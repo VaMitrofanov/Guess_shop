@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { resolveWbOrderRef } from "./wb-order-source";
 
 /**
  * Нить обычного (не-DBS) заказа в админке.
@@ -89,4 +90,45 @@ export async function orderCardRoots(
   } catch {
     return null;
   }
+}
+
+/**
+ * Корень ветки заказа — ОДНОЙ функцией для всех отправителей.
+ *
+ * У заказа два возможных корня, и раньше про них знали только две карточки
+ * выкупа: живая карточка DBS (`WbMarketplaceOrder.adminCardMessages`), а если
+ * доставки не было — карточка активации кода (`ADMIN_CARD_ROOT`). Все
+ * остальные сообщения о том же заказе — обращение в поддержку, подтверждённый
+ * выкуп, скриншот оплаты, скриншот отзыва — уходили россыпью, хотя код заказа
+ * знали все до одного.
+ *
+ * Порядок проверки повторяет `sendWebOrderCard`: живая карточка старше и
+ * переживает замену заказа, поэтому она первая.
+ *
+ * Никогда не бросает и никогда не блокирует отправку: ветка — это оформление,
+ * а сообщение может быть о деньгах.
+ */
+export async function orderThreadRoots(
+  db: Db & { wbMarketplaceOrder?: unknown },
+  code: string | null | undefined,
+): Promise<Record<string, number> | null> {
+  if (!code) return null;
+  try {
+    const wbRef = await resolveWbOrderRef(db, code);
+    if (wbRef.cardMessages) return wbRef.cardMessages;
+  } catch { /* нет доставки — обычный WB-заказ */ }
+  return orderCardRoots(db, code);
+}
+
+/**
+ * Поля ответа для одного админа. `allow_sending_without_reply` обязателен:
+ * корень могли удалить или переслать заново, и Telegram отказал бы в отправке
+ * целиком — уведомление не имеет права потеряться из-за оформления.
+ */
+export function replyToRoot(
+  roots: Record<string, number> | null | undefined,
+  adminId: string,
+): Record<string, unknown> {
+  const rootId = roots?.[adminId];
+  return rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {};
 }

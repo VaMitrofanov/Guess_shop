@@ -35,7 +35,7 @@ import {
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
-import { recordOrderCardRoot } from "../shared/order-thread";
+import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/order-thread";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
@@ -1781,7 +1781,10 @@ async function handleRefActivation(
 
   // Lazy registration — always persist the real name
   let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  /** Покупателя завели прямо сейчас — строка «новый клиент» в карточке DBS. */
+  let userIsNew = false;
   if (!user) {
+    userIsNew = true;
     user = await (db as any).user.create({
       data: { vkId: String(vkUserId), name: fullName },
     });
@@ -1863,19 +1866,29 @@ async function handleRefActivation(
   }
 
   if (adoptedExistingOrder) {
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
-      id,
-      `🟢 <b>DBS · покупатель нашёлся сам</b>\n` +
-      `Код <code>${escapeHtml(wbCode.code)}</code> · vk:${vkUserId}\n` +
-      `Дальше: заказ перевешен со служебного аккаунта, уведомления теперь дойдут`,
-    )));
+    // Единый язык и ветка заказа — см. тот же блок в TG-боте.
+    const notice = formatAdminNotice({
+      marker: "done",
+      zone: "DBS",
+      title: "покупатель нашёлся сам",
+      lines: [orderRef({ code: wbCode.code, denomination: totalAmount }, [
+        `<a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a>`,
+      ])],
+      next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
+    });
+    const roots = await orderThreadRoots(db, wbCode.code);
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, notice, replyToRoot(roots, id))));
   }
 
   // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг воронки,
   // а не задача, и уходит строкой в её таймлайн вместо второго сообщения об
   // одном и том же заказе.
   const foldedIntoDbsCard = provisionalCreated
-    ? await noteDbsBuyerSignedIn(db, wbCode.code, "VK").catch(() => false)
+    ? await noteDbsBuyerSignedIn(db, wbCode.code, "VK", {
+        display: fullName,
+        url: `https://vk.com/id${vkUserId}`,
+        isNew: userIsNew,
+      }).catch(() => false)
     : false;
 
   if (provisionalCreated && !foldedIntoDbsCard) {

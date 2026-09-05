@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
 
 interface UserRef {
@@ -253,6 +254,10 @@ export async function notifyOrderCompleted(
     });
     await vkPost(user.vkId, m.vkMsg2, { keyboard: vkKb });
   }
+
+  // Живая карточка DBS — единственное место, где виден весь заказ целиком;
+  // «выкуплен» обязан появиться и в ней, а не только в чате с покупателем.
+  await refreshDbsCardByCode(prisma, order?.wbCode ?? null).catch(() => {});
 }
 
 /** A safe full-price replacement was not found after Roblox enabled a donor-specific price. */

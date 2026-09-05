@@ -14,7 +14,9 @@ describe("TWA and admin notification regressions", () => {
     // уходит строкой в таймлайн живой карточки, а не вторым сообщением о том
     // же заказе (единая нить заказа, 02.09.2026).
     expect(source).toContain('if (provisionalCreated && !foldedIntoDbsCard && provisionalOrder?.status === "AWAITING_GAMEPASS")');
-    expect(source).toContain('noteDbsBuyerSignedIn(db, code, "TG")');
+    // С 05.09.2026 вход несёт ещё и личность покупателя: имя, ссылку и «новый
+    // ли он» — они стали строкой в самой карточке вместо отдельного сообщения.
+    expect(source).toContain('noteDbsBuyerSignedIn(db, code, "TG", {');
   });
 
   test("toast is portalled above the order bottom sheet", () => {

@@ -299,7 +299,10 @@ export async function GET(req: NextRequest) {
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
-  const orderBy = isVirtualTab ? orderByForTab(tab as FilterTab) : { createdAt: "desc" as const };
+  // В поиске сортировка тоже своя: очередь ранжируют приоритетом и возрастом,
+  // а найденное читают от свежего к старому.
+  const orderBy = q ? { createdAt: "desc" as const }
+    : isVirtualTab ? orderByForTab(tab as FilterTab) : { createdAt: "desc" as const };
 
   let searchWhere: any = {};
   if (q) {
@@ -311,6 +314,9 @@ export async function GET(req: NextRequest) {
       { robloxUsername: { contains: qClean,      mode: "insensitive" } },
       // adminNote держит «вероятные» ники ([НИК? дата] ник) — ищем и по ним.
       { adminNote:      { contains: qClean,      mode: "insensitive" } },
+      // Вероятный ник — отдельное поле с 22.08; искать его через `adminNote`
+      // работало, только пока строку `[НИК? …]` никто не переписал.
+      { probableNick:   { contains: qClean,      mode: "insensitive" } },
       { wbCode:         { contains: q.toUpperCase() } },
       { id:             { endsWith: q.toLowerCase() } },
       { user: { name:     { contains: q,         mode: "insensitive" } } },
@@ -335,8 +341,15 @@ export async function GET(req: NextRequest) {
   const narrow = parseNarrow(searchParams);
   const narrowed = isNarrowed(narrow);
   const narrowWhere = narrowed && isVirtualTab ? buildNarrowWhere(tab as FilterTab, narrow) : {};
+  /* Поиск идёт по ВСЕЙ базе, а не внутри среза.
+     До 05.09.2026 к запросу подмешивались границы вкладки и сужение шапки:
+     стоя в «К выкупу» и набрав код заказа из «Ждут ссылку», менеджер получал
+     пустой экран — заказ существовал, просто лежал в другом срезе (владелец,
+     NGS22UR). Срез — это способ РАБОТАТЬ с очередью; поиск — способ НАЙТИ
+     заказ, и он обязан находить его везде. В какой вкладке заказ живёт,
+     карточка скажет сама (`orderToTab`). */
   const where = q
-    ? { AND: [notTest, tabWhere, sourceWhere, narrowWhere, searchWhere] }
+    ? { AND: [notTest, searchWhere] }
     : { AND: [notTest, tabWhere, sourceWhere, narrowWhere] };
 
   const take = skipCounts ? limit + 1 : limit;
@@ -358,7 +371,11 @@ export async function GET(req: NextRequest) {
   };
 
   let ordersPromise: Promise<any[]>;
-  if (tab === "ATTENTION") {
+  if (q) {
+    // Поиск — плоская выборка по всей базе: ни ранжирования «Требуют внимания»,
+    // ни склейки «Ждут ссылку», иначе найденное зависит от того, где стояли.
+    ordersPromise = (prisma as any).wbOrder.findMany({ where, orderBy, skip, take, include: userInclude });
+  } else if (tab === "ATTENTION") {
     // Секция небольшая по природе — берём одним куском (без пагинации)
     // и ранжируем по серьёзности уже в памяти.
     ordersPromise = (prisma as any).wbOrder

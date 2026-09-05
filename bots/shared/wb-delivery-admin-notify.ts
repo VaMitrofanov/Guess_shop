@@ -327,6 +327,20 @@ export type DbsCardState = {
   next: string | null;
   /** Уже пройденные этапы, в порядке появления: `["22:48 заказ принят", …]`. */
   timeline: string[];
+  /**
+   * Кто пришёл по гейту: имя в боте/на сайте, ссылка на профиль и «новый ли».
+   *
+   * Стоит в карточке, а не отдельным сообщением. До 05.09.2026 сайт слал по
+   * входу покупателя своё «🆕 Новый пользователь / 👤 Имя / 🆔 VK ID» — без
+   * кода, без номера WB и мимо ветки: под аккуратной карточкой DBS висели три
+   * строки, которые не с чем было связать (скрин владельца по NGS22UR).
+   */
+  buyer?: {
+    display: string;
+    url: string | null;
+    channel: string;
+    isNew: boolean;
+  } | null;
 };
 
 export function renderDbsCard(state: DbsCardState): string {
@@ -345,6 +359,15 @@ export function renderDbsCard(state: DbsCardState): string {
         priceKopecks: state.priceKopecks,
         buyerName: state.buyerName,
       }),
+      state.buyer
+        ? [
+            state.buyer.url
+              ? `👤 <a href="${state.buyer.url}">${escapeHtml(state.buyer.display)}</a>`
+              : `👤 ${escapeHtml(state.buyer.display)}`,
+            escapeHtml(state.buyer.channel),
+            state.buyer.isNew ? "новый клиент" : null,
+          ].filter(Boolean).join(" · ")
+        : null,
     ],
     next: state.next,
   });

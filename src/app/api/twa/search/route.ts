@@ -41,10 +41,39 @@ async function lookupGamepass(id: string) {
   return null;
 }
 
+/** Это НАШ код, а не ник Roblox?
+ *
+ *  Ходить с кодом гейта в Roblox бессмысленно и дорого: мост ждёт до 20 с
+ *  (`roblox-bridge.ts`), прямая ветка — до тридцати, и всё это время ответ
+ *  поиска не отдаётся вообще. Именно на этом «долго ищется» и стоял поиск по
+ *  коду NGS22UR.
+ *
+ *  Проверяем по базе, а не по форме строки: `gidtiv1` — тоже семь символов с
+ *  цифрой, и запретить по маске значило бы перестать искать живые ники. Код
+ *  уникален и проиндексирован, лишний запрос стоит миллисекунды против
+ *  двадцати секунд ожидания Roblox. */
+async function isOurCode(value: string): Promise<boolean> {
+  const code = value.trim().toUpperCase();
+  if (!/^[A-Z0-9]{7}$/.test(code)) return false;
+  try {
+    return (await prisma.wbCode.count({ where: { code } })) > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const query = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (query.length < 2) return NextResponse.json({ error: "Минимум 2 символа" }, { status: 400 });
+  /* Две половины поиска отвечают в разном темпе, поэтому и запрашиваются
+     порознь: база — десятки миллисекунд, Roblox — секунды.
+     `scope=db` отдаёт заказы и DBS сразу, `scope=roblox` дотягивает пассы.
+     Раньше всё это складывалось в один `Promise.all`, и готовый DBS-заказ ждал
+     Roblox — до двадцати секунд на запрос, который к Roblox не относился. */
+  const scope = req.nextUrl.searchParams.get("scope") ?? "all";
+  const wantDb = scope === "all" || scope === "db";
+  const robloxAllowed = scope === "all" || scope === "roblox";
 
   const clean = query.replace(/^@/, "");
   const digits = query.replace(/\D/g, "");
@@ -69,7 +98,7 @@ export async function GET(req: NextRequest) {
   // Заказы DBS живут в своей таблице и до 30.08.2026 искались только со своего
   // экрана: номер `#31401299` и имя покупателя из чата WB не находились больше
   // ниоткуда. Поиск один на приложение — значит и они в нём.
-  const dbsPromise = prisma.wbMarketplaceOrder.findMany({
+  const dbsPromise = !wantDb ? Promise.resolve([]) : prisma.wbMarketplaceOrder.findMany({
     where: {
       isTest: false,
       OR: [
@@ -87,7 +116,7 @@ export async function GET(req: NextRequest) {
     },
   }).catch(() => []);
 
-  const ordersPromise = prisma.wbOrder.findMany({
+  const ordersPromise = !wantDb ? Promise.resolve([]) : prisma.wbOrder.findMany({
     where: { isTest: false, OR: clauses },
     orderBy: { createdAt: "desc" },
     take: 8,
@@ -100,12 +129,15 @@ export async function GET(req: NextRequest) {
   });
 
   const livePromise = (async () => {
+    if (!robloxAllowed) return [];
     if (gpId) {
       const pass = await lookupGamepass(gpId);
       if (!pass) partialErrors.push("Roblox: геймпасс временно недоступен");
       return pass ? [pass] : [];
     }
     if (clean.length < 3 || /\s/.test(clean)) return [];
+    // Номер заказа WB и код гейта — не ники: в Roblox с ними идти незачем.
+    if (/^\d{4,}$/.test(clean) || await isOurCode(clean)) return [];
     try {
       const found = await searchForSalePassesByNick(clean);
       if (found.status !== "ok") {

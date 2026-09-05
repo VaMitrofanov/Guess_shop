@@ -338,8 +338,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               // него — шаг воронки, а не задача: он уходит строкой в таймлайн
               // той же карточки, и третьего сообщения об одном заказе больше
               // нет (скрин владельца, 01.09.2026).
+              const isNewUser = user.createdAt.getTime() === user.updatedAt.getTime();
               const foldedIntoDbsCard = isActiveActivation
-                ? await noteDbsBuyerSignedIn(prisma, wbCode!, "VK").catch(() => false)
+                ? await noteDbsBuyerSignedIn(prisma, wbCode!, "VK", {
+                    display: name,
+                    url: `https://vk.com/id${vkId}`,
+                    isNew: isNewUser,
+                  }).catch(() => false)
                 : false;
               if (isActiveActivation && !foldedIntoDbsCard) {
                 const denomination = wbCodeRecord?.denomination ?? 0;
@@ -370,10 +375,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],
                   ],
                 };
-              } else if (shouldSendLoginNotif(vkId)) {
-                const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
+              } else if (!foldedIntoDbsCard && shouldSendLoginNotif(vkId)) {
+                /* Голая карточка входа — только для входа БЕЗ заказа.
+                 *
+                 * Раньше здесь стоял просто `else if`, и вход, успешно
+                 * свёрнутый в живую карточку DBS, проваливался сюда: под
+                 * карточкой появлялись «🆕 Новый пользователь / 👤 Имя /
+                 * 🆔 VK ID» — без кода, без номера WB и мимо ветки. Условие
+                 * `!foldedIntoDbsCard` доводит до конца замысел от 01.09.2026:
+                 * о заказе DBS говорит одна карточка, и личность покупателя
+                 * теперь строка в ней самой. */
                 msg =
-                  `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
+                  `${isNewUser ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
                   `👤 ${escapeHtml(name)}\n` +
                   `🆔 VK ID: <code>${vkId}</code>`;
               }

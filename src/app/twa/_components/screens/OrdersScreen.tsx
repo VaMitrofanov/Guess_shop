@@ -899,6 +899,127 @@ function MoveToModal({ order, token, currentTab, onDone, onClose }: {
    Причина обязательна: через месяц «почему нельзя выкупать» не вспомнит никто,
    а заморозка без причины неотличима от забытого заказа. Четыре заготовки
    закрывают почти всё; текст можно дописать руками. */
+/* ── 🔗 Ссылка на геймпасс руками ─────────────────────────────────────────────
+   Второй выход из «ждём ссылку». Первый — поиск пасса по нику (👁), но он
+   находит не всегда: пасс может быть в скрытом плейсе, назван иначе или просто
+   не отдаться Roblox. Тогда клиент присылает ссылку сам, и её нужно вставить.
+
+   До 05.09.2026 такого поля на поверхности не было вовсе: вставить ссылку можно
+   было только через «···» → «Редактировать» → лист заказа, и на телефоне лист
+   открывался ПОД карточкой (см. `.twa-form-sheet` в globals.css). Форма нарочно
+   маленькая: одно поле и одна кнопка.
+
+   Цена проверяется ДО привязки тем же `manual-validate`, что и лист заказа:
+   пасс не за тот номинал упирается в прайс-гард уже при выкупе, и узнавать об
+   этом лучше здесь. Расхождение не запрещает привязку — оно её называет.
+   ────────────────────────────────────────────────────────────────────────── */
+function AttachGamepassForm({ order, token, onDone, onClose }: {
+  order: Order;
+  token: string;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<{
+    error?: string; gamepassId?: string; livePrice?: number | null;
+    isForSale?: boolean | null; expected?: number | null; priceMismatch?: boolean;
+    sellerMatch?: boolean | null;
+  } | null>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const passId = parseGamepassRef(value.trim());
+
+  useEffect(() => {
+    const raw = value.trim();
+    setCheck(null);
+    if (!raw) return;
+    clearTimeout(debounce.current);
+    debounce.current = setTimeout(async () => {
+      setChecking(true);
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "manual-validate", gamepassUrl: raw, amount: order.amount }),
+        });
+        const d = await r.json();
+        if (r.ok) setCheck(d.gamepass ?? null);
+      } catch { /* проверка не обязана мешать привязке */ }
+      finally { setChecking(false); }
+    }, 500);
+    return () => clearTimeout(debounce.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, token, order.amount]);
+
+  async function submit() {
+    const raw = value.trim();
+    if (!raw || busy) return;
+    setBusy(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "attach-gamepass", orderId: order.id, gamepassId: raw }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Не удалось привязать", "error"); return; }
+      haptic.notify("success");
+      toast(d.notified
+        ? `Геймпасс привязан — заказ к выкупу, клиент оповещён`
+        : `Геймпасс привязан — заказ к выкупу (клиент НЕ оповещён)`, "success");
+      onDone();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setBusy(false); }
+  }
+
+  const hint = check?.error ? { text: `⛔ ${check.error}`, color: C.red }
+    : check?.isForSale === false ? { text: "⛔ пасс снят с продажи", color: C.red }
+      : check?.priceMismatch && check.livePrice != null
+        ? { text: `⚠️ ${check.livePrice} R$ вместо ${check.expected} R$`, color: C.orange }
+        : check?.livePrice != null ? { text: `✓ ${check.livePrice} R$ — цена сходится`, color: C.green }
+          : checking ? { text: "Проверяю цену…", color: C.textTertiary } : null;
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 13px 13px", borderRadius: 12,
+      border: `1px solid ${C.blue}44`, background: `${C.blue}0f`,
+      display: "flex", flexDirection: "column", gap: 9,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.blue }}>🔗 Ссылка на геймпасс</div>
+      <input
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        placeholder="roblox.com/game-pass/… или ID"
+        inputMode="url"
+        autoComplete="off"
+        style={{
+          width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+          color: "#fff", fontSize: 16, padding: "12px", outline: "none",
+          fontFamily: "inherit", boxSizing: "border-box",
+        }}
+      />
+      {(hint || passId) && (
+        <div style={{ fontSize: 13, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {passId && <span style={{ color: C.textSecondary, fontFamily: MONO }}>{passId}</span>}
+          {hint && <span style={{ color: hint.color, fontWeight: 600 }}>{hint.text}</span>}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose} disabled={busy}
+          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+          Отмена
+        </button>
+        <button className="twa-press" onClick={submit} disabled={busy || !passId}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.blue, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy || !passId ? 0.5 : 1 }}>
+          {busy ? "…" : "Привязать — заказ к выкупу"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function HoldModal({ order, onHold, onClose }: {
   order: Order;
   onHold: (reason: string) => Promise<ActionResult>;
@@ -1948,12 +2069,12 @@ function RejectModal({ order, onReject, onClose }: {
    стоять рядом с копированием ID.
    ────────────────────────────────────────────────────────────────────────── */
 type MenuAction =
-  | "edit" | "split" | "rebind" | "move"
+  | "edit" | "attach" | "split" | "rebind" | "move"
   | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
   | "purchase" | "refund" | "trace";
 
 function OrderMenuSheet({
-  open, order, passId, splitIds, grossAmount, canEdit, canSplit, canRefund, canMove, canPurchase, canPrioritize, busy,
+  open, order, passId, splitIds, grossAmount, canEdit, canAttach, canSplit, canRefund, canMove, canPurchase, canPrioritize, busy,
   onClose, onCopy, onPick,
 }: {
   open: boolean;
@@ -1962,6 +2083,7 @@ function OrderMenuSheet({
   splitIds: string[];
   grossAmount: number;
   canEdit: boolean;
+  canAttach: boolean;
   canSplit: boolean;
   canRefund: boolean;
   canMove: boolean;
@@ -2004,6 +2126,10 @@ function OrderMenuSheet({
       {oneLine && copyRow("⧉", "Всё одной строкой", oneLine, "для донора")}
 
       <div className="twa-oc-menu-group">Правка</div>
+      {/* Ссылка руками — первой строкой и отдельным пунктом, а не полем внутри
+          правки. Заказ без пасса приходит сюда ровно за этим: поиск по нику не
+          нашёл, и менеджер вставляет ссылку, которую прислал клиент. */}
+      {canAttach && row("attach", "🔗", "Вставить ссылку на геймпасс", "поиск не нашёл")}
       {canEdit && row("edit", "✏️", "Редактировать заказ")}
       {canSplit && row("split", "🧩", "Разбить на несколько пассов",
         splitIds.length > 0 ? `${order.splitGamepasses?.filter(p => p.purchasedAt).length ?? 0}/${splitIds.length}` : undefined)}
@@ -2061,6 +2187,14 @@ function OrderCard({
   const [expanded, setExpanded] = useState(false);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /* Форма, к которой нужно подкрутить лист. Формы заморозки, разбиения,
+     перемещения и отмены — не шторки, а блоки в КОНЦЕ длинного досье. Открытые
+     из меню «···» они оказывались ниже видимой части, и «нажал — ничего не
+     произошло» выглядело так же, как сломанная кнопка. */
+  const [scrollTo, setScrollTo] = useState<string | null>(null);
+  const sheetBodyRef = useRef<HTMLDivElement | null>(null);
+  /** Ручная вставка ссылки на геймпасс — когда поиск по нику ничего не дал. */
+  const [attachOpen, setAttachOpen] = useState(false);
   /** Какая из двух кнопок копирования только что сработала — для галочки. */
   const [copied, setCopied] = useState<"code" | "pass" | null>(null);
   const [primaryBusy, setPrimaryBusy] = useState(false);
@@ -2068,6 +2202,21 @@ function OrderCard({
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
   const [gpwPassId, setGpwPassId] = useState<string | null>(order.gpWatchNotifiedPassId);
   const [gpwLoading, setGpwLoading] = useState(false);
+
+  /* Подкрутка листа к только что открытой форме. Кадр ожидания обязателен:
+     форма появляется в том же коммите, что и сам лист, и до отрисовки шторки
+     её узла в документе ещё нет. */
+  useEffect(() => {
+    if (!scrollTo || !expanded) return;
+    const frame = requestAnimationFrame(() => {
+      sheetBodyRef.current
+        ?.closest(".twa-sheet")
+        ?.querySelector<HTMLElement>(`[data-form="${scrollTo}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      setScrollTo(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scrollTo, expanded]);
 
   async function gpwNotify() {
     if (gpwLoading) return;
@@ -2147,6 +2296,12 @@ function OrderCard({
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
+  /* Вставить ссылку руками. Предусловие ровно как у `attach-gamepass` на
+     сервере, плюс «пасса ещё нет»: там, где пасс уже привязан, ссылку меняют
+     правкой — с проверкой цены и продавца. */
+  const isAttachable = !order.heldAt && !isUnpaidDirect(order)
+    && ["AWAITING_GAMEPASS", "PENDING", "ERROR", "REJECTED"].includes(order.status)
+    && !order.gamepassUrl && split.length === 0;
   // Разбить можно всё, что ещё не закрыто и уже знает ник — именно ник даёт
   // список пассов покупателя, из которых собираются части.
   const isSplittable = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status)
@@ -2324,6 +2479,7 @@ function OrderCard({
       splitIds={splitIds}
       grossAmount={dirtyAmount}
       canEdit={isEditable}
+      canAttach={isAttachable}
       canSplit={isSplittable}
       canRefund={canRefund}
       canMove={showMoveBtn}
@@ -2334,16 +2490,24 @@ function OrderCard({
       onCopy={(text, label) => copyAnd(text, "pass", label)}
       onPick={id => {
         setMenuOpen(false);
-        // Формы досье: открываем сам лист и нужную форму в нём.
-        const inSheet = (fn: () => void) => { setExpanded(true); fn(); };
+        /* Формы досье: открываем сам лист, нужную форму в нём — и ведём к ней
+           глаз. Лист разворачиваем на весь экран: формы живут в его конце, и
+           на 76 % высоты половина из них осталась бы за краем. */
+        const inSheet = (fn: () => void, anchor?: string) => {
+          setExpanded(true);
+          setSheetExpanded(true);
+          fn();
+          if (anchor) setScrollTo(anchor);
+        };
         switch (id) {
           case "edit":     inSheet(() => setEditOpen(true)); break;
-          case "split":    inSheet(() => setSplitOpen(true)); break;
-          case "rebind":   inSheet(() => setRebindOpen(true)); break;
-          case "move":     inSheet(() => setMoveOpen(true)); break;
-          case "hold":     inSheet(() => setHoldOpen(true)); break;
-          case "refund":   inSheet(() => setRefundOpen(true)); break;
-          case "reject":   inSheet(() => setRejectOpen(true)); break;
+          case "attach":   inSheet(() => setAttachOpen(true), "attach"); break;
+          case "split":    inSheet(() => setSplitOpen(true), "split"); break;
+          case "rebind":   inSheet(() => setRebindOpen(true), "rebind"); break;
+          case "move":     inSheet(() => setMoveOpen(true), "move"); break;
+          case "hold":     inSheet(() => setHoldOpen(true), "hold"); break;
+          case "refund":   inSheet(() => setRefundOpen(true), "refund"); break;
+          case "reject":   inSheet(() => setRejectOpen(true), "reject"); break;
           case "trace":    setExpanded(true); break;
           case "favorite": onToggleFavorite(); break;
           case "priority": onTogglePriority?.(); break;
@@ -2374,7 +2538,7 @@ function OrderCard({
       </div>
       <>
       {/* Header: platform badge + nick + star */}
-      <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div ref={sheetBodyRef} style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
             <span style={{
@@ -2630,6 +2794,30 @@ function OrderCard({
         </div>
       )}
 
+      {/* 🔗 Ссылка руками. Стоит рядом с поиском по нику, а не в правке: поиск
+          находит пасс не всегда, и «вставить то, что прислал клиент» — второй
+          рабочий выход из «ждём ссылку», а не редкая операция. */}
+      {isAttachable && (
+        <div data-form="attach" style={{ padding: "0 14px 10px" }}>
+          {attachOpen ? (
+            <AttachGamepassForm
+              order={order}
+              token={token}
+              onDone={() => { setAttachOpen(false); onMoved(); }}
+              onClose={() => setAttachOpen(false)}
+            />
+          ) : (
+            <button className="twa-press-sm" onClick={e => { e.stopPropagation(); haptic.select(); setAttachOpen(true); }}
+              style={{
+                width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.blue}55`,
+                background: "transparent", color: C.blue, fontSize: 14, fontWeight: 600, cursor: "pointer",
+              }}>
+              🔗 Вставить ссылку на геймпасс
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ❌ П3: клиент отверг GP-watch-ник — вероятного ника больше нет, дожать вручную */}
       {order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername && (
         <div style={{
@@ -2693,22 +2881,27 @@ function OrderCard({
       )}
 
       {holdOpen && (
+        <div data-form="hold">
         <HoldModal
           order={order}
           onHold={(reason) => onRunAction("hold", reason)}
           onClose={() => setHoldOpen(false)}
         />
+        </div>
       )}
 
       {rejectOpen && (
+        <div data-form="reject">
         <RejectModal
           order={order}
           onReject={(reason) => onRunAction("reject", reason)}
           onClose={() => setRejectOpen(false)}
         />
+        </div>
       )}
 
       {moveOpen && (
+        <div data-form="move">
         <MoveToModal
           order={order}
           token={token}
@@ -2716,6 +2909,7 @@ function OrderCard({
           onDone={() => { setMoveOpen(false); onMoved(); }}
           onClose={() => setMoveOpen(false)}
         />
+        </div>
       )}
 
       {/* Edit order button — правка номинала/ника/ГП за клиента */}
@@ -2777,6 +2971,7 @@ function OrderCard({
       )}
 
       {splitOpen && (
+        <div data-form="split">
         <SplitModal
           order={order}
           token={token}
@@ -2784,6 +2979,7 @@ function OrderCard({
           onDone={() => { setSplitOpen(false); setSplitSeed(null); onMoved(); }}
           onClose={() => { setSplitOpen(false); setSplitSeed(null); }}
         />
+        </div>
       )}
 
       {canRefund && !refundOpen && (
@@ -2794,7 +2990,7 @@ function OrderCard({
           </button>
         </div>
       )}
-      {refundOpen && <RefundModal order={order} token={token} onDone={() => { setRefundOpen(false); onMoved(); }} onClose={() => setRefundOpen(false)} />}
+      {refundOpen && <div data-form="refund"><RefundModal order={order} token={token} onDone={() => { setRefundOpen(false); onMoved(); }} onClose={() => setRefundOpen(false)} /></div>}
 
       {/* Rebind button */}
       {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && !rebindOpen && (
@@ -2810,12 +3006,14 @@ function OrderCard({
       )}
 
       {rebindOpen && (
+        <div data-form="rebind">
         <RebindModal
           order={order}
           token={token}
           onDone={() => { setRebindOpen(false); onMoved(); }}
           onClose={() => setRebindOpen(false)}
         />
+        </div>
       )}
 
       {/* Action panel */}
@@ -3164,25 +3362,45 @@ export default function OrdersScreen({
     if (filter === "DIRECT" && !query) fetchIntents();
   }, [filter, query, fetchIntents]);
 
-  // Живой поиск (Roblox + заказы DBS) идёт своим запросом и своим темпом:
-  // Roblox отвечает секундами, а лента заказов обязана появиться сразу.
+  /* Живой поиск идёт ДВУМЯ запросами, а не одним.
+     Половины отвечают в разном темпе: заказы DBS — десятки миллисекунд, Roblox
+     — секунды (мост ждёт до 20 с). Пока это был один `Promise.all` на сервере,
+     готовая строка DBS ждала Roblox, и поиск по коду выглядел зависшим.
+     Теперь база приходит сразу и рисуется, а пассы Roblox доезжают следом. */
   useEffect(() => {
     const value = query.trim();
     if (value.length < 3) { setLive(null); return; }
     const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/twa/search?q=${encodeURIComponent(value)}`, {
-          headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
-        });
-        if (!response.ok) return;
-        const payload = await response.json();
-        setLive({
-          gamepasses: payload.gamepasses ?? [],
-          dbs: payload.dbs ?? [],
-          partialErrors: payload.partialErrors ?? [],
-        });
-      } catch { /* отменённый или упавший live-поиск ленту не ломает */ }
+    const ask = async (scope: "db" | "roblox") => {
+      const response = await fetch(`/api/twa/search?q=${encodeURIComponent(value)}&scope=${scope}`, {
+        headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+      });
+      return response.ok ? await response.json() : null;
+    };
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const db = await ask("db");
+          // Порядок ответов не гарантирован — каждая половина правит только своё.
+          if (db) setLive(prev => ({
+            dbs: db.dbs ?? [],
+            gamepasses: prev?.gamepasses ?? [],
+            partialErrors: prev?.partialErrors ?? [],
+          }));
+        } catch { /* отменённый или упавший live-поиск ленту не ломает */ }
+      })();
+      void (async () => {
+        try {
+          const roblox = await ask("roblox");
+          if (roblox) {
+            setLive(prev => ({
+              dbs: prev?.dbs ?? [],
+              gamepasses: roblox.gamepasses ?? [],
+              partialErrors: roblox.partialErrors ?? [],
+            }));
+          }
+        } catch { /* Roblox молчит — это не ошибка поиска по базе */ }
+      })();
     }, 420);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [query, token]);
@@ -3575,6 +3793,79 @@ export default function OrdersScreen({
     return "list";
   }, [query, allOrders]);
 
+  /* Живая выдача поиска: заказы WB Доставки и пассы Roblox.
+     Живёт ОТДЕЛЬНО от ленты, потому что рисуется и тогда, когда лента пуста.
+     До 05.09.2026 эти группы лежали внутри ветки со списком, и `allOrders
+     .length === 0` подменял их пустым состоянием: DBS-заказ по номеру WB
+     сервер находил, а экран показывал «ничего не найдено» — на телефоне это и
+     выглядело как «код не ищется вообще» (владелец, NGS22UR). */
+  const hasLiveResults = !!live && (live.dbs.length > 0 || live.gamepasses.length > 0);
+  const liveResults = query ? (
+    <>
+          {/* Заказы WB Доставки — из другой таблицы, поэтому отдельной секцией.
+              Тап уводит на экран доставки с тем же запросом: действия DBS
+              живут там и дублировать их здесь нельзя. */}
+          {query && live && live.dbs.length > 0 && (
+            <div className="twa-live-group">
+              <span>WB Доставка · {live.dbs.length}</span>
+              {live.dbs.map(order => (
+                <button
+                  key={order.id}
+                  type="button"
+                  className="twa-live-row twa-press-sm"
+                  onClick={() => { haptic.select(); onOpenDelivery?.(query); }}
+                >
+                  <b>{order.buyerName ?? `WB #${order.wbOrderId}`}</b>
+                  <small>
+                    #{order.wbOrderId}
+                    {order.denomination ? ` · ${order.denomination} R$` : ""}
+                    {order.code ? ` · ${order.code}` : ""}
+                    {order.closed ? " · закрыт" : ` · ${order.supplierStatus}`}
+                  </small>
+                  <span>›</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* For-sale геймпассы ника прямо из Roblox. На главной этот же
+              список был тупиком — тап уводил на экран Аккаунта и там ничего
+              не делал. Здесь он открывает форму заказа уже заполненной. */}
+          {query && live && live.gamepasses.length > 0 && (
+            <div className="twa-live-group">
+              <span>Геймпассы Roblox · {live.gamepasses.length}</span>
+              {live.gamepasses.map(pass => (
+                <div key={pass.gamepassId} className="twa-live-row is-static">
+                  <b>{pass.name}</b>
+                  <small>ID {pass.gamepassId} · {pass.price.toLocaleString("ru-RU")} R$ · {pass.sellerName ?? "Roblox"}</small>
+                  <button
+                    type="button"
+                    className="twa-live-cta twa-press-sm"
+                    onClick={() => {
+                      haptic.impact("light");
+                      setCreatePrefill({
+                        url: `https://www.roblox.com/game-pass/${pass.gamepassId}`,
+                        nick: pass.sellerName ?? undefined,
+                        // Клиенту уходит 70% цены пасса — та же формула, что в
+                        // «Поиск и выкуп»; менеджер может поправить в форме.
+                        amount: Math.floor(pass.price * 0.7),
+                      });
+                      setCreateMode("manual");
+                      setCreateOpen(true);
+                    }}
+                  >
+                    Создать заказ
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {query && live?.partialErrors.map(error => (
+            <div key={error} className="twa-live-note">{error}</div>
+          ))}
+    </>
+  ) : null;
+
   return (
     <div className="twa-orders-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "transparent" }}>
 
@@ -3714,12 +4005,26 @@ export default function OrdersScreen({
         {loading ? (
           <Skeleton />
         ) : allOrders.length === 0 ? (
-          <EmptyState
-            filter={filter}
-            query={query}
-            attention={isAttentionView}
-            onShowAll={isAttentionView ? () => { haptic.select(); setAllView("list"); } : undefined}
-          />
+          /* Пусто в ленте ≠ пусто в поиске: DBS-заказ живёт в другой таблице,
+             а пасс Roblox — вообще не у нас. Сначала показываем, что нашлось,
+             и только потом объясняем пустую ленту. */
+          <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {liveResults}
+            {hasLiveResults ? (
+              // Что-то нашлось — просто не среди заказов. «Ничего не нашлось»
+              // под найденной строкой DBS было бы прямой ложью.
+              <div style={{ padding: "8px 2px", fontSize: 14, color: C.textTertiary, textAlign: "center" }}>
+                Среди заказов совпадений нет — только то, что выше
+              </div>
+            ) : (
+              <EmptyState
+                filter={filter}
+                query={query}
+                attention={isAttentionView}
+                onShowAll={isAttentionView ? () => { haptic.select(); setAllView("list"); } : undefined}
+              />
+            )}
+          </div>
         ) : (
           <div className={`twa-fade-in${filter === "DONE" ? "" : " twa-orders-list-stack"}`} style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
             {(query || isAttentionView || filter === "DONE") && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
@@ -3763,67 +4068,7 @@ export default function OrdersScreen({
               <SearchProfileCard user={allOrders[0].user} orders={allOrders} />
             )}
 
-            {/* Заказы WB Доставки — из другой таблицы, поэтому отдельной секцией.
-                Тап уводит на экран доставки с тем же запросом: действия DBS
-                живут там и дублировать их здесь нельзя. */}
-            {query && live && live.dbs.length > 0 && (
-              <div className="twa-live-group">
-                <span>WB Доставка · {live.dbs.length}</span>
-                {live.dbs.map(order => (
-                  <button
-                    key={order.id}
-                    type="button"
-                    className="twa-live-row twa-press-sm"
-                    onClick={() => { haptic.select(); onOpenDelivery?.(query); }}
-                  >
-                    <b>{order.buyerName ?? `WB #${order.wbOrderId}`}</b>
-                    <small>
-                      #{order.wbOrderId}
-                      {order.denomination ? ` · ${order.denomination} R$` : ""}
-                      {order.code ? ` · ${order.code}` : ""}
-                      {order.closed ? " · закрыт" : ` · ${order.supplierStatus}`}
-                    </small>
-                    <span>›</span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* For-sale геймпассы ника прямо из Roblox. На главной этот же
-                список был тупиком — тап уводил на экран Аккаунта и там ничего
-                не делал. Здесь он открывает форму заказа уже заполненной. */}
-            {query && live && live.gamepasses.length > 0 && (
-              <div className="twa-live-group">
-                <span>Геймпассы Roblox · {live.gamepasses.length}</span>
-                {live.gamepasses.map(pass => (
-                  <div key={pass.gamepassId} className="twa-live-row is-static">
-                    <b>{pass.name}</b>
-                    <small>ID {pass.gamepassId} · {pass.price.toLocaleString("ru-RU")} R$ · {pass.sellerName ?? "Roblox"}</small>
-                    <button
-                      type="button"
-                      className="twa-live-cta twa-press-sm"
-                      onClick={() => {
-                        haptic.impact("light");
-                        setCreatePrefill({
-                          url: `https://www.roblox.com/game-pass/${pass.gamepassId}`,
-                          nick: pass.sellerName ?? undefined,
-                          // Клиенту уходит 70% цены пасса — та же формула, что в
-                          // «Поиск и выкуп»; менеджер может поправить в форме.
-                          amount: Math.floor(pass.price * 0.7),
-                        });
-                        setCreateMode("manual");
-                        setCreateOpen(true);
-                      }}
-                    >
-                      Создать заказ
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {query && live?.partialErrors.map(error => (
-              <div key={error} className="twa-live-note">{error}</div>
-            ))}
+            {liveResults}
 
             {filter === "DONE" ? (
               <>
@@ -3898,7 +4143,7 @@ export default function OrdersScreen({
                   <OrderCard
                     order={order}
                     token={token}
-                    currentTab={isAttentionView ? "ATTENTION" : filter}
+                    currentTab={query ? orderToTab(order) : isAttentionView ? "ATTENTION" : filter}
                     live={liveMap[order.id]}
                     exiting={exiting.has(order.id)}
                     onRunAction={(action, reason) => runAction(order, action, reason)}

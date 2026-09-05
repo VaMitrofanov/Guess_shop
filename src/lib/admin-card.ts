@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 import { resolveWbOrderRef } from "../../bots/shared/wb-order-source";
 import { orderCardRoots } from "../../bots/shared/order-thread";
+import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
 
 /**
@@ -149,4 +150,8 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
       ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),
     });
   }));
+
+  // Живая карточка DBS обязана догнать заказ: ссылка получена — значит её
+  // заголовок больше не «покупатель активирует код в боте».
+  if (wbRef.source === "WB_DBS") await refreshDbsCardByCode(prisma, order.wbCode);
 }

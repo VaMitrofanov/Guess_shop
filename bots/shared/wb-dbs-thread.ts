@@ -44,11 +44,15 @@ async function noteEvent(
   type: string,
   idempotencyKey: string,
   payload: Record<string, string | number | boolean | null>,
+  /** Переписать payload у уже записанного шага. Нужно там, где второй заход
+   *  знает БОЛЬШЕ первого: вход покупателя пишется по коду и в первый раз мог
+   *  прийти без имени, а карточка собирается только из событий. */
+  overwrite = false,
 ) {
   await db.wbMarketplaceEvent.upsert({
     where: { idempotencyKey },
     create: { marketplaceOrderId, type, idempotencyKey, actor: "wb-thread", payload },
-    update: {},
+    update: overwrite ? { payload } : {},
   });
 }
 
@@ -116,6 +120,27 @@ const CARD_STEP: Record<string, string> = {
   WB_ORDER_CANCELLED: "отменён на WB",
 };
 
+/** Кто пришёл по гейту — из последнего события входа.
+ *
+ * Личность покупателя живёт в карточке, а не в отдельном сообщении: строки
+ * «👤 Имя» и «🆔 VK ID» сами по себе не называют ни заказ, ни код, и рядом с
+ * карточкой читались как чужие (скрин владельца по NGS22UR, 05.09.2026). */
+function cardBuyerOf(events: { type: string; payload: unknown }[]): DbsCardState["buyer"] {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.type !== "BUYER_SIGNED_IN") continue;
+    const payload = (event.payload ?? {}) as { channel?: string; display?: string; url?: string; isNew?: boolean };
+    if (!payload.display) return null;
+    return {
+      display: payload.display,
+      url: typeof payload.url === "string" && payload.url ? payload.url : null,
+      channel: payload.channel ?? "—",
+      isNew: payload.isNew === true,
+    };
+  }
+  return null;
+}
+
 /** Подпись этапа. У входа на сайт важен канал — «вошёл на сайт (VK)»: по нему
  * оператор понимает, в каком боте искать покупателя. */
 function cardStepLabel(event: { type: string; payload: unknown }): string | null {
@@ -147,6 +172,11 @@ export async function refreshDbsCard(db: Db, orderId: string) {
   });
   if (!order || order.isTest) return;
 
+  // Заказ на выкуп — вторая половина жизни того же заказа. Карточка обрывалась
+  // на «покупатель активирует код в боте», и всё, что дальше (ссылка, очередь,
+  // выкуп), приходило отдельными сообщениями: одно дело выглядело как четыре.
+  const buyout = order.wbCode?.code ? await buyoutStateOf(db, order.wbCode.code) : null;
+
   const hasLiveSecret = wbDeliverySecretIsLive(order.deliverySecret);
   const state: DbsCardState = {
     wbOrderId: order.wbOrderId,
@@ -154,10 +184,20 @@ export async function refreshDbsCard(db: Db, orderId: string) {
     denomination: order.denominationSnapshot,
     priceKopecks: order.finalPriceKopecks ?? order.priceKopecks,
     activationCode: order.wbCode?.code ?? null,
-    ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null),
-    timeline: order.events
-      .map((event) => ({ at: event.createdAt, label: cardStepLabel(event) }))
-      .filter((row): row is { at: Date; label: string } => Boolean(row.label))
+    ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null, buyout),
+    buyer: cardBuyerOf(order.events),
+    timeline: [
+      ...order.events
+        .map((event) => ({ at: event.createdAt, label: cardStepLabel(event) }))
+        .filter((row): row is { at: Date; label: string } => Boolean(row.label)),
+      /* Шаги выкупа берутся из самого заказа, а не из отдельных событий:
+         статус меняют пять разных путей (TWA, бот, воркер, сайт, скрипты), и
+         каждый пришлось бы инструментировать — а расходиться они начали бы в
+         первый же день. Выведенное состояние соврать не может. */
+      ...(buyout?.pendingAt ? [{ at: buyout.pendingAt, label: "ссылка получена — в очереди на выкуп" }] : []),
+      ...(buyout?.completedAt ? [{ at: buyout.completedAt, label: "выкуплен" }] : []),
+    ]
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
       .map((row) => `${mskTime(row.at)}  ${row.label}`)
       // Один и тот же шаг может записаться дважды (например, повторный запрос
       // кода) — в карточке это шум, а не информация.
@@ -197,6 +237,7 @@ export async function noteDbsBuyerSignedIn(
   db: Db,
   activationCode: string,
   channel: string,
+  buyer?: { display?: string | null; url?: string | null; isNew?: boolean },
 ): Promise<boolean> {
   try {
     const order = await db.wbMarketplaceOrder.findFirst({
@@ -204,12 +245,71 @@ export async function noteDbsBuyerSignedIn(
       select: { id: true, isTest: true },
     });
     if (!order || order.isTest) return false;
-    await noteEvent(db, order.id, "BUYER_SIGNED_IN", `buyer-signed-in:${order.id}`, { channel });
+    await noteEvent(db, order.id, "BUYER_SIGNED_IN", `buyer-signed-in:${order.id}`, {
+      channel,
+      // Имя и ссылка кладутся в событие, потому что карточка собирается ТОЛЬКО
+      // из событий: второго источника правды у неё нет и заводить его нельзя.
+      display: buyer?.display ?? null,
+      url: buyer?.url ?? null,
+      isNew: buyer?.isNew ?? false,
+    }, Boolean(buyer?.display));
     await refreshDbsCard(db, order.id);
     return true;
   } catch (error) {
     console.error("[WbDbsSync] buyer sign-in note failed:", safeErrorCode(error));
     return false;
+  }
+}
+
+/** Состояние выкупа по коду гейта. Отдельный запрос: связь между доставкой и
+ *  выкупом идёт через код (`WbMarketplaceOrder.wbCode` → `WbOrder.wbCode`),
+ *  отношения в схеме между ними нет. Никогда не бросает: карточка доставки
+ *  обязана собраться и тогда, когда выкупа ещё нет. */
+type BuyoutState = {
+  status: string;
+  heldAt: Date | null;
+  heldReason: string | null;
+  hasGamepass: boolean;
+  pendingAt: Date | null;
+  completedAt: Date | null;
+};
+
+async function buyoutStateOf(db: Db, code: string): Promise<BuyoutState | null> {
+  try {
+    const row = await db.wbOrder.findUnique({
+      where: { wbCode: code },
+      select: {
+        status: true, heldAt: true, heldReason: true, gamepassUrl: true,
+        pendingAt: true, completedAt: true,
+        splitGamepasses: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!row) return null;
+    return {
+      status: row.status,
+      heldAt: row.heldAt,
+      heldReason: row.heldReason,
+      hasGamepass: Boolean(row.gamepassUrl) || row.splitGamepasses.length > 0,
+      pendingAt: row.pendingAt,
+      completedAt: row.completedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Обновить карточку по коду гейта — вход для отправителей, которые знают код,
+ *  но не знают id заказа доставки (карточки выкупа на сайте и в ботах). */
+export async function refreshDbsCardByCode(db: Db, code: string | null | undefined) {
+  if (!code) return;
+  try {
+    const order = await db.wbMarketplaceOrder.findFirst({
+      where: { wbCode: { code } },
+      select: { id: true },
+    });
+    if (order) await refreshDbsCard(db, order.id);
+  } catch (error) {
+    console.error("[WbDbsSync] card refresh by code failed:", safeErrorCode(error));
   }
 }
 
@@ -235,6 +335,7 @@ function dbsCardHeadline(
   },
   hasLiveSecret: boolean,
   codeReceivedAt: Date | null,
+  buyout?: BuyoutState | null,
 ): Pick<DbsCardState, "marker" | "title" | "next"> {
   if (order.cancelledAt) {
     return { marker: "cancelled", title: "отменён на WB", next: "деньги вернулись покупателю" };
@@ -255,6 +356,10 @@ function dbsCardHeadline(
     return { marker: "urgent", title: `ошибка ${order.lastErrorCode}`, next: "сверить кабинет WB и синхронизировать заказ" };
   }
   if (wbGateDelivered(order.gateState) && order.completedAt) {
+    /* Доставка закрыта — дальше карточку ведёт сам заказ на выкуп. Пока этой
+       ветки не было, карточка навсегда застывала на «покупатель активирует
+       код в боте», даже когда заказ уже был выкуплен. */
+    if (buyout) return buyoutHeadline(buyout);
     return { marker: "done", title: "доставка закрыта, гейт отправлен", next: "покупатель активирует код в боте" };
   }
   if (wbGateDelivered(order.gateState)) {
@@ -282,4 +387,32 @@ function dbsCardHeadline(
     return { marker: "waiting", title: "чат открыт", next: "автозапрос кода доставки" };
   }
   return { marker: "progress", title: "заказ принят", next: "ждём, когда покупатель откроет чат WB" };
+}
+
+/** Заголовок карточки во второй половине жизни заказа — после активации кода.
+ *  Порядок веток тот же, что у `primaryActionFor` в админке: сначала то, что
+ *  выключает заказ из работы, потом то, что требует человека. */
+function buyoutHeadline(buyout: BuyoutState): Pick<DbsCardState, "marker" | "title" | "next"> {
+  if (buyout.heldAt) {
+    return {
+      marker: "urgent",
+      title: "заморожен — не выкупать",
+      next: buyout.heldReason ? `причина: ${buyout.heldReason}` : "разморозить в админке, если причина снята",
+    };
+  }
+  switch (buyout.status) {
+    case "AWAITING_GAMEPASS":
+      return { marker: "waiting", title: "код активирован — ждём геймпасс", next: "покупатель присылает ссылку — бот напомнит трижды" };
+    case "PENDING":
+    case "IN_PROGRESS":
+      return { marker: "action", title: "в очереди на выкуп", next: "выкупить пасс у донора и нажать «ВЫКУПЛЕНО»" };
+    case "COMPLETED":
+      return { marker: "done", title: "выкуплен", next: "робуксы у покупателя — ждём отзыв" };
+    case "ERROR":
+      return { marker: "urgent", title: "ошибка выкупа", next: "разобрать во вкладке «Заказы»" };
+    case "REJECTED":
+      return { marker: "cancelled", title: "заказ отменён", next: "деньги за карту остаются у WB — сверить с покупателем" };
+    default:
+      return { marker: "progress", title: "код активирован", next: "покупатель проходит инструкцию" };
+  }
 }

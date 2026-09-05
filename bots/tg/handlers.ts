@@ -42,8 +42,8 @@ import {
   linkWbOrderToBuyer,
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
-import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
-import { recordOrderCardRoot } from "../shared/order-thread";
+import { dbsRef, noteDbsBuyerSignedIn, refreshDbsCardByCode } from "../shared/wb-dbs-thread";
+import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/order-thread";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
@@ -618,7 +618,10 @@ export function registerStart(bot: Telegraf): void {
 
     // Lazy registration: find or create user
     let user = await (db as any).user.findUnique({ where: { tgId } });
+    /** Покупателя завели прямо сейчас — строка «новый клиент» в карточке DBS. */
+    let userIsNew = false;
     if (!user) {
+      userIsNew = true;
       user = await (db as any).user.create({
         data: {
           tgId,
@@ -718,19 +721,28 @@ export function registerStart(bot: Telegraf): void {
     // only the transaction that created the provisional order, never a replay.
     if (adoptedExistingOrder) {
       const who = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || `tg:${tgId}`);
-      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
-        id,
-        `🟢 <b>DBS · покупатель нашёлся сам</b>\n` +
-        `Код <code>${escapeHtml(code)}</code> · ${who}\n` +
-        `Дальше: заказ перевешен со служебного аккаунта, уведомления теперь дойдут`,
-      )));
+      // Единый язык и ветка заказа: сообщение о ТОМ ЖЕ заказе, что и живая
+      // карточка DBS, обязано стоять под ней, а не отдельным делом.
+      const notice = formatAdminNotice({
+        marker: "done",
+        zone: "DBS",
+        title: "покупатель нашёлся сам",
+        lines: [orderRef({ code, denomination: totalAmount }, [who])],
+        next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
+      });
+      const roots = await orderThreadRoots(db, code);
+      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, notice, replyToRoot(roots, id))));
     }
 
     // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг
     // воронки, а не задача, и уходит строкой в её таймлайн вместо второго
     // сообщения об одном и том же заказе.
     const foldedIntoDbsCard = provisionalCreated
-      ? await noteDbsBuyerSignedIn(db, code, "TG").catch(() => false)
+      ? await noteDbsBuyerSignedIn(db, code, "TG", {
+          display: ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || `tg:${tgId}`),
+          url: `tg://user?id=${ctx.from.id}`,
+          isNew: userIsNew,
+        }).catch(() => false)
       : false;
     if (provisionalCreated && !foldedIntoDbsCard && provisionalOrder?.status === "AWAITING_GAMEPASS") {
       try {
@@ -4687,6 +4699,9 @@ export function registerCallbacks(bot: Telegraf): void {
         try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
         if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
+        // Живая карточка DBS показывает весь заказ целиком — «выкуплен» должен
+        // появиться и в ней, а не только в отредактированной карточке выкупа.
+        await refreshDbsCardByCode(db, order.wbCode).catch(() => {});
         await ctx.answerCbQuery("✅ Выполнено").catch(() => {});
       } catch (err) {
         console.error("[admin_ok] error:", err);

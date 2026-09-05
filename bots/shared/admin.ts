@@ -12,7 +12,8 @@ import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
 import { resolveWbOrderRef, wbOrderSourceLabel } from "./wb-order-source";
-import { orderCardRoots } from "./order-thread";
+import { orderCardRoots, orderThreadRoots, replyToRoot } from "./order-thread";
+import { refreshDbsCardByCode } from "./wb-dbs-thread";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 import { formatAdminNotice, mskTime, orderRef } from "./notify-format";
@@ -317,7 +318,11 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
     ? { inline_keyboard: [[{ text: "📊 Открыть заказ", web_app: { url: twaLaunchUrl(adminId, { q: code }) } }]] }
     : undefined);
 
-  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup: reply_markup(id) })));
+  // Обращение по заказу встаёт в ту же ветку, что и карточки этого заказа:
+  // «клиент пишет» и «вот его заказ» — одно дело, а не два.
+  const roots = await orderThreadRoots(db, code);
+  await Promise.allSettled(ADMIN_IDS.map((id) =>
+    tgSend(id, text, { reply_markup: reply_markup(id), ...replyToRoot(roots, id) })));
 }
 
 /** Public support contact. Used as the final URL the bot hands the user after
@@ -520,7 +525,9 @@ export async function notifyAdminsRetailBuyout(input: RetailBuyoutAdminAlert): P
     ],
     next: null,
   });
-  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { parse_mode: "HTML" })));
+  const roots = await orderThreadRoots(db, input.wbCode);
+  await Promise.allSettled(ADMIN_IDS.map((id) =>
+    tgSend(id, text, { parse_mode: "HTML", ...replyToRoot(roots, id) })));
 }
 
 // ── Unified user-handle formatting ─────────────────────────────────────────────
@@ -936,6 +943,10 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       });
     })
   );
+
+  // Живая карточка DBS обязана догнать заказ: ссылка получена — значит её
+  // заголовок больше не «покупатель активирует код в боте».
+  if (wbRef.source === "WB_DBS") await refreshDbsCardByCode(db, order.wbCode);
 }
 
 /**
@@ -1083,17 +1094,21 @@ async function broadcastPhotoCard(
   caption: string,
   reply_markup: unknown,
   what: string,
+  /** Корень ветки заказа: скрин оплаты и скрин отзыва — тоже шаги ОДНОГО
+   *  заказа, а не отдельные дела с собственной перепиской. */
+  roots?: Record<string, number> | null,
 ): Promise<number> {
   const results = await Promise.all(
     ADMIN_IDS.map(async (id) => {
-      if (await tgSendPhoto(id, photo, caption, { reply_markup })) return true;
+      const thread = replyToRoot(roots, id);
+      if (await tgSendPhoto(id, photo, caption, { reply_markup, ...thread })) return true;
       try {
         // URL экранируем: в ссылках VK CDN есть `&`, и на нём Telegram роняет
         // разбор HTML целиком — фолбэк молча повторил бы исходную поломку.
         const sent = await tgSend(
           id,
           `${caption}\n\n⚠️ Фото не удалось приложить — открой по ссылке:\n${escapeHtml(photo)}`,
-          { reply_markup },
+          { reply_markup, ...thread },
         );
         return sent?.ok === true;
       } catch (err) {
@@ -1134,7 +1149,10 @@ export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload
     ]],
   };
 
-  const delivered = await broadcastPhotoCard(payload.photoFileId, caption, reply_markup, "скрин оплаты");
+  const delivered = await broadcastPhotoCard(
+    payload.photoFileId, caption, reply_markup, "скрин оплаты",
+    await orderThreadRoots(db, code),
+  );
   if (delivered === 0) {
     throw new Error(`payment card undelivered: 0/${ADMIN_IDS.length} admins`);
   }
@@ -1192,7 +1210,10 @@ export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<v
     ]],
   };
 
-  const delivered = await broadcastPhotoCard(payload.photoSource, caption, reply_markup, "скрин отзыва");
+  const delivered = await broadcastPhotoCard(
+    payload.photoSource, caption, reply_markup, "скрин отзыва",
+    await orderThreadRoots(db, code),
+  );
   if (delivered === 0) {
     // Последний рубеж: Telegram может быть недоступен целиком, и тогда любое
     // уведомление бессмысленно. След в заказе переживёт это — по нему отзыв
