@@ -33,8 +33,13 @@ export const dynamic = "force-dynamic";
 const MAX_TARGETS = 2;
 const MIN_PRICE = 1;
 const MAX_PRICE = 100_000;
-/** Ключ Open Cloud — длинный блоб; всё, что заметно длиннее, к нам не относится. */
-const MAX_KEY_LEN = 4000;
+/**
+ * Ключ Open Cloud — длинный блоб. Предел общий с ботами
+ * (`bots/shared/gamepass-autocreate.ts`): это предел одного сообщения в TG и
+ * ВК, и опускать его ниже транспорта нельзя — настоящий длинный ключ получил
+ * бы отказ «это не похоже на ключ».
+ */
+const MAX_KEY_LEN = 4096;
 const CODE_RE = /^[A-Z0-9]{7}$/;
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 

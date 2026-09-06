@@ -1374,7 +1374,13 @@ export interface CreateGamePassResult {
   priceInRobux?: number;
   isForSale?: boolean;
   name?: string;
-  /** Машинный код: bad_key | bad_scope | not_authorized | no_universe | bad_price | roblox_error | network. */
+  /**
+   * Машинный код: bad_key | bad_scope | bad_scope_write | not_authorized |
+   * no_universe | bad_price | roblox_error | network.
+   *
+   * `bad_scope` — ключ не умеет ничего (выбран не тот API System);
+   * `bad_scope_write` — читать умеет, создавать нет (отмечена одна операция).
+   */
   error?: string;
   /** Человекочитаемая деталь для админа (без ключа!). */
   detail?: string;
@@ -1558,9 +1564,32 @@ export async function createGamePassDirect(
 }
 
 /**
+ * Умеет ли ключ ЧИТАТЬ геймпассы этого опыта (`game-pass:read`).
+ *
+ * Нужен ровно для одного: различить две причины отказа по правам. Roblox на обе
+ * отвечает одинаково — `403 Scope not authorized`, — а чинятся они по-разному:
+ * выбран соседний `legacy-game-passes` (ключ не умеет вообще ничего) или в
+ * рамке операций отмечена только одна строка из двух. Если чтение проходит, а
+ * создание нет — значит не хватает именно `game-pass:write`, и человеку надо
+ * сказать это, а не гонять его выпускать ключ заново.
+ *
+ * Вызывается ТОЛЬКО после отказа: на успешном пути лишних запросов нет.
+ */
+async function canReadGamePassesDirect(apiKey: string, universeId: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${OPEN_CLOUD_GAMEPASS_BASE}/${universeId}/game-passes?passView=Full&pageSize=1`,
+      { method: "GET", headers: { "x-api-key": apiKey } },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Оркестратор: резолв кандидатов-universe → создать на первом, где ключ
  * авторизован. 403 = «не тот universe» → следующий; иная ошибка → стоп.
- * ДОРМАНТ — не вызывается из клиентского флоу.
  */
 export async function createGamePassForUserDirect(
   params: CreateGamePassParams,
@@ -1587,5 +1616,90 @@ export async function createGamePassForUserDirect(
     last = r;
     if (r.error !== "not_authorized") break; // bad_scope и прочее — дальше нет смысла
   }
+  // Права: уточняем, какой именно операции не хватает. Обе ошибки приходят от
+  // Roblox одинаковыми, а покупателю надо сказать разное.
+  if (last?.error === "bad_scope" && last.universeId) {
+    const canRead = await canReadGamePassesDirect(params.apiKey, last.universeId);
+    if (canRead) {
+      return {
+        ...last,
+        error: "bad_scope_write",
+        detail: "у ключа есть game-pass:read, но нет game-pass:write",
+      };
+    }
+  }
   return last ?? { ok: false, error: "no_universe", detail: "нет кандидатов" };
+}
+
+/**
+ * Создание пасса так, как его запускают боты.
+ *
+ * ВК-бот живёт на RF-хосте, откуда `apis.roblox.com` молча висит (та же сеть
+ * Roblox, что и у поиска по нику), а ТГ-бот — на SG, где Roblox доступен
+ * напрямую. Поэтому маршрут тот же, что у `searchGamepassesByNickRouted`:
+ * сначала мост, и только если он не отвечает — прямой путь.
+ *
+ * Отдельно от поиска: создание НЕ идемпотентно. Если мост ответил хоть чем-то
+ * осмысленным (включая отказ Roblox), повторять его прямым вызовом нельзя —
+ * так родились бы два пасса на один заказ. Фолбэк срабатывает только когда
+ * мост недоступен как таковой (сеть, 401, 404 роута).
+ */
+export async function createGamePassForUserRouted(
+  params: CreateGamePassParams,
+): Promise<CreateGamePassResult> {
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+  if (bridgeUrl) {
+    const viaBridge = await createGamePassViaBridge(params, bridgeUrl, process.env.VALIDATOR_KEY?.trim());
+    if (viaBridge !== BRIDGE_UNAVAILABLE) return viaBridge;
+    console.warn("[Roblox/bots] Мост недоступен для create-gamepass — пробуем напрямую");
+  }
+  return createGamePassForUserDirect(params);
+}
+
+async function createGamePassViaBridge(
+  params: CreateGamePassParams,
+  bridgeUrl: string,
+  bridgeKey: string | undefined,
+): Promise<CreateGamePassResult | typeof BRIDGE_UNAVAILABLE> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const res = await fetch(`${bridgeUrl.replace(/\/+$/, "")}/create-gamepass`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        ...(bridgeKey ? { "x-validator-key": bridgeKey } : {}),
+      },
+      // Ключ уходит транзитом и НИКОГДА не печатается в лог — ни здесь, ни на мосту.
+      body: JSON.stringify({
+        apiKey: params.apiKey,
+        priceInRobux: params.priceInRobux,
+        name: params.name,
+        universeId: params.universeId,
+        placeId: params.placeId,
+        username: params.username,
+      }),
+      signal: controller.signal,
+    });
+    if (res.status === 401) {
+      console.error("[Roblox/bots] Мост ответил 401 на create-gamepass — сверить VALIDATOR_KEY с обеих сторон");
+      return BRIDGE_UNAVAILABLE;
+    }
+    if (res.status === 404) {
+      console.error("[Roblox/bots] Мост не знает /create-gamepass — версия моста старее ботов");
+      return BRIDGE_UNAVAILABLE;
+    }
+    const body: any = await res.json().catch(() => null);
+    if (!body || typeof body.ok !== "boolean") {
+      console.warn(`[Roblox/bots] Мост вернул невнятный ответ на create-gamepass: HTTP ${res.status}`);
+      return BRIDGE_UNAVAILABLE;
+    }
+    return body as CreateGamePassResult;
+  } catch (err: any) {
+    console.warn(`[Roblox/bots] Мост недоступен для create-gamepass: ${err?.message ?? err}`);
+    return BRIDGE_UNAVAILABLE;
+  } finally {
+    clearTimeout(timer);
+  }
 }

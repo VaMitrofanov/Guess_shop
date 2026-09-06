@@ -1,145 +1,26 @@
 /**
- * Хранение Open Cloud API-ключей покупателей.
+ * Хранение Open Cloud-ключей — веб-сторона.
  *
- * Решение владельца 06.09.2026: ключ НЕ стираем после создания пасса. Он не
- * даёт доступа к аккаунту, робуксам и платежам — только к геймпассам того, кто
- * его выпустил (`game-passes: read + write`), — и бессрочен, если покупатель не
- * выбрал дату истечения. Взамен мы получаем две вещи:
- *
- *   1. **Починку без покупателя.** Пасс создан, но цена уехала или продажа
- *      слетела — правим тем же ключом, не гоняя человека в Creator Hub.
- *   2. **Быстрый повторный заказ.** Постоянному покупателю пасс создаётся
- *      сразу: ему остаётся оплатить.
- *
- * Значение лежит зашифрованным (AES-256-GCM) — тот же конверт и тот же
- * `WB_DELIVERY_ENCRYPTION_KEY`, что у кодов доставки WB. Наружу (в ответ роута,
- * в логи, в карточку админа) ключ не отдаётся никогда: отсюда возвращаются
- * только метаданные, а расшифровка живёт в `loadRobloxApiKey` для будущих
- * админских действий.
- *
- * Ни одна ошибка здесь не роняет пользовательский поток: пасс уже создан,
- * и «не сохранили ключ» — это потеря удобства, а не заказа.
+ * Правила и шифрование живут в `bots/shared/roblox-api-key-store.ts`: тем же
+ * хранилищем пользуется ветка «пришли ключ» в TG/VK, а боты в `src/` смотреть
+ * не умеют. Здесь — только привязка к веб-клиенту Prisma.
  */
 
 import { prisma } from "@/lib/prisma";
 import {
-  decryptWbSecret,
-  encryptWbSecret,
-  wbDeliveryCryptoReady,
-  wbSecretHmac,
-} from "../../bots/shared/wb-delivery-crypto";
+  loadRobloxApiKey as loadShared,
+  rememberRobloxApiKey as rememberShared,
+  type RememberKeyInput,
+  type StoredRobloxApiKey,
+} from "../../bots/shared/roblox-api-key-store";
 
-const PURPOSE = "roblox-api-key" as const;
+export { robloxApiKeyStoreReady } from "../../bots/shared/roblox-api-key-store";
+export type { RememberKeyInput, StoredRobloxApiKey };
 
-export interface RememberKeyInput {
-  /** Сам ключ. В логи и наружу не попадает ни при каком исходе. */
-  key: string;
-  /** Ник Roblox, на аккаунте которого ключ работает. */
-  robloxUsername: string;
-  /** Наш пользователь, если заказ уже привязан к учётке. */
-  userId?: string | null;
-  /** Заказ, на котором ключ применялся. */
-  orderId?: string | null;
-  /** Машинный исход применения: `ok`, `bad_scope`, `not_authorized`, … */
-  result: string;
-  /** Сколько пассов этим ключом создано в этот раз. */
-  createdPasses?: number;
+export function rememberRobloxApiKey(input: RememberKeyInput): Promise<"saved" | "updated" | "skipped"> {
+  return rememberShared(prisma as never, input);
 }
 
-/** Готово ли хранилище: без ключа шифрования сохранять нечего. */
-export function robloxApiKeyStoreReady(): boolean {
-  return wbDeliveryCryptoReady();
-}
-
-/**
- * Запомнить ключ (или обновить след у уже известного).
- *
- * Дедупликация по HMAC: тот же ключ, присланный второй раз, не плодит строк —
- * у него просто растёт `useCount` и обновляется последний исход.
- */
-export async function rememberRobloxApiKey(input: RememberKeyInput): Promise<"saved" | "updated" | "skipped"> {
-  const key = input.key.trim();
-  const nick = input.robloxUsername.trim().toLowerCase();
-  if (!key || !nick) return "skipped";
-  if (!robloxApiKeyStoreReady()) {
-    console.warn("[roblox-api-key] WB_DELIVERY_ENCRYPTION_KEY не задан — ключ не сохранён");
-    return "skipped";
-  }
-  try {
-    const keyHmac = wbSecretHmac(key, PURPOSE);
-    const existing = await prisma.robloxApiKey.findUnique({ where: { keyHmac }, select: { id: true, createdPasses: true } });
-    const now = new Date();
-    if (existing) {
-      await prisma.robloxApiKey.update({
-        where: { id: existing.id },
-        data: {
-          robloxUsername: nick,
-          userId: input.userId ?? undefined,
-          lastOrderId: input.orderId ?? undefined,
-          lastResult: input.result,
-          lastUsedAt: now,
-          useCount: { increment: 1 },
-          createdPasses: { increment: input.createdPasses ?? 0 },
-          // Перешифровываем: конверт несёт свежий IV, а строка ключа та же.
-          encryptedValue: encryptWbSecret(key, PURPOSE),
-        },
-      });
-      return "updated";
-    }
-    await prisma.robloxApiKey.create({
-      data: {
-        robloxUsername: nick,
-        userId: input.userId ?? null,
-        encryptedValue: encryptWbSecret(key, PURPOSE),
-        keyHmac,
-        lastOrderId: input.orderId ?? null,
-        lastResult: input.result,
-        lastUsedAt: now,
-        useCount: 1,
-        createdPasses: input.createdPasses ?? 0,
-      },
-    });
-    return "saved";
-  } catch (err) {
-    // Ключ — удобство, заказ важнее. Сообщение печатаем без значения ключа.
-    console.warn("[roblox-api-key] не сохранили:", err instanceof Error ? err.message : err);
-    return "skipped";
-  }
-}
-
-export interface StoredRobloxApiKey {
-  id: string;
-  robloxUsername: string;
-  key: string;
-  lastUsedAt: Date | null;
-  createdPasses: number;
-}
-
-/**
- * Достать последний рабочий ключ этого ника — для админских действий
- * («поправить пасс», «создать сразу»). Возвращает расшифрованное значение,
- * поэтому вызывать только из серверного кода и никогда не отдавать в ответ.
- */
-export async function loadRobloxApiKey(robloxUsername: string): Promise<StoredRobloxApiKey | null> {
-  const nick = robloxUsername.trim().toLowerCase();
-  if (!nick || !robloxApiKeyStoreReady()) return null;
-  try {
-    const row = await prisma.robloxApiKey.findFirst({
-      where: { robloxUsername: nick },
-      // Сначала тот, которым что-то реально создавали, затем свежий.
-      orderBy: [{ lastResult: "asc" }, { lastUsedAt: "desc" }],
-      select: { id: true, robloxUsername: true, encryptedValue: true, lastUsedAt: true, createdPasses: true },
-    });
-    if (!row) return null;
-    return {
-      id: row.id,
-      robloxUsername: row.robloxUsername,
-      key: decryptWbSecret(row.encryptedValue, PURPOSE),
-      lastUsedAt: row.lastUsedAt,
-      createdPasses: row.createdPasses,
-    };
-  } catch (err) {
-    console.warn("[roblox-api-key] не прочитали:", err instanceof Error ? err.message : err);
-    return null;
-  }
+export function loadRobloxApiKey(robloxUsername: string): Promise<StoredRobloxApiKey | null> {
+  return loadShared(prisma as never, robloxUsername);
 }

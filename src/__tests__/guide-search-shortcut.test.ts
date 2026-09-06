@@ -19,6 +19,20 @@ const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf8")
 describe("инструкция: ярлык через поиск Creator Hub", () => {
   const steps = () => read("src/app/guide/guide-steps.tsx");
 
+  test("две колонки — только когда во второй что-то есть", () => {
+    // Боковая колонка шага 2 несёт видео, а оно показывается лишь на телефоне
+    // в «супер подробно». `wbi-rev` ставит эту колонку ПЕРВОЙ, поэтому пустая
+    // она забирала левую половину экрана, а текст уезжал вправо (приёмка
+    // владельца 07.09.2026 на `?source=site&amount=1000`).
+    const s = steps();
+    const titleAt = s.indexOf("Найди «Create Pass» через поиск");
+    const step2 = s.slice(titleAt - 600, titleAt + 2200);
+    expect(step2).toContain('isMob && maxi ? "wbi-cols wbi-media wbi-rev" : undefined');
+    // Сама колонка тоже рисуется под условием, а не пустым div'ом.
+    expect(step2).toContain("{isMob && maxi && (");
+    expect(step2).not.toMatch(/<div className="wbi-mcol">\s*\n\s*\{isMob && maxi \?/);
+  });
+
   test("основной маршрут — поиск, а не Monetization → Passes", () => {
     const s = steps();
     // Шаг 2 учит искать «pass» и жать «Create Pass».

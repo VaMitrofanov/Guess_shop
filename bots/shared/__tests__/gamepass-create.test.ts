@@ -146,7 +146,11 @@ describe("createGamePassForUserDirect (перебор и валидация)", (
       placeId: undefined,
     });
     expect(r.error).toBe("bad_scope");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Перебор опытов при отказе по правам бессмыслен: ключ не умеет ничего
+    // нигде. Считаем именно ПОПЫТКИ СОЗДАНИЯ — read-проба (GET) уточняет, чего
+    // не хватает, и к перебору отношения не имеет.
+    const creates = fetchMock.mock.calls.filter((call) => call[1]?.method === "POST");
+    expect(creates).toHaveLength(1);
   });
 
   test("явный universeId + успех — создаёт на нём", async () => {
@@ -157,5 +161,47 @@ describe("createGamePassForUserDirect (перебор и валидация)", (
     expect(r.ok).toBe(true);
     expect(r.gamePassId).toBe(7);
     expect(r.universeId).toBe("10302269431");
+  });
+});
+
+describe("права ключа: read есть, write нет", () => {
+  let fetchMock: jest.Mock;
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+  });
+
+  test("403 Scope not authorized + успешное чтение → bad_scope_write", async () => {
+    // Roblox отвечает одинаковым 403 и на «выбран legacy-game-passes», и на
+    // «отмечена только одна операция». Различаем сами: если ключом удаётся
+    // ПРОЧИТАТЬ пассы того же опыта — значит не хватает именно write, и это
+    // одна галочка, а не новый ключ.
+    fetchMock
+      .mockResolvedValueOnce(mockRes(403, { message: "Scope not authorized" })) // create
+      .mockResolvedValueOnce(mockRes(200, { gamePasses: [] }));                 // read-проба
+
+    const r = await createGamePassForUserDirect({ apiKey: "k", priceInRobux: 143, universeId: "1" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("bad_scope_write");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("game-passes?passView=Full");
+  });
+
+  test("403 Scope not authorized + чтение тоже отказ → остаётся bad_scope", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockRes(403, { message: "Scope not authorized" }))
+      .mockResolvedValueOnce(mockRes(403, { message: "Scope not authorized" }));
+
+    const r = await createGamePassForUserDirect({ apiKey: "k", priceInRobux: 143, universeId: "1" });
+    expect(r.error).toBe("bad_scope");
+  });
+
+  test("на успешном создании лишних запросов нет", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockRes(200, { gamePassId: 1, name: "RobloxBank", isForSale: true, priceInformation: { defaultPriceInRobux: 143 } }),
+    );
+    const r = await createGamePassForUserDirect({ apiKey: "k", priceInRobux: 143, universeId: "1" });
+    expect(r.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

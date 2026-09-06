@@ -8,6 +8,8 @@
  * expected = ceil(amount / 0.7), допуск ±PRICE_TOL. Для DIR-заказов amount
  * уже включает бонус (totalAmount), для WB/Avito amount = номинал.
  */
+import { expectedGamepassPrice } from "../../bots/shared/gamepass-plan";
+
 export const PRICE_TOL = 2;
 export const BUYOUT_ERROR_REGIONAL_PRICE = "REGIONAL_PRICE";
 export const BUYOUT_ERROR_ROBLOX_PLUS_FLOW = "ROBLOX_PLUS_FLOW";
@@ -67,7 +69,12 @@ export function classifyBuyerPrice(
     : { kind: "UNSAFE_DISCOUNT", discountPercent: null, discountAmount: Math.max(0, base - livePrice) };
 }
 
-export const expectedGamepassPrice = (amount: number): number => Math.ceil(amount / 0.7);
+/**
+ * Формула одна на весь проект и живёт в `bots/shared/gamepass-plan.ts`: там же
+ * считается, какие пассы просить создать. Разойдясь, гард начал бы отвергать
+ * ровно те пассы, которые сам же и заказал.
+ */
+export { expectedGamepassPrice } from "../../bots/shared/gamepass-plan";
 
 /** Unknown/Regional buyer pricing is active. Typed Roblox Plus is known, not regional. */
 export function hasRegionalPrice(

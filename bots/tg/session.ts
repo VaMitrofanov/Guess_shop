@@ -148,3 +148,32 @@ export const bossrobuxSearchCache = new Map<number, import("../shared/bossrobux"
  * so we know which `wbCode` / `denomination` to validate the price against.
  */
 export const pendingRobloxNick = new Map<number, LinkState>();
+
+// ── Квест «ник → что нашли → как сделаем» (общий с сайтом) ───────────────────
+
+/**
+ * Разбор аккаунта, показанный покупателю последним.
+ *
+ * Держим ЦЕЛИКОМ, а не один выбранный пасс: подтверждение оформляет заказ по
+ * всему набору (заказ на 2000 закрывается парой пассов), а ветка ключа
+ * пересчитывает план по тому, что мы только что создали. Без сохранённого
+ * плана «Подтвердить» пришлось бы гонять поиск по нику заново.
+ */
+export interface QuestPlanState {
+  wbCode: string;
+  denomination: number;
+  nick: string;
+  plan: import("../shared/gamepass-plan").CheckPlan;
+  /** Всё, что нашли на аккаунте, — по нему план пересчитывается после ключа. */
+  owned: import("../shared/gamepass-plan").OwnedPass[];
+}
+
+export const questPlans = new Map<number, QuestPlanState>();
+
+/**
+ * Покупатель в ветке «сделаем за тебя»: следующее текстовое сообщение — это
+ * Open Cloud ключ, а не ник и не ссылка. Стейт отдельный, потому что ключ
+ * приходит обычным текстом и его нельзя спутать с чем-то ещё: сообщение с ним
+ * бот удаляет сразу после чтения.
+ */
+export const pendingApiKey = new Map<number, { wbCode: string; denomination: number; nick: string }>();

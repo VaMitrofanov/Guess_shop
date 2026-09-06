@@ -187,6 +187,8 @@ export async function auditGamepassAutocreated(
     wbCode?: string;
     /** Опыт, на котором пасс создан (для разбора «а почему в этой игре»). */
     universeId?: string | null;
+    /** Откуда пришёл ключ: инструкция на сайте или ветка ключа в боте. */
+    via?: "site-api-key" | "bot-api-key";
   },
 ): Promise<void> {
   const gamepassId = String(opts.gamepassId ?? "").trim();
@@ -196,7 +198,7 @@ export async function auditGamepassAutocreated(
     if (!orderId) return;
     await write(client, ORDER_AUDIT_TYPE.GAMEPASS_AUTOCREATED, orderId, gamepassId, {
       gamepassId,
-      via: "site-api-key",
+      via: opts.via ?? "site-api-key",
       price: opts.price,
       robloxUsername: opts.robloxUsername,
       ...(opts.universeId ? { universeId: String(opts.universeId) } : {}),

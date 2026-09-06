@@ -1,19 +1,9 @@
 /**
- * Флаг метода «пасс по ключу» (инструкция V2).
+ * Флаг метода «пасс по ключу» — веб-сторона.
  *
- * Метод трогает чужой аккаунт Roblox, поэтому по умолчанию он ВЫКЛЮЧЕН и
- * включается одной переменной окружения на Web и на Guide:
- *
- *     GAMEPASS_AUTOCREATE=1
- *
- * Не `NEXT_PUBLIC_*` намеренно: такие переменные вшиваются в бандл на сборке, и
- * выключить метод без пересборки стало бы невозможно (см. память
- * `project_next_public_build_time_trap`). Значение читает сервер и передаёт
- * страницам пропом, а роут проверяет его сам — чтобы включённая вёрстка без
- * включённого роута не обещала того, чего нет.
+ * Ядро в `bots/shared/gamepass-autocreate-flag.ts`: одна и та же переменная
+ * `GAMEPASS_AUTOCREATE` включает метод и на сайте, и в ветке ключа у ботов,
+ * поэтому читается она из одного места.
  */
 
-export function gamepassAutocreateEnabled(): boolean {
-  const v = process.env.GAMEPASS_AUTOCREATE?.trim().toLowerCase();
-  return v === "1" || v === "on" || v === "true";
-}
+export { gamepassAutocreateEnabled } from "../../bots/shared/gamepass-autocreate-flag";

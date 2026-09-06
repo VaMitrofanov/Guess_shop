@@ -12,7 +12,10 @@
  * расставлены по замерам, а не на глаз. Ползунок Experience Restrictions
  * намеренно НЕ обведён: обведённое жмут не читая, а он только всё усложняет.
  *
- * Ключ уходит на наш роут и дальше транзитом на SG-мост; нигде не сохраняется.
+ * Ключ уходит на наш роут и дальше транзитом на SG-мост. С 06.09.2026 он
+ * ХРАНИТСЯ (решение владельца): зашифрованным, чтобы чинить созданный пасс без
+ * покупателя и создавать пасс сразу на следующем заказе. Текст поля обязан это
+ * говорить — обещание «нигде не сохраняется» перестало быть правдой.
  * Метод живёт под флагом `GAMEPASS_AUTOCREATE` (см. gamepass-autocreate-flag).
  */
 
@@ -265,7 +268,7 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
             {/* 4. game-passes + read/write */}
             {kstep === 3 && (
             <div className="wbi-keystep">
-              <b>Выбери game-passes и права read + write</b>
+              <b>Выбери game-passes и включи ему две операции</b>
               <p className="wbi-t">
                 В поле <span className="wbi-pill">Select API System</span> напиши <b>pass</b> и выбери{" "}
                 <span className="wbi-pill">game-passes</span>. Соседний <b>legacy-game-passes</b> не
@@ -291,19 +294,43 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
                 </span>
                 <figcaption>Верхний — нужный. Нижний, с приставкой <b>legacy</b>, — нет.</figcaption>
               </figure>
+              {/* Самое неочевидное место всей ветки: после выбора системы права
+                  НЕ появляются сами — их надо доставить в отдельном пустом поле,
+                  которое выглядит просто как рамка со стрелочкой. Владелец на
+                  приёмке 07.09.2026: «здесь надо подробнее, где именно вставлять
+                  read и write». Поэтому — свой абзац, по шагам, с ориентирами
+                  «где искать» отдельно для телефона и компьютера. */}
+              <p className="wbi-t">
+                Ниже появится блок с названием <span className="wbi-pill">game-passes</span> — прав у
+                него пока нет, их надо добавить:
+              </p>
+              <ol className="wbi-ol">
+                <li>
+                  Найди <b>пустое поле со стрелочкой ▾</b>{" "}
+                  {isMob ? <>— оно под названием <b>game-passes</b>, ниже ползунка</>
+                         : <>— оно справа от названия <b>game-passes</b>, в той же строке</>}.
+                </li>
+                <li>Нажми на него — выпадет список из двух строк.</li>
+                <li>
+                  Отметь <b>обе</b>: <span className="wbi-pill">game-pass:read</span> и{" "}
+                  <span className="wbi-pill">game-pass:write</span>. Первая разрешает смотреть, вторая —
+                  создавать; без второй пасс не появится.
+                </li>
+              </ol>
               <figure className="wbi-figure">
                 <span className="wbi-anno">
                   <img
                     src={isMob ? "/guide/wb-key-m-ops.jpg" : "/guide/wb-key-pc-ops.jpg"}
-                    alt="Операции game-pass:read и game-pass:write" loading="lazy" decoding="async"
+                    alt="Поле операций ключа с добавленными game-pass:read и game-pass:write" loading="lazy" decoding="async"
                   />
                   {isMob
                     ? <span className="wbi-box g" style={{ left: "14%", top: "62%", width: "74%", height: "25%" }} />
                     : <span className="wbi-box g" style={{ left: "52.5%", top: "71.2%", width: "45%", height: "11.5%" }} />}
                 </span>
                 <figcaption>
-                  Нужны обе строки: <b>read</b> и <b>write</b>. Серый ползунок рядом трогать не нужно —
-                  оставь как есть.
+                  <b>Так выглядит готово:</b> в рамке лежат две плашки — <b>game-pass:read</b> и{" "}
+                  <b>game-pass:write</b>. Если рамка пустая — права не добавились, нажми на неё ещё раз.
+                  Серый ползунок рядом трогать не нужно.
                 </figcaption>
               </figure>
             </div>
@@ -384,7 +411,9 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
         <label htmlFor="rb-apikey">Вставь ключ сюда</label>
         <p className="wbi-keyhint">
           Создадим {prices.length > 1 ? "два пасса" : "пасс"} на <b>{prices.join(" и ")} R$</b> и сразу
-          поставим {prices.length > 1 ? "их" : "его"} в продажу. Ключ нигде не сохраняется.
+          поставим {prices.length > 1 ? "их" : "его"} в продажу. Ключ хранится у нас
+          зашифрованным — чтобы поправить геймпасс без тебя и сделать всё сразу в следующий раз.
+          Доступа к аккаунту он не даёт.
         </p>
         <textarea
           id="rb-apikey"

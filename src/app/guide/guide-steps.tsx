@@ -324,8 +324,12 @@ export default function GuideSteps({
       </Step>)}
 
       {/* ── 2. Ярлык: поиск ведёт прямо на форму ──────────────────────── */}
+      {/* Две колонки — ТОЛЬКО когда во второй что-то есть. Видео шага живёт в
+          боковой колонке и показывается лишь на телефоне в «супер подробно»;
+          на компьютере колонка оставалась пустой, а `wbi-rev` ставит её ПЕРВОЙ
+          — текст уезжал в правую половину, слева зияла дыра (приёмка 07.09). */}
       {show(1) && (<Step n="2">
-        <div className="wbi-cols wbi-media wbi-rev">
+        <div className={isMob && maxi ? "wbi-cols wbi-media wbi-rev" : undefined}>
           <div><div className="wbi-ttl">Найди «Create Pass» через поиск</div>
             <p className="wbi-t">Искать свою игру и лазить по меню не нужно. Поиск в Creator Hub отведёт прямо на форму создания:</p>
             <ol className="wbi-ol">
@@ -337,14 +341,14 @@ export default function GuideSteps({
             {pair && <div className="wbi-ok">📌 Запомни этот путь: пассов нужно два, и сюда ты вернёшься за вторым.</div>}
             <LongWayFallback />
           </div>
-          <div className="wbi-mcol">
-            {isMob && maxi ? (
+          {isMob && maxi && (
+            <div className="wbi-mcol">
               <figure className="wbi-figure wbi-spot">
                 <LazyVideo src="/guide/wb-m-search.mp4" poster="/guide/wb-m-search-poster.jpg" alt="Поиск в Creator Hub: pass → Create Pass" />
                 <figcaption>Целиком: <b>🔍</b> → <b>pass</b> → <b>Create Pass</b> → форма.</figcaption>
               </figure>
-            ) : null}
-          </div>
+            </div>
+          )}
         </div>
 
         {isMob ? (

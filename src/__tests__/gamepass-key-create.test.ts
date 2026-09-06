@@ -147,6 +147,17 @@ describe("вердикты покупателю", () => {
     expect(v.retry).toBe(false);
   });
 
+  test("нет только write — отдельный вердикт: одна галочка, а не новый ключ", () => {
+    // Roblox на «выбран legacy» и «отмечена одна операция» отвечает одинаковым
+    // 403. Различаем сами (пробуем ключом ПРОЧИТАТЬ пассы), потому что чинится
+    // это по-разному: во втором случае человек почти всё сделал правильно.
+    const v = keyCreateVerdict("bad_scope_write");
+    expect(v.text).toContain("write");
+    expect(v.text).toContain("Новый ключ выпускать не нужно");
+    expect(v.step).toBe(3);
+    expect(v.retry).toBe(false);
+  });
+
   test("bad_key объясняет час жизни ключа", () => {
     expect(keyCreateVerdict("bad_key").text).toContain("час");
   });
@@ -158,7 +169,7 @@ describe("вердикты покупателю", () => {
   });
 
   test("ни один вердикт не говорит «скоуп» и не сыплет кодами", () => {
-    for (const code of ["bad_key", "bad_scope", "not_authorized", "no_universe", "network", "rate_limited"]) {
+    for (const code of ["bad_key", "bad_scope", "bad_scope_write", "not_authorized", "no_universe", "network", "rate_limited"]) {
       const v = keyCreateVerdict(code);
       expect(v.text.toLowerCase()).not.toContain("скоуп");
       expect(v.text).not.toContain(code);

@@ -25,7 +25,10 @@
 import { expectedGamepassPrice, PRICE_TOL } from "./purchase-guard";
 
 /** Ниже этого номинала часть не имеет смысла: пасс дешевле 2 R$ не выставить. */
-export const MIN_SPLIT_PART_ROBUX = 10;
+import { MIN_SPLIT_PART_ROBUX } from "../../bots/shared/gamepass-plan";
+
+/** Порог части — общий с разбором плана (ядро в `bots/shared/gamepass-plan.ts`). */
+export { MIN_SPLIT_PART_ROBUX } from "../../bots/shared/gamepass-plan";
 /** Больше частей — это уже не «удобнее выкупать», а рассыпанный заказ. */
 export const MAX_SPLIT_PARTS = 10;
 

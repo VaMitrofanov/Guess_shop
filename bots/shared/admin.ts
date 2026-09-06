@@ -772,6 +772,10 @@ export interface OrderCardPayload {
   viaManualLink?:      boolean;
   /** Old gamepassUrl when the user swapped the pass on an already-queued order (🔁 marker). */
   replacedGamepassUrl?: string;
+  /** Пасс(ы) создал наш бот по Open Cloud-ключу покупателя — цену и «в продаже» выставили мы. */
+  viaKey?:             boolean;
+  /** Заказ закрывается несколькими пассами: каждую часть покупает ОТДЕЛЬНЫЙ донор. */
+  splitParts?:         { gamepassId: string; amount: number }[];
 }
 
 export interface ReviewCardPayload {
@@ -858,6 +862,21 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
 
   const webOneTapLine = order.viaWebOneTap ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
+  // Пасс создали мы сами по ключу покупателя: за цену и за «в продаже» отвечаем
+  // тоже мы, поэтому маркер идёт первым — он меняет то, как читать всё ниже.
+  const viaKeyLine = order.viaKey
+    ? `🔑 <b>ПАСС СОЗДАН ПО API-КЛЮЧУ</b> — цену и «в продаже» выставили мы\n`
+    : "";
+  // Разбивка: у каждой части свой номинал, и покупать их надо с РАЗНЫХ доноров
+  // (повтор одного пасса с того же аккаунта вернёт AlreadyOwned).
+  const parts = order.splitParts ?? [];
+  const splitLines = parts.length > 1
+    ? [
+        `🧩 <b>РАЗБИВКА: ${parts.length} ${parts.length < 5 ? "части" : "частей"}</b> — каждую покупать с ОТДЕЛЬНОГО донора`,
+        ...parts.map((part, index) =>
+          `   ${index + 1}. <code>${part.gamepassId}</code> · ${part.amount} R$ · пасс ${Math.ceil(part.amount / 0.7)} R$`),
+      ]
+    : [];
   // Поиск по нику пасс не увидел, покупатель прислал ссылку сам — почти всегда
   // это скрытый плейс. Заказ штатный, но менеджеру стоит глянуть глазами.
   const manualLinkLine = order.viaManualLink
@@ -890,9 +909,10 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
         code: order.wbCode,
         denomination: order.amount,
         buyerName: null,
-      }, [`геймпасс ${passPrice} R$`]),
+      }, [parts.length > 1 ? `${parts.length} пасса на ${passPrice} R$ суммарно` : `геймпасс ${passPrice} R$`]),
       // Плашки-исключения идут ДО полей: они меняют то, как читать всё ниже.
       replacedLine.trim() || null,
+      viaKeyLine.trim() || null,
       webOneTapLine.trim() || null,
       manualLinkLine.trim() || null,
       loyaltyLine.trim() || null,
@@ -904,12 +924,15 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       `📅 Время: <b>${dateStr}</b>`,
       // Возраст — отдельной строкой: у недельного заказа это и есть тревога.
       `⏳ Возраст заказа: <b>${age}</b>`,
+      ...splitLines,
       `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`,
-      passIdLine,
+      parts.length > 1 ? null : passIdLine,
     ],
     next: order.isAgeRestricted
       ? "игра 18+ — выкупать только вручную"
-      : "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
+      : parts.length > 1
+        ? "выкупить части с разных доноров (карточка заказа ведёт по одной) и нажать «ВЫКУПЛЕНО»"
+        : "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
   });
 
   // One-tap deep-link into the TWA Orders screen, prefocused on this order

@@ -13,14 +13,38 @@ import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
 import { vkGetName, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
-import { getState, setState, clearState } from "./session";
+import { getState, setState, clearState, getQuestPlan, setQuestPlan, clearQuestPlan } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import {
+  planFromOwned,
+  targetsToCreate,
+  type CheckPlan,
+  type OwnedPass,
+  type PlanPart,
+} from "../shared/gamepass-plan";
+import {
+  QUEST,
+  guideUrlFor,
+  planIsReady,
+  plainText,
+  questForkScreen,
+  questKeyFailScreen,
+  questKeyScreen,
+  questKeyWorkingText,
+  questNoAccountScreen,
+  questResultScreen,
+  type QuestButton,
+  type QuestScreen,
+} from "../shared/gamepass-quest";
+import { gamepassAutocreateEnabled } from "../shared/gamepass-autocreate-flag";
+import { createPassesByKey, looksLikeApiKey, recordAutocreateTrace } from "../shared/gamepass-autocreate";
+import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
-import { auditGamepassSubmitted, type OrderAuditClient } from "../shared/order-audit";
+import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -1384,6 +1408,19 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
 
   // ── 🔎 Find gamepass by Roblox nick (item 7) ───────────────────────────────
+  // ── Квест «что нашли → как сделаем» ─────────────────────────────────────
+  if (msgPayload?.command === "quest_ok") {
+    await handleQuestConfirm(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "quest_fork") {
+    await handleQuestFork(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "quest_key" || msgPayload?.command === "quest_key_retry") {
+    await handleQuestKey(ctx, vkUserId);
+    return;
+  }
   if (msgPayload?.command === "find_gp_start") {
     await handleFindGpStart(ctx, vkUserId);
     return;
@@ -1439,6 +1476,23 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // gpw_ok, attach из TWA или выкуп уже перевели заказ дальше, а Map-стейт
   // остался и съедал любой текст формат-ошибкой (кейс DCTAKAJ: «❤️❤️» →
   // «Напиши свой ник…» при заказе давно в очереди). Перепроверяем статус.
+  // Ветка ключа идёт ПЕРЕД ником и ссылкой: ключ — длинная строка, и в разборе
+  // ника он получил бы «ник не похож на ник Roblox».
+  if (state?.type === "AWAITING_API_KEY") {
+    const sweep = await sweepStaleVkOrderState(ctx, vkUserId, state.wbCode, text);
+    if (sweep === "replied") return;
+    if (sweep === "cleared") {
+      await handleIdleMessage(ctx, vkUserId, text);
+      return;
+    }
+    await handleVkApiKeyInput(ctx, vkUserId, text, {
+      wbCode: state.wbCode,
+      denomination: state.denomination,
+      nick: state.nick,
+    });
+    return;
+  }
+
   if (state?.type === "AWAITING_ROBLOX_NICK" || state?.type === "AWAITING_LINK") {
     const sweep = await sweepStaleVkOrderState(ctx, vkUserId, state.wbCode, text);
     if (sweep === "replied") return;
@@ -1610,6 +1664,9 @@ async function sweepStaleVkOrderState(
   if (!order || order.status === "AWAITING_GAMEPASS" || order.status === "REJECTED") return "valid";
 
   clearState(vkUserId);
+  // План относился к заказу, который уже уехал дальше: держать его — значит
+  // дать «Подтвердить» оформить набор по чужому, уже неактуальному разбору.
+  clearQuestPlan(vkUserId);
 
   // Валидный существующий WB-код не глотаем — пусть активируется штатно.
   if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
@@ -1955,24 +2012,26 @@ async function handleRefActivation(
   const vkMultiLine = vkMultiOrder
     ? `\n\n📦 Активных заказов: ${vkParallelOrders.length} — они независимы. Для этого кода укажи ник Roblox, на который придут робуксы именно по нему.`
     : "";
-  const kb = Keyboard.builder()
-    .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: vkGuideUrl })
-    .row();
+  // Порядок кнопок = порядок шагов: сначала проверка аккаунта (она часто
+  // закрывает заказ без единого действия), инструкция — вторым входом.
+  const kb = Keyboard.builder();
   if (vkSavedNick) {
     kb.textButton({ label: `✅ Найти у ${vkSavedNick}`, payload: { command: "find_gp_saved" }, color: "positive" })
       .row()
       .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "primary" });
   } else {
-    kb.textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" });
+    kb.textButton({ label: "🔎 Проверить мой аккаунт", payload: { command: "find_gp_start" }, color: "positive" });
   }
+  kb.row().urlButton({ label: "📖 Открыть инструкцию", url: vkGuideUrl });
   if (vkMultiOrder) {
     kb.row().textButton({ label: "📦 Мои заказы", payload: { command: "orders_list" }, color: "secondary" });
   }
   await ctx.reply({
     message:
       greetLine + `\n` +
-      `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$${vkNickLine}\n\n` +
-      `📖 Открой инструкцию по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇` +
+      `✅ Код ${code} активирован · номинал ${totalAmount} R$${vkNickLine}\n\n` +
+      `🔎 Начнём с ника Roblox: посмотрю, что у тебя уже выставлено — часто заказ собирается из готового и создавать ничего не нужно. Если нужно — покажу, что именно, и дам выбрать способ.\n\n` +
+      `📖 Та же проверка и инструкция со скринами — на сайте.` +
       vkMultiLine,
     keyboard: enforceVkInlineKbLimits(kb.inline(), "vk-code-activated"),
   });
@@ -1988,7 +2047,7 @@ async function handleGamepassLink(
   input: string,
   wbCode: string,
   denomination: number,
-  opts: { viaManualLink?: boolean } = {},
+  opts: { viaManualLink?: boolean; parts?: PlanPart[] } = {},
 ): Promise<void> {
   const passId = extractPassId(input);
 
@@ -2024,7 +2083,12 @@ async function handleGamepassLink(
   const checkingMsg: any = await ctx.reply("⏳ Проверяем геймпасс…");
   // Edit-in-place (пункт F): первый ответ ветки редактируется в «⏳ Проверяем…».
   const showResult = buildVkEditInPlace(ctx, vkUserId, checkingMsg);
-  const expectedPrice = Math.ceil(denomination / 0.7);
+  // Заказ может закрываться НЕСКОЛЬКИМИ пассами (2000 = 1500 + 500, либо размен
+  // по тому, что уже выставлено). Тогда цена основного пасса сверяется с
+  // номиналом ЕГО части: прайс-гард заказа к разбитому заказу неприменим по
+  // построению — так же считает и сайт (`/api/wb-code/select-gamepass`).
+  const parts = opts.parts && opts.parts.length > 1 ? opts.parts : null;
+  const expectedPrice = parts ? parts[0].price : Math.ceil(denomination / 0.7);
   const gamepassInfo  = await getGamepassDetails(passId);
 
   if (!gamepassInfo) {
@@ -2248,6 +2312,32 @@ async function handleGamepassLink(
 
       // Bonus balance is preserved — only spent on direct bot orders, not WB-code orders.
 
+      // Разбивка: набор перезаписывается целиком, чтобы повторное оформление
+      // того же кода не оставило хвост от прошлой попытки. Сумму частей
+      // проверяем ещё раз — разошедшаяся сумма это не та сумма робуксов, за
+      // которую человек заплатил.
+      if (parts) {
+        const sum = parts.reduce((acc, part) => acc + part.amount, 0);
+        if (sum !== denomination) {
+          throw Object.assign(new Error(`Разбивка не сходится: ${sum} ≠ ${denomination}`), { badSplit: true });
+        }
+        await tx.wbOrderGamepass.deleteMany({ where: { orderId: newOrder.id } });
+        await tx.wbOrderGamepass.createMany({
+          data: parts.map((part, index) => ({
+            orderId: newOrder.id,
+            gamepassId: part.gamepassId,
+            gamepassUrl: `https://www.roblox.com/game-pass/${part.gamepassId}`,
+            amount: part.amount,
+            position: index,
+          })),
+        });
+      } else if (existingOrder) {
+        // Пасс заменили на ОДИН (эта ветка — только когда пасс другой: тот же
+        // вернулся выше как duplicate). Прежний набор относился к прежнему
+        // пассу — оставить его значит показать менеджеру чужую разбивку.
+        await tx.wbOrderGamepass.deleteMany({ where: { orderId: newOrder.id } });
+      }
+
       return { order: newOrder, duplicate: false, replacedUrl };
     });
     order = txResult.order;
@@ -2257,6 +2347,11 @@ async function handleGamepassLink(
     if (err.isClaimed) {
       clearState(vkUserId);
       await showResult("⚠️ Этот код уже был активирован другим пользователем. Обратись в поддержку.\nhttps://t.me/RobloxBank_PA");
+      return;
+    }
+    if (err.badSplit) {
+      console.error("[VK] Разбивка не сошлась:", err.message);
+      await showResult("⚠️ Не сошлась разбивка заказа — проверим руками, чтобы ты получил ровно свою сумму. Напиши сюда, ответим здесь.");
       return;
     }
     if (err.code === "P2002") {
@@ -2338,6 +2433,11 @@ async function handleGamepassLink(
   // Fetch real name for admin card (non-blocking — fallback is "VK #id")
   const vkName = user.name ?? await vkGetName(vkUserId);
 
+  // Пасс создан нашим ботом по ключу покупателя? Спрашиваем события заказа.
+  const autoCreatedCount = await (db as any).orderEvent.count({
+    where: { orderId: order.id, type: ORDER_AUDIT_TYPE.GAMEPASS_AUTOCREATED },
+  }).catch(() => 0);
+
   // Marker: did the customer pick this pass on the website? selectedGamepassId
   // is only ever written by /api/wb-code/select-gamepass. Non-fatal extra read.
   let viaWebOneTap = false;
@@ -2366,6 +2466,10 @@ async function handleGamepassLink(
     viaWebOneTap,
     viaManualLink:       opts.viaManualLink === true,
     replacedGamepassUrl: replacedGamepassUrl ?? undefined,
+    // Признак «пасс создан по ключу» берём из СОБЫТИЙ заказа, а не со слов
+    // клиента: маркер 🔑 говорит, что цену и «в продаже» выставили мы.
+    viaKey:              autoCreatedCount > 0,
+    splitParts:          parts ? parts.map((part) => ({ gamepassId: part.gamepassId, amount: part.amount })) : undefined,
   });
 }
 
@@ -2460,14 +2564,16 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     wbCode: order.wbCode,
     denomination: order.amount,
   });
-  const passPrice = Math.ceil(order.amount / 0.7);
   // Код в тексте — не украшение: у покупателя нескольких карточек это
   // единственный способ убедиться, что ник уйдёт в тот заказ, который он выбрал.
   const forOrder = String(order.wbCode).startsWith("DIR-") ? "" : ` для заказа ${order.wbCode}`;
+  // Обещание изменилось вместе с флоу: раньше бот искал пассы РОВНО за
+  // `ceil(номинал/0.7)`, теперь смотрит аккаунт целиком и складывает заказ из
+  // того, что уже выставлено (то же самое делает инструкция на сайте).
   await ctx.reply(
     `🔎 Введи ник Roblox${forOrder} — то, как ты заходишь в игру.\n\n` +
-    `Я найду все геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
-    `Если передумал — пришли ссылку на геймпасс как обычно.`
+    `Посмотрю, что у тебя уже выставлено, и соберу заказ на ${order.amount} R$ из этого — создавать что-то новое нужно не всегда.\n` +
+    `Если под рукой есть ссылка на геймпасс — пришли её, этого тоже достаточно.`
   );
 }
 
@@ -2580,6 +2686,104 @@ async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<
  * User typed a Roblox nick — same 5-branch tree as the TG version, text-only
  * (VK keyboards are text buttons; no photo card variant).
  */
+/**
+ * Кнопки квеста в клавиатуру VK.
+ *
+ * Каждый экран квеста уложен в 3–4 ряда по одной кнопке — это внутри лимитов
+ * VK (10 кнопок / 6 рядов / 5 в ряду), но страховка всё равно обязательна:
+ * превышение отвергает ВСЮ отправку, и клиент видит «Произошла ошибка»
+ * (P0 04.07.2026), а не сообщение.
+ */
+function questVkKeyboard(screen: QuestScreen, tag: string): string {
+  const kb = Keyboard.builder();
+  screen.rows.forEach((row, rowIndex) => {
+    if (rowIndex > 0) kb.row();
+    for (const button of row) buildQuestVkButton(kb, button);
+  });
+  return enforceVkInlineKbLimits(kb.inline(), tag);
+}
+
+function buildQuestVkButton(kb: ReturnType<typeof Keyboard.builder>, button: QuestButton): void {
+  if (button.id === "url" && button.url) {
+    kb.urlButton({ label: button.label, url: button.url });
+    return;
+  }
+  // Payload-команды VK исторически называются иначе, чем callback'и TG
+  // (`find_gp_start` против `find_gp`), поэтому общий id переводится здесь.
+  const command = ({
+    [QUEST.confirm]: "quest_ok",
+    [QUEST.fork]: "quest_fork",
+    [QUEST.key]: "quest_key",
+    [QUEST.keyRetry]: "quest_key_retry",
+    [QUEST.nick]: "find_gp_start",
+    [QUEST.recheck]: "find_gp_recheck",
+    [QUEST.passid]: "send_gp_link",
+  } as Record<string, string>)[button.id] ?? button.id;
+  kb.textButton({
+    label: button.label,
+    payload: { command },
+    color: button.tone === "positive" ? "positive" : button.tone === "secondary" ? "secondary" : "primary",
+  });
+}
+
+/** Показать экран квеста (VK: тот же текст без HTML). */
+async function showVkQuest(
+  ctx: MessageContext,
+  screen: QuestScreen,
+  tag: string,
+  edit?: (payload: { message: string; keyboard?: unknown }) => Promise<void>,
+): Promise<void> {
+  const payload = { message: plainText(screen.text), keyboard: questVkKeyboard(screen, tag) };
+  if (edit) await edit(payload);
+  else await ctx.reply(payload);
+}
+
+/** Пассы аккаунта в том виде, в каком их читает разбор плана. */
+function vkOwnedFromSearch(all: { gamepassId: number | string; name: string; robux: number; image?: string }[]): OwnedPass[] {
+  return all.map((g) => ({
+    gamepassId: String(g.gamepassId),
+    name: g.name,
+    price: g.robux,
+    image: g.image ?? null,
+    // Поиск отдаёт только продающиеся пассы (мост фильтрует `isForSale !== false`).
+    isForSale: true,
+  }));
+}
+
+/**
+ * Разбор аккаунта → экран результата. Одна точка на все входы (ввод ника,
+ * перепроверка, возврат из ветки ключа) — и та же, что в TG: разбор считает
+ * общий `gamepass-plan`, поэтому бот и сайт отвечают про аккаунт одинаково.
+ */
+async function showVkQuestPlan(
+  ctx: MessageContext,
+  vkUserId: number,
+  opts: { wbCode: string; denomination: number; nick: string; owned: OwnedPass[] },
+  edit?: (payload: { message: string; keyboard?: unknown }) => Promise<void>,
+): Promise<CheckPlan> {
+  const plan = planFromOwned(opts.denomination, opts.owned);
+  setQuestPlan(vkUserId, {
+    wbCode: opts.wbCode,
+    denomination: opts.denomination,
+    nick: opts.nick,
+    plan,
+    owned: opts.owned,
+  });
+  await showVkQuest(
+    ctx,
+    questResultScreen({
+      amount: opts.denomination,
+      nick: opts.nick,
+      plan,
+      keyEnabled: gamepassAutocreateEnabled(),
+      wbCode: opts.wbCode,
+    }),
+    "VK/quest-result",
+    edit,
+  );
+  return plan;
+}
+
 async function handleRobloxNickInput(
   ctx: MessageContext,
   vkUserId: number,
@@ -2641,7 +2845,7 @@ async function handleRobloxNickInput(
     return;
   }
 
-  // Always return to LINK state — picker handles next move via VK payload button.
+  // Возврат в LINK-стейт: следующим сообщением всё ещё может прийти ссылка.
   setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
 
   // Early nick capture: every branch except user_not_found means the nick is a
@@ -2651,110 +2855,210 @@ async function handleRobloxNickInput(
     void noteProbableNick({ nick, source: "nick-search", wbCode });
   }
 
-  const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
-
-  // Branch 1: nickname doesn't exist on Roblox
+  // ── Аккаунта нет на Roblox — почти всегда опечатка ───────────────────────
   if (outcome.status === "user_not_found") {
-    await showResult({
-      message:
-        `🤷 Пользователя ${nick} нет на Roblox.\n\n` +
-        `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.\n\n` +
-        `📖 Как найти ник и создать геймпасс — в инструкции:`,
+    await showVkQuest(ctx, questNoAccountScreen({ nick, wbCode }), "VK/quest-nonick", showResult);
+    return;
+  }
+
+  // ── Дальше решает разбор плана, а не число найденных пассов ──────────────
+  // Было пять текстовых веток, и каждая просила ОДИН пасс ровно за
+  // `ceil(номинал/0.7)`. Сайт с 06.09.2026 смотрит, что уже выставлено, и
+  // просит создать только недостающее; здесь тот же модуль (`gamepass-plan`),
+  // поэтому на один и тот же аккаунт бот и сайт отвечают одинаково.
+  const owned = outcome.status === "no_gamepasses" ? [] : vkOwnedFromSearch(outcome.all);
+  await showVkQuestPlan(ctx, vkUserId, { wbCode, denomination, nick, owned }, showResult);
+}
+
+/**
+ * «Подтвердить заказ» — оформление по сохранённому плану.
+ *
+ * Первая часть едет в `gamepassUrl` заказа (на неё смотрит вся старая
+ * машинерия), весь набор — в `WbOrderGamepass`.
+ */
+async function handleQuestConfirm(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const quest = getQuestPlan(vkUserId);
+  if (!quest || quest.plan.kind === "empty") {
+    await ctx.reply({
+      message: "Проверка устарела — пришли ник ещё раз, посмотрим аккаунт заново.",
       keyboard: Keyboard.builder()
-        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
-        .row()
-        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
-        .row()
-        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" })
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;
   }
+  if (!planIsReady(quest.plan)) {
+    await showVkQuest(ctx, questForkScreen({
+      targets: targetsToCreate(quest.plan),
+      keyEnabled: gamepassAutocreateEnabled(),
+      wbCode: quest.wbCode,
+      nick: quest.nick,
+    }), "VK/quest-fork");
+    return;
+  }
+  const parts = quest.plan.parts;
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode: quest.wbCode, denomination: quest.denomination });
+  // Ссылкой, а не голым числом: `parseGamepassRef` берёт голый ID только от 7
+  // цифр (короткое число у покупателя почти всегда цена или номинал), а у
+  // старого пасса ID бывает короче — свой же выбор мы отвергать не должны.
+  await handleGamepassLink(
+    ctx,
+    vkUserId,
+    `https://www.roblox.com/game-pass/${parts[0].gamepassId}`,
+    quest.wbCode,
+    quest.denomination,
+    { parts },
+  );
+}
 
-  // Branch 2: nick exists but no public for-sale gamepasses
-  if (outcome.status === "no_gamepasses") {
-    await showResult({
-      message:
-        `🙈 У ${nick} не нашли публичных геймпассов.\n\n` +
-        `Скорее всего геймпасс ещё не создан, не выставлен на продажу или плейс закрыт.\n\n` +
-        `✅ Геймпасс уже создан? Тогда просто пришли ссылку на него — оформим заказ по ссылке, ` +
-        `даже если плейс скрыт и поиск по нику его не видит.\n\n` +
-        `⚠️ Ещё не создан — пройди инструкцию: там по шагам создание, разблокировка и правильная цена ${expectedPrice} R$:\n` +
-        `👉 ${guideUrl}`,
+/** Экран выбора способа. */
+async function handleQuestFork(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const quest = getQuestPlan(vkUserId);
+  if (!quest) {
+    await ctx.reply({
+      message: "Сначала посмотрим твой аккаунт — пришли ник Roblox.",
       keyboard: Keyboard.builder()
-        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "positive" })
-        .row()
-        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
-        .row()
-        .textButton({ label: "🔎 Уже сделал — проверить", payload: { command: "find_gp_recheck" }, color: "primary" })
-        .row()
-        .textButton({ label: "✏️ Поменять ник", payload: { command: "find_gp_start" }, color: "secondary" })
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;
   }
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode: quest.wbCode, denomination: quest.denomination });
+  await showVkQuest(ctx, questForkScreen({
+    targets: targetsToCreate(quest.plan),
+    keyEnabled: gamepassAutocreateEnabled(),
+    wbCode: quest.wbCode,
+    nick: quest.nick,
+  }), "VK/quest-fork");
+}
 
-  // outcome.status === "ok"
-  const { matches, nonMatches } = outcome;
-
-  // Branch 5: gamepasses exist but none at expected price → show actual prices
-  if (matches.length === 0) {
-    const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
-    const listLines = top.map(g => `• ${g.name} · ${g.robux} R$`).join("\n");
-    await showResult({
-      message:
-        `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
-        `${listLines}\n\n` +
-        `Нужен геймпасс ровно на ${expectedPrice} R$. Как исправить — в инструкции.\n\n` +
-        `Нужный геймпасс есть, но его нет в списке выше? Пришли ссылку на него — заберём по ссылке.`,
+/** Ветка «сделаем за тебя»: просим ключ. */
+async function handleQuestKey(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const quest = getQuestPlan(vkUserId);
+  if (!gamepassAutocreateEnabled()) {
+    // Кнопка живёт в диалоге дольше флага: старое сообщение не имеет права
+    // обещать то, чего уже нет.
+    await ctx.reply({
+      message: "Этот способ сейчас недоступен — создай геймпасс по инструкции, там всё по шагам.",
       keyboard: Keyboard.builder()
-        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
-        .row()
-        .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_recheck" }, color: "primary" })
-        .row()
-        .textButton({ label: "✏️ Поменять ник", payload: { command: "find_gp_start" }, color: "secondary" })
-        .row()
-        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" })
+        .textButton({ label: "↩️ Другой способ", payload: { command: "quest_fork" }, color: "secondary" })
         .inline(),
     });
     return;
   }
-
-  // Branch 3: exactly 1 price-match (VK = text confirmation, no photo)
-  if (matches.length === 1) {
-    const m = matches[0];
-    await showResult({
-      message:
-        `🎯 Нашёл у ${nick} подходящий геймпасс:\n\n` +
-        `💎 ${m.name} · ${m.robux} R$\n\n` +
-        `Это он? Нажми «✅ Да» — отправлю на проверку.`,
+  if (!quest || targetsToCreate(quest.plan).length === 0) {
+    await ctx.reply({
+      message: "Сначала посмотрим твой аккаунт — пришли ник Roblox.",
       keyboard: Keyboard.builder()
-        .textButton({ label: `✅ Да, выкупаем (${m.robux} R$)`, payload: { command: "gp_pick", passId: String(m.gamepassId) }, color: "positive" })
-        .row()
-        .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" })
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;
   }
-
-  // Branch 4: 2–5 price-matches → text-button list.
-  // 5 рядов пассов + ряд «Другой ник» = ровно 6 рядов (лимит VK) — страховка обязательна.
-  const shown = matches.slice(0, MAX_PICK_BUTTONS);
-  const kb = Keyboard.builder();
-  for (const m of shown) {
-    kb.textButton({
-      label: `💎 ${m.name.slice(0, 32)} · ${m.robux} R$`,
-      payload: { command: "gp_pick", passId: String(m.gamepassId) },
-      color: "positive",
-    }).row();
-  }
-  kb.textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" });
-  await showResult({
-    message:
-      `У ${nick} нашёл несколько подходящих геймпассов.\n` +
-      `Выбери тот, который хочешь продать:`,
-    keyboard: enforceVkInlineKbLimits(kb.inline(), "VK/find-gp"),
+  setState(vkUserId, {
+    type: "AWAITING_API_KEY",
+    wbCode: quest.wbCode,
+    denomination: quest.denomination,
+    nick: quest.nick,
   });
+  await showVkQuest(ctx, questKeyScreen({
+    targets: targetsToCreate(quest.plan),
+    wbCode: quest.wbCode,
+    nick: quest.nick,
+    // Сообщество ВК не может удалить сообщение человека — просим его самого.
+    deleteBy: "user",
+  }), "VK/quest-key");
+}
+
+/**
+ * Покупатель прислал Open Cloud ключ.
+ *
+ * ВК, в отличие от Telegram, не даёт сообществу удалять сообщения человека —
+ * поэтому в тексте ветки мы просим удалить его самому, а сами не логируем ключ
+ * ни при одном исходе и храним его только зашифрованным.
+ */
+async function handleVkApiKeyInput(
+  ctx: MessageContext,
+  vkUserId: number,
+  raw: string,
+  pending: { wbCode: string; denomination: number; nick: string },
+): Promise<void> {
+  const quest = getQuestPlan(vkUserId);
+  const key = raw.trim();
+
+  if (!looksLikeApiKey(key)) {
+    await ctx.reply({
+      message:
+        "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».",
+      keyboard: Keyboard.builder()
+        .urlButton({ label: "📸 Шаги с картинками", url: `${guideUrlFor(pending.wbCode, pending.nick)}#key` })
+        .row()
+        .textButton({ label: "↩️ Другой способ", payload: { command: "quest_fork" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  const targets = quest ? targetsToCreate(quest.plan) : [];
+  if (targets.length === 0) {
+    setState(vkUserId, { type: "AWAITING_LINK", wbCode: pending.wbCode, denomination: pending.denomination });
+    await ctx.reply({
+      message: "Создавать больше нечего — проверим аккаунт заново.",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔄 Проверить ещё раз", payload: { command: "find_gp_recheck" }, color: "primary" })
+        .inline(),
+    });
+    return;
+  }
+
+  const prices = targets.map((t) => t.price);
+  const workingMsg: any = await ctx.reply(plainText(questKeyWorkingText(prices)));
+  const showResult = buildVkEditInPlace(ctx, vkUserId, workingMsg);
+
+  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: prices });
+
+  if (outcome.created.length > 0) {
+    // След пишем ДО ответа покупателю: пасс уже создан на чужом аккаунте, и
+    // админ должен видеть, что именно он выкупает.
+    await recordAutocreateTrace(db as any, {
+      wbCode: pending.wbCode,
+      nick: pending.nick,
+      apiKey: key,
+      created: outcome.created,
+      partial: Boolean(outcome.error),
+    }).catch((err: any) => console.warn("[VK/key] след не записан:", err?.message ?? err));
+  }
+
+  if (!outcome.error && outcome.created.length > 0 && quest) {
+    setState(vkUserId, { type: "AWAITING_LINK", wbCode: pending.wbCode, denomination: pending.denomination });
+    const owned: OwnedPass[] = [
+      ...quest.owned,
+      ...outcome.created.map((c) => ({
+        gamepassId: String(c.gamePassId),
+        name: c.name || `Пасс ${c.priceInRobux}`,
+        price: c.priceInRobux,
+        isForSale: true,
+      })),
+    ];
+    await showResult(
+      `✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`,
+    );
+    await showVkQuestPlan(ctx, vkUserId, {
+      wbCode: quest.wbCode,
+      denomination: quest.denomination,
+      nick: quest.nick,
+      owned,
+    });
+    return;
+  }
+
+  const verdict = keyCreateVerdict(outcome.error);
+  await showVkQuest(
+    ctx,
+    questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }),
+    "VK/quest-keyfail",
+    showResult,
+  );
 }
 
 /** User tapped a "💎 ${name} · ${price} R$" button → run the canonical flow. */
