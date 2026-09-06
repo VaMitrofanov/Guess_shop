@@ -1584,6 +1584,15 @@ export interface VerifyGamePassKeyResult {
   universeId?: string;
   /** Ник владельца, по которому резолвили опыт. */
   username?: string;
+  /**
+   * Аккаунт, на котором ключ реально работает: канонический ник, как его пишет
+   * Roblox, и аватар. Показывается покупателю после приёма ключа — чтобы он
+   * своими глазами убедился, что привязал ТОТ аккаунт.
+   *
+   * Вывод честный: кандидаты-опыты резолвятся ИЗ ника, и ключ авторизован на
+   * одном из них — значит владелец ключа и есть владелец этого ника.
+   */
+  account?: RobloxUserProfile | null;
   /** Машинный код отказа — те же, что у создания. */
   error?: string;
   detail?: string;
@@ -1625,7 +1634,10 @@ export async function verifyGamePassKeyDirect(
     if (write === "network") return { ok: false, error: "network", universeId };
     // `unauthorized` на записи при прошедшем чтении — это не про права, а про
     // конкретный (несуществующий) пасс: считаем запись доступной.
-    return { ok: true, universeId, username: params.username };
+    const account = params.username
+      ? await getRobloxUserProfileDirect({ username: params.username }).catch(() => null)
+      : null;
+    return { ok: true, universeId, username: account?.name ?? params.username, account };
   }
   return last ?? { ok: false, error: "no_universe", detail: "нет кандидатов" };
 }

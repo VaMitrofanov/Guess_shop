@@ -2825,7 +2825,7 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
       })),
     ];
     await edit(
-      `✅ <b>Сделали за тебя</b>\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`,
+      `✅ <b>Сделали за тебя</b>\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`,
       { parse_mode: "HTML" },
     );
     await showQuestPlan(ctx, {
@@ -4482,7 +4482,7 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
       await edit(
-        `✅ <b>Сделали за тебя</b>\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`,
+        `✅ <b>Сделали за тебя</b>\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`,
         { parse_mode: "HTML" },
       );
       await showQuestPlan(ctx, {

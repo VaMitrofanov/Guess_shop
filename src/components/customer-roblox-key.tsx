@@ -39,6 +39,13 @@ import {
 } from "@/lib/device-platform";
 import styles from "@/app/dashboard/dashboard.module.css";
 
+export interface KeyAccount {
+  id: string;
+  name: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
 export interface LinkedKeyView {
   id: string;
   username: string;
@@ -79,6 +86,14 @@ export default function CustomerRobloxKeyCard({
   const [scanStep, setScanStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<GuidePlatform>("mobile");
+  /** Аккаунт, подтверждённый самим Roblox после приёма ключа (с аватаром). */
+  const [confirmed, setConfirmed] = useState<KeyAccount | null>(null);
+  /**
+   * Поле ника показываем, только когда его негде взять. Ник уже спрашивают
+   * выше, в профиле, и второе такое же поле рядом читается как ошибка формы
+   * (приёмка владельца 07.09.2026): «зачем два раза?».
+   */
+  const [nickOpen, setNickOpen] = useState(!username);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
@@ -123,7 +138,7 @@ export default function CustomerRobloxKeyCard({
         body: JSON.stringify({ key, username: account }),
       });
       const body = (await response.json().catch(() => null)) as
-        | { ok?: boolean; error?: string; keys?: LinkedKeyView[] }
+        | { ok?: boolean; error?: string; keys?: LinkedKeyView[]; account?: KeyAccount | null }
         | null;
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, SCAN_MIN_MS - (Date.now() - started))));
 
@@ -132,8 +147,10 @@ export default function CustomerRobloxKeyCard({
         setValue("");
         setTypedNick(null);
         setKeys(body.keys);
+        setConfirmed(body.account ?? null);
         setPhase("done");
         setOpen(false);
+        setNickOpen(false);
         return;
       }
       setError(body?.error ?? "roblox_error");
@@ -173,9 +190,17 @@ export default function CustomerRobloxKeyCard({
 
       {linked ? (
         <div className={styles.keyLinked}>
+          {/* Аватар и ник — прямо от Roblox, а не то, что человек напечатал:
+              единственный способ убедиться, что привязан ТОТ аккаунт. */}
+          {confirmed?.avatarUrl && (
+            <img className={styles.keyAva} src={confirmed.avatarUrl} alt={`Аватар ${confirmed.name}`} loading="lazy" />
+          )}
           <div>
-            <strong>@{linked.username}</strong>
+            <strong>@{confirmed?.name ?? linked.username}</strong>
             <small>
+              {confirmed
+                ? <>Ключ работает на этом аккаунте — робуксы придут сюда. </>
+                : null}
               Привязан {fmtDate(linked.linkedAt)}
               {linked.createdPasses > 0
                 ? ` · создано геймпассов: ${linked.createdPasses}`
@@ -201,16 +226,31 @@ export default function CustomerRobloxKeyCard({
 
       {open && (
         <div className={styles.keyForm}>
-          <label htmlFor="roblox-key-nick">Ник Roblox, на котором работает ключ</label>
-          <input
-            id="roblox-key-nick"
-            value={nick}
-            onChange={(event) => setNick(event.target.value)}
-            placeholder="Например, Builderman"
-            maxLength={20}
-            autoComplete="off"
-            spellCheck={false}
-          />
+          {username && !nickOpen ? (
+            <div className={styles.keyFor}>
+              <span>Ключ для аккаунта <b>@{username}</b> — в его игре и создадим геймпасс.</span>
+              <button type="button" onClick={() => setNickOpen(true)}>другой аккаунт</button>
+            </div>
+          ) : (
+            <>
+              <label htmlFor="roblox-key-nick">
+                {username ? "Другой ник Roblox" : "Ник Roblox, на котором работает ключ"}
+              </label>
+              <input
+                id="roblox-key-nick"
+                value={nick}
+                onChange={(event) => setNick(event.target.value)}
+                placeholder="Например, Builderman"
+                maxLength={20}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <small className={styles.keyNote}>
+                Ник нужен, чтобы найти твою игру: геймпасс создаётся внутри неё. Проверим и покажем
+                аккаунт с аватаром — убедишься, что не ошибся.
+              </small>
+            </>
+          )}
           <label htmlFor="roblox-key-value">Ключ из Creator Hub</label>
           <textarea
             id="roblox-key-value"

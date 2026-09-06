@@ -94,9 +94,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: verdict.error ?? "roblox_error" }, { headers: PRIVATE });
   }
 
+  // Ник сохраняем КАНОНИЧЕСКИЙ — тот, которым его пишет сам Roblox. Введённый
+  // может отличаться регистром, а по нику потом ищется ключ на заказе.
+  const confirmed = verdict.account?.name ?? verdict.username ?? nick;
+
   const saved = await rememberRobloxApiKey({
     key,
-    robloxUsername: nick,
+    robloxUsername: confirmed,
     userId,
     result: "verified",
     createdPasses: 0,
@@ -107,9 +111,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "storage" }, { headers: PRIVATE });
   }
 
-  void notifyAdmins({ userId, nick, updated: saved === "updated" });
+  void notifyAdmins({ userId, nick: confirmed, updated: saved === "updated" });
 
-  return NextResponse.json({ ok: true, ...(await statusFor(userId)) }, { headers: PRIVATE });
+  // `account` — чтобы кабинет показал аккаунт с аватаром: покупатель должен
+  // своими глазами убедиться, что ключ привязан к ТОМУ аккаунту.
+  return NextResponse.json(
+    { ok: true, account: verdict.account ?? null, ...(await statusFor(userId)) },
+    { headers: PRIVATE },
+  );
 }
 
 export async function DELETE(req: NextRequest) {

@@ -2995,7 +2995,7 @@ async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Prom
     await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), "VK/quest-keyfail", showResult);
     return;
   }
-  await showResult(`✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`);
+  await showResult(`✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`);
   await showVkQuestPlan(ctx, vkUserId, {
     wbCode: quest.wbCode,
     denomination: quest.denomination,
@@ -3121,7 +3121,7 @@ async function handleVkApiKeyInput(
       })),
     ];
     await showResult(
-      `✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`,
+      `✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`,
     );
     await showVkQuestPlan(ctx, vkUserId, {
       wbCode: quest.wbCode,

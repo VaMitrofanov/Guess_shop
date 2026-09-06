@@ -105,7 +105,10 @@ export async function createGamePassViaBridge(
 export interface VerifyGamePassKeyOutcome {
   ok: boolean;
   universeId?: string;
+  /** Канонический ник, как его пишет Roblox (регистр может отличаться от введённого). */
   username?: string;
+  /** Аккаунт, на котором ключ работает, — показываем покупателю после приёма. */
+  account?: { id: string; name: string; displayName: string; avatarUrl: string | null } | null;
   /** Машинный код: те же, что у создания, плюс `bad_scope_write`. */
   error?: string;
   detail?: string;

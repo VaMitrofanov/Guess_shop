@@ -25,7 +25,12 @@
 .keyOk{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;background:rgba(69,214,170,.18);color:#8ff0d2;font-size:12px;font-weight:900}
 .keyLead{margin:10px 0 0;color:rgba(246,242,255,.82);font-size:14px;line-height:1.55}
 .keyLead b{color:#fff}
-.keyLinked{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:12px;padding:13px;border:1px solid rgba(255,255,255,.16);border-radius:14px;background:rgba(12,8,26,.28)}
+.keyLinked{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px;padding:13px;border:1px solid rgba(255,255,255,.16);border-radius:14px;background:rgba(12,8,26,.28)}
+.keyLinked>div:not(.keyLinkedActions){flex:1 1 220px;min-width:0}
+.keyAva{width:46px;height:46px;flex:0 0 auto;border-radius:14px;object-fit:cover;background:rgba(255,255,255,.08)}
+.keyFor{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 13px;border:1px solid rgba(255,255,255,.16);border-radius:12px;background:rgba(12,8,26,.24);color:rgba(246,242,255,.82);font-size:14px;line-height:1.5}
+.keyFor b{color:#fff}
+.keyFor button{padding:0;border:0;background:none;color:#c2b2ff;font:inherit;font-size:14px;font-weight:900;text-decoration:underline;cursor:pointer}
 .keyLinked strong{display:block;font-size:16px}
 .keyLinked small{display:block;margin-top:3px;color:rgba(246,242,255,.66);font-size:13px}
 .keyLinkedActions{display:flex;gap:8px}

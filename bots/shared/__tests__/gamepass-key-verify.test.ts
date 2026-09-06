@@ -49,6 +49,28 @@ describe("verifyGamePassKeyDirect", () => {
     expect(r.universeId).toBe("77");
   });
 
+  test("после приёма возвращается аккаунт — покупателю есть что показать", async () => {
+    // Ник в ответе КАНОНИЧЕСКИЙ (от Roblox), а не тот, что напечатали: по нему
+    // потом ищется сохранённый ключ, и регистр не должен разъезжаться.
+    // Мок по АДРЕСУ, а не по порядку: резолв кандидатов-опытов сам ходит в
+    // Roblox, и жёсткая очередь ответов здесь только маскировала бы правку.
+    fetchMock.mockImplementation(async (url: any, init: any) => {
+      const address = String(url);
+      const method = init?.method ?? "GET";
+      if (address.includes("/game-passes/999999999999")) return res(404, "not found");
+      if (address.includes("/game-passes") && method === "GET") return res(200, '{"gamePasses":[]}');
+      if (address.includes("usernames/users")) return res(200, '{"data":[{"id":1,"name":"Builderman","displayName":"Builderman"}]}');
+      if (address.includes("users.roblox.com")) return res(200, '{"id":1,"name":"Builderman","displayName":"Builderman"}');
+      if (address.includes("thumbnails.roblox.com")) return res(200, '{"data":[{"imageUrl":"https://tr.rbxcdn.com/x"}]}');
+      return res(200, '{"data":[]}');
+    });
+
+    const r = await verifyGamePassKeyDirect({ apiKey: "k", universeId: "77", username: "builderman" });
+    expect(r.ok).toBe(true);
+    expect(r.username).toBe("Builderman");
+    expect(r.account?.avatarUrl).toBe("https://tr.rbxcdn.com/x");
+  });
+
   test("НИ ОДНОГО создания: проверка только читает и PATCH-ит несуществующий пасс", async () => {
     fetchMock
       .mockResolvedValueOnce(res(200, '{"gamePasses":[]}'))

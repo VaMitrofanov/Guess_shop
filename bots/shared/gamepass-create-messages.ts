@@ -101,10 +101,17 @@ export function keyCreateVerdict(error?: string | null): KeyCreateVerdict {
   return VERDICTS[error] ?? OURS;
 }
 
-/** Успех: сколько пассов создано и на какие суммы. */
-export function keyCreateSuccessText(prices: number[]): string {
+/**
+ * Успех: сколько пассов создано, на какие суммы и НА КАКОМ АККАУНТЕ.
+ *
+ * Аккаунт называется всегда, когда известен: пасс создаётся на чужом аккаунте
+ * по чужому ключу, и человек должен видеть, что это именно его аккаунт, — до
+ * того, как заказ уйдёт в работу, а не после.
+ */
+export function keyCreateSuccessText(prices: number[], account?: string | null): string {
+  const where = account ? ` на аккаунте ${account}` : "";
   if (prices.length > 1) {
-    return `Создали два пасса — на ${prices.join(" и ")} R$. Оба уже стоят в продаже.`;
+    return `Создали два пасса — на ${prices.join(" и ")} R$${where}. Оба уже стоят в продаже.`;
   }
-  return `Пасс на ${prices[0]} R$ создан и уже стоит в продаже.`;
+  return `Пасс на ${prices[0]} R$ создан${where} и уже стоит в продаже.`;
 }

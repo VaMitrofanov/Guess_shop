@@ -459,7 +459,7 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
       {phase === "done" && created.length > 0 && (
         <div className="wbi-ok">
           <b>Готово — {created.length > 1 ? "пассы созданы" : "пасс создан"}.</b>{" "}
-          {keyCreateSuccessText(created.map((c) => c.priceInRobux))} Ничего больше делать не нужно —
+          {keyCreateSuccessText(created.map((c) => c.priceInRobux), nick)} Ничего больше делать не нужно —
           подтверди заказ выше.
         </div>
       )}

@@ -70,7 +70,12 @@ beforeEach(() => {
   process.env = { ...realEnv, TG_TOKEN: "tok", ADMIN_IDS: "1,2" };
   mockAuth.mockReset().mockResolvedValue({ user: { id: "user_1" } });
   mockFlag.mockReset().mockReturnValue(true);
-  mockVerify.mockReset().mockResolvedValue({ ok: true, universeId: "77" });
+  mockVerify.mockReset().mockResolvedValue({
+    ok: true,
+    universeId: "77",
+    username: "Lokomotiv_2018",
+    account: { id: "1", name: "Lokomotiv_2018", displayName: "Локо", avatarUrl: "https://tr.rbxcdn.com/x" },
+  });
   mockRemember.mockReset().mockResolvedValue("saved");
   mockList.mockReset().mockResolvedValue([linkedRow]);
   mockForget.mockReset().mockResolvedValue(true);
@@ -102,9 +107,19 @@ describe("POST /api/account/roblox-key", () => {
     expect(body.ok).toBe(true);
     expect(body.keys[0]).toMatchObject({ username: "lokomotiv_2018", createdPasses: 0 });
     expect(JSON.stringify(body)).not.toContain(KEY);
+    // Сохраняется КАНОНИЧЕСКИЙ ник от Roblox, а не то, что напечатали: по нему
+    // потом ищется сохранённый ключ на заказе, и регистр не должен разъехаться.
     expect(mockRemember).toHaveBeenCalledWith(expect.objectContaining({
-      key: KEY, robloxUsername: "lokomotiv_2018", userId: "user_1", result: "verified",
+      key: KEY, robloxUsername: "Lokomotiv_2018", userId: "user_1", result: "verified",
     }));
+  });
+
+  test("в ответ уходит аккаунт с аватаром — покупатель видит, что привязал ТОТ", () => {
+    return POST(req({ key: KEY, username: "lokomotiv_2018" }, "10.0.0.14"))
+      .then((res) => res.json())
+      .then((body) => {
+        expect(body.account).toMatchObject({ name: "Lokomotiv_2018", avatarUrl: "https://tr.rbxcdn.com/x" });
+      });
   });
 
   test("уведомление админам уходит и НЕ содержит ключа", async () => {
@@ -115,7 +130,8 @@ describe("POST /api/account/roblox-key", () => {
     expect(mockSend).toHaveBeenCalledTimes(2); // два админа
     const text = String(mockSend.mock.calls[0][2]);
     expect(text).toContain("привязал ключ");
-    expect(text).toContain("lokomotiv_2018");
+    // Ник в уведомлении — канонический от Roblox, тот же, что сохранён.
+    expect(text).toContain("Lokomotiv_2018");
     expect(text).not.toContain(KEY);
   });
 
