@@ -6,7 +6,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { buildSplitParts, type SplitPart } from "@/lib/order-gamepass-split";
 import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
 import { PRICE_TOL, expectedGamepassPrice } from "@/lib/purchase-guard";
-import { auditGamepassSubmitted, type OrderAuditClient } from "@/lib/order-audit";
+import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "@/lib/order-audit";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -273,12 +273,18 @@ export async function POST(request: Request) {
     // ── 4. Fire the admin card (non-blocking failure) ─────────────────────────
     try {
       const order = result.order;
-      const [user, previousOrderCount] = await Promise.all([
+      const [user, previousOrderCount, autoCreated] = await Promise.all([
         prisma.user.findUnique({
           where: { id: order.userId },
           select: { tgId: true, vkId: true, name: true, username: true },
         }),
         prisma.wbOrder.count({ where: { userId: order.userId, status: "COMPLETED" } }),
+        // Пасс создан нашим ботом по ключу покупателя? Спрашиваем СОБЫТИЯ
+        // заказа, а не клиента: маркер в карточке админа должен опираться на
+        // то, что мы сами записали при создании, а не на поле в запросе.
+        prisma.orderEvent.count({
+          where: { orderId: order.id, type: ORDER_AUDIT_TYPE.GAMEPASS_AUTOCREATED },
+        }),
       ]);
 
       const safeName = (user?.name ?? "Пользователь")
@@ -307,6 +313,7 @@ export async function POST(request: Request) {
         previousOrderCount,
         createdAt: order.createdAt,
         manualLink,
+        viaKey: autoCreated > 0,
         splitParts: splitParts?.map((part) => ({ gamepassId: part.gamepassId, amount: part.amount })),
       });
     } catch (cardErr) {

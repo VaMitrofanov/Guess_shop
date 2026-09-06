@@ -44,6 +44,56 @@ export const GUIDE_CSS = `
 .wbi-card.wbi-key{border:1px solid rgba(201,168,76,.5);animation:wbi-glow 3.4s ease-in-out infinite}
 @keyframes wbi-glow{0%,100%{box-shadow:0 0 0 1px rgba(201,168,76,.25),0 0 22px rgba(201,168,76,.08)}50%{box-shadow:0 0 0 1px rgba(201,168,76,.6),0 0 44px rgba(201,168,76,.2)}}
 .wbi-kbadge{display:inline-block;background:linear-gradient(90deg,#c9a84c,#f7d574);color:#1a1405;font-size:14px;font-weight:850;letter-spacing:.8px;padding:7px 13px;border-radius:20px;margin-bottom:14px}
+/* ── Квест: шаг за шагом вместо простыни ────────────────────────────────────
+   Полоса управления (устройство + подробность), прогресс и навигация шага.
+   Инструкция в оформлении заказа идёт по одному шагу: человек не листает
+   девять экранов, чтобы понять, где он находится. */
+.wbi-stepbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
+.wbi-detailseg{flex-shrink:0}
+.wbi-progress{display:flex;align-items:center;gap:12px;margin-top:12px;padding:9px 13px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.02)}
+.wbi-progress .k{font-size:14px;font-weight:800;color:var(--gold2);white-space:nowrap}
+.wbi-progress .d{display:flex;gap:6px;margin-left:auto}
+.wbi-progress .d i{width:8px;height:8px;border-radius:50%;background:#2b2340;display:block}
+.wbi-progress .d i.on{background:var(--gold2)}
+.wbi-progress .d i.done{background:rgba(69,214,170,.65)}
+.wbi-stepnav{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+.wbi-stepnav-row{display:flex;gap:10px}
+.wbi-stepnav-row>*{flex:1}
+/* ── Экран выбора способа ────────────────────────────────────────────────
+   Три двери на отдельном экране: под результатом их не листали вовсе. */
+.wbi-forkhead{margin:6px 0 4px}
+.wbi-forkhead .k{font-size:13px;font-weight:800;letter-spacing:2px;color:#71e0bd}
+.wbi-forkhead h3{font-size:clamp(24px,5vw,32px);font-weight:900;letter-spacing:-.02em;line-height:1.1;margin:8px 0 0;color:#fff}
+.wbi-forkhead p{color:var(--mut);font-size:16.5px;margin:10px 0 0;line-height:1.55}
+.wbi-opts{display:grid;gap:11px;margin-top:18px}
+@media(min-width:860px){.wbi-opts{grid-template-columns:repeat(3,1fr);align-items:stretch}}
+.wbi-opt{display:grid;grid-template-columns:46px 1fr 14px;gap:13px;align-items:center;text-align:left;width:100%;
+  border:1px solid var(--line);border-radius:16px;padding:16px;background:rgba(255,255,255,.03);color:inherit;font:inherit;cursor:pointer;transition:.16s}
+@media(min-width:860px){.wbi-opt{grid-template-columns:1fr;align-content:start;gap:10px;padding:20px}.wbi-opt .a{display:none}}
+.wbi-opt:hover{border-color:rgba(166,139,255,.7);transform:translateY(-2px);background:rgba(255,255,255,.05)}
+.wbi-opt .i{width:46px;height:46px;border-radius:13px;background:#241d36;display:grid;place-items:center;font-size:22px}
+.wbi-opt .t{display:block;font-size:17px;font-weight:850;color:#fff;line-height:1.25}
+.wbi-opt .t em{font-style:normal;font-weight:650;color:var(--mut);font-size:15px}
+.wbi-opt .s{display:block;font-size:14.5px;color:var(--mut);margin-top:4px;line-height:1.45}
+.wbi-opt .a{color:#5f5878;font-size:20px}
+.wbi-opt .chip{display:inline-block;margin-top:9px;font-size:12px;font-weight:800;letter-spacing:.04em;padding:5px 9px;border-radius:99px;background:rgba(255,255,255,.06);color:var(--mut)}
+.wbi-opt.usual{border-color:rgba(166,139,255,.55);background:linear-gradient(180deg,rgba(117,86,232,.12),rgba(255,255,255,.02))}
+.wbi-opt.usual .i{background:rgba(117,86,232,.24)}
+.wbi-opt.usual .chip{background:rgba(166,139,255,.2);color:#e7e0ff}
+.wbi-opt.key{border-color:rgba(69,214,170,.55);background:linear-gradient(180deg,rgba(69,214,170,.1),rgba(255,255,255,.02))}
+.wbi-opt.key .i{background:rgba(69,214,170,.18)}
+.wbi-opt.key .chip{background:rgba(69,214,170,.2);color:#8ff0d2}
+.wbi-new{display:inline-block;font-size:10.5px;font-weight:900;letter-spacing:.08em;padding:3px 7px;border-radius:99px;background:var(--grn);color:#04241b;margin-left:7px;vertical-align:middle}
+/* Пройденное — строкой, а не экраном: вернуться можно, читать заново не надо. */
+.wbi-crumbs{display:flex;flex-direction:column;gap:7px;margin:14px 0 4px}
+.wbi-crumb{display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;font-size:14px;color:var(--mut);border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:11px;padding:9px 12px}
+.wbi-crumb i{color:var(--grn);font-style:normal;font-weight:800}
+.wbi-crumb b{color:#e7e0ff;font-weight:700}
+.wbi-crumb button{margin-left:auto;white-space:nowrap;font:inherit;font-size:13.5px;color:var(--gold);background:none;border:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;padding:0}
+/* Запасные двери внизу ветки: тупиков в квесте нет. */
+.wbi-escape{margin-top:26px;padding-top:18px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:10px}
+.wbi-escape-h{font-size:12px;letter-spacing:1.6px;font-weight:800;color:#6f6788}
+
 /* Finish step — green "finish line" accent so it can't be missed when scrolling fast */
 .wbi-card.wbi-finish{border:1px solid rgba(0,224,138,.6);animation:wbi-glow-fin 3s ease-in-out infinite}
 @keyframes wbi-glow-fin{0%,100%{box-shadow:0 0 0 1px rgba(0,224,138,.3),0 0 26px rgba(0,224,138,.12)}50%{box-shadow:0 0 0 1px rgba(0,224,138,.72),0 0 54px rgba(0,224,138,.28)}}
@@ -575,6 +625,37 @@ export const GUIDE_CSS = `
  .wbi-rbadge{order:6;margin-left:auto}
  .wbi-recheck{padding:22px 18px}
 }
+/* ── «Сделаем пасс за тебя»: ключ Open Cloud (инструкция V2) ────────────
+   Блок-альтернатива ручному созданию пасса. Тон — акцентный (не янтарный, как
+   у запасного входа по Pass ID): это не «что-то пошло не так», а другой путь. */
+.wbi-keyzone{margin:0 0 26px;padding:26px 28px;border-radius:24px;border:2px solid var(--rb-accent);background:color-mix(in srgb,var(--rb-accent) 8%,transparent);box-shadow:8px 8px 0 var(--rb-accent)}
+.wbi-keyzone .k{display:inline-flex;align-items:center;gap:9px;padding:6px 12px;border-radius:999px;background:var(--rb-accent);color:#160f28;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.wbi-keyzone h3{margin:14px 0 0;font-family:var(--font-display),sans-serif;font-size:clamp(21px,2.4vw,28px);line-height:1.15;letter-spacing:-.04em;color:var(--rb-text)}
+.wbi-keyzone > p{margin:10px 0 0;font-size:16px;line-height:1.6;color:var(--rb-text);opacity:.88;max-width:62ch}
+.wbi-keysteps{margin-top:18px}
+.wbi-keyol{margin-top:6px}
+.wbi-keyol > li{margin-bottom:24px}
+.wbi-keyol > li:last-child{margin-bottom:0}
+/* Шаги ключа идут по одному: на экране только то действие, которое делают
+   сейчас. Раньше все пять лежали свёрнутым списком внутри «details», и до
+   поля ключа человек добирался прокруткой через девять кадров. */
+.wbi-keystep{margin:0}
+.wbi-keystep > b{display:block;font-size:18px;font-weight:800;color:var(--rb-text);line-height:1.3}
+.wbi-keystep .wbi-t{margin:8px 0 12px}
+.wbi-keystep .wbi-figure{margin-bottom:14px}
+.wbi-keystep .wbi-figure:last-child{margin-bottom:0}
+.wbi-keyol .wbi-t{margin:6px 0 0}
+.wbi-keyol .wbi-figure{margin-top:12px}
+.wbi-keyfield{margin-top:22px;display:flex;flex-direction:column;gap:8px}
+.wbi-keyfield label{font-size:15px;font-weight:800;color:var(--rb-text)}
+.wbi-keyhint{margin:0;font-size:15px;line-height:1.55;color:var(--rb-muted)}
+.wbi-keyinput{width:100%;min-height:96px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;line-height:1.45}
+/* Внутри блока анимация проверки — обычная карточка, а не экран во всю высоту. */
+.wbi-keyzone .wbi-scan{margin:20px 0 0;min-height:0;display:block;box-shadow:6px 6px 0 var(--rb-accent)}
+.wbi-keyzone .wbi-ok,.wbi-keyzone .wbi-warn{margin-top:18px}
+/* Красная рамка — «этот пункт НЕ нужен» (legacy-game-passes). */
+.wbi-box.r{border-color:#ff5d5d;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(255,93,93,.45)}
+@media(max-width:560px){.wbi-keyzone{padding:20px 18px;box-shadow:6px 6px 0 var(--rb-accent)}}
 @media (prefers-reduced-motion: reduce){
  .wbi-bigfield.idle,.wbi-ava.spin::after,.wbi-scanline.on:not(.done) .m{animation:none !important}
 }

@@ -20,6 +20,8 @@ import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
  * picked their gamepass on the site, not in the bot. Когда поиск по нику не
  * нашёл геймпасс и покупатель вставил ссылку руками, маркер меняется на 🔗:
  * такой заказ стоит глянуть глазами — плейс у него, скорее всего, скрытый.
+ * А если пасс создан нашим ботом по ключу покупателя, маркер становится 🔑:
+ * цену и «в продаже» выставляли мы, и проверять их — тоже нам.
  */
 
 function escapeHtml(s: string): string {
@@ -38,6 +40,13 @@ export interface WebOrderCard {
   createdAt: Date | string;
   /** Покупатель вставил ссылку/ID геймпасса руками — поиск по нику его не нашёл. */
   manualLink?: boolean;
+  /**
+   * Пасс создал НАШ бот по Open Cloud-ключу покупателя (инструкция V2).
+   * Админу это надо видеть до выкупа: цену и «в продаже» выставляли мы, и
+   * спрашивать за них тоже с нас. Признак берётся из событий заказа
+   * (`AUDIT_GAMEPASS_AUTOCREATED`), а не со слов клиента.
+   */
+  viaKey?: boolean;
   /**
    * Заказ закрывается несколькими пассами. Админу это надо видеть в первой же
    * строке: цена одного пасса в шапке к такому заказу не относится, а части
@@ -95,9 +104,11 @@ export function buildWebOrderCardText(
         { wbOrderId, code: order.wbCode, denomination: order.amount },
         [parts.length > 1 ? `${parts.length} пасса на ${passPrice} R$ суммарно` : `геймпасс ${passPrice} R$`],
       ),
-      order.manualLink
-        ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс`
-        : `🌐 <b>ONE-TAP С САЙТА</b>`,
+      order.viaKey
+        ? `🔑 <b>ПАСС СОЗДАН ПО API-КЛЮЧУ</b> — цену и «в продаже» выставили мы`
+        : order.manualLink
+          ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс`
+          : `🌐 <b>ONE-TAP С САЙТА</b>`,
       loyaltyLine.trim() || null,
       `${platformEmoji} Источник: <b>${order.platform} (сайт)</b>`,
       `👤 Юзер: ${order.userDisplay}`,

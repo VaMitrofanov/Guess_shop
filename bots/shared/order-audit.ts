@@ -32,6 +32,8 @@ export const ORDER_AUDIT_TYPE = {
   NICK_ENTERED: "AUDIT_NICK_ENTERED",
   /** Покупатель прислал/выбрал геймпасс; владелец — по данным Roblox. */
   GAMEPASS_SUBMITTED: "AUDIT_GAMEPASS_SUBMITTED",
+  /** Геймпасс создал НАШ бот по Open Cloud-ключу покупателя. */
+  GAMEPASS_AUTOCREATED: "AUDIT_GAMEPASS_AUTOCREATED",
 } as const;
 
 export type OrderAuditType = typeof ORDER_AUDIT_TYPE[keyof typeof ORDER_AUDIT_TYPE];
@@ -162,5 +164,44 @@ export async function auditGamepassSubmitted(
     });
   } catch (err) {
     console.warn("[order-audit] auditGamepassSubmitted:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Геймпасс создан НАМИ по ключу покупателя (инструкция V2, «сделаем за тебя»).
+ *
+ * Отдельная запись, а не `via` у `auditGamepassSubmitted`: в споре это разные
+ * утверждения. «Прислал пасс» — действие покупателя, «создали пассом-ботом» —
+ * действие наше, и отвечать за цену и за факт «в продаже» в этом случае нам.
+ * Ключ в запись не попадает НИКОГДА — только его признак и результат.
+ */
+export async function auditGamepassAutocreated(
+  client: OrderAuditClient,
+  opts: {
+    gamepassId: string;
+    /** Цена, которую мы выставили пассу. */
+    price: number;
+    /** Ник владельца опыта — на его аккаунте создан пасс. */
+    robloxUsername: string;
+    orderId?: string;
+    wbCode?: string;
+    /** Опыт, на котором пасс создан (для разбора «а почему в этой игре»). */
+    universeId?: string | null;
+  },
+): Promise<void> {
+  const gamepassId = String(opts.gamepassId ?? "").trim();
+  if (!GP_RE.test(gamepassId)) return;
+  try {
+    const orderId = await resolveOrderId(client, opts);
+    if (!orderId) return;
+    await write(client, ORDER_AUDIT_TYPE.GAMEPASS_AUTOCREATED, orderId, gamepassId, {
+      gamepassId,
+      via: "site-api-key",
+      price: opts.price,
+      robloxUsername: opts.robloxUsername,
+      ...(opts.universeId ? { universeId: String(opts.universeId) } : {}),
+    });
+  } catch (err) {
+    console.warn("[order-audit] auditGamepassAutocreated:", err instanceof Error ? err.message : err);
   }
 }

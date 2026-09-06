@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import GuideClient from "./GuideClient";
 import { platformFromUserAgent } from "@/lib/device-platform";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
+import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
 
 export const metadata: Metadata = {
   title: "Инструкция по созданию геймпасса | Roblox Bank",
@@ -14,11 +15,11 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string; keyauto?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom, preview, amount, username, flow } = await searchParams;
+  const { source, skip, code, test, nom, preview, amount, username, flow, keyauto } = await searchParams;
   // Телефон или компьютер: вход в Creator Hub на них разный, и кадры инструкции
   // тоже. Догадка приходит в первом HTML, чтобы страница не мигала после
   // гидратации; в браузере она уточняется, а переключатель её перекрывает.
@@ -46,6 +47,11 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   // кабинет). «Инструкция» из меню, футера и главной его не несёт — там человек
   // просто читает, и проверять у него нечего.
   const orderFlow = flow === "order";
+  // Блок «пасс по ключу» живёт под флагом GAMEPASS_AUTOCREATE. Чтобы посмотреть
+  // его вёрстку до включения флага, есть QA-обходка `&keyauto=1` — она работает
+  // ТОЛЬКО в тестовом/превью-режиме и вёрстку показывает, а метод не включает:
+  // роут без флага всё равно ответит 404.
+  const keyAutoPreview = (testMode || previewMode) && keyauto === "1";
 
   return (
     <>
@@ -68,6 +74,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         initialUsername={username ?? ""}
         orderFlow={orderFlow}
         initialPlatform={initialPlatform}
+        keyAutoEnabled={gamepassAutocreateEnabled() || keyAutoPreview}
       />
     </>
   );

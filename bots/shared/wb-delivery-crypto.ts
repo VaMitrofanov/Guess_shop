@@ -1,6 +1,13 @@
 import crypto from "node:crypto";
 
 const ENVELOPE_VERSION = "v1";
+
+/**
+ * Назначение секрета — часть AAD конверта: расшифровать код доставки ключом
+ * «reply-sign» нельзя даже с правильным ключом шифрования. `roblox-api-key` —
+ * Open Cloud ключ покупателя, которым бот создаёт геймпасс (см. RobloxApiKey).
+ */
+export type SecretPurpose = "delivery-code" | "reply-sign" | "roblox-api-key";
 const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,6})(?!\d)/g;
 /** The buyer naming it themselves ("код 7760778") removes the ambiguity that
  * makes a bare five- or seven-digit run untrustworthy in prose. */
@@ -33,7 +40,7 @@ export function wbDeliveryCryptoReady(): boolean {
   }
 }
 
-export function encryptWbSecret(value: string, purpose: "delivery-code" | "reply-sign"): string {
+export function encryptWbSecret(value: string, purpose: SecretPurpose): string {
   const key = decodeKey();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -49,7 +56,7 @@ export function encryptWbSecret(value: string, purpose: "delivery-code" | "reply
   ].join(":");
 }
 
-export function decryptWbSecret(envelope: string, purpose: "delivery-code" | "reply-sign"): string {
+export function decryptWbSecret(envelope: string, purpose: SecretPurpose): string {
   const [version, actualPurpose, ivRaw, tagRaw, ciphertextRaw, ...tail] = envelope.split(":");
   if (tail.length || version !== ENVELOPE_VERSION || actualPurpose !== purpose || !ivRaw || !tagRaw || !ciphertextRaw) {
     throw new Error("Invalid WB secret envelope");
@@ -63,7 +70,7 @@ export function decryptWbSecret(envelope: string, purpose: "delivery-code" | "re
   ]).toString("utf8");
 }
 
-export function wbSecretHmac(value: string, purpose: "delivery-code" | "reply-sign"): string {
+export function wbSecretHmac(value: string, purpose: SecretPurpose): string {
   return crypto
     .createHmac("sha256", decodeKey())
     .update(`${ENVELOPE_VERSION}:${purpose}:${value}`, "utf8")

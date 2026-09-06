@@ -42,6 +42,34 @@ describe("web one-tap admin card", () => {
     expect(text).not.toContain("ONE-TAP С САЙТА");
   });
 
+  it("маркирует заказ, где пасс создал наш бот по API-ключу", () => {
+    // Владельцу это нужно ДО выкупа: цену и «в продаже» выставляли мы, значит и
+    // спрашивать за них с нас. Маркер вытесняет 🌐/🔗 — источник тут не главное.
+    const text = buildWebOrderCardText({
+      id: "order-3",
+      amount: 2000,
+      gamepassUrl: "https://www.roblox.com/game-pass/1963665231",
+      platform: "TG",
+      wbCode: "84CR7UZ",
+      userDisplay: "@buyer",
+      creatorName: "mono262910",
+      createdAt: new Date("2026-09-06T10:00:00.000Z"),
+      viaKey: true,
+      splitParts: [
+        { gamepassId: "1963665231", amount: 1500 },
+        { gamepassId: "1970321037", amount: 500 },
+      ],
+    }, new Date("2026-09-06T10:05:00.000Z"));
+
+    expect(text).toContain("ПАСС СОЗДАН ПО API-КЛЮЧУ");
+    expect(text).not.toContain("ONE-TAP С САЙТА");
+    // Разбивка 2000 остаётся на месте: два пасса, оба ID видны админу.
+    expect(text).toContain("1963665231");
+    expect(text).toContain("1970321037");
+    expect(text).toContain("2143 R$");
+    expect(text).toContain("715 R$");
+  });
+
   it("deduplicates and trims configured admin chat IDs", () => {
     process.env = { ...realEnv, ADMIN_IDS: " 111,222,111,, 222 ", TG_CHAT_ID: "333" };
     expect(telegramAdminRecipients()).toEqual(["111", "222"]);

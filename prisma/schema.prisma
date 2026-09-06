@@ -60,6 +60,7 @@ model User {
   emailActionTokens       EmailActionToken[]
   consentEvidences        ConsentEvidence[]
   robloxAccounts          UserRobloxAccount[]
+  robloxApiKeys           RobloxApiKey[]
   mergeSources            AccountMergeAudit[] @relation("AccountMergeSource")
   mergeTargets            AccountMergeAudit[] @relation("AccountMergeTarget")
   createdAt               DateTime            @default(now())
@@ -1217,6 +1218,39 @@ model WbDeliverySecret {
   /// by exact keyed-hash match instead of being told "no active orders".
   /// See docs/wb-dbs-review-2026-08-20.md §7 (О5) for the rate limits.
   @@index([codeHmac])
+}
+
+/// Open Cloud API-ключ покупателя: им бот создаёт геймпасс нужной цены на его
+/// же опыте (`docs/roblox-gamepass-autocreate.md`). Хранится ЗАШИФРОВАННЫМ тем
+/// же конвертом, что и коды доставки (`WB_DELIVERY_ENCRYPTION_KEY`), и живёт
+/// ради двух вещей: поправить цену уже созданного пасса, если что-то пошло не
+/// так, и не гонять постоянного покупателя за новым ключом на следующем заказе.
+///
+/// Права ключа ограничены геймпассами (`game-passes: read + write`) — доступа к
+/// аккаунту, робуксам или платежам он не даёт. `keyHmac` — ключ дедупликации:
+/// один и тот же ключ, присланный дважды, не плодит строк.
+model RobloxApiKey {
+  id             String    @id @default(cuid())
+  /// Ник Roblox, на аккаунте которого ключ работает (нижний регистр).
+  robloxUsername String
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
+  encryptedValue String
+  keyHmac        String    @unique
+  keyVersion     String    @default("v1")
+  /// Последний заказ, на котором ключ применялся, — след для разбора.
+  lastOrderId    String?
+  /// Машинный исход последнего применения: ok / bad_scope / not_authorized / …
+  lastResult     String?
+  lastUsedAt     DateTime?
+  useCount       Int       @default(0)
+  /// Сколько геймпассов этим ключом уже создано.
+  createdPasses  Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([robloxUsername])
+  @@index([userId])
 }
 
 /// Persistent pagination cursor and cross-process lease for DBS/chat sync.

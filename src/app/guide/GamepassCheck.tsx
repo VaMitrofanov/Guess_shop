@@ -35,6 +35,7 @@ import {
 } from "@/lib/gamepass-plan";
 import { GUIDE_CSS } from "./guide-css";
 import GuideSteps from "./guide-steps";
+import KeyCreate from "./KeyCreate";
 import type { GuidePlatform } from "@/lib/device-platform";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
@@ -45,6 +46,14 @@ const SCAN_MIN_MS = 2000;
 interface RobloxAccount { id: string; username: string; avatarUrl: string | null }
 
 type Phase = "entry" | "scanning" | "result";
+/**
+ * Где человек находится после проверки.
+ *
+ * `result` — что нашли; `fork` — экран выбора способа; дальше одна из трёх
+ * веток. Выбор вынесен на СВОЙ экран намеренно: пока три способа лежали
+ * секциями под результатом, до них просто не долистывали.
+ */
+type Stage = "result" | "fork" | "manual" | "key" | "passid";
 
 export default function GamepassCheck({
   mode,
@@ -54,6 +63,7 @@ export default function GamepassCheck({
   testMode = false,
   onReset,
   initialPlatform = "mobile",
+  keyAutoEnabled = false,
 }: {
   mode: "WB" | "SITE" | "BOT";
   amount: number;
@@ -63,6 +73,8 @@ export default function GamepassCheck({
   onReset?: () => void;
   /** Догадка сервера «телефон или компьютер» — только для кадров инструкции. */
   initialPlatform?: GuidePlatform;
+  /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE). */
+  keyAutoEnabled?: boolean;
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
@@ -73,6 +85,7 @@ export default function GamepassCheck({
   );
 
   const [phase, setPhase] = useState<Phase>("entry");
+  const [stage, setStage] = useState<Stage>("result");
   const [nick, setNick] = useState(initialUsername.trim().replace(/^@/, ""));
   const [touched, setTouched] = useState(false);
   const [account, setAccount] = useState<RobloxAccount | null>(null);
@@ -81,6 +94,11 @@ export default function GamepassCheck({
   const [error, setError] = useState<string | null>(null);
   const [scanStep, setScanStep] = useState(0);
   const [peek, setPeek] = useState(false);
+
+  /** Пасс уже создан по ключу: план пересчитан, но блок должен остаться на месте
+   *  — иначе сообщение «готово» исчезает вместе с ним, и человек не понимает,
+   *  что произошло. */
+  const [keyDone, setKeyDone] = useState(false);
 
   const [manualRef, setManualRef] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
@@ -137,6 +155,7 @@ export default function GamepassCheck({
     setError(null);
     setConfirmErr(null);
     setNick(value);
+    setStage("result");
     setPhase("scanning");
     setScanStep(0);
     timers.current.forEach(clearTimeout);
@@ -287,7 +306,9 @@ export default function GamepassCheck({
     [amount, isSite],
   );
   const stepTargets = toCreate.length > 0 ? toCreate : peekTargets;
-  const showSteps = toCreate.length > 0 || peek;
+  /** Справочный показ инструкции: создавать нечего, человек просто смотрит. */
+  const reference = toCreate.length === 0;
+  const showSteps = (stage === "manual" && toCreate.length > 0) || peek;
 
   return (
     <>
@@ -309,7 +330,32 @@ export default function GamepassCheck({
             </div>
           </div>
 
+          {/* ── Пройденное: строкой сверху, а не экраном ─────────────────── */}
+          {phase === "result" && (
+            <div className="wbi-crumbs">
+              <div className="wbi-crumb">
+                <i>✓</i>
+                <span>Ник · <b>{account?.username ?? nick}</b></span>
+                {!orderPlaced && (
+                  <button type="button" onClick={() => { setPhase("entry"); setPlan(null); setAccount(null); setTouched(false); setKeyDone(false); setStage("result"); }}>
+                    сменить
+                  </button>
+                )}
+              </div>
+              {stage !== "result" && toCreate.length > 0 && (
+                <div className="wbi-crumb">
+                  <i>✓</i>
+                  <span>
+                    Нужен {toCreate.length > 1 ? "два геймпасса" : <>геймпасс за <b>{toCreate[0].price} R$</b></>}
+                  </span>
+                  <button type="button" onClick={() => setStage("fork")}>другой способ</button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Экран входа ─────────────────────────────────────────────── */}
+          {phase !== "result" && (
           <section className="wbi-hero wbi-checkhero">
             <div>
               <div className="wbi-kick">ПОЛУЧИ СВОИ ROBUX</div>
@@ -373,6 +419,7 @@ export default function GamepassCheck({
               </div>
             </div>
           </section>
+          )}
 
           {/* ── Анимация проверки ───────────────────────────────────────── */}
           {phase === "scanning" && (
@@ -399,7 +446,10 @@ export default function GamepassCheck({
           )}
 
           {/* ── Результат ───────────────────────────────────────────────── */}
-          {phase === "result" && plan && (
+          {/* Внутри ветки карточка результата сворачивается в строку-крошку
+              сверху: держать её на экране целиком — значит заставлять человека
+              прокручивать мимо неё каждый шаг инструкции. */}
+          {phase === "result" && plan && (stage === "result" || toCreate.length === 0 || orderPlaced) && (
             <div ref={resultRef}>
               <div className="wbi-sechead"><b>Результат проверки</b></div>
               <ResultCard
@@ -414,15 +464,66 @@ export default function GamepassCheck({
                 peek={peek}
                 onPeek={() => setPeek((v) => !v)}
                 onConfirm={confirm}
-                onOpenGuide={() => stepsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                onOpenRescue={() => rescueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                onChangeNick={() => { setPhase("entry"); setPlan(null); setAccount(null); setTouched(false); }}
+                onOpenFork={() => {
+                  setStage("fork");
+                  requestAnimationFrame(() => stepsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                }}
+                onChangeNick={() => { setPhase("entry"); setPlan(null); setAccount(null); setTouched(false); setKeyDone(false); }}
               />
             </div>
           )}
 
+          {/* ── Экран выбора способа ────────────────────────────────────── */}
+          {phase === "result" && plan && toCreate.length > 0 && !orderPlaced && stage === "fork" && (
+            <section ref={stepsRef}>
+              <div className="wbi-forkhead">
+                <div className="k">ВЫБЕРИ, КАК СДЕЛАЕМ</div>
+                <h3>{toCreate.length > 1 ? "Нужно два геймпасса" : "Как сделаем геймпасс?"}</h3>
+                <p>
+                  {toCreate.length > 1
+                    ? <>Нужны два: на <b>{toCreate[0].price}</b> и <b>{toCreate[1].price} R$</b>. Способ один на оба — выбирай любой, результат одинаковый.</>
+                    : <>Нужен один геймпасс за <b>{toCreate[0].price} R$</b>. Сделать его можно {keyAutoEnabled ? "тремя способами" : "двумя способами"} — выбирай любой, результат одинаковый.</>}
+                </p>
+              </div>
+              <div className="wbi-opts">
+                <button className="wbi-opt usual" onClick={() => setStage("manual")}>
+                  <span className="i">📖</span>
+                  <span>
+                    <span className="t">Создам сам <em>(инструкция)</em></span>
+                    <span className="s">Покажем каждое нажатие с картинкой. Ничего сложного, просто по шагам.</span>
+                    <span className="chip">обычный путь · 3–5 минут</span>
+                  </span>
+                  <span className="a" aria-hidden="true">›</span>
+                </button>
+                {keyAutoEnabled && (
+                  <button className="wbi-opt key" onClick={() => setStage("key")}>
+                    <span className="i">🔑</span>
+                    <span>
+                      <span className="t">Сделайте за меня<span className="wbi-new">НОВОЕ</span></span>
+                      <span className="s">Пришлёшь один ключ из Roblox — создадим сами. Пароль не нужен.</span>
+                      <span className="chip">минута</span>
+                    </span>
+                    <span className="a" aria-hidden="true">›</span>
+                  </button>
+                )}
+                <button className="wbi-opt" onClick={() => setStage("passid")}>
+                  <span className="i">🔢</span>
+                  <span>
+                    <span className="t">Он у меня уже есть</span>
+                    <span className="s">Геймпасс создан, но мы его не видим — найдём по номеру, даже скрытый.</span>
+                    <span className="chip">10 секунд</span>
+                  </span>
+                  <span className="a" aria-hidden="true">›</span>
+                </button>
+              </div>
+              <div className="wbi-note" style={{ marginTop: 14, textAlign: "center" }}>
+                Не знаешь, что выбрать? Жми первый — это обычный путь.
+              </div>
+            </section>
+          )}
+
           {/* ── Запасной вход по Pass ID — ровно там, где поиск подвёл ──── */}
-          {phase === "result" && plan && toCreate.length > 0 && !orderPlaced && (
+          {phase === "result" && plan && toCreate.length > 0 && !orderPlaced && stage === "passid" && (
             <section className="wbi-rescue" ref={rescueRef}>
               <span className="k">🔢 Пасс уже создан?</span>
               <h3>{plan.kind === "empty" ? "Вставь его Pass ID — найдём даже скрытый" : "Есть ещё один пасс? Вставь его Pass ID"}</h3>
@@ -455,33 +556,127 @@ export default function GamepassCheck({
                   <figcaption>Число из колонки <b>Pass ID</b> (синяя рамка) — его и вставь. Рядом есть кнопка <b>Copy Pass ID</b>.</figcaption>
                 </figure>
               </div>
+              <div className="wbi-escape">
+                <div className="wbi-escape-h">ГЕЙМПАССА ВСЁ-ТАКИ НЕТ?</div>
+                <button className="wbi-opt usual" onClick={() => setStage("manual")}>
+                  <span className="i">📖</span>
+                  <span>
+                    <span className="t">Создать геймпасс <em>(инструкция)</em></span>
+                    <span className="s">Четыре шага, каждое нажатие с картинкой</span>
+                  </span>
+                  <span className="a" aria-hidden="true">›</span>
+                </button>
+                {keyAutoEnabled && (
+                  <button className="wbi-opt key" onClick={() => setStage("key")}>
+                    <span className="i">🔑</span>
+                    <span>
+                      <span className="t">Сделаем за тебя</span>
+                      <span className="s">Пришли ключ из Roblox — создадим сами, минута</span>
+                    </span>
+                    <span className="a" aria-hidden="true">›</span>
+                  </button>
+                )}
+              </div>
             </section>
+          )}
+
+          {/* ── Пасс по ключу: альтернатива ручному созданию ────────────── */}
+          {keyAutoEnabled && phase === "result" && plan && (stage === "key" || keyDone) && !orderPlaced && (
+            <KeyCreate
+              targets={toCreate}
+              nick={account?.username ?? nick}
+              code={code}
+              initialPlatform={initialPlatform}
+              onCreated={(passes) => {
+                setKeyDone(true);
+                // Созданный пасс сразу уходит в план: человек жмёт «Подтвердить»,
+                // как после обычной проверки ника, и второй раз ничего не ищет.
+                replan([...owned.filter((p) => !passes.some((n) => n.gamepassId === p.gamepassId)), ...passes]);
+                requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+              }}
+            />
+          )}
+
+          {/* Из ключа всегда открыта дверь в обычную инструкцию: метод новый,
+              и упереться в него человек не должен. */}
+          {keyAutoEnabled && phase === "result" && plan && stage === "key" && !keyDone && !orderPlaced && (
+            <div className="wbi-escape">
+              <div className="wbi-escape-h">ПЕРЕДУМАЛ ИЛИ НЕ ИДЁТ</div>
+              <button className="wbi-opt usual" onClick={() => setStage("manual")}>
+                <span className="i">📖</span>
+                <span>
+                  <span className="t">Создам сам <em>(инструкция)</em></span>
+                  <span className="s">Обычный путь: четыре шага, каждое нажатие с картинкой</span>
+                </span>
+                <span className="a" aria-hidden="true">›</span>
+              </button>
+              <div className="wbi-note">
+                Или <a className="wbi-supportlink" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">напиши менеджеру</a> — поможем руками.
+              </div>
+            </div>
           )}
 
           {/* ── Инструкция: только на то, чего не хватает ───────────────── */}
           {phase === "result" && plan && showSteps && !orderPlaced && (
             <>
               <div className="wbi-sechead" ref={stepsRef}>
-                <b>{toCreate.length === 0
+                <b>{reference
                   ? (stepTargets.length > 1 ? "Как создаются два пасса" : "Как создаётся геймпасс")
-                  : (toCreate.length > 1 ? "Нужно создать два пасса" : "Нужно создать один пасс")}</b>
+                  : (toCreate.length > 1 ? "Создаём два геймпасса" : "Создаём геймпасс")}</b>
               </div>
-              {toCreate.length === 0 && (
+              {reference && (
                 <div className="wbi-ok" style={{ margin: "0 0 18px" }}>
                   📖 Это справка «на будущее» — тебе прямо сейчас <b>создавать ничего не нужно</b>, всё уже готово.
                 </div>
               )}
-              <Goals plan={plan} toCreate={stepTargets} reference={toCreate.length === 0} />
+              <Goals plan={plan} toCreate={stepTargets} reference={reference} />
               <div className="wbi-tl">
-                <GuideSteps targets={stepTargets} mode={mode} initialPlatform={initialPlatform} />
+                <GuideSteps
+                  targets={stepTargets}
+                  mode={mode}
+                  initialPlatform={initialPlatform}
+                  // Внутри заказа шаги идут по одному: человек делает, а не читает.
+                  // Справка «на будущее» остаётся списком — её именно читают.
+                  layout={reference ? "list" : "paged"}
+                  onDone={() => runCheck()}
+                />
               </div>
-              <section className="wbi-recheck">
-                <h3>{toCreate.length === 0 ? "Что-то поменял?" : "Сделал? Проверим ещё раз"}</h3>
-                <p>Нажми — мы заново посмотрим твой аккаунт. Если пассы на месте, заказ соберётся сразу, вводить ник ещё раз не нужно.</p>
-                <div className="row">
-                  <button className="wbi-bigbtn" onClick={() => runCheck()} disabled={phase !== "result"}>🔄 Проверить мой аккаунт</button>
+              {reference && (
+                <section className="wbi-recheck">
+                  <h3>Что-то поменял?</h3>
+                  <p>Нажми — мы заново посмотрим твой аккаунт. Если пассы на месте, заказ соберётся сразу, вводить ник ещё раз не нужно.</p>
+                  <div className="row">
+                    <button className="wbi-bigbtn" onClick={() => runCheck()} disabled={phase !== "result"}>🔄 Проверить мой аккаунт</button>
+                  </div>
+                </section>
+              )}
+              {!reference && (
+                <div className="wbi-escape">
+                  <div className="wbi-escape-h">ЕСЛИ НЕ ПОЛУЧИЛОСЬ</div>
+                  {keyAutoEnabled && (
+                    <button className="wbi-opt key" onClick={() => setStage("key")}>
+                      <span className="i">🔑</span>
+                      <span>
+                        <span className="t">Сделаем за тебя</span>
+                        <span className="s">Пришли ключ из Roblox — геймпасс создадим сами, минута</span>
+                      </span>
+                      <span className="a" aria-hidden="true">›</span>
+                    </button>
+                  )}
+                  <button className="wbi-opt" onClick={() => setStage("passid")}>
+                    <span className="i">🔢</span>
+                    <span>
+                      <span className="t">Создал, но его не видно</span>
+                      <span className="s">Вставь Pass ID — найдём даже скрытый</span>
+                    </span>
+                    <span className="a" aria-hidden="true">›</span>
+                  </button>
+                  <div className="wbi-note">
+                    Совсем не выходит?{" "}
+                    <a className="wbi-supportlink" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">Напиши живому менеджеру</a>.
+                  </div>
                 </div>
-              </section>
+              )}
             </>
           )}
 
@@ -547,7 +742,7 @@ function toOwned(gp: Record<string, unknown>): OwnedPass {
 const TONE: Record<CheckPlan["kind"], string> = { ready: "ok", assembled: "mix", build: "half", empty: "none" };
 
 function ResultCard({
-  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek, onConfirm, onChangeNick, onOpenGuide, onOpenRescue,
+  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek, onConfirm, onChangeNick, onOpenFork,
 }: {
   plan: CheckPlan;
   amount: number;
@@ -561,8 +756,8 @@ function ResultCard({
   onPeek: () => void;
   onConfirm: () => void;
   onChangeNick: () => void;
-  onOpenGuide: () => void;
-  onOpenRescue: () => void;
+  /** Открыть экран выбора способа — единственная дверь из «чего не хватает». */
+  onOpenFork: () => void;
 }) {
   const covered = coveredRobux(plan);
   const done = plan.kind === "ready" || plan.kind === "assembled";
@@ -629,27 +824,14 @@ function ResultCard({
       {confirmErr && <div className="wbi-warn" style={{ marginTop: 14 }}>{confirmErr}</div>}
 
       {!done && !orderPlaced && (
-        <div className="wbi-choice">
-          <div className="wbi-choice-h">Что делаем дальше?</div>
-          <div className="wbi-choice-row">
-            <button className="wbi-choice-b" onClick={onOpenGuide}>
-              <span className="i">📖</span>
-              <span className="m">
-                <span className="t">{create.length > 1 ? "Создать оба пасса" : "Создать пасс"}</span>
-                <span className="s">Пошагово, со скриншотами — 3–5 минут</span>
-              </span>
-              <span className="a" aria-hidden="true">↓</span>
-            </button>
-            <button className="wbi-choice-b" onClick={onOpenRescue}>
-              <span className="i">🔢</span>
-              <span className="m">
-                <span className="t">Пасс уже есть</span>
-                <span className="s">Вставь Pass ID — поиск видит не все пассы</span>
-              </span>
-              <span className="a" aria-hidden="true">↓</span>
-            </button>
+        <>
+          <div className="wbi-actions">
+            <button className="wbi-bigbtn" onClick={onOpenFork}>Выбрать, как это сделать →</button>
           </div>
-        </div>
+          <div className="wbi-note" style={{ marginTop: 10, textAlign: "center" }}>
+            Три способа — выбери любой, результат одинаковый.
+          </div>
+        </>
       )}
 
       {done && !orderPlaced && (

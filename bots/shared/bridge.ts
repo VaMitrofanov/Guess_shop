@@ -25,6 +25,7 @@
 
 import * as http from "http";
 import {
+  createGamePassForUserDirect,
   getGamepassDetailsDirect,
   getGamepassForPurchase,
   getRobloxUserProfileDirect,
@@ -90,10 +91,11 @@ export function startBridgeServer(): http.Server {
     const isCheckPass        = req.method === "GET"  && url.pathname === "/check-pass";
     const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";
     const isSearchGamepasses = req.method === "POST" && url.pathname === "/search-gamepasses";
+    const isCreateGamepass   = req.method === "POST" && url.pathname === "/create-gamepass";
     const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
     const isRobloxUser       = req.method === "GET"  && url.pathname === "/roblox-user";
 
-    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isGamepassById && !isRobloxUser) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isCreateGamepass && !isGamepassById && !isRobloxUser) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -230,6 +232,67 @@ export function startBridgeServer(): http.Server {
         respond(200, { ok: true, gamepasses, userExists: account !== null, account });
       } catch (err: any) {
         console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
+      }
+      return;
+    }
+
+    // ── POST /create-gamepass ───────────────────────────────────────────────
+    // Движок автосоздания пасса (Part 1, ДОРМАНТ). Тело:
+    //   { apiKey, priceInRobux, name?, universeId?, placeId?, username? }
+    // apiKey — Open Cloud ключ клиента (scope game-pass:write на его experience);
+    // проходит транзитом, НИКОГДА не логируется и не возвращается назад.
+    // Логическая ошибка возвращается 200 с { ok:false, error, detail }, чтобы
+    // вызывающая сторона (RF Web) прочитала её, а не получила голый null.
+    if (isCreateGamepass) {
+      let body: Record<string, unknown>;
+      try {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", (chunk) => { data += chunk; });
+          req.on("end",  () => resolve(data));
+          req.on("error", reject);
+        });
+        body = JSON.parse(raw);
+      } catch {
+        respond(400, { ok: false, error: "bad_request" });
+        return;
+      }
+
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
+      const priceInRobux = typeof body.priceInRobux === "number"
+        ? body.priceInRobux
+        : Number(body.priceInRobux);
+      if (!apiKey.trim() || !Number.isFinite(priceInRobux)) {
+        respond(400, { ok: false, error: "missing_fields" });
+        return;
+      }
+
+      // Лог без ключа: только номинал и то, чем адресован опыт.
+      const target =
+        body.universeId != null ? `universe=${body.universeId}` :
+        body.placeId    != null ? `place=${body.placeId}` :
+        body.username    != null ? `nick=${body.username}` : "no-target";
+      console.log(`[Bridge] → create-gamepass ${priceInRobux}R$ (${target})`);
+
+      try {
+        const result = await createGamePassForUserDirect({
+          apiKey,
+          priceInRobux,
+          name: typeof body.name === "string" ? body.name : undefined,
+          universeId: (typeof body.universeId === "string" || typeof body.universeId === "number") ? body.universeId : undefined,
+          placeId: (typeof body.placeId === "string" || typeof body.placeId === "number") ? body.placeId : undefined,
+          username: typeof body.username === "string" ? body.username : undefined,
+        });
+        console.log(
+          `[Bridge] ← create-gamepass: ` +
+          (result.ok
+            ? `id=${result.gamePassId} ${result.priceInRobux}R$ forSale=${result.isForSale}`
+            : `FAIL ${result.error} — ${result.detail ?? ""}`),
+        );
+        respond(200, { ...result }); // result НЕ содержит apiKey
+      } catch (err: any) {
+        console.error("[Bridge] create-gamepass error:", err?.message ?? err);
         respond(500, { ok: false, error: "server_error" });
       }
       return;

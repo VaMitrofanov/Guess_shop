@@ -1526,14 +1526,17 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
         {!loading && data && data.events.map(e => {
           const p = e.payload ?? {};
           const isNick = e.type === "AUDIT_NICK_ENTERED";
+          // Пасс, созданный НАШИМ ботом по ключу покупателя, — это не «клиент
+          // прислал», а наше действие: цену и «в продаже» выставляли мы.
+          const isAuto = e.type === "AUDIT_GAMEPASS_AUTOCREATED";
           const subject = String(isNick ? p.nick ?? "" : p.gamepassId ?? "");
           return (
             <div key={e.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
-              <span style={{ flexShrink: 0 }}>{isNick ? "⌨️" : "🎮"}</span>
+              <span style={{ flexShrink: 0 }}>{isNick ? "⌨️" : isAuto ? "🔑" : "🎮"}</span>
               <span style={{ minWidth: 0, flex: 1 }}>
                 <b style={{ color: "#e5e5ea", wordBreak: "break-all" }}>{subject}</b>
                 <span style={{ color: C.textTertiary }}>
-                  {isNick ? " — ввёл ник" : " — прислал геймпасс"}
+                  {isNick ? " — ввёл ник" : isAuto ? " — создан ботом по API-ключу" : " — прислал геймпасс"}
                   {p.creatorName ? <> · владелец по Roblox <b style={{ color: C.textSecondary }}>{String(p.creatorName)}</b></> : null}
                   {p.price ? ` · ${Number(p.price).toLocaleString("ru-RU")} R$` : ""}
                   {p.via ? ` · ${String(p.via)}` : ""}

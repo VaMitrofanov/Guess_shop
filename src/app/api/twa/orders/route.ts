@@ -2341,7 +2341,7 @@ export async function POST(req: NextRequest) {
   // по запросу, а не в общий список — там это лишний вес на каждой карточке.
   if (action === "order-audit") {
     const events = await (prisma as any).orderEvent.findMany({
-      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED"] } },
+      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED", "AUDIT_GAMEPASS_AUTOCREATED"] } },
       orderBy: { createdAt: "asc" },
       select: { id: true, type: true, payload: true, createdAt: true },
     });

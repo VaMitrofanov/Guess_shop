@@ -30,6 +30,7 @@ const EVENT_LABELS: Record<string, string> = {
   GAMEPASS_ATTACHED: "Привязан геймпасс",
   AUDIT_NICK_ENTERED: "Покупатель ввёл ник",
   AUDIT_GAMEPASS_SUBMITTED: "Покупатель прислал ссылку на геймпасс",
+  AUDIT_GAMEPASS_AUTOCREATED: "🔑 Пасс создан ботом по API-ключу покупателя",
   ADMIN_CARD_ROOT: "Карточка заказа в админке",
   WB_GATE_ISSUED: "Гейт выдан покупателю",
   REVIEW_BONUS_GRANTED: "Начислен бонус за отзыв",

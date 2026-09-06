@@ -184,9 +184,22 @@ export interface GuideStepsProps {
   mode?: "WB" | "SITE" | "BOT";
   /** Догадка сервера по `User-Agent`. Дальше уточняется в браузере. */
   initialPlatform?: GuidePlatform;
+  /**
+   * Как подавать шаги.
+   *
+   * `list` — все сразу, как было: страница-инструкция для читателя, где человек
+   * листает и читает. `paged` — по одному, с кнопкой «Дальше»: так инструкция
+   * идёт в квесте оформления, где важно не потеряться, а не прочитать целиком.
+   * Ссылка «показать все шаги списком» переключает `paged` в `list` на месте.
+   */
+  layout?: "list" | "paged";
+  /** Последний шаг пройден — в квесте это «Сделал, проверь мой аккаунт». */
+  onDone?: () => void;
 }
 
-export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatform = "mobile" }: GuideStepsProps) {
+export default function GuideSteps({
+  targets, nomRow, mode = "WB", initialPlatform = "mobile", layout = "list", onDone,
+}: GuideStepsProps) {
   const pair = targets.length > 1;
   const first = targets[0];
   const second = targets[1];
@@ -203,12 +216,50 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
   const choose = useCallback((p: GuidePlatform) => { setPlatform(p); rememberPlatform(p); }, []);
   const isMob = platform === "mobile";
 
+  /**
+   * Уровень подробности. По умолчанию на экране — кадр на каждое действие и
+   * ничего лишнего. «Супер подробно» добавляет видео шага целиком и общие планы
+   * страницы: они помогают тем, кто не узнаёт экран по фрагменту, но остальным
+   * удлиняют шаг вдвое.
+   */
+  const [detail, setDetail] = useState<"norm" | "max">("norm");
+  const maxi = detail === "max";
+  /** Пошаговый режим можно развернуть в список — это одно и то же содержимое. */
+  const [listed, setListed] = useState(false);
+  const paged = layout === "paged" && !listed;
+  const total = pair ? 5 : 4;
+  const [idx, setIdx] = useState(0);
+  const step = Math.min(idx, total - 1);
+  const show = (i: number) => !paged || i === step;
+  const go = useCallback((next: number) => {
+    setIdx(next);
+    // Шаг сменился — человек должен увидеть его начало, а не середину прошлого.
+    requestAnimationFrame(() => {
+      document.getElementById("wbi-steps-top")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
   return (
     <>
-      <PlatformSwitch value={platform} onChange={choose} />
+      <span id="wbi-steps-top" />
+      <div className="wbi-stepbar">
+        <PlatformSwitch value={platform} onChange={choose} />
+        <div className="wbi-seg wbi-detailseg" role="group" aria-label="Насколько подробно показывать">
+          <button type="button" aria-pressed={!maxi} onClick={() => setDetail("norm")}>📸 Пошагово</button>
+          <button type="button" aria-pressed={maxi} onClick={() => setDetail("max")}>🎬 Супер подробно</button>
+        </div>
+      </div>
+      {paged && (
+        <div className="wbi-progress">
+          <span className="k">Шаг {step + 1} из {total}</span>
+          <span className="d">{Array.from({ length: total }, (_, i) => (
+            <i key={i} className={i < step ? "done" : i === step ? "on" : ""} />
+          ))}</span>
+        </div>
+      )}
 
       {/* ── 1. Вход в Creator Hub ─────────────────────────────────────── */}
-      <Step n="1">
+      {show(0) && (<Step n="1">
         <div className="wbi-cols wbi-media wbi-intro-step">
           <div><div className="wbi-ttl">Открой Creator Hub</div>
             <p className="wbi-t">Это официальный раздел Roblox, где создаются геймпассы. Ты уже вошёл в свой аккаунт — логин вводить не придётся.</p>
@@ -248,10 +299,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
           </figure>
         ) : (
           <>
-            <figure className="wbi-figure wbi-wide wbi-spot">
+            {maxi && (<figure className="wbi-figure wbi-wide wbi-spot">
               <LazyVideo src="/guide/wb-pc-create.mp4" poster="/guide/wb-pc-create-poster.jpg" alt="Клик по Create на roblox.com" />
               <figcaption><b>Как это выглядит целиком:</b> клик по <b>Create</b> → загружается Creator Hub.</figcaption>
-            </figure>
+            </figure>)}
             <figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-nav-zoom.jpg" alt="Верхнее меню roblox.com крупно: пункт Create" loading="lazy" decoding="async" />
@@ -260,20 +311,20 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
               </span>
               <figcaption>Крупно: <b>Create</b> в верхнем меню roblox.com.</figcaption>
             </figure>
-            <figure className="wbi-figure wbi-wide">
+            {maxi && (<figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-nav-full.jpg" alt="roblox.com целиком: верхнее меню с пунктом Create" loading="lazy" decoding="async" />
                 <span className="wbi-box g pill" style={{ left: "27.3%", top: "0.6%", width: "9.3%", height: "5.4%" }} />
                 <span className="wbi-tip g" style={{ left: "44%", top: "3.2%" }}>← ЗДЕСЬ</span>
               </span>
               <figcaption>Та же кнопка на всей странице — <b>вверху по центру</b>.</figcaption>
-            </figure>
+            </figure>)}
           </>
         )}
-      </Step>
+      </Step>)}
 
       {/* ── 2. Ярлык: поиск ведёт прямо на форму ──────────────────────── */}
-      <Step n="2">
+      {show(1) && (<Step n="2">
         <div className="wbi-cols wbi-media wbi-rev">
           <div><div className="wbi-ttl">Найди «Create Pass» через поиск</div>
             <p className="wbi-t">Искать свою игру и лазить по меню не нужно. Поиск в Creator Hub отведёт прямо на форму создания:</p>
@@ -287,7 +338,7 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
             <LongWayFallback />
           </div>
           <div className="wbi-mcol">
-            {isMob ? (
+            {isMob && maxi ? (
               <figure className="wbi-figure wbi-spot">
                 <LazyVideo src="/guide/wb-m-search.mp4" poster="/guide/wb-m-search-poster.jpg" alt="Поиск в Creator Hub: pass → Create Pass" />
                 <figcaption>Целиком: <b>🔍</b> → <b>pass</b> → <b>Create Pass</b> → форма.</figcaption>
@@ -319,10 +370,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
           </div>
         ) : (
           <>
-            <figure className="wbi-figure wbi-wide wbi-spot">
+            {maxi && (<figure className="wbi-figure wbi-wide wbi-spot">
               <LazyVideo src="/guide/wb-pc-search.mp4" poster="/guide/wb-pc-search-poster.jpg" alt="Поиск в Creator Hub на компьютере" />
               <figcaption><b>Как это выглядит целиком:</b> <b>🔍</b> → <b>pass</b> → <b>Create Pass</b> → форма.</figcaption>
-            </figure>
+            </figure>)}
             <figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-hub-zoom.jpg" alt="Шапка Creator Hub крупно: иконка поиска" loading="lazy" decoding="async" />
@@ -331,14 +382,14 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
               </span>
               <figcaption>Крупно: <b>лупа</b> в шапке Creator Hub, левее колокольчика.</figcaption>
             </figure>
-            <figure className="wbi-figure wbi-wide">
+            {maxi && (<figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-hub-full.jpg" alt="Creator Hub целиком: иконка поиска справа вверху" loading="lazy" decoding="async" />
                 <span className="wbi-box g pill" style={{ left: "88.4%", top: "1.9%", width: "3.6%", height: "6.4%" }} />
                 <span className="wbi-tip g" style={{ left: "78%", top: "9.5%" }}>↑ ЛУПА ЗДЕСЬ</span>
               </span>
               <figcaption>Она же на всей странице — <b>правый верхний угол</b>.</figcaption>
-            </figure>
+            </figure>)}
             <figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-results.jpg" alt="Поиск Creator Hub на компьютере: набрано pass, первая строка Create Pass" loading="lazy" decoding="async" />
@@ -351,10 +402,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
             </figure>
           </>
         )}
-      </Step>
+      </Step>)}
 
       {/* ── 3. Форма: имя и Create pass ───────────────────────────────── */}
-      <Step n="3">
+      {show(2) && (<Step n="3">
         <div className="wbi-ttl">{firstName ? <>Назови пасс <b>{firstName}</b></> : "Заполни форму пасса"}</div>
         <p className="wbi-t">{firstName
           ? <>Название — это <b>подсказка самому себе</b>: впиши в него ту цену, которую поставишь на следующем шаге. Тогда пассы не перепутаются — ни у тебя, ни у нас.</>
@@ -379,10 +430,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
           </figure>
         ) : (
           <>
-            <figure className="wbi-figure wbi-wide wbi-spot">
+            {maxi && (<figure className="wbi-figure wbi-wide wbi-spot">
               <LazyVideo src="/guide/wb-pc-form.mp4" poster="/guide/wb-pc-form-poster.jpg" alt="Заполнение формы Create a Pass" />
               <figcaption><b>Как это выглядит целиком:</b> вписать название → нажать <b>Create pass</b>.</figcaption>
-            </figure>
+            </figure>)}
             <figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-form.jpg" alt="Форма Create a Pass на компьютере: поле Name и кнопка Create pass" loading="lazy" decoding="async" />
@@ -395,10 +446,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
             </figure>
           </>
         )}
-      </Step>
+      </Step>)}
 
       {/* ── 4. Цена: без неё пасс не выкупить ─────────────────────────── */}
-      <Step n="4" cls="wbi-key">
+      {show(3) && (<Step n="4" cls="wbi-key">
         <div className="wbi-ttl">{pair ? <>Цена первого пасса: <b>{first.price}</b></> : "Впиши цену и сохрани"}</div>
         <p className="wbi-t">Пасс создан, но пока не продаётся — в списке у него написано <b>Offsale</b>. Открой его и задай цену:</p>
         <ol className="wbi-ol">
@@ -442,10 +493,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
           </>
         ) : (
           <>
-            <figure className="wbi-figure wbi-wide wbi-spot">
+            {maxi && (<figure className="wbi-figure wbi-wide wbi-spot">
               <LazyVideo src="/guide/wb-pc-sales.mp4" poster="/guide/wb-pc-sales-poster.jpg" alt="Выбор пасса, вкладка Sales, цена и сохранение" />
               <figcaption><b>Как это выглядит целиком:</b> нажать на пасс → <b>Sales</b> → <b>Item for sale</b> → цена → <b>Save Changes</b>.</figcaption>
-            </figure>
+            </figure>)}
             <figure className="wbi-figure wbi-wide">
               <span className="wbi-anno">
                 <img src="/guide/wb-pc-passes.jpg" alt="Список Passes: новый пасс внизу со статусом Offsale" loading="lazy" decoding="async" />
@@ -480,10 +531,10 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
           </>
         )}
         {pair && <div className="wbi-ok">✅ Первый пасс готов. Осталось повторить то же самое для второго — он короче, всё уже знакомо.</div>}
-      </Step>
+      </Step>)}
 
       {/* ── 5. Второй пасс: только у пары ─────────────────────────────── */}
-      {pair && second && (
+      {pair && second && show(4) && (
         <Step n="5" cls="wbi-key">
           <div className="wbi-ttl">Второй пасс: <b>{second.price}</b></div>
           <p className="wbi-t">Всё то же самое, что ты уже сделал, только цена другая. И искать снова ничего не надо — тем же поиском:</p>
@@ -537,6 +588,34 @@ export default function GuideSteps({ targets, nomRow, mode = "WB", initialPlatfo
           </div>
           <div className="wbi-ok">✅ Теперь у тебя два пасса: <b>{first.price}</b> и <b>{second.price}</b>. Дальше — проверка.</div>
         </Step>
+      )}
+
+      {paged && (
+        <div className="wbi-stepnav">
+          <div className="wbi-stepnav-row">
+            {step > 0 && (
+              <button type="button" className="wbi-ghostbtn" onClick={() => go(step - 1)}>← Назад</button>
+            )}
+            {step < total - 1 ? (
+              <button type="button" className="wbi-bigbtn" onClick={() => go(step + 1)}>Дальше →</button>
+            ) : (
+              <button type="button" className="wbi-bigbtn" onClick={() => onDone?.()}>✅ Сделал — проверить</button>
+            )}
+          </div>
+          <button type="button" className="wbi-peek" onClick={() => setListed(true)}>
+            Показать все шаги списком
+          </button>
+        </div>
+      )}
+      {layout === "paged" && listed && (
+        <button type="button" className="wbi-peek" onClick={() => { setListed(false); go(total - 1); }}>
+          ✕ Свернуть обратно в пошаговый режим
+        </button>
+      )}
+      {layout === "paged" && listed && (
+        <div className="wbi-stepnav">
+          <button type="button" className="wbi-bigbtn" onClick={() => onDone?.()}>✅ Сделал — проверить</button>
+        </div>
       )}
     </>
   );

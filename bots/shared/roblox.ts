@@ -1317,3 +1317,275 @@ export async function purchaseGamepassVerified(
   }
   return result;
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// Создание геймпасса через Open Cloud — движок автосоздания (Part 1, ДОРМАНТ)
+//
+// Проверено живьём 05.09.2026 (mono262910, universe 10302269431) и повторено
+// 06.09.2026 на двух аккаунтах (KrytishVadim4ick 3870886947 → пасс 1963665231
+// @100; mono262910 → пасс 1970321037 @228). Open Cloud создаёт ПОКУПАЕМЫЙ
+// геймпасс нужного номинала ОДНИМ запросом. Факты (память
+// project_roblox_opencloud_gamepass_api):
+//   • POST https://apis.roblox.com/game-passes/v1/universes/{U}/game-passes
+//   • Тело — multipart/form-data c ASP.NET model-binding: request.Name,
+//     request.Price, request.IsForSale. JSON → 415. Иконка (request.Icon)
+//     НЕобязательна. IsForSale=true проходит прямо при создании — отдельный
+//     PATCH не нужен (оставлен подстраховкой).
+//   • СКОУП КЛЮЧА (06.09): в Creator Hub нужен API System `game-passes` с
+//     операциями `game-pass:read` + `game-pass:write`. Соседний `legacy-game-passes
+//     → legacy-game-pass:manage` НЕ РАБОТАЕТ вовсе: 403 "Scope not authorized"
+//     даже на чтение. Выбора experience у ключа нет — он покрывает ВСЕ опыты
+//     своего владельца и только их.
+//   • Два разных 403 (различаем, потому что лечатся по-разному):
+//       "Scope not authorized"  → ключ сделан не на том API System (перебор
+//                                 кандидатов бессмыслен, нужен новый ключ);
+//       "UnauthorizedAccess … universe" → опыт чужой для этого ключа →
+//                                 пробуем следующего кандидата.
+//     Пасс в обоих случаях не создаётся — перебор безопасен.
+//   • Иконка бизнесу не важна; важны ЦЕНА и факт «в продаже». Имя — наше, и
+//     оно же реклама: брендовое «RobloxBank …» на чужом опыте (BRAND_GAMEPASS_NAMES).
+//
+// ДОРМАНТ: движок вызывают только мостовой роут POST /create-gamepass и
+// ops-скрипт. В клиентский флоу НЕ подключён — ждёт инструкции V2 и прогона.
+// Ключ клиента здесь только проходит транзитом; НИКОГДА не логировать его.
+// ══════════════════════════════════════════════════════════════════════════
+
+const OPEN_CLOUD_GAMEPASS_BASE = "https://apis.roblox.com/game-passes/v1/universes";
+
+export interface CreateGamePassParams {
+  /** Open Cloud API-ключ клиента (API System `game-passes`: read + write). */
+  apiKey: string;
+  /** Цена в робуксах — единственное, что реально важно бизнесу. */
+  priceInRobux: number;
+  /** Название пасса. Наше, не клиентское; по умолчанию нейтральное по номиналу. */
+  name?: string;
+  /** Явный universe, если известен. */
+  universeId?: string | number;
+  /** Явный placeId (резолвится в universe). */
+  placeId?: string | number;
+  /** Ник владельца — резолвится в его публичные experience'ы. */
+  username?: string;
+}
+
+export interface CreateGamePassResult {
+  ok: boolean;
+  gamePassId?: number;
+  universeId?: string;
+  priceInRobux?: number;
+  isForSale?: boolean;
+  name?: string;
+  /** Машинный код: bad_key | bad_scope | not_authorized | no_universe | bad_price | roblox_error | network. */
+  error?: string;
+  /** Человекочитаемая деталь для админа (без ключа!). */
+  detail?: string;
+}
+
+/**
+ * Брендовый пул имён пасса — заодно бесплатная реклама RobloxBank на чужом
+ * опыте. Без мата и спецсимволов (иначе Roblox-фильтр заменит имя на «#####»).
+ */
+export const BRAND_GAMEPASS_NAMES = [
+  "RobloxBank",
+  "RobloxBank лучший",
+  "RobloxBank любимый",
+  "RobloxBank топ",
+  "RobloxBank №1 по робуксам",
+  "RobloxBank лучший магазин робуксов",
+  "Робуксы тут — RobloxBank",
+  "RobloxBank рекомендую",
+];
+
+/**
+ * Имя пасса. Наше, не клиентское — поэтому это ещё и реклама RobloxBank: дефолт
+ * берётся из брендового пула (случайно, для разнообразия объявлений). Явный
+ * латиница/цифры/пробелы override уважаем (ручной случай админа); мат/кириллицу/
+ * произвольный ввод не пускаем — вернём брендовое имя. `_priceInRobux` в
+ * сигнатуре сохранён для совместимости и на случай ценового варианта названия.
+ */
+export function safeGamePassName(_priceInRobux: number, override?: string): string {
+  const raw = (override ?? "").trim();
+  if (raw && /^[A-Za-z0-9 ]{3,40}$/.test(raw)) return raw;
+  return BRAND_GAMEPASS_NAMES[Math.floor(Math.random() * BRAND_GAMEPASS_NAMES.length)];
+}
+
+function isValidGamePassPrice(p: unknown): p is number {
+  return typeof p === "number" && Number.isInteger(p) && p >= 1 && p <= 1_000_000;
+}
+
+/** placeId → universeId (эндпоинт уже используется в этом файле выше). */
+async function placeToUniverseDirect(placeId: string | number): Promise<string | null> {
+  try {
+    const res = await rFetch(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`);
+    if (!res.ok) return null;
+    const data: any = await res.json().catch(() => null);
+    return data?.universeId != null ? String(data.universeId) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Публичные experience'ы аккаунта (universeId). Скрытый плейс здесь не появится. */
+async function listUserUniverseIdsDirect(userId: number | string): Promise<string[]> {
+  const out: string[] = [];
+  try {
+    const res = await rFetch(
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`,
+    );
+    if (!res.ok) return out;
+    const data: any = await res.json().catch(() => null);
+    for (const g of data?.data ?? []) if (g?.id != null) out.push(String(g.id));
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+/**
+ * Кандидаты-universe в порядке приоритета: явный universeId → placeId → ник.
+ * Скрытый плейс в публичном списке не появится — тогда нужен явный universeId/
+ * placeId (клиент даёт ссылку на опыт).
+ */
+export async function resolveUniverseCandidatesDirect(
+  params: Pick<CreateGamePassParams, "universeId" | "placeId" | "username">,
+): Promise<string[]> {
+  const cands: string[] = [];
+  if (params.universeId != null) cands.push(String(params.universeId));
+  if (params.placeId != null) {
+    const u = await placeToUniverseDirect(params.placeId);
+    if (u) cands.push(u);
+  }
+  if (params.username && params.username.trim()) {
+    const userId = await resolveRobloxUserId(params.username.trim());
+    if (userId != null) cands.push(...(await listUserUniverseIdsDirect(userId)));
+  }
+  return [...new Set(cands)];
+}
+
+/** Довести пасс до «в продаже» (PATCH, 204). Подстраховка на случай isForSale=false. */
+async function patchGamePassOnSaleDirect(
+  apiKey: string,
+  universeId: string,
+  gamePassId: number,
+  priceInRobux: number,
+): Promise<boolean> {
+  const form = new FormData();
+  form.append("request.IsForSale", "true");
+  form.append("request.Price", String(priceInRobux));
+  try {
+    const res = await fetch(
+      `${OPEN_CLOUD_GAMEPASS_BASE}/${universeId}/game-passes/${gamePassId}`,
+      { method: "PATCH", headers: { "x-api-key": apiKey }, body: form },
+    );
+    return res.ok; // 204
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Создать покупаемый пасс на КОНКРЕТНОМ universe. Один POST (multipart), БЕЗ
+ * авто-ретраев — создание не идемпотентно, повтор наплодил бы дубли. Отказы:
+ * 401 → bad_key (протух/скопирован не целиком); 403 «Scope not authorized» →
+ * bad_scope (ключ не на том API System, перебор не поможет); прочий 403 →
+ * not_authorized (чужой опыт) → следующий кандидат.
+ */
+export async function createGamePassDirect(
+  apiKey: string,
+  universeId: string,
+  name: string,
+  priceInRobux: number,
+): Promise<CreateGamePassResult> {
+  const form = new FormData();
+  form.append("request.Name", name);
+  form.append("request.Description", "");
+  form.append("request.Price", String(priceInRobux));
+  form.append("request.IsForSale", "true");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${OPEN_CLOUD_GAMEPASS_BASE}/${universeId}/game-passes`, {
+      method: "POST",
+      headers: { "x-api-key": apiKey },
+      body: form,
+      signal: controller.signal,
+    });
+    const text = await res.text().catch(() => "");
+    // 401 = ключа нет/протух. У Open Cloud ключ живёт час, а покупатель легко
+    // копирует его не целиком — это самая частая «ошибка», и звучать она должна
+    // не как «Roblox вернул ошибку», а как «пришли ключ заново».
+    if (res.status === 401) {
+      return { ok: false, error: "bad_key", universeId, detail: "ключ не принят Roblox (протух или скопирован не полностью)" };
+    }
+    if (res.status === 403) {
+      // «Scope not authorized» = ключ выпущен без `game-pass:write` (частая
+      // ошибка клиента: выбран legacy-game-passes). Другие опыты не спасут.
+      if (/scope not authorized/i.test(text)) {
+        return {
+          ok: false,
+          error: "bad_scope",
+          universeId,
+          detail: "ключ без скоупа game-pass:write (нужен API System game-passes)",
+        };
+      }
+      return { ok: false, error: "not_authorized", universeId, detail: "ключ не авторизован на этот experience" };
+    }
+    if (!res.ok) {
+      return { ok: false, error: "roblox_error", universeId, detail: `HTTP ${res.status}: ${text.slice(0, 300)}` };
+    }
+    let body: any = null;
+    try { body = JSON.parse(text); } catch { /* ignore */ }
+    const gamePassId = Number(body?.gamePassId);
+    if (!Number.isFinite(gamePassId)) {
+      return { ok: false, error: "roblox_error", universeId, detail: `неожиданный ответ: ${text.slice(0, 300)}` };
+    }
+    let isForSale = Boolean(body?.isForSale);
+    const returnedPrice = Number(body?.priceInformation?.defaultPriceInRobux ?? priceInRobux);
+    if (!isForSale) isForSale = await patchGamePassOnSaleDirect(apiKey, universeId, gamePassId, priceInRobux);
+    return {
+      ok: true,
+      gamePassId,
+      universeId,
+      priceInRobux: Number.isFinite(returnedPrice) ? returnedPrice : priceInRobux,
+      isForSale,
+      name: typeof body?.name === "string" ? body.name : name,
+    };
+  } catch (err: any) {
+    return { ok: false, error: "network", universeId, detail: err?.message ?? String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Оркестратор: резолв кандидатов-universe → создать на первом, где ключ
+ * авторизован. 403 = «не тот universe» → следующий; иная ошибка → стоп.
+ * ДОРМАНТ — не вызывается из клиентского флоу.
+ */
+export async function createGamePassForUserDirect(
+  params: CreateGamePassParams,
+): Promise<CreateGamePassResult> {
+  if (!params.apiKey || !params.apiKey.trim()) {
+    return { ok: false, error: "roblox_error", detail: "пустой apiKey" };
+  }
+  if (!isValidGamePassPrice(params.priceInRobux)) {
+    return { ok: false, error: "bad_price", detail: `цена вне диапазона: ${params.priceInRobux}` };
+  }
+  const name = safeGamePassName(params.priceInRobux, params.name);
+  const candidates = await resolveUniverseCandidatesDirect(params);
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      error: "no_universe",
+      detail: "не удалось определить experience (нужен universeId/placeId или публичный опыт по нику)",
+    };
+  }
+  let last: CreateGamePassResult | null = null;
+  for (const universeId of candidates) {
+    const r = await createGamePassDirect(params.apiKey, universeId, name, params.priceInRobux);
+    if (r.ok) return r;
+    last = r;
+    if (r.error !== "not_authorized") break; // bad_scope и прочее — дальше нет смысла
+  }
+  return last ?? { ok: false, error: "no_universe", detail: "нет кандидатов" };
+}
