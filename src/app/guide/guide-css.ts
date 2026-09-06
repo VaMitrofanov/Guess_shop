@@ -414,6 +414,11 @@ export const GUIDE_CSS = `
 :is(html[data-theme="light"]) .wbi-tgoal .d b{color:#14342a}
 :is(html[data-theme="light"]) .wbi-tgoal .v small{color:#2b7e66}
 :is(html[data-theme="light"]) .wbi-tnote{color:#62596f}
+/* Строка-крошка над развилкой: ник и цена стояли почти белым (#e7e0ff) — на
+   светлом фоне их не видно ровно так же, как заголовков дверей. */
+:is(html[data-theme="light"]) .wbi-crumb{background:#fff;border-color:#ded8f1}
+:is(html[data-theme="light"]) .wbi-crumb b{color:#251b3f}
+:is(html[data-theme="light"]) .wbi-crumb i{color:#12674e}
 @media(max-width:900px){
  .wbi-v3 .wbi-hero{min-height:0;grid-template-columns:1fr;grid-template-rows:auto;padding:52px 0 42px;gap:0}
  .wbi-v3 .wbi-kick,.wbi-v3 .wbi-h1,.wbi-v3 .wbi-lead,.wbi-v3 .wbi-chips,.wbi-v3 .wbi-must{grid-column:1;grid-row:auto}
