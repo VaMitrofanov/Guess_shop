@@ -44,6 +44,18 @@ export const GUIDE_CSS = `
 .wbi-card.wbi-key{border:1px solid rgba(201,168,76,.5);animation:wbi-glow 3.4s ease-in-out infinite}
 @keyframes wbi-glow{0%,100%{box-shadow:0 0 0 1px rgba(201,168,76,.25),0 0 22px rgba(201,168,76,.08)}50%{box-shadow:0 0 0 1px rgba(201,168,76,.6),0 0 44px rgba(201,168,76,.2)}}
 .wbi-kbadge{display:inline-block;background:linear-gradient(90deg,#c9a84c,#f7d574);color:#1a1405;font-size:14px;font-weight:850;letter-spacing:.8px;padding:7px 13px;border-radius:20px;margin-bottom:14px}
+/* Задача, а не найденный предмет: пунктир и зелёный отделяют «что сделать» от
+   списка того, что реально нашли на аккаунте. */
+.wbi-target{margin-top:14px;border:1.5px dashed rgba(69,214,170,.55);border-radius:16px;padding:16px;
+  background:linear-gradient(180deg,rgba(69,214,170,.09),transparent);display:flex;flex-direction:column;gap:12px}
+.wbi-target .k{font-size:11px;font-weight:800;letter-spacing:1.6px;color:#4e8f7c}
+.wbi-tgoal{display:flex;align-items:center;gap:14px}
+.wbi-tgoal .v{flex-shrink:0;font-size:30px;font-weight:900;color:var(--grn);line-height:1;font-variant-numeric:tabular-nums}
+.wbi-tgoal .v small{font-size:14px;color:#4e8f7c;margin-left:3px}
+.wbi-tgoal .d{font-size:15px;color:#bff0de;line-height:1.5}
+.wbi-tgoal .d b{color:#fff}
+.wbi-tnote{font-size:13.5px;color:var(--mut);line-height:1.5}
+
 /* ── Квест: шаг за шагом вместо простыни ────────────────────────────────────
    Полоса управления (устройство + подробность), прогресс и навигация шага.
    Инструкция в оформлении заказа идёт по одному шагу: человек не листает

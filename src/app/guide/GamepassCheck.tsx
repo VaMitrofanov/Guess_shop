@@ -766,9 +766,9 @@ function ResultCard({
 
   const head = {
     ready: { k: "✅ всё уже готово", h: "Создавать ничего не нужно", s: <>У тебя уже выставлены геймпассы с нужными ценами. Мы подставили их сами — остаётся подтвердить.</> },
-    assembled: { k: "🧩 собрали из твоих", h: "Ровных пассов нет — собрали из того, что есть", s: <>Твои цены складываются в <b>ровно {amount.toLocaleString("ru-RU")} R$</b> без остатка. Один и тот же пасс можно купить несколько раз: части выкупаются с разных аккаунтов.</> },
-    build: { k: "➕ достроим одним пассом", h: "Почти сходится — нужен ещё один пасс", s: <>То, что уже выставлено, закрывает <b>{covered.toLocaleString("ru-RU")} R$</b>. Точной суммы из этого не собрать, поэтому создай <b>один</b> пасс — инструкция ниже показывает ровно его.</> },
-    empty: { k: "🆕 пассов не нашли", h: "Сделаем с нуля — это 3–5 минут", s: <>На аккаунте нет геймпассов, выставленных на продажу. Ниже — что именно создать.</> },
+    assembled: { k: "🧩 собрали из твоих", h: "Создавать ничего не нужно", s: <>Твои геймпассы складываются в <b>ровно {amount.toLocaleString("ru-RU")} R$</b> без остатка — один из них мы выкупим несколько раз, покупки идут с разных аккаунтов. Тебе делать ничего не надо.</> },
+    build: { k: "➕ берём твой и добавляем", h: "Твой геймпасс подходит — нужен ещё один", s: <>Твой закрывает <b>{covered.toLocaleString("ru-RU")} R$</b> из {amount.toLocaleString("ru-RU")} — его выкупим столько раз, сколько нужно. Ровно этим не добрать, поэтому под остаток нужен ещё один геймпасс.</> },
+    empty: { k: "🔍 подходящего не нашли", h: "На аккаунте нет геймпасса, который мы можем купить", s: <><b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Такой вещи у тебя пока нет.</> },
   }[plan.kind];
 
   return (
@@ -803,23 +803,48 @@ function ResultCard({
             <span className={`wbi-rbadge${part.repeat ? " warn2" : ""}`}>{part.repeat ? "повтор" : "подходит"}</span>
           </div>
         ))}
-        {create.map((t, i) => (
-          <div className="wbi-rline dim" key={`todo-${i}`}>
-            <span className="wbi-rtile todo"><span>{t.price}</span><small>R$</small></span>
-            <span className="wbi-rmeta">
-              <span className="t">Пасс на {t.price} R$</span>
-              <span className="s">его нужно создать — инструкция ниже</span>
-            </span>
-            <span className="wbi-rnet">{t.amount.toLocaleString("ru-RU")} R$<small>НА РУКИ</small></span>
-            <span className="wbi-rbadge todo">создать</span>
-          </div>
-        ))}
       </div>
 
-      <div className={`wbi-total${done ? "" : " short"}`}>
-        <span className="l">{done ? "Итого на руки" : `Собрано из ${amount.toLocaleString("ru-RU")}`}</span>
-        <span className="r">{(done ? amount : covered).toLocaleString("ru-RU")} R$</span>
-      </div>
+      {/* Того, чего НЕТ, в списке найденного быть не должно: строка «Пасс на
+          1429 R$ · создать» читалась как «пасс уже есть». Недостающее — это
+          задача, и выглядеть она должна как задача. */}
+      {!done && create.length > 0 && (
+        <div className="wbi-target">
+          <span className="k">ЧТО НУЖНО СДЕЛАТЬ</span>
+          {create.length === 1 ? (
+            <div className="wbi-tgoal">
+              <span className="v">{create[0].price}<small>R$</small></span>
+              <span className="d">
+                Выставить <b>{rows.length > 0 ? "ещё один геймпасс" : "один геймпасс"}</b> с такой ценой.
+                <br />С него придёт{rows.length > 0 ? " недостающие" : ""} <b>{create[0].amount.toLocaleString("ru-RU")} R$</b>.
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="wbi-tgoal">
+                <span className="v">{create[0].price}<small>R$</small></span>
+                <span className="d">Первый геймпасс — с него придёт <b>{create[0].amount.toLocaleString("ru-RU")} R$</b></span>
+              </div>
+              <div className="wbi-tgoal">
+                <span className="v">{create[1].price}<small>R$</small></span>
+                <span className="d">
+                  Второй — с него <b>{create[1].amount.toLocaleString("ru-RU")} R$</b>.
+                  <br />Вместе — <b>{amount.toLocaleString("ru-RU")} R$</b>.
+                </span>
+              </div>
+              <span className="wbi-tnote">Два геймпасса вместо одного дорогого: так заказ выкупается быстрее, а ты получаешь ровно ту же сумму.</span>
+            </>
+          )}
+          <span className="wbi-tnote">Цену скопируешь на следующем шаге — набирать руками не придётся.</span>
+        </div>
+      )}
+
+      {done && (
+        <div className="wbi-total">
+          <span className="l">Итого на руки</span>
+          <span className="r">{amount.toLocaleString("ru-RU")} R$</span>
+        </div>
+      )}
 
       {confirmErr && <div className="wbi-warn" style={{ marginTop: 14 }}>{confirmErr}</div>}
 
