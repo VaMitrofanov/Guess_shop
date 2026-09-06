@@ -40,7 +40,13 @@ import {
   type QuestScreen,
 } from "../shared/gamepass-quest";
 import { gamepassAutocreateEnabled } from "../shared/gamepass-autocreate-flag";
-import { createPassesByKey, looksLikeApiKey, recordAutocreateTrace } from "../shared/gamepass-autocreate";
+import {
+  createPassesByKey,
+  createPassesWithStoredKey,
+  hasStoredKeyFor,
+  looksLikeApiKey,
+  recordAutocreateTrace,
+} from "../shared/gamepass-autocreate";
 import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
@@ -2694,6 +2700,30 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   await showQuestPlan(ctx, { wbCode: state.wbCode, denomination: state.denomination, nick, owned }, showResult);
 }
 
+/** Id нашего пользователя по Telegram-аккаунту — нужен, чтобы взять ЕГО ключ. */
+async function dbUserIdFor(ctx: any): Promise<string | null> {
+  const user = await (db as any).user
+    .findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } })
+    .catch(() => null);
+  return user?.id ?? null;
+}
+
+/**
+ * Экран выбора способа. Если у покупателя уже привязан ключ на этот ник, первой
+ * дверью становится «создать за меня» — ради этого ключи и хранятся.
+ */
+async function showQuestFork(ctx: any, quest: { wbCode: string; nick: string; plan: CheckPlan }): Promise<void> {
+  const userId = gamepassAutocreateEnabled() ? await dbUserIdFor(ctx) : null;
+  const storedKey = userId ? await hasStoredKeyFor(db as any, userId, quest.nick) : false;
+  await showQuest(ctx, questForkScreen({
+    targets: targetsToCreate(quest.plan),
+    keyEnabled: gamepassAutocreateEnabled(),
+    wbCode: quest.wbCode,
+    nick: quest.nick,
+    storedKey,
+  }));
+}
+
 /**
  * «Подтвердить заказ» — оформление по сохранённому плану.
  *
@@ -2712,12 +2742,7 @@ async function handleQuestConfirm(bot: Telegraf, ctx: any): Promise<void> {
     return;
   }
   if (!planIsReady(quest.plan)) {
-    await showQuest(ctx, questForkScreen({
-      targets: targetsToCreate(quest.plan),
-      keyEnabled: gamepassAutocreateEnabled(),
-      wbCode: quest.wbCode,
-      nick: quest.nick,
-    }));
+    await showQuestFork(ctx, quest);
     return;
   }
   const parts = quest.plan.parts;
@@ -4408,12 +4433,72 @@ export function registerCallbacks(bot: Telegraf): void {
         );
         return;
       }
-      await showQuest(ctx, questForkScreen({
-        targets: targetsToCreate(quest.plan),
-        keyEnabled: gamepassAutocreateEnabled(),
-        wbCode: quest.wbCode,
+      await showQuestFork(ctx, quest);
+      return;
+    }
+
+    // ── ✨ Создать сейчас сохранённым ключом ────────────────────────────
+    // Ключ привязан в кабинете — покупателю не нужно ни идти в Roblox, ни
+    // присылать что-либо: одно нажатие, и пассы созданы.
+    if (data === QUEST.keyStored) {
+      const quest = questPlans.get(ctx.from.id);
+      await ctx.answerCbQuery("Создаём…").catch(() => {});
+      const targets = quest ? targetsToCreate(quest.plan) : [];
+      const userId = quest && gamepassAutocreateEnabled() ? await dbUserIdFor(ctx) : null;
+      if (!quest || targets.length === 0 || !userId) {
+        await ctx.reply(
+          "Проверка устарела — пришли ник ещё раз, посмотрим аккаунт заново.",
+          Markup.inlineKeyboard([[Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)]]),
+        );
+        return;
+      }
+      const prices = targets.map((t) => t.price);
+      const working = await ctx.reply(questKeyWorkingText(prices), { parse_mode: "HTML" });
+      const chatId = ctx.chat?.id ?? ctx.from.id;
+      const edit = async (text: string, extra: Record<string, unknown>) => {
+        try {
+          await bot.telegram.editMessageText(chatId, working.message_id, undefined, text, extra as any);
+        } catch {
+          await ctx.reply(text, extra);
+        }
+      };
+
+      const outcome = await createPassesWithStoredKey(db as any, {
+        userId,
         nick: quest.nick,
-      }));
+        targets: prices,
+        wbCode: quest.wbCode,
+      });
+
+      if (!outcome) {
+        // Ключ успели удалить между показом кнопки и нажатием — обычная развилка.
+        await edit("Сохранённого ключа больше нет — выбери способ ниже.", { parse_mode: "HTML" });
+        await showQuestFork(ctx, quest);
+        return;
+      }
+      if (outcome.error && outcome.created.length === 0) {
+        const verdict = keyCreateVerdict(outcome.error);
+        await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), edit);
+        return;
+      }
+      await edit(
+        `✅ <b>Сделали за тебя</b>\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`,
+        { parse_mode: "HTML" },
+      );
+      await showQuestPlan(ctx, {
+        wbCode: quest.wbCode,
+        denomination: quest.denomination,
+        nick: quest.nick,
+        owned: [
+          ...quest.owned,
+          ...outcome.created.map((c) => ({
+            gamepassId: String(c.gamePassId),
+            name: c.name || `Пасс ${c.priceInRobux}`,
+            price: c.priceInRobux,
+            isForSale: true,
+          })),
+        ],
+      });
       return;
     }
 

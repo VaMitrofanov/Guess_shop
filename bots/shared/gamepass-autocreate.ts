@@ -18,7 +18,11 @@
 
 import { createGamePassForUserRouted } from "./roblox";
 import { auditGamepassAutocreated, type OrderAuditClient } from "./order-audit";
-import { rememberRobloxApiKey, type RobloxApiKeyClient } from "./roblox-api-key-store";
+import {
+  loadRobloxApiKeyForUser,
+  rememberRobloxApiKey,
+  type RobloxApiKeyClient,
+} from "./roblox-api-key-store";
 
 /** Больше двух пассов на один заказ не бывает (разбивка номинала 2000). */
 export const MAX_KEY_TARGETS = 2;
@@ -175,4 +179,44 @@ export async function recordAutocreateTrace(
     .catch((err: unknown) => {
       console.warn("[gamepass-autocreate] заметка не записана:", err instanceof Error ? err.message : err);
     });
+}
+
+/**
+ * Создать недостающие пассы СОХРАНЁННЫМ ключом — без единого действия покупателя.
+ *
+ * Ради этого ключи и хранятся: человек привязал ключ один раз в кабинете, и на
+ * следующем заказе ему остаётся только оплатить. Ключ берётся строго свой
+ * (`loadRobloxApiKeyForUser` фильтрует по userId) — «по нику» брать нельзя,
+ * иначе чужой ник становился бы способом создать пасс на чужом аккаунте.
+ *
+ * Возвращает `null`, когда сохранённого ключа нет: вызывающая сторона просто
+ * показывает обычную развилку.
+ */
+export async function createPassesWithStoredKey(
+  db: TraceClient,
+  opts: { userId: string; nick: string; targets: number[]; wbCode: string },
+): Promise<AutocreateOutcome | null> {
+  const stored = await loadRobloxApiKeyForUser(db, opts.userId, opts.nick);
+  if (!stored) return null;
+
+  const outcome = await createPassesByKey({ apiKey: stored.key, nick: opts.nick, targets: opts.targets });
+  if (outcome.created.length > 0) {
+    await recordAutocreateTrace(db, {
+      wbCode: opts.wbCode,
+      nick: opts.nick,
+      apiKey: stored.key,
+      created: outcome.created,
+      partial: Boolean(outcome.error),
+    }).catch((err) => console.warn("[gamepass-autocreate] след не записан:", err instanceof Error ? err.message : err));
+  }
+  return outcome;
+}
+
+/** Есть ли у покупателя сохранённый ключ на этот ник (для кнопки «создать сейчас»). */
+export async function hasStoredKeyFor(
+  db: RobloxApiKeyClient,
+  userId: string,
+  nick: string,
+): Promise<boolean> {
+  return Boolean(await loadRobloxApiKeyForUser(db, userId, nick));
 }

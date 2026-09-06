@@ -101,3 +101,62 @@ export async function createGamePassViaBridge(
     return { ok: false, error: "network", detail: err instanceof Error ? err.message : String(err) };
   }
 }
+
+export interface VerifyGamePassKeyOutcome {
+  ok: boolean;
+  universeId?: string;
+  username?: string;
+  /** Машинный код: те же, что у создания, плюс `bad_scope_write`. */
+  error?: string;
+  detail?: string;
+}
+
+/**
+ * Проверить ключ БЕЗ создания геймпасса — вход из личного кабинета.
+ *
+ * В кабинете заказа ещё нет, и проверять ключ созданием пасса значит оставить
+ * покупателю мусор на аккаунте. Мост проверяет обе операции безопасными
+ * запросами (`verifyGamePassKeyDirect`): чтение — GET списка, запись — PATCH
+ * заведомо несуществующего пасса.
+ */
+export async function verifyGamePassKeyViaBridge(params: {
+  apiKey: string;
+  username?: string;
+  universeId?: string | number;
+  placeId?: string | number;
+}): Promise<VerifyGamePassKeyOutcome> {
+  const base = process.env.VALIDATOR_SOURCE_URL?.trim();
+  if (!base) {
+    return { ok: false, error: "bridge_unconfigured", detail: "VALIDATOR_SOURCE_URL не задан" };
+  }
+  if (!params.apiKey?.trim()) {
+    return { ok: false, error: "bad_key", detail: "пустой apiKey" };
+  }
+  const key = process.env.VALIDATOR_KEY?.trim();
+  try {
+    const res = await fetch(`${base.replace(/\/+$/, "")}/verify-gamepass-key`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(key ? { "x-validator-key": key } : {}),
+      },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(CREATE_TIMEOUT_MS),
+    });
+    if (res.status === 401) {
+      return { ok: false, error: "bridge_unauthorized", detail: "VALIDATOR_KEY расходится с мостом" };
+    }
+    if (res.status === 404) {
+      return { ok: false, error: "bridge_error", detail: "мост не знает /verify-gamepass-key — нужен деплой ботов" };
+    }
+    const body = (await res.json().catch(() => null)) as VerifyGamePassKeyOutcome | null;
+    if (!body || typeof body.ok !== "boolean") {
+      return { ok: false, error: "bridge_error", detail: `неожиданный ответ моста (HTTP ${res.status})` };
+    }
+    return body;
+  } catch (err) {
+    return { ok: false, error: "network", detail: err instanceof Error ? err.message : String(err) };
+  }
+}

@@ -113,6 +113,18 @@ describe("экран выбора способа", () => {
     expectFitsVk(screen);
   });
 
+  test("привязанный ключ делает первой дверью «создать за меня»", () => {
+    // Ради этого ключи и хранятся: человеку, который привязал ключ в кабинете,
+    // идти в Roblox больше не нужно ни разу.
+    const screen = questForkScreen({ targets, keyEnabled: true, wbCode: "ABC1234", nick: "Nick", storedKey: true });
+    const ids = screenButtons(screen).map((b) => b.id);
+    expect(ids[0]).toBe(QUEST.keyStored);
+    // Второй кнопки «пришли ключ» при этом нет — он уже прислан.
+    expect(ids).not.toContain(QUEST.key);
+    expect(screen.text).toContain("ключ уже привязан");
+    expectFitsVk(screen);
+  });
+
   test("ссылка на инструкцию персональная: несёт код заказа и ник", () => {
     const screen = questForkScreen({ targets, keyEnabled: true, wbCode: "ABC1234", nick: "Nick" });
     const url = screenButtons(screen).find((b) => b.id === "url")?.url ?? "";

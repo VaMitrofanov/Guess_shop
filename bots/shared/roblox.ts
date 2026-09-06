@@ -1564,6 +1564,112 @@ export async function createGamePassDirect(
 }
 
 /**
+ * Проверка ключа БЕЗ создания геймпасса — для личного кабинета.
+ *
+ * В кабинете ключ привязывают заранее, когда заказа ещё нет. Проверять его
+ * созданием пасса нельзя: у покупателя на аккаунте останется мусор, который он
+ * не заказывал. Поэтому обе операции проверяются своими безопасными запросами:
+ *
+ *   • `game-pass:read` — GET списка пассов опыта: ничего не меняет;
+ *   • `game-pass:write` — PATCH НЕСУЩЕСТВУЮЩЕГО пасса: создать он не может по
+ *     определению, а Roblox сначала проверяет права и только потом наличие.
+ *     Права есть → «не найден» (404/400); прав нет → `403 Scope not authorized`.
+ *
+ * Именно так проверка отвечает на вопрос «ключ рабочий?» целиком: разрешение на
+ * запись без пробы на запись — это обещание, которое вскроется на заказе.
+ */
+export interface VerifyGamePassKeyResult {
+  ok: boolean;
+  /** Опыт, на котором проверяли (он же — первый годный кандидат). */
+  universeId?: string;
+  /** Ник владельца, по которому резолвили опыт. */
+  username?: string;
+  /** Машинный код отказа — те же, что у создания. */
+  error?: string;
+  detail?: string;
+}
+
+/** Заведомо несуществующий id: пространство asset ID Roblox до него не доросло. */
+const ABSENT_GAMEPASS_ID = 999_999_999_999;
+
+export async function verifyGamePassKeyDirect(
+  params: Pick<CreateGamePassParams, "apiKey" | "universeId" | "placeId" | "username">,
+): Promise<VerifyGamePassKeyResult> {
+  if (!params.apiKey || !params.apiKey.trim()) {
+    return { ok: false, error: "bad_key", detail: "пустой ключ" };
+  }
+  const candidates = await resolveUniverseCandidatesDirect(params);
+  if (candidates.length === 0) {
+    return { ok: false, error: "no_universe", detail: "не удалось определить experience" };
+  }
+
+  let last: VerifyGamePassKeyResult | null = null;
+  for (const universeId of candidates) {
+    const read = await probeGamePassScope(params.apiKey, universeId, "read");
+    if (read === "unauthorized") {
+      // Опыт чужой для ключа — пробуем следующий: у аккаунта их бывает много.
+      last = { ok: false, error: "not_authorized", universeId, detail: "ключ не авторизован на этот experience" };
+      continue;
+    }
+    if (read === "bad_key") return { ok: false, error: "bad_key", universeId, detail: "Roblox не принял ключ" };
+    if (read === "network") return { ok: false, error: "network", universeId, detail: "Roblox не ответил" };
+    if (read === "no_scope") {
+      return { ok: false, error: "bad_scope", universeId, detail: "у ключа нет game-pass:read" };
+    }
+
+    const write = await probeGamePassScope(params.apiKey, universeId, "write");
+    if (write === "no_scope") {
+      return { ok: false, error: "bad_scope_write", universeId, detail: "у ключа нет game-pass:write" };
+    }
+    if (write === "bad_key") return { ok: false, error: "bad_key", universeId };
+    if (write === "network") return { ok: false, error: "network", universeId };
+    // `unauthorized` на записи при прошедшем чтении — это не про права, а про
+    // конкретный (несуществующий) пасс: считаем запись доступной.
+    return { ok: true, universeId, username: params.username };
+  }
+  return last ?? { ok: false, error: "no_universe", detail: "нет кандидатов" };
+}
+
+type ScopeProbe = "ok" | "no_scope" | "bad_key" | "unauthorized" | "network";
+
+async function probeGamePassScope(
+  apiKey: string,
+  universeId: string,
+  op: "read" | "write",
+): Promise<ScopeProbe> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    let res: Response;
+    if (op === "read") {
+      res = await fetch(
+        `${OPEN_CLOUD_GAMEPASS_BASE}/${universeId}/game-passes?passView=Full&pageSize=1`,
+        { method: "GET", headers: { "x-api-key": apiKey }, signal: controller.signal },
+      );
+    } else {
+      const form = new FormData();
+      form.append("request.IsForSale", "true");
+      form.append("request.Price", "100");
+      res = await fetch(
+        `${OPEN_CLOUD_GAMEPASS_BASE}/${universeId}/game-passes/${ABSENT_GAMEPASS_ID}`,
+        { method: "PATCH", headers: { "x-api-key": apiKey }, body: form, signal: controller.signal },
+      );
+    }
+    if (res.status === 401) return "bad_key";
+    if (res.status === 403) {
+      const text = await res.text().catch(() => "");
+      return /scope not authorized/i.test(text) ? "no_scope" : "unauthorized";
+    }
+    // Для записи «404 не найден» — тоже успех: права проверены раньше наличия.
+    return "ok";
+  } catch {
+    return "network";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Умеет ли ключ ЧИТАТЬ геймпассы этого опыта (`game-pass:read`).
  *
  * Нужен ровно для одного: различить две причины отказа по правам. Roblox на обе

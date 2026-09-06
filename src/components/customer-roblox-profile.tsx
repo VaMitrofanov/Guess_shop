@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import type { CustomerRobloxProfile } from "@/lib/roblox-profile";
+import CustomerRobloxKeyCard, { type LinkedKeyView } from "@/components/customer-roblox-key";
 import styles from "@/app/dashboard/dashboard.module.css";
 
 type ProfilePayload = {
@@ -34,6 +35,10 @@ type CustomerRobloxProfileCardProps = {
   bonusCaption: string;
   isAdmin: boolean;
   activeOrderHref: string | null;
+  /** Привязанные ключи для геймпассов — грузятся на сервере вместе с профилем. */
+  keys: LinkedKeyView[];
+  /** Метод «сделаем пасс за тебя» включён флагом. */
+  keyAutoEnabled: boolean;
 };
 
 function profileDate(value: string | null) {
@@ -52,6 +57,8 @@ export default function CustomerRobloxProfileCard({
   bonusCaption,
   isAdmin,
   activeOrderHref,
+  keys,
+  keyAutoEnabled,
 }: CustomerRobloxProfileCardProps) {
   const [payload, setPayload] = useState(initial);
   const [editing, setEditing] = useState(!initial.profile);
@@ -268,6 +275,15 @@ export default function CustomerRobloxProfileCard({
         </div>
       )}
       {message && <p className={styles.robloxMessage} role="status">{message}</p>}
+
+      {/* Ключ идёт следом за ником намеренно: это две половины одного действия —
+          «кому робуксы» и «кто создаст геймпасс». Разведённые по разным экранам,
+          они превращаются в две задачи вместо одной. */}
+      <CustomerRobloxKeyCard
+        initialKeys={keys}
+        username={profile?.username ?? null}
+        enabled={keyAutoEnabled}
+      />
     </div>
   );
 }

@@ -26,6 +26,7 @@
 import * as http from "http";
 import {
   createGamePassForUserDirect,
+  verifyGamePassKeyDirect,
   getGamepassDetailsDirect,
   getGamepassForPurchase,
   getRobloxUserProfileDirect,
@@ -92,10 +93,11 @@ export function startBridgeServer(): http.Server {
     const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";
     const isSearchGamepasses = req.method === "POST" && url.pathname === "/search-gamepasses";
     const isCreateGamepass   = req.method === "POST" && url.pathname === "/create-gamepass";
+    const isVerifyKey        = req.method === "POST" && url.pathname === "/verify-gamepass-key";
     const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
     const isRobloxUser       = req.method === "GET"  && url.pathname === "/roblox-user";
 
-    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isCreateGamepass && !isGamepassById && !isRobloxUser) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isCreateGamepass && !isVerifyKey && !isGamepassById && !isRobloxUser) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -232,6 +234,51 @@ export function startBridgeServer(): http.Server {
         respond(200, { ok: true, gamepasses, userExists: account !== null, account });
       } catch (err: any) {
         console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
+      }
+      return;
+    }
+
+    // ── POST /verify-gamepass-key ───────────────────────────────────────────
+    // Проверка ключа БЕЗ создания пасса — для личного кабинета, где заказа ещё
+    // нет и оставлять на аккаунте покупателя лишний геймпасс нельзя. Тело:
+    //   { apiKey, username? | universeId? | placeId? }
+    // Ключ проходит транзитом, НИКОГДА не логируется и не возвращается.
+    if (isVerifyKey) {
+      let body: Record<string, unknown>;
+      try {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", (chunk) => { data += chunk; });
+          req.on("end",  () => resolve(data));
+          req.on("error", reject);
+        });
+        body = JSON.parse(raw);
+      } catch {
+        respond(400, { ok: false, error: "bad_request" });
+        return;
+      }
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
+      if (!apiKey.trim()) {
+        respond(400, { ok: false, error: "missing_fields" });
+        return;
+      }
+      const target =
+        body.universeId != null ? `universe=${body.universeId}` :
+        body.placeId    != null ? `place=${body.placeId}` :
+        body.username   != null ? `nick=${body.username}` : "no-target";
+      console.log(`[Bridge] → verify-gamepass-key (${target})`);
+      try {
+        const result = await verifyGamePassKeyDirect({
+          apiKey,
+          universeId: (typeof body.universeId === "string" || typeof body.universeId === "number") ? body.universeId : undefined,
+          placeId: (typeof body.placeId === "string" || typeof body.placeId === "number") ? body.placeId : undefined,
+          username: typeof body.username === "string" ? body.username : undefined,
+        });
+        console.log(`[Bridge] ← verify-gamepass-key: ${result.ok ? "ok" : `FAIL ${result.error}`}`);
+        respond(200, { ...result }); // result НЕ содержит apiKey
+      } catch (err: any) {
+        console.error("[Bridge] verify-gamepass-key error:", err?.message ?? err);
         respond(500, { ok: false, error: "server_error" });
       }
       return;

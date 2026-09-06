@@ -66,6 +66,14 @@ describe.each([
     expect(source).toContain("} else if (existingOrder) {");
   });
 
+  test("сохранённый ключ берётся только СВОЙ (фильтр по userId)", () => {
+    // Ключ — креденшл: брать его «по нику» значит позволить любому, кто знает
+    // чужой ник, создавать геймпассы на чужом аккаунте.
+    expect(source).toContain("createPassesWithStoredKey");
+    expect(source).toContain("userId");
+    expect(read("bots/shared/roblox-api-key-store.ts")).toContain("where: { userId, robloxUsername: nick }");
+  });
+
   test("цена основного пасса на разбитом заказе — цена ЕГО части", () => {
     expect(source).toContain("parts ? parts[0].price");
   });

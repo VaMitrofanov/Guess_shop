@@ -34,6 +34,8 @@ export const QUEST = {
   fork: "quest_fork",
   /** Ветка «сделаем за тебя по ключу». */
   key: "quest_key",
+  /** Создать сейчас сохранённым ключом — без повторного ввода. */
+  keyStored: "quest_key_saved",
   /** Вернуться к полю ключа после отказа. */
   keyRetry: "quest_key_retry",
   /** Ввести другой ник (существующий callback ботов). */
@@ -201,8 +203,10 @@ export function questForkScreen(opts: {
   keyEnabled: boolean;
   wbCode: string;
   nick?: string;
+  /** У покупателя уже привязан ключ на этот ник — тогда делать ему нечего. */
+  storedKey?: boolean;
 }): QuestScreen {
-  const { targets, keyEnabled, wbCode, nick } = opts;
+  const { targets, keyEnabled, wbCode, nick, storedKey = false } = opts;
   const many = targets.length > 1;
 
   const lines = [
@@ -215,21 +219,30 @@ export function questForkScreen(opts: {
     "",
     "📖 <b>Создам сам</b> — покажем каждое нажатие с картинкой · 3–5 минут",
   ];
-  if (keyEnabled) {
+  if (keyEnabled && storedKey) {
+    lines.push("✨ <b>Создать за меня</b> — ключ уже привязан в твоём кабинете, делать ничего не нужно · минута");
+  } else if (keyEnabled) {
     lines.push("🔑 <b>Сделайте за меня</b> · НОВОЕ — пришлёшь один ключ из Roblox, создадим сами. Пароль не нужен · минута");
   }
   lines.push(
     "🔢 <b>Он у меня уже есть</b> — найдём по номеру, даже скрытый · 10 секунд",
     "",
-    "Не знаешь, что выбрать? Жми первый — это обычный путь.",
+    storedKey
+      ? "Твой ключ уже привязан в личном кабинете — жми первую кнопку, и через минуту всё будет готово."
+      : "Не знаешь, что выбрать? Жми первый — это обычный путь.",
   );
 
-  const rows: QuestButton[][] = [
-    [{ id: "url", label: "📖 Создам сам (инструкция)", url: guideUrlFor(wbCode, nick) }],
-  ];
-  if (keyEnabled) rows.push([{ id: QUEST.key, label: "🔑 Сделайте за меня", tone: "positive" }]);
+  const rows: QuestButton[][] = [];
+  if (keyEnabled && storedKey) {
+    // Ключ уже привязан в кабинете — человеку не за чем идти в Roblox вообще.
+    // Эта дверь идёт первой и одна выделена: остальные остаются на случай
+    // «хочу другой аккаунт» или «пасс уже есть».
+    rows.push([{ id: QUEST.keyStored, label: `✨ Создать за меня — ${many ? "оба пасса" : "пасс"}`, tone: "positive" }]);
+  }
+  rows.push([{ id: "url", label: "📖 Создам сам (инструкция)", url: guideUrlFor(wbCode, nick) }]);
+  if (keyEnabled && !storedKey) rows.push([{ id: QUEST.key, label: "🔑 Сделайте за меня", tone: "positive" }]);
   rows.push([{ id: QUEST.passid, label: "🔢 Он у меня уже есть", tone: "primary" }]);
-  rows.push([{ id: QUEST.recheck, label: "🔄 Уже сделал — проверить", tone: "secondary" }]);
+  if (!storedKey) rows.push([{ id: QUEST.recheck, label: "🔄 Уже сделал — проверить", tone: "secondary" }]);
 
   return { text: lines.join("\n"), rows };
 }

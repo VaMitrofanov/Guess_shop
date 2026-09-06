@@ -39,7 +39,13 @@ import {
   type QuestScreen,
 } from "../shared/gamepass-quest";
 import { gamepassAutocreateEnabled } from "../shared/gamepass-autocreate-flag";
-import { createPassesByKey, looksLikeApiKey, recordAutocreateTrace } from "../shared/gamepass-autocreate";
+import {
+  createPassesByKey,
+  createPassesWithStoredKey,
+  hasStoredKeyFor,
+  looksLikeApiKey,
+  recordAutocreateTrace,
+} from "../shared/gamepass-autocreate";
 import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
@@ -1421,6 +1427,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleQuestKey(ctx, vkUserId);
     return;
   }
+  if (msgPayload?.command === "quest_key_saved") {
+    await handleQuestStoredKey(ctx, vkUserId);
+    return;
+  }
   if (msgPayload?.command === "find_gp_start") {
     await handleFindGpStart(ctx, vkUserId);
     return;
@@ -2714,6 +2724,7 @@ function buildQuestVkButton(kb: ReturnType<typeof Keyboard.builder>, button: Que
     [QUEST.confirm]: "quest_ok",
     [QUEST.fork]: "quest_fork",
     [QUEST.key]: "quest_key",
+    [QUEST.keyStored]: "quest_key_saved",
     [QUEST.keyRetry]: "quest_key_retry",
     [QUEST.nick]: "find_gp_start",
     [QUEST.recheck]: "find_gp_recheck",
@@ -2911,7 +2922,18 @@ async function handleQuestConfirm(ctx: MessageContext, vkUserId: number): Promis
   );
 }
 
-/** Экран выбора способа. */
+/** Id нашего пользователя по VK-аккаунту — нужен, чтобы взять ЕГО ключ. */
+async function vkDbUserId(vkUserId: number): Promise<string | null> {
+  const user = await (db as any).user
+    .findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } })
+    .catch(() => null);
+  return user?.id ?? null;
+}
+
+/**
+ * Экран выбора способа. Если ключ уже привязан в кабинете, первой дверью
+ * становится «создать за меня» — ради этого ключи и хранятся.
+ */
 async function handleQuestFork(ctx: MessageContext, vkUserId: number): Promise<void> {
   const quest = getQuestPlan(vkUserId);
   if (!quest) {
@@ -2924,12 +2946,70 @@ async function handleQuestFork(ctx: MessageContext, vkUserId: number): Promise<v
     return;
   }
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: quest.wbCode, denomination: quest.denomination });
+  const userId = gamepassAutocreateEnabled() ? await vkDbUserId(vkUserId) : null;
+  const storedKey = userId ? await hasStoredKeyFor(db as any, userId, quest.nick) : false;
   await showVkQuest(ctx, questForkScreen({
     targets: targetsToCreate(quest.plan),
     keyEnabled: gamepassAutocreateEnabled(),
     wbCode: quest.wbCode,
     nick: quest.nick,
+    storedKey,
   }), "VK/quest-fork");
+}
+
+/**
+ * «✨ Создать за меня» — сохранённым ключом, без единого действия покупателя.
+ */
+async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const quest = getQuestPlan(vkUserId);
+  const targets = quest ? targetsToCreate(quest.plan) : [];
+  const userId = quest && gamepassAutocreateEnabled() ? await vkDbUserId(vkUserId) : null;
+  if (!quest || targets.length === 0 || !userId) {
+    await ctx.reply({
+      message: "Проверка устарела — пришли ник ещё раз, посмотрим аккаунт заново.",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .inline(),
+    });
+    return;
+  }
+  const prices = targets.map((t) => t.price);
+  const workingMsg: any = await ctx.reply(plainText(questKeyWorkingText(prices)));
+  const showResult = buildVkEditInPlace(ctx, vkUserId, workingMsg);
+
+  const outcome = await createPassesWithStoredKey(db as any, {
+    userId,
+    nick: quest.nick,
+    targets: prices,
+    wbCode: quest.wbCode,
+  });
+
+  if (!outcome) {
+    // Ключ успели удалить между показом кнопки и нажатием — обычная развилка.
+    await showResult("Сохранённого ключа больше нет — выбери способ ниже.");
+    await handleQuestFork(ctx, vkUserId);
+    return;
+  }
+  if (outcome.error && outcome.created.length === 0) {
+    const verdict = keyCreateVerdict(outcome.error);
+    await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), "VK/quest-keyfail", showResult);
+    return;
+  }
+  await showResult(`✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux))}`);
+  await showVkQuestPlan(ctx, vkUserId, {
+    wbCode: quest.wbCode,
+    denomination: quest.denomination,
+    nick: quest.nick,
+    owned: [
+      ...quest.owned,
+      ...outcome.created.map((c) => ({
+        gamepassId: String(c.gamePassId),
+        name: c.name || `Пасс ${c.priceInRobux}`,
+        price: c.priceInRobux,
+        isForSale: true,
+      })),
+    ],
+  });
 }
 
 /** Ветка «сделаем за тебя»: просим ключ. */

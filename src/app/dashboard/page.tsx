@@ -42,6 +42,8 @@ import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
 import CustomerRobloxProfileCard from "@/components/customer-roblox-profile";
 import { loadCustomerRobloxProfile } from "@/lib/roblox-profile";
+import { listRobloxApiKeys } from "@/lib/roblox-api-key-store";
+import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -136,7 +138,12 @@ async function RobloxProfileSection({
   isAdmin: boolean;
   activeOrderHref: string | null;
 }) {
-  const initial = await loadCustomerRobloxProfile(userId);
+  // Одной волной: профиль и привязанные ключи независимы, а каждый заход в базу
+  // с прод-хоста стоит ~200 мс.
+  const [initial, keys] = await Promise.all([
+    loadCustomerRobloxProfile(userId),
+    listRobloxApiKeys(userId),
+  ]);
   return (
     <CustomerRobloxProfileCard
       initial={initial}
@@ -145,6 +152,14 @@ async function RobloxProfileSection({
       bonusCaption={bonusCaption}
       isAdmin={isAdmin}
       activeOrderHref={activeOrderHref}
+      keys={keys.map((key) => ({
+        id: key.id,
+        username: key.robloxUsername,
+        linkedAt: key.createdAt.toISOString(),
+        lastUsedAt: key.lastUsedAt ? key.lastUsedAt.toISOString() : null,
+        createdPasses: key.createdPasses,
+      }))}
+      keyAutoEnabled={gamepassAutocreateEnabled()}
     />
   );
 }

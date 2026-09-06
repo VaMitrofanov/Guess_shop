@@ -37,8 +37,10 @@ export type RobloxApiKeyClient = {
   robloxApiKey: {
     findUnique: (args: any) => Promise<any>;
     findFirst: (args: any) => Promise<any>;
+    findMany?: (args: any) => Promise<any[]>;
     create: (args: any) => Promise<any>;
     update: (args: any) => Promise<any>;
+    deleteMany?: (args: any) => Promise<{ count: number }>;
   };
 };
 
@@ -154,5 +156,103 @@ export async function loadRobloxApiKey(db: RobloxApiKeyClient, robloxUsername: s
   } catch (err) {
     console.warn("[roblox-api-key] не прочитали:", err instanceof Error ? err.message : err);
     return null;
+  }
+}
+
+/* ── Ключи в личном кабинете ────────────────────────────────────────────────
+   В кабинете ключ привязывают ЗАРАНЕЕ, когда заказа ещё нет: покупателю
+   остаётся только оплатить, а геймпасс мы создадим сами. Наружу отсюда уходят
+   только метаданные — сам ключ не отдаётся никогда и ни при каком запросе.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Ключ ЭТОГО покупателя для этого ника — для автосоздания без повторного ввода.
+ *
+ * Фильтр по `userId` обязателен и не подлежит ослаблению: ключ — креденшл, и
+ * брать его «по нику» значит позволить любому, кто знает чужой ник, создавать
+ * геймпассы на чужом аккаунте. Владелец ключа — тот, кто его привязал.
+ */
+export async function loadRobloxApiKeyForUser(
+  db: RobloxApiKeyClient,
+  userId: string,
+  robloxUsername: string,
+): Promise<StoredRobloxApiKey | null> {
+  const nick = robloxUsername.trim().toLowerCase();
+  if (!userId || !nick || !robloxApiKeyStoreReady()) return null;
+  try {
+    const row = await db.robloxApiKey.findFirst({
+      where: { userId, robloxUsername: nick },
+      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
+      select: { id: true, robloxUsername: true, encryptedValue: true, lastUsedAt: true, createdPasses: true },
+    });
+    if (!row) return null;
+    return {
+      id: row.id,
+      robloxUsername: row.robloxUsername,
+      key: decryptWbSecret(row.encryptedValue, PURPOSE),
+      lastUsedAt: row.lastUsedAt,
+      createdPasses: row.createdPasses,
+    };
+  } catch (err) {
+    console.warn("[roblox-api-key] не прочитали ключ покупателя:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+export interface LinkedRobloxKey {
+  id: string;
+  /** Ник Roblox, на аккаунте которого ключ работает. */
+  robloxUsername: string;
+  /** Когда привязан. */
+  createdAt: Date;
+  /** Когда последний раз применялся (создание пасса). */
+  lastUsedAt: Date | null;
+  /** Сколько пассов этим ключом уже создано. */
+  createdPasses: number;
+  /** Исход последнего применения: `verified`, `ok`, `bad_scope`, … */
+  lastResult: string | null;
+}
+
+/** Ключи, привязанные этим покупателем. Значения не расшифровываются. */
+export async function listRobloxApiKeys(
+  db: RobloxApiKeyClient,
+  userId: string,
+): Promise<LinkedRobloxKey[]> {
+  if (!userId || !db.robloxApiKey.findMany) return [];
+  try {
+    const rows = await db.robloxApiKey.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true, robloxUsername: true, createdAt: true,
+        lastUsedAt: true, createdPasses: true, lastResult: true,
+      },
+    });
+    return rows as LinkedRobloxKey[];
+  } catch (err) {
+    console.warn("[roblox-api-key] не прочитали список:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/**
+ * Отвязать ключ (кнопка «Удалить» в кабинете).
+ *
+ * Удаляем строку целиком, а не помечаем: покупатель просил убрать креденшл, и
+ * «мы его больше не используем, но храним» — это не то, о чём он просил.
+ * Ограничение по `userId` обязательно: id строки чужим быть не должен.
+ */
+export async function forgetRobloxApiKey(
+  db: RobloxApiKeyClient,
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  if (!userId || !id || !db.robloxApiKey.deleteMany) return false;
+  try {
+    const { count } = await db.robloxApiKey.deleteMany({ where: { id, userId } });
+    return count > 0;
+  } catch (err) {
+    console.warn("[roblox-api-key] не удалили:", err instanceof Error ? err.message : err);
+    return false;
   }
 }

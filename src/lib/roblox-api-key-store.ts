@@ -8,14 +8,17 @@
 
 import { prisma } from "@/lib/prisma";
 import {
+  forgetRobloxApiKey as forgetShared,
+  listRobloxApiKeys as listShared,
   loadRobloxApiKey as loadShared,
   rememberRobloxApiKey as rememberShared,
+  type LinkedRobloxKey,
   type RememberKeyInput,
   type StoredRobloxApiKey,
 } from "../../bots/shared/roblox-api-key-store";
 
 export { robloxApiKeyStoreReady } from "../../bots/shared/roblox-api-key-store";
-export type { RememberKeyInput, StoredRobloxApiKey };
+export type { LinkedRobloxKey, RememberKeyInput, StoredRobloxApiKey };
 
 export function rememberRobloxApiKey(input: RememberKeyInput): Promise<"saved" | "updated" | "skipped"> {
   return rememberShared(prisma as never, input);
@@ -23,4 +26,14 @@ export function rememberRobloxApiKey(input: RememberKeyInput): Promise<"saved" |
 
 export function loadRobloxApiKey(robloxUsername: string): Promise<StoredRobloxApiKey | null> {
   return loadShared(prisma as never, robloxUsername);
+}
+
+/** Ключи, привязанные покупателем в личном кабинете. Значения не отдаются. */
+export function listRobloxApiKeys(userId: string): Promise<LinkedRobloxKey[]> {
+  return listShared(prisma as never, userId);
+}
+
+/** Отвязать ключ по кнопке в кабинете (только свой). */
+export function forgetRobloxApiKey(userId: string, id: string): Promise<boolean> {
+  return forgetShared(prisma as never, userId, id);
 }
