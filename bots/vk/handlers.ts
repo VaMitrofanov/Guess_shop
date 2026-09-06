@@ -18,6 +18,7 @@ import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import {
+  createTargetsFor,
   planFromOwned,
   targetsToCreate,
   type CheckPlan,
@@ -2962,7 +2963,9 @@ async function handleQuestFork(ctx: MessageContext, vkUserId: number): Promise<v
  */
 async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Promise<void> {
   const quest = getQuestPlan(vkUserId);
-  const targets = quest ? targetsToCreate(quest.plan) : [];
+  const targets = quest && targetsToCreate(quest.plan).length > 0
+    ? createTargetsFor(quest.denomination)
+    : [];
   const userId = quest && gamepassAutocreateEnabled() ? await vkDbUserId(vkUserId) : null;
   if (!quest || targets.length === 0 || !userId) {
     await ctx.reply({
@@ -3042,7 +3045,8 @@ async function handleQuestKey(ctx: MessageContext, vkUserId: number): Promise<vo
     nick: quest.nick,
   });
   await showVkQuest(ctx, questKeyScreen({
-    targets: targetsToCreate(quest.plan),
+    // Эталонный набор под номинал, а не «чего не хватает»: см. createTargetsFor.
+    targets: createTargetsFor(quest.denomination),
     wbCode: quest.wbCode,
     nick: quest.nick,
     // Сообщество ВК не может удалить сообщение человека — просим его самого.
@@ -3079,7 +3083,9 @@ async function handleVkApiKeyInput(
     return;
   }
 
-  const targets = quest ? targetsToCreate(quest.plan) : [];
+  const targets = quest && targetsToCreate(quest.plan).length > 0
+    ? createTargetsFor(quest.denomination)
+    : [];
   if (targets.length === 0) {
     setState(vkUserId, { type: "AWAITING_LINK", wbCode: pending.wbCode, denomination: pending.denomination });
     await ctx.reply({

@@ -26,6 +26,7 @@ import { getOrInitSessionId } from "@/lib/wb-session";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import {
   coveredRobux,
+  createTargetsFor,
   idealTargetsFor,
   planFromOwned,
   targetsToCreate,
@@ -583,7 +584,11 @@ export default function GamepassCheck({
           {/* ── Пасс по ключу: альтернатива ручному созданию ────────────── */}
           {keyAutoEnabled && phase === "result" && plan && (stage === "key" || keyDone) && !orderPlaced && (
             <KeyCreate
-              targets={toCreate}
+              /* По ключу создаём ЭТАЛОННЫЙ набор под номинал, а не «чего не
+                 хватает»: руками тут никто ничего не делает, и подстраиваться
+                 под то, что уже лежит на аккаунте, значит получать неудобные
+                 для выкупа пассы (см. `createTargetsFor`). */
+              targets={createTargetsFor(amount, !isSite)}
               nick={account?.username ?? nick}
               code={code}
               initialPlatform={initialPlatform}

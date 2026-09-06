@@ -13,6 +13,7 @@ export {
   MIN_SPLIT_PART_ROBUX,
   SPLIT_PLANS,
   coveredRobux,
+  createTargetsFor,
   expectedGamepassPrice,
   idealTargetsFor,
   netFromPrice,

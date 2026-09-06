@@ -15,7 +15,7 @@ export {};
  *     стоит соседней строкой и не работает вовсе — час отладки 06.09.2026.
  */
 
-import { planFromOwned, type OwnedPass } from "../gamepass-plan";
+import { createTargetsFor, planFromOwned, targetsToCreate, type OwnedPass } from "../gamepass-plan";
 import {
   QUEST,
   plainText,
@@ -190,5 +190,37 @@ describe("plainText", () => {
       questNoAccountScreen({ nick: "N", wbCode: "ABC1234" }),
     ];
     for (const screen of screens) expect(plainText(screen.text)).not.toMatch(/<\/?[a-z]/i);
+  });
+});
+
+describe("что создаём по ключу", () => {
+  test("эталонный набор под номинал, а не «чего не хватает»", () => {
+    // Живой случай 07.09.2026 (TST2000): на аккаунте лежал пасс на 20 R$
+    // (14 на руки). Разбор плана его засчитал и попросил ОДИН пасс на 2838 —
+    // вышла пара «2838 + 20»: первый выкупается только с крупного донора,
+    // второй — отдельный поход к донору ради 14 робуксов.
+    const junk = planFromOwned(2000, [pass("junk", 20, "Мелочь")]);
+    expect(targetsToCreate(junk).map((t) => t.price)).toEqual([2838]);
+
+    // По ключу создаём своё и удобное — руками тут никто ничего не делает.
+    expect(createTargetsFor(2000).map((t) => t.price)).toEqual([2143, 715]);
+    expect(createTargetsFor(2000).map((t) => t.amount)).toEqual([1500, 500]);
+  });
+
+  test("созданный набор вытесняет мелочь из плана заказа", () => {
+    const owned = [
+      pass("junk", 20, "Мелочь"),
+      ...createTargetsFor(2000).map((t, i) => pass(`new${i}`, t.price, "RobloxBank")),
+    ];
+    const plan = planFromOwned(2000, owned);
+    expect(plan.kind).toBe("ready");
+    const parts = plan.kind === "empty" ? [] : plan.parts;
+    // Минимум частей выигрывает: две по 1500 и 500, мелочь не берётся вовсе.
+    expect(parts.map((p) => p.amount)).toEqual([1500, 500]);
+    expect(parts.some((p) => p.gamepassId === "junk")).toBe(false);
+  });
+
+  test("на сайте набор остаётся из одного пасса — заказ несёт один gamepassId", () => {
+    expect(createTargetsFor(2000, false).map((t) => t.price)).toEqual([2858]);
   });
 });

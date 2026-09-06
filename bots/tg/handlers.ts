@@ -19,6 +19,7 @@ import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, g
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import {
+  createTargetsFor,
   netFromPrice,
   planFromOwned,
   targetsToCreate,
@@ -2778,7 +2779,12 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
     return;
   }
 
-  const targets = quest ? targetsToCreate(quest.plan) : [];
+  // По ключу создаём ЭТАЛОННЫЙ набор под номинал, а не «чего не хватает»:
+  // руками тут никто ничего не делает, и подбирать под то, что валяется на
+  // аккаунте, значит получать неудобные для выкупа пассы (см. createTargetsFor).
+  const targets = quest && targetsToCreate(quest.plan).length > 0
+    ? createTargetsFor(quest.denomination)
+    : [];
   if (targets.length === 0) {
     pendingApiKey.delete(ctx.from.id);
     await ctx.reply(
@@ -4443,7 +4449,9 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === QUEST.keyStored) {
       const quest = questPlans.get(ctx.from.id);
       await ctx.answerCbQuery("Создаём…").catch(() => {});
-      const targets = quest ? targetsToCreate(quest.plan) : [];
+      const targets = quest && targetsToCreate(quest.plan).length > 0
+        ? createTargetsFor(quest.denomination)
+        : [];
       const userId = quest && gamepassAutocreateEnabled() ? await dbUserIdFor(ctx) : null;
       if (!quest || targets.length === 0 || !userId) {
         await ctx.reply(
@@ -4527,7 +4535,7 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingRobloxNick.delete(ctx.from.id);
       pendingApiKey.set(ctx.from.id, { wbCode: quest.wbCode, denomination: quest.denomination, nick: quest.nick });
       await showQuest(ctx, questKeyScreen({
-        targets: targetsToCreate(quest.plan),
+        targets: createTargetsFor(quest.denomination),
         wbCode: quest.wbCode,
         nick: quest.nick,
       }));
