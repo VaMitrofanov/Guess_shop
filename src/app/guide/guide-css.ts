@@ -387,6 +387,33 @@ export const GUIDE_CSS = `
    белом фоне не читался во всех режимах инструкции. */
 :is(html[data-theme="light"]) .wbi-warn{color:#7a4a06;background:rgba(245,158,11,.12);border-color:rgba(180,110,10,.32)}
 :is(html[data-theme="light"]) .wbi-warn b{color:#4d2f04}
+
+/* Экран выбора способа и блок «что нужно сделать» были описаны только для
+   тёмной темы: заголовки и названия дверей стояли белым, а подписи —
+   бледно-мятным. На светлой это белое по светло-сиреневому, то есть текста
+   попросту не видно (скрин владельца 07.09.2026). Здесь тот же набор ролей,
+   пересчитанный под светлый фон: тёмный текст, светлые плашки, читаемые
+   акценты. */
+:is(html[data-theme="light"]) .wbi-forkhead h3,
+:is(html[data-theme="light"]) .wbi-opt .t{color:#251b3f}
+:is(html[data-theme="light"]) .wbi-forkhead .k{color:#12674e}
+:is(html[data-theme="light"]) .wbi-opt{border-color:#ded8f1;background:#fff}
+:is(html[data-theme="light"]) .wbi-opt:hover{border-color:#b9aae8;background:#faf8ff}
+:is(html[data-theme="light"]) .wbi-opt .i{background:#f0ecff}
+:is(html[data-theme="light"]) .wbi-opt .a{color:#8d84a3}
+:is(html[data-theme="light"]) .wbi-opt .chip{background:#f2effd;color:#5b5170}
+:is(html[data-theme="light"]) .wbi-opt.usual{border-color:#b9aae8;background:linear-gradient(180deg,#f4f0ff,#fff)}
+:is(html[data-theme="light"]) .wbi-opt.usual .i{background:#e6dfff}
+:is(html[data-theme="light"]) .wbi-opt.usual .chip{background:#e9e2ff;color:#4a35a8}
+:is(html[data-theme="light"]) .wbi-opt.key{border-color:#87d7bb;background:linear-gradient(180deg,#e9f8f2,#fff)}
+:is(html[data-theme="light"]) .wbi-opt.key .i{background:#d8f3e8}
+:is(html[data-theme="light"]) .wbi-opt.key .chip{background:#d8f3e8;color:#12674e}
+:is(html[data-theme="light"]) .wbi-target{border-color:#87d7bb;background:linear-gradient(180deg,#eafaf3,transparent)}
+:is(html[data-theme="light"]) .wbi-target .k{color:#12674e}
+:is(html[data-theme="light"]) .wbi-tgoal .d{color:#3f5f55}
+:is(html[data-theme="light"]) .wbi-tgoal .d b{color:#14342a}
+:is(html[data-theme="light"]) .wbi-tgoal .v small{color:#2b7e66}
+:is(html[data-theme="light"]) .wbi-tnote{color:#62596f}
 @media(max-width:900px){
  .wbi-v3 .wbi-hero{min-height:0;grid-template-columns:1fr;grid-template-rows:auto;padding:52px 0 42px;gap:0}
  .wbi-v3 .wbi-kick,.wbi-v3 .wbi-h1,.wbi-v3 .wbi-lead,.wbi-v3 .wbi-chips,.wbi-v3 .wbi-must{grid-column:1;grid-row:auto}

@@ -239,8 +239,49 @@ export default function GuideSteps({
     });
   }, []);
 
+  /**
+   * Показать шаги.
+   *
+   * `.wbi-reveal` — это `opacity:0` до тех пор, пока кто-то не повесит
+   * `.wbi-in`. Раньше это делал ТОЛЬКО наблюдатель страницы-инструкции
+   * (`WBInstructionV2`), а в квесте оформления шаги живут внутри проверки
+   * аккаунта — и никто их не показывал: на месте шага зияла пустота (скрин
+   * владельца из браузера Telegram, 07.09.2026). Плюс наблюдатель там ищет
+   * элементы один раз при монтировании, а в пошаговом режиме шаг появляется
+   * позже.
+   *
+   * Поэтому показ живёт здесь и переживает оба случая: шаг по одному
+   * показывается сразу (прятать нечего), список — по пересечению, но со
+   * страховкой по таймеру: в WebView мессенджеров наблюдатель иногда молчит, а
+   * пустой экран хуже отсутствия анимации.
+   */
+  const revealRoot = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const root = revealRoot.current;
+    if (!root) return;
+    const els = Array.from(root.querySelectorAll<HTMLElement>(".wbi-reveal:not(.wbi-in)"));
+    if (els.length === 0) return;
+    const showAll = () => els.forEach((el) => el.classList.add("wbi-in"));
+    if (paged || typeof IntersectionObserver === "undefined") {
+      showAll();
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("wbi-in");
+          io.unobserve(entry.target);
+        }
+      }),
+      { threshold: 0.12 },
+    );
+    els.forEach((el, i) => { el.style.transitionDelay = `${(i % 3) * 70}ms`; io.observe(el); });
+    const safety = setTimeout(showAll, 1200);
+    return () => { clearTimeout(safety); io.disconnect(); };
+  }, [paged, step, listed, platform, maxi]);
+
   return (
-    <>
+    <div ref={revealRoot} style={{ display: "contents" }}>
       <span id="wbi-steps-top" />
       <div className="wbi-stepbar">
         <PlatformSwitch value={platform} onChange={choose} />
@@ -621,6 +662,6 @@ export default function GuideSteps({
           <button type="button" className="wbi-bigbtn" onClick={() => onDone?.()}>✅ Сделал — проверить</button>
         </div>
       )}
-    </>
+    </div>
   );
 }

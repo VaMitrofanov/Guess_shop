@@ -19,6 +19,20 @@ const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf8")
 describe("инструкция: ярлык через поиск Creator Hub", () => {
   const steps = () => read("src/app/guide/guide-steps.tsx");
 
+  test("шаги показываются сами, а не ждут наблюдателя чужого компонента", () => {
+    // `.wbi-reveal` — это opacity:0 до класса `.wbi-in`. Раньше его вешал ТОЛЬКО
+    // наблюдатель страницы-инструкции, и в квесте на месте шага была пустота
+    // (скрин владельца из браузера Telegram, 07.09.2026). В WebView мессенджеров
+    // наблюдатель к тому же иногда молчит вовсе — отсюда страховка по таймеру.
+    const s = steps();
+    expect(s).toContain("revealRoot");
+    expect(s).toContain('.wbi-reveal:not(.wbi-in)');
+    expect(s).toContain("const showAll");
+    expect(s).toContain("setTimeout(showAll");
+    // Пошаговый режим показывает шаг сразу: прятать нечего.
+    expect(s).toContain("if (paged || typeof IntersectionObserver === \"undefined\")");
+  });
+
   test("две колонки — только когда во второй что-то есть", () => {
     // Боковая колонка шага 2 несёт видео, а оно показывается лишь на телефоне
     // в «супер подробно». `wbi-rev` ставит эту колонку ПЕРВОЙ, поэтому пустая
