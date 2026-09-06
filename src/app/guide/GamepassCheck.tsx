@@ -641,10 +641,10 @@ function ResultCard({
               <span className="a" aria-hidden="true">↓</span>
             </button>
             <button className="wbi-choice-b" onClick={onOpenRescue}>
-              <span className="i">🔗</span>
+              <span className="i">🔢</span>
               <span className="m">
                 <span className="t">Пасс уже есть</span>
-                <span className="s">Дай ссылку — поиск видит не все пассы</span>
+                <span className="s">Вставь Pass ID — поиск видит не все пассы</span>
               </span>
               <span className="a" aria-hidden="true">↓</span>
             </button>

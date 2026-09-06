@@ -154,12 +154,11 @@ export const GUIDE_CSS = `
 .wbi-picked-h{font-size:14px;font-weight:850;letter-spacing:1.2px;color:#a3f3d2}
 .wbi-picked-b{font-size:21px;color:#fff;font-weight:800;margin-top:6px}
 .wbi-relink{margin-top:14px;font-size:14.5px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);border-radius:8px;padding:8px 14px;cursor:pointer}
-/* Запасной вход «вставить ссылку»: тихая ссылка, пока поиск по нику
-   работает, и раскрытая панель — как только он зашёл в тупик. */
+/* Запасной вход «вставить Pass ID»: тихая строка, пока поиск по нику
+   работает. Как только он зашёл в тупик — раскрывается карточка
+   .wbi-rescue, та же самая, что в гейте. */
 .wbi-manualtoggle{display:block;width:100%;margin-top:12px;padding:11px 14px;font-size:15px;font-weight:700;text-align:left;color:var(--mut);background:transparent;border:1px dashed var(--line);border-radius:11px;cursor:pointer;transition:color .2s,border-color .2s}
 .wbi-manualtoggle:hover{color:var(--txt);border-color:var(--gold2)}
-.wbi-manual{margin-top:14px;padding:15px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.02)}
-.wbi-manual-h{font-size:14px;font-weight:850;letter-spacing:.9px;color:var(--gold2);margin-bottom:8px}
 .wbi-relink:hover{border-color:rgba(201,168,76,.7)}
 .wbi-blist{list-style:none;margin:10px 0 4px;padding:0;display:flex;flex-direction:column;gap:10px}
 .wbi-blist li{position:relative;padding:11px 14px;font-size:15.5px;line-height:1.5;color:#c3c9d4;border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:11px}
@@ -281,8 +280,6 @@ export const GUIDE_CSS = `
 .wbi-v3 .wbi-sinput:focus,.wbi-v3 .wbi-input:focus{border-color:var(--rb-accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--rb-accent) 12%,transparent)}
 .wbi-v3 .wbi-sbtn{background:#7556e8;border-color:#7556e8;color:#fff;box-shadow:3px 3px 0 #45d6aa}
 .wbi-v3 .wbi-gpcard{background:var(--rb-surface);border-color:var(--rb-border)}
-.wbi-v3 .wbi-manual{border-color:var(--rb-border);border-radius:16px;background:var(--rb-surface-2)}
-.wbi-v3 .wbi-manual-h{color:var(--rb-accent)}
 .wbi-v3 .wbi-manualtoggle{border-color:var(--rb-border);border-radius:14px;color:var(--rb-muted)}
 .wbi-v3 .wbi-manualtoggle:hover{color:var(--rb-text);border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border))}
 .wbi-v3 .wbi-icoTile{border-color:var(--rb-border);background:linear-gradient(145deg,var(--rb-accent-soft),var(--rb-surface));font-size:78px}

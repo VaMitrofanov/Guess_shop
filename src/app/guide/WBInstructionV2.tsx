@@ -127,11 +127,17 @@ export default function WBInstructionV2({
   // терялись, и карточка навсегда застывала на «⏳ Оформляем твой заказ…».
   const [pickErr, setPickErr] = useState<string | null>(null);
 
-  // ── Запасной вход: ссылка на геймпасс вместо поиска по нику ───────────────
+  // ── Запасной вход: Pass ID вместо поиска по нику ─────────────────────────
   // Поиск живёт на публичных списках Roblox (`accessFilter=Public` + перебор
   // игр) и регулярно молчит при живом геймпассе: скрытый плейс (треть
   // застрявших заказов по разбору 22.08), только что созданный пасс, лаг API.
-  // Ссылку на свой геймпасс покупатель при этом видит в браузере.
+  //
+  // Просим **Pass ID**, а не ссылку: у скрытого плейса публичной ссылки может
+  // не быть вовсе, а Pass ID лежит отдельной колонкой в таблице Passes и
+  // копируется кнопкой `Copy Pass ID` — одно движение вместо разбора адресной
+  // строки. Вставленный адрес принимаем по-прежнему. Блок — тот же, что в
+  // WB-гейте (`GamepassCheck`): одинаковый вопрос должен получать одинаковый
+  // ответ на обоих экранах.
   const [manualOpen, setManualOpen] = useState(false);
   const [manualRef, setManualRef] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
@@ -143,7 +149,18 @@ export default function WBInstructionV2({
     const id = parseGamepassRef(raw);
     setManualPass(null);
     if (!id) {
-      setManualErr("Не похоже на ссылку или номер геймпасса. Скопируй адрес страницы геймпасса целиком — например roblox.com/game-pass/1234567.");
+      // Два вида путаницы ждём заранее: адрес СПИСКА пассов
+      // (`/monetization/passes` — номера в нём нет) и номер ИГРЫ (он идёт
+      // после `/experiences/`). Третий — вставленная цена вместо Pass ID.
+      setManualErr(
+        /^\d+$/.test(raw)
+          ? `В Pass ID 9–10 цифр, а здесь ${raw.length}. Похоже, это цена или номинал — Pass ID стоит в отдельной колонке, справа от названия пасса.`
+          : /passes\b/i.test(raw)
+            ? "Это адрес страницы, а не номер. Pass ID стоит отдельной колонкой в таблице Passes — скопируй число оттуда."
+            : /experiences?\/\d+/i.test(raw)
+              ? "Это номер игры, а не пасса. Нужное число — в колонке Pass ID, напротив названия пасса."
+              : "Не похоже на Pass ID. Это число из колонки Pass ID — 9–10 цифр, без пробелов.",
+      );
       return;
     }
     setManualErr(null);
@@ -153,7 +170,18 @@ export default function WBInstructionV2({
       const data = await res.json();
       const gp = (data?.gamepasses ?? [])[0] as Pass | undefined;
       if (!data?.success || !gp) {
-        setManualErr("Не нашли такой геймпасс на Roblox. Проверь, что ссылка ведёт на сам Game Pass (а не на игру) и что он опубликован.");
+        setManualErr("Не нашли пасс с таким номером. Проверь, что взял его из колонки Pass ID, а не номер игры.");
+        return;
+      }
+      // Робуксы уходят ВЛАДЕЛЬЦУ пасса, а не тому, кого назвал покупатель.
+      // Чужой номер (из туториала, у друга) иначе тихо уехал бы в заказ и
+      // оставил человека без робуксов — та же сверка стоит в WB-гейте.
+      // `rawInput` пришёл из поля ника: там лежал номер или ссылка, своего
+      // ника нет и сверять не с чем.
+      const owner = (gp.creatorName ?? "").trim();
+      const claimed = rawInput ? "" : nick.trim().replace(/^@/, "");
+      if (owner && NICK_RE.test(claimed) && owner.toLowerCase() !== claimed.toLowerCase()) {
+        setManualErr(`Этот пасс принадлежит аккаунту ${owner}, а робуксы ты просишь на ${claimed}. Робуксы придут владельцу пасса — проверь номер или поправь ник выше.`);
         return;
       }
       setManualPass({ ...gp, isPriceMatch: gamepassPriceMatches(gp.price, expectedPrice, isSite ? 0 : undefined) });
@@ -162,29 +190,36 @@ export default function WBInstructionV2({
     } finally {
       setManualBusy(false);
     }
-  }, [manualRef, code, expectedPrice, isSite]);
+  }, [manualRef, nick, code, expectedPrice, isSite]);
 
   const runSearch = useCallback(async () => {
     const raw = nick.trim();
-    // Вставили ссылку в поле ника — это не опечатка, а готовый ответ: у человека
-    // уже есть всё, что нам нужно. Раньше это упиралось в «Ник Roblox: 3–20
-    // символов», хотя рядом лежал прямой путь к заказу.
-    if (parseGamepassUrl(raw)) {
+    // Вставили в поле ника ссылку или Pass ID — это не опечатка, а готовый
+    // ответ: у человека уже есть всё, что нам нужно. Раньше это упиралось в
+    // «Ник Roblox: 3–20 символов», хотя рядом лежал прямой путь к заказу.
+    //
+    // Номер попадает сюда часто с тех пор, как запасной вход просит именно
+    // Pass ID. Поиском по нику он всё равно не станет: тот же `parseGamepassRef`
+    // стоит и на сервере — `/api/roblox/gamepasses` разбирает голое число как
+    // геймпасс. Разница только в том, ЧТО увидит покупатель: список «у
+    // 1969680833 есть геймпассы» — или карточка пасса с владельцем и ценой.
+    const pastedRef = parseGamepassUrl(raw) ?? (/^\d+$/.test(raw) ? parseGamepassRef(raw) : null);
+    if (pastedRef) {
       setSearchErr(null);
       setView({ kind: "idle" });
       setPicked(null);
       setPickErr(null);
       setManualOpen(true);
       setManualRef(raw);
-      // Ссылка переезжает в своё поле целиком: два одинаковых инпута подряд
-      // читаются как сбой, а поле ника должно остаться полем ника.
+      // Вставленное переезжает в своё поле целиком: два одинаковых инпута
+      // подряд читаются как сбой, а поле ника должно остаться полем ника.
       setNick("");
       await runManualLookup(raw);
       return;
     }
     const n = raw.replace(/^@/, "");
     if (!NICK_RE.test(n)) {
-      setSearchErr("Ник Roblox: 3–20 символов — латинские буквы, цифры или _. Или вставь сюда ссылку на геймпасс.");
+      setSearchErr("Ник Roblox: 3–20 символов — латинские буквы, цифры или _. Пасс уже создан? Вставь его Pass ID ниже.");
       setView({ kind: "idle" });
       return;
     }
@@ -420,12 +455,12 @@ export default function WBInstructionV2({
                 <input
                   className="wbi-sinput"
                   type="text"
-                  placeholder="Ник Roblox или ссылка на геймпасс"
+                  placeholder="Например: RobloxKid2011"
                   value={nick}
                   onChange={(e) => setNick(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
                   autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                  aria-label="Ник Roblox — аккаунт получателя робуксов, либо ссылка на геймпасс"
+                  aria-label="Ник Roblox — аккаунт получателя робуксов"
                 />
                 <button className="wbi-sbtn" onClick={runSearch} disabled={searching}>
                   {searching ? "Ищем…" : "🔎 Найти"}
@@ -438,14 +473,14 @@ export default function WBInstructionV2({
               {view.kind === "user_not_found" && (
                 <div className="wbi-warn" style={{ marginTop: 12 }}>
                   🤷 Пользователя <b>{view.nick}</b> нет на Roblox. Скорее всего опечатка — скопируй ник прямо со страницы профиля и попробуй снова.
-                  <br />Либо вставь <b>ссылку на сам геймпасс</b> — этого тоже достаточно 👇
+                  <br />Либо вставь <b>Pass ID</b> готового геймпасса — этого тоже достаточно 👇
                 </div>
               )}
 
               {view.kind === "no_gamepasses" && (
                 <div className="wbi-warn" style={{ marginTop: 12 }}>
                   🙈 У <b>{view.nick}</b> не нашли геймпассов на продажу.
-                  <br /><br />✅ <b>Геймпасс уже создан?</b> Поиск иногда его не видит — например, когда плейс скрыт. Вставь <b>ссылку на геймпасс</b> ниже, и мы оформим заказ по ней 👇
+                  <br /><br />✅ <b>Геймпасс уже создан?</b> Поиск иногда его не видит — например, когда плейс скрыт. Вставь его <b>Pass ID</b> ниже: по номеру находим даже скрытый 👇
                   <br /><br />⚠️ Ещё не создан — вернись к шагам <b>2–4</b>, затем нажми «Найти» снова.
                 </div>
               )}
@@ -461,7 +496,7 @@ export default function WBInstructionV2({
                       </div>
                     ))}
                   </div>
-                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>4</b>) и нажми «Найти» снова. Нужный геймпасс есть, но его нет в списке? Вставь <b>ссылку</b> на него ниже.</div>
+                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>4</b>) и нажми «Найти» снова. Нужный геймпасс есть, но его нет в списке? Вставь его <b>Pass ID</b> ниже.</div>
                 </div>
               )}
 
@@ -480,43 +515,59 @@ export default function WBInstructionV2({
                 </div>
               )}
 
-              {/* ── Запасной вход: ссылка на геймпасс ──────────────────────
-                  Раскрыт сам, когда поиск по нику зашёл в тупик; в остальное
-                  время — тихая ссылка под результатами, чтобы не спорить с
-                  основным сценарием. */}
+              {/* ── Запасной вход: Pass ID ─────────────────────────────────
+                  Тот же блок, что в WB-гейте (`GamepassCheck`) — вплоть до
+                  разметки скрина: одинаковый вопрос должен получать одинаковый
+                  ответ на обоих экранах. Раскрыт сам, когда поиск по нику
+                  зашёл в тупик; в остальное время — тихая строка под
+                  результатами, чтобы не спорить с основным сценарием. */}
               {!picked && (() => {
                 const deadEnd = view.kind === "user_not_found" || view.kind === "no_gamepasses" || view.kind === "wrong_price";
                 if (!manualOpen && !deadEnd) {
                   return (
                     <button className="wbi-manualtoggle" onClick={() => setManualOpen(true)}>
-                      🔗 Не находит геймпасс? Вставить ссылку вручную
+                      🔢 Пасс уже создан, но не находится? Вставить Pass ID
                     </button>
                   );
                 }
                 return (
-                  <div className="wbi-manual">
-                    <div className="wbi-manual-h">🔗 Ссылка на геймпасс</div>
-                    <div className="wbi-shint" style={{ marginTop: 0 }}>
-                      Открой геймпасс в браузере (Creator Hub → <b>Creations</b> → игра → <b>Passes</b> → нажми на пасс) и скопируй адрес.
-                      Подойдёт и просто <b>номер</b> геймпасса.
-                    </div>
-                    <div className="wbi-srow" style={{ marginTop: 10 }}>
+                  <section className="wbi-rescue" style={{ margin: "14px 0 0" }}>
+                    <span className="k">🔢 Пасс уже создан?</span>
+                    <h3>Вставь его Pass ID — найдём даже скрытый</h3>
+                    <p>Если игра скрыта из поиска или пасс создан только что, по нику мы его не находим — <b>по Pass ID находим всегда</b>.</p>
+                    <div className="wbi-srow">
                       <input
                         className="wbi-sinput"
                         type="text"
-                        placeholder="https://www.roblox.com/game-pass/…"
+                        placeholder="Например: 1969680833"
                         value={manualRef}
                         onChange={(e) => setManualRef(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") runManualLookup(); }}
                         autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                        aria-label="Ссылка на геймпасс или его номер"
+                        aria-label="Pass ID геймпасса"
                       />
                       <button className="wbi-sbtn" onClick={() => runManualLookup()} disabled={manualBusy}>
-                        {manualBusy ? "Проверяем…" : "✓ Проверить"}
+                        {manualBusy ? "Ищем…" : "Найти пасс"}
                       </button>
                     </div>
 
-                    {manualErr && <div className="wbi-warn" style={{ marginTop: 10 }}>{manualErr}</div>}
+                    {manualErr && <div className="wbi-warn" style={{ marginTop: 12 }}>{manualErr}</div>}
+
+                    {/* Мини-инструкция «где взять номер» нужна, пока номера нет.
+                        Как только пасс найден, она только отодвигает карточку
+                        с ответом вниз — прячем. */}
+                    {!manualPass && <div className="wbi-how">
+                      <b>Где взять Pass ID:</b>
+                      <span className="wbi-path">Creator Hub → твоя игра → <b>Monetization</b> → <b>Passes</b> → колонка <b>Pass ID</b>.</span>
+                      <figure className="wbi-figure wbi-shot">
+                        <span className="wbi-anno">
+                          <img src="/guide/wb-passid.png" alt="Таблица Passes в Creator Hub: колонка Pass ID и кнопка Copy Pass ID" loading="lazy" decoding="async" />
+                          <span className="wbi-box y" style={{ left: "59.5%", top: "5.9%", width: "11%", height: "8.2%" }} />
+                          <span className="wbi-box g nodot" style={{ left: "59.5%", top: "22.4%", width: "19%", height: "11.7%" }} />
+                        </span>
+                        <figcaption>Число из колонки <b>Pass ID</b> (синяя рамка) — его и вставь. Рядом есть кнопка <b>Copy Pass ID</b>.</figcaption>
+                      </figure>
+                    </div>}
 
                     {manualPass && (() => {
                       // Одна карточка на все три исхода — берётся она или нет,
@@ -530,16 +581,16 @@ export default function WBInstructionV2({
                         <div style={{ marginTop: 10 }}>
                           {offsale && (
                             <div className="wbi-warn">
-                              ⚠️ Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> (шаг <b>4</b>) и нажми «Проверить» снова.
+                              ⚠️ Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> (шаг <b>4</b>) и нажми «Найти пасс» снова.
                             </div>
                           )}
                           {!offsale && !manualPass.isPriceMatch && (
                             <div className="wbi-warn">
-                              ⚠️ Цена геймпасса <b>{manualPass.price} R$</b>, а нужна ровно <b>{expectedPrice} R$</b>. Поправь цену (шаг <b>4</b>) и нажми «Проверить» снова.
+                              ⚠️ Цена геймпасса <b>{manualPass.price} R$</b>, а нужна ровно <b>{expectedPrice} R$</b>. Поправь цену (шаг <b>4</b>) и нажми «Найти пасс» снова.
                             </div>
                           )}
                           {ready && (
-                            <div className="wbi-ok">🎯 Нашли геймпасс по ссылке{manualPass.creatorName ? <> — владелец <b>{manualPass.creatorName}</b></> : null}. Это он?</div>
+                            <div className="wbi-ok">🎯 Нашли пасс по номеру{manualPass.creatorName ? <> — владелец <b>{manualPass.creatorName}</b></> : null}. Это он?</div>
                           )}
                           <div className="wbi-gplist">
                             {ready ? (
@@ -557,7 +608,7 @@ export default function WBInstructionV2({
                         </div>
                       );
                     })()}
-                  </div>
+                  </section>
                 );
               })()}
 
