@@ -26,6 +26,19 @@ function mockRes(status: number, jsonObj?: unknown) {
 }
 
 describe("safeGamePassName", () => {
+  test("пул брендовых имён разнообразный и весь проходит по длине", () => {
+    // Имя пасса — наша единственная бесплатная реклама на чужом опыте, и
+    // одинаковое имя у всех выглядит как штамп. Ограничение по длине держим
+    // сами: слишком длинное Roblox обрежет в списке пассов.
+    expect(BRAND_GAMEPASS_NAMES.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(BRAND_GAMEPASS_NAMES).size).toBe(BRAND_GAMEPASS_NAMES.length);
+    for (const name of BRAND_GAMEPASS_NAMES) {
+      expect(name.length).toBeGreaterThanOrEqual(3);
+      expect(name.length).toBeLessThanOrEqual(50);
+      expect(name).toContain("RobloxBank");
+    }
+  });
+
   test("дефолт — брендовое имя RobloxBank (реклама нам)", () => {
     for (let i = 0; i < 20; i++) {
       expect(BRAND_GAMEPASS_NAMES).toContain(safeGamePassName(228));

@@ -1391,14 +1391,35 @@ export interface CreateGamePassResult {
  * опыте. Без мата и спецсимволов (иначе Roblox-фильтр заменит имя на «#####»).
  */
 export const BRAND_GAMEPASS_NAMES = [
+  // Короткие — на случай узких мест интерфейса Roblox.
   "RobloxBank",
+  "RobloxBank топ",
   "RobloxBank лучший",
   "RobloxBank любимый",
-  "RobloxBank топ",
+  "RobloxBank рекомендую",
+  "RobloxBank спасибо",
+  "RobloxBank навсегда",
+  "RobloxBank и робуксы",
+  // С обращением — такие чаще замечают в списке пассов.
+  "С любовью от RobloxBank",
+  "С заботой от RobloxBank",
+  "Подарок от RobloxBank",
+  "Спасибо, что с RobloxBank",
+  "Твои робуксы — RobloxBank",
+  "Робуксы тут — RobloxBank",
+  "Робуксы быстро — RobloxBank",
+  "Робуксы честно — RobloxBank",
+  // С обещанием — то, за что нас и выбирают.
   "RobloxBank №1 по робуксам",
   "RobloxBank лучший магазин робуксов",
-  "Робуксы тут — RobloxBank",
-  "RobloxBank рекомендую",
+  "RobloxBank робуксы без обмана",
+  "RobloxBank выгодный курс",
+  "RobloxBank проверено временем",
+  "RobloxBank всегда на связи",
+  // Латиница — для тех, у кого игра на английском.
+  "RobloxBank best shop",
+  "Robux with love RobloxBank",
+  "RobloxBank thank you",
 ];
 
 /**
