@@ -88,6 +88,25 @@ describe("findGamepassRefInChatText", () => {
   test("код доставки и номинал не длинные числа и не ловятся", () => {
     expect(findGamepassRefInChatText("код 367516, сумма 500")).toBeNull();
   });
+
+  /* Обе проверки ниже — с ЖИВЫХ данных 07.09.2026: прогон разбора по 738
+     сообщениям покупателей нашёл 11 совпадений, из которых одно было чужим. */
+
+  test("служебная строка WB «по товару <nmId>» пассом не считается", () => {
+    // WB помечает её то `seller`, то `client` — фильтра по отправителю мало.
+    expect(findGamepassRefInChatText("Чат с покупателем по товару 967446616")).toBeNull();
+  });
+
+  test("номер нашего товара на WB отсекается и по числу", () => {
+    expect(findGamepassRefInChatText("вопрос по 967446616", 967446616)).toBeNull();
+    expect(findGamepassRefInChatText("вот пасс 1967540063", 967446616)).toBe("1967540063");
+  });
+
+  test("адрес Creator Hub читается ссылкой, а не догадкой по длине числа", () => {
+    expect(findGamepassRefInChatText(
+      "https://create.roblox.com/dashboard/creations/experiences/10342798258/passes/1966753478/configure",
+    )).toBe("1966753478");
+  });
 });
 
 describe("tryAttachGamepassFromChat", () => {
@@ -194,10 +213,10 @@ describe("воркер зовёт разбор", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");
 
   test("только на сообщениях покупателя и только когда в тексте что-то есть", () => {
-    expect(source).toContain("findGamepassRefInChatText(rawText)");
+    expect(source).toContain("findGamepassRefInChatText(rawText, order.nmId)");
     expect(source).toContain("tryAttachGamepassFromChat");
     // Дешёвый разбор стоит ДО похода в базу за карточкой заказа.
-    expect(source.indexOf("findGamepassRefInChatText(rawText)"))
+    expect(source.indexOf("findGamepassRefInChatText(rawText, order.nmId)"))
       .toBeLessThan(source.indexOf("tryAttachGamepassFromChat(db"));
   });
 });

@@ -33,8 +33,28 @@ import { sendAdminOrderCard } from "./admin";
 import { notifyDbsChatGamepassAttached, notifyDbsChatGamepassRejected } from "./wb-delivery-admin-notify";
 import type { DbsRef } from "./wb-delivery-admin-notify";
 
-/** Ссылка на пасс в тексте: самый надёжный признак, ищем в любом месте строки. */
-const URL_RE = /(?:game-pass(?:es)?|game_pass(?:es)?)\/(\d+)/i;
+/**
+ * Ссылки на пасс: самый надёжный признак, ищем в любом месте строки.
+ *
+ * Третий шаблон — адрес Creator Hub (`…/experiences/<universeId>/passes/<passId>/…`).
+ * Без него такая ссылка проваливалась в разбор голых чисел и держалась там
+ * только на том, что universeId длиннее десяти цифр, — то есть на удаче.
+ */
+const URL_PATTERNS = [
+  /game-pass(?:es)?\/(\d+)/i,
+  /game_pass(?:es)?\/(\d+)/i,
+  /\bpasses\/(\d+)/i,
+];
+
+/**
+ * Служебная строка самого Wildberries: «Чат с покупателем по товару <nmId>».
+ *
+ * Она приходит в переписку с номером НАШЕГО товара — девятизначным числом,
+ * неотличимым по форме от старого пасса. WB помечает её то `seller`, то
+ * `client` (проверено на живых данных 07.09.2026: 175 таких строк, одна из них
+ * от `client`), поэтому фильтра по отправителю недостаточно.
+ */
+const WB_SYSTEM_LINE_RE = /чат с покупателем по товару/i;
 /**
  * Голый ID отдельным словом.
  *
@@ -54,10 +74,16 @@ const PRICE_TOLERANCE = 2;
  * ОДНО: две длинные цифры в одном сообщении — это уже догадка, а догадка здесь
  * стоит чужого пасса в заказе.
  */
-export function findGamepassRefInChatText(text: string): string | null {
-  const url = text.match(URL_RE);
-  if (url?.[1]) return url[1];
-  const bare = [...new Set([...text.matchAll(BARE_RE)].map((m) => m[1]))];
+export function findGamepassRefInChatText(text: string, nmId?: number | null): string | null {
+  if (WB_SYSTEM_LINE_RE.test(text)) return null;
+  for (const pattern of URL_PATTERNS) {
+    const m = text.match(pattern);
+    if (m?.[1]) return m[1];
+  }
+  const bare = [...new Set([...text.matchAll(BARE_RE)].map((m) => m[1]))]
+    // Номер нашего же товара на WB — не пасс. Точная проверка вдобавок к тексту
+    // служебной строки: формулировку WB может поменять, номер товара — нет.
+    .filter((id) => !nmId || id !== String(nmId));
   return bare.length === 1 ? bare[0] : null;
 }
 
@@ -111,6 +137,8 @@ interface AttachInput {
   /** Код гейта, выданный по этому заказу. */
   wbCode: string;
   text: string;
+  /** Номер товара на WB: он же приходит в служебной строке чата и пассом не является. */
+  nmId?: number | null;
 }
 
 /**
@@ -119,7 +147,7 @@ interface AttachInput {
  * Возвращает исход для счётчиков воркера; уведомления шлёт сама.
  */
 export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: AttachInput): Promise<ChatGamepassOutcome> {
-  const gamepassId = findGamepassRefInChatText(input.text);
+  const gamepassId = findGamepassRefInChatText(input.text, input.nmId);
   if (!gamepassId) return { kind: "skipped" };
 
   const order = await db.wbOrder

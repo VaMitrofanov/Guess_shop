@@ -1251,10 +1251,10 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     // сообщении действительно что-то похожее на пасс (каждый заход в Neon с
     // прод-хоста стоит ~200 мс, а сообщений в чатах несоизмеримо больше).
     if (isNewEvent && order && isBuyerSender(event.sender) && rawText
-      && findGamepassRefInChatText(rawText) && !order.completedAt && !order.cancelledAt) {
+      && findGamepassRefInChatText(rawText, order.nmId) && !order.completedAt && !order.cancelledAt) {
       const ref = await dbsRef(db, order.id, order.wbOrderId);
       if (ref.code) {
-        const outcome = await tryAttachGamepassFromChat(db as unknown as ChatGamepassDb, { ref, wbCode: ref.code, text: rawText })
+        const outcome = await tryAttachGamepassFromChat(db as unknown as ChatGamepassDb, { ref, wbCode: ref.code, text: rawText, nmId: order.nmId })
           .catch((err) => {
             console.warn("[WbDbsSync] разбор геймпасса из чата:", err instanceof Error ? err.message : err);
             return { kind: "skipped" as const };
