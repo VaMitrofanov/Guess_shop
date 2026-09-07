@@ -569,6 +569,10 @@ export function registerStart(bot: Telegraf): void {
       // заказ находится: код с карточки или код доставки из чата WB. Апселл
       // «купи напрямую» здесь читается как «твоего заказа у нас нет».
       if (helpMode && !isAdmin) {
+        // Видно в логах бота: сколько людей доходит до нас без кода. Тревогу
+        // «человек застрял» при этом НЕ поднимаем — он ещё ничего не пробовал,
+        // мы только просим код, и алерт на каждый такой заход был бы шумом.
+        console.log(`[TG] wbhelp: гость без кода tgId=${tgId}`);
         await ctx.reply(
           `Привет! 👋 Ты открыл меня со страницы инструкции — заказа за тобой я пока не вижу.\n\n` +
           `Пришли сюда одно из двух, и я его найду:\n` +
@@ -580,7 +584,7 @@ export function registerStart(bot: Telegraf): void {
             link_preview_options: { is_disabled: true },
             ...Markup.inlineKeyboard([
               [Markup.button.url("📖 Где взять код", "https://robloxbank.ru/guide?source=wb")],
-              [supportBtn("💬 Не нашёл код — помогите", "wbhelp_no_code", ctx)],
+              [supportBtn("💬 Не нашёл код — помогите", "wbhelp_no_code")],
             ]),
           },
         );
