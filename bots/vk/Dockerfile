@@ -65,8 +65,12 @@ RUN npx prisma generate --schema ./prisma/schema.prisma
 FROM node:${NODE_VERSION} AS runner
 WORKDIR /app
 
+# curl — не для кода, а для пробы живости. Coolify собирает healthcheck сам и
+# зовёт `curl … || wget … || exit 1`; в `bookworm-slim` нет ни того, ни другого,
+# поэтому включённая проба падала бы всегда и держала контейнер «нездоровым»
+# честнее, чем он есть. ~1 МБ на образ (07.09.2026).
 RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Build-time defaults only.

@@ -296,7 +296,17 @@ Coolify держал у `TG_bot` и `VK_bot` `health_check_enabled: false`, по
 
 **Порядок важен и нарушает обычное правило «конфиг до пуша»:** healthcheck в
 Coolify включается ПОСЛЕ выкатки кода с `/healthz`. Включённая проба на старом
-образе пометила бы контейнер нездоровым и отправила бы его на рестарт.
+образе пометила бы контейнер нездоровым.
+
+**И ещё две грабли, обе поймались на живом включении:**
+- `PATCH health_check_enabled` меняет только запись приложения. У уже запущенного
+  контейнера `Config.Healthcheck` остаётся пустым, статус висит `running:unknown`
+  — проба попадает в контейнер **только при следующем деплое**.
+- Coolify собирает команду сам: `curl … || wget … || exit 1`. В образах ботов
+  (`node:22-bookworm-slim` + только `openssl ca-certificates`) **нет ни curl, ни
+  wget** — проба падала бы всегда. В runner-стадию обоих Dockerfile добавлен
+  `curl`; проверять новый healthcheck надо не по статусу в панели, а изнутри:
+  `docker exec <ctr> sh -lc "curl -sf http://localhost:3000/healthz"`.
 
 ### Russian Trusted Root CA в Docker-образе (06.08.2026)
 
