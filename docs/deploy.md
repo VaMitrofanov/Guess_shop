@@ -122,6 +122,19 @@ heartbeat, `wb-dbs-statuses`/chat cursors без error и synthetic `isTest` flo
 > `SITE_ACQUIRING_ENABLED=false`: включение требует отдельной staging test matrix,
 > согласованных ККТ-параметров и всех launch-gates master plan.
 
+### API коридора живёт на Guide, а не на Web (проверено 08.09.2026)
+
+У Web в `watch_paths` стоит `src/**`, но следом — **`!src/app/api/wb-**`**: маршруты
+коридора (`/api/wb-code`, `/api/wb-link`, …) обслуживает контейнер Guide. Практический
+вывод, доказанный живым запросом: правка в `src/app/api/wb-link/route.ts` уехала в Web
+(контейнер уже стоял на новом коммите), а прод продолжал отдавать СТАРЫЙ ответ — потому
+что отвечал Guide. **Починка в `src/app/api/wb-*` доезжает до покупателя только со сборкой
+Guide** (сама она придёт от drift-watch в течение 15 минут либо руками
+`deploy-web-and-guide.sh --guide-only`).
+
+Проверять после такой правки надо ответ прода, а не образ Web:
+`curl -s -o /dev/null -w '%{redirect_url}' https://robloxbank.ru/api/wb-link`.
+
 ### Guide теперь выкатывается сам — руками его ставить не надо (06.09.2026)
 
 С 03.09 `drift-watch.sh` не только жалуется, но и **лечит**: увидев разошедшиеся отпечатки
