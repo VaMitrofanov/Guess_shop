@@ -64,7 +64,7 @@ import {
   isServiceOwned,
   linkWbOrderToBuyer,
 } from "../shared/wb-buyer-link";
-import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
+import { notifyDbsBuyerFoundLate, notifyDbsUnknownDeliveryCode } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
 import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/order-thread";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
@@ -4192,8 +4192,14 @@ async function handleVkDeliveryCodeEntry(ctx: VkDeliveryCodeCtx, vkUserId: numbe
     );
   };
 
-  if (!match || match.alreadyOwned) {
-    if (!match) return false;
+  // Ответ ОДИН на все исходы — иначе по разнице ответов перебирается код.
+  // Раньше промах возвращал `false` и падал в общее «нет активных заявок».
+  if (!match) {
+    await askSupport();
+    notifyDbsUnknownDeliveryCode(`vk:${vkUserId}`, code);
+    return true;
+  }
+  if (match.alreadyOwned) {
     await askSupport();
     return true;
   }

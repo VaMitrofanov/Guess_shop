@@ -858,6 +858,17 @@ function CheckoutContent() {
                   const matches = gamepassPriceMatches(Number(manualPass.price), expectedPassPrice);
                   const ready = !offsale && (matches || passRobux !== null);
                   const owner = manualPass.creatorName || manualPass.sellerName || "";
+                  // Ник, который человек уже назвал сам. Если владелец пасса
+                  // другой — раньше поле ника молча перезаписывалось владельцем:
+                  // подмена была видна, но не спрошена, а сервер её не ловит
+                  // (гард `OWNER_MISMATCH` живёт в `select-gamepass`, а покупка
+                  // на сайте туда не заходит). Решение владельца 07.09.2026:
+                  // не отказывать, а показать оба ника и спросить — риск берёт
+                  // на себя покупатель, но осознанно.
+                  const claimed = (account?.username || username || "").trim();
+                  const ownerMismatch = Boolean(
+                    ready && owner && claimed && owner.toLowerCase() !== claimed.toLowerCase(),
+                  );
                   return (
                     <div className={styles.manualResult}>
                       {offsale && (
@@ -866,8 +877,19 @@ function CheckoutContent() {
                       {!offsale && !matches && passRobux === null && (
                         <div className={styles.manualWarn}><CircleAlert size={18} /><span>Цена пасса <b>{Number(manualPass.price).toLocaleString("ru-RU")} R$</b> вне диапазона заказа ({MIN_ROBUX.toLocaleString("ru-RU")}–{MAX_ROBUX.toLocaleString("ru-RU")} R$). Поставь <b>{expectedPassPrice.toLocaleString("ru-RU")} R$</b> и нажми «Проверить» снова.</span></div>
                       )}
-                      {ready && owner && (
+                      {ready && owner && !ownerMismatch && (
                         <div className={styles.manualOk}><BadgeCheck size={18} /><span>Владелец пасса — <b>{owner}</b>. Робуксы придут именно на этот аккаунт.</span></div>
+                      )}
+                      {ownerMismatch && (
+                        <div className={styles.manualWarn} role="alert">
+                          <CircleAlert size={18} />
+                          <span>
+                            Ты искал аккаунт <b>{claimed}</b>, а этот геймпасс принадлежит <b>{owner}</b>.
+                            Робуксы Roblox переводит <b>владельцу геймпасса</b> — они придут на <b>{owner}</b>,
+                            а не на {claimed}. Если это твой второй аккаунт — всё в порядке, подтверди ниже.
+                            Если нет — проверь ссылку на геймпасс.
+                          </span>
+                        </div>
                       )}
                       <button
                         type="button"
@@ -882,6 +904,9 @@ function CheckoutContent() {
                           <em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>
                             {matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}
                           </em>
+                          {/* Последствие названо там, где палец: карточку жмут,
+                              не долистав до предупреждения выше. */}
+                          {ownerMismatch && <small>Нажми, чтобы оформить заказ на <b>{owner}</b></small>}
                         </span>
                         {String(selectedPass?.id ?? "") === String(manualPass.id) && <Check size={19} />}
                       </button>

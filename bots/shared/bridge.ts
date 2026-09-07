@@ -88,6 +88,21 @@ export function startBridgeServer(): http.Server {
       return;
     }
 
+    // ── Проба живости ───────────────────────────────────────────────────────
+    //
+    // Без неё Coolify показывал обоим ботам статус `running:unknown`: healthcheck
+    // у приложения был выключен, потому что проверять было нечего — все роуты
+    // моста закрыты ключом и на GET без него отвечают 401/404, а это для
+    // healthcheck такой же «нездоров», как и мёртвый процесс.
+    //
+    // Отвечает ДО авторизации и намеренно ничего не рассказывает: только то, что
+    // процесс жив и цикл событий отвечает. Что бот на самом деле разгребает
+    // очередь Telegram или VK, эта проба не доказывает и не притворяется.
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      respond(200, { ok: true, uptime: Math.round(process.uptime()) });
+      return;
+    }
+
     // ── Route dispatcher ────────────────────────────────────────────────────
     const isCheckPass        = req.method === "GET"  && url.pathname === "/check-pass";
     const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";

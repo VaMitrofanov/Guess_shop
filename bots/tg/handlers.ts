@@ -72,7 +72,7 @@ import {
   isServiceOwned,
   linkWbOrderToBuyer,
 } from "../shared/wb-buyer-link";
-import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
+import { notifyDbsBuyerFoundLate, notifyDbsUnknownDeliveryCode } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn, refreshDbsCardByCode } from "../shared/wb-dbs-thread";
 import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/order-thread";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
@@ -3608,8 +3608,18 @@ async function handleWbDeliveryCodeEntry(ctx: DeliveryCodeCtx, tgId: string, cod
     );
   };
 
-  if (!match || match.alreadyOwned) {
-    if (!match) return false;
+  // Ответ ОДИН на все исходы — в этом весь смысл: по разнице ответов
+  // пятизначный код можно было бы перебирать. Раньше промах возвращал `false`
+  // и падал в общее «нет активных заявок» — и оракул, и тупик разом.
+  if (!match) {
+    await askSupport();
+    notifyDbsUnknownDeliveryCode(
+      ctx.from?.username ? `@${ctx.from.username}` : `tg:${tgId}`,
+      code,
+    );
+    return true;
+  }
+  if (match.alreadyOwned) {
     await askSupport();
     return true;
   }
