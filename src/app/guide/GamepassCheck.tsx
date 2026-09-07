@@ -23,7 +23,7 @@ import Footer from "@/components/footer";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getOrInitSessionId } from "@/lib/wb-session";
-import { tgBotHref } from "@/lib/bot-links";
+import { tgBotHref, vkBotHref } from "@/lib/bot-links";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import {
   coveredRobux,
@@ -42,7 +42,6 @@ import KeyCreate from "./KeyCreate";
 import type { GuidePlatform } from "@/lib/device-platform";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
-const VK_RETURN_HREF = "https://vk.me/club237309399";
 /** Анимация проверки не должна мигать: ответ приходит быстрее, чем читается строка. */
 const SCAN_MIN_MS = 2000;
 
@@ -150,7 +149,7 @@ export default function GamepassCheck({
   }, []);
 
   const tgHref = tgBotHref(code, code ? getOrInitSessionId() : null);
-  const returnHref = channel === "VK" ? (code ? `${VK_RETURN_HREF}?ref=${code}` : VK_RETURN_HREF) : tgHref;
+  const returnHref = channel === "VK" ? vkBotHref(code) : tgHref;
 
   // Канал (TG/VK) и уже оформленный заказ — чтобы повторный вход на страницу не
   // предлагал оформить то, что оформлено, и вёл в тот мессенджер, где человек уже есть.

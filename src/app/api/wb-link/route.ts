@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
+import { vkBotHref } from "@/lib/bot-links";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
@@ -48,9 +49,9 @@ export async function GET(request: NextRequest) {
 
   // In guide mode, pass the GD prefix so the VK bot sends the guide welcome message.
   const refCode = wbCode ? (isGuideMode ? `GD${wbCode}` : wbCode) : null;
-  const targetUrl = refCode
-    ? `https://vk.me/club237309399?ref=${refCode}`
-    : "https://vk.me/club237309399";
+  // Без кода — метка `WBHELP`, а не голый диалог: бот тогда ищет заказ самого
+  // гостя и просит код, вместо велкома «купи напрямую» (`src/lib/bot-links.ts`).
+  const targetUrl = vkBotHref(refCode);
 
   return NextResponse.redirect(new URL(targetUrl));
 }

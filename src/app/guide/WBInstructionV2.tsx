@@ -17,7 +17,7 @@ import VKAuthButton from "@/components/auth/VKAuthButton";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { getOrInitSessionId } from "@/lib/wb-session";
-import { tgBotHref } from "@/lib/bot-links";
+import { tgBotHref, vkBotHref } from "@/lib/bot-links";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
 import { parseGamepassRef, parseGamepassUrl } from "@/lib/gamepass-id";
@@ -28,10 +28,6 @@ import type { GuidePlatform } from "@/lib/device-platform";
 
 const RATE = 0.7; // Roblox keeps 30%
 const calcPrice = (n: number) => (n > 0 ? Math.ceil(n / RATE) : 0);
-
-// VK community deep-link used to bounce the user back into the bot once the order
-// is placed (the code is already bound to their VK id — no re-auth needed).
-const VK_RETURN_HREF = "https://vk.me/club237309399";
 
 // ─── Step-7 nick search types ───────────────────────────────────────────────
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
@@ -278,9 +274,9 @@ export default function WBInstructionV2({
     return () => { alive = false; };
   }, [code, testMode]);
 
-  const returnHref = channel === "VK"
-    ? (code ? `${VK_RETURN_HREF}?ref=${code}` : VK_RETURN_HREF)
-    : tgHref;
+  // Диалог сообщества ВК с меткой: с кодом — сразу в заказ (код уже привязан к
+  // vk id, повторный вход не нужен), без кода — `WBHELP`, как у Telegram.
+  const returnHref = channel === "VK" ? vkBotHref(code) : tgHref;
 
   // Auto-redirect only on fresh picks (not re-entries — let the user see their nick).
   const redirecting = orderPlaced && !isReEntry && !testMode && !!channel;

@@ -22,7 +22,7 @@ import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
 import { ConnectivityAssistant } from "@/components/connectivity-assistant";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getOrInitSessionId, loadWBSession, saveWBSession, clearWBSession } from "@/lib/wb-session";
-import { tgBotHref } from "@/lib/bot-links";
+import { tgBotHref, vkBotHref } from "@/lib/bot-links";
 
 // ─── Step definitions ──────────────────────────────────────────────────────────
 
@@ -2312,7 +2312,7 @@ function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: s
                             // `vkAuthCode` как есть, с префиксом GD: ровно то же
                             // значение, что подставляет VKAuthButton в штатном
                             // пути. Префикс снимают и бот, и `src/auth.ts`.
-                            href={`https://vk.me/club237309399?ref=${encodeURIComponent(vkAuthCode)}`}
+                            href={vkBotHref(vkAuthCode)}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
@@ -3059,7 +3059,7 @@ export default function GuideClient({
             <a href={tgFallbackHref}>
               Продолжить в Telegram
             </a>
-            <a href="https://vk.me/club237309399">
+            <a href={vkBotHref(wbCodeFromUrl)}>
               Продолжить в VK
             </a>
           </div>

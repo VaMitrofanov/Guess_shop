@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { TG_BOT_URL, TG_HELP_START, tgBotHref } from "@/lib/bot-links";
+import { TG_BOT_URL, TG_HELP_START, VK_BOT_URL, VK_HELP_REF, tgBotHref, vkBotHref } from "@/lib/bot-links";
 
 /**
  * Голой ссылки на бота больше нет.
@@ -37,12 +37,36 @@ describe("tgBotHref", () => {
   });
 });
 
+describe("vkBotHref", () => {
+  test("с кодом — прямо в заказ", () => {
+    expect(vkBotHref("JS6NQB9")).toBe(`${VK_BOT_URL}?ref=JS6NQB9`);
+  });
+
+  test("гайд-режим сохраняет префикс GD — его снимают бот и src/auth.ts", () => {
+    expect(vkBotHref("GDJS6NQB9")).toBe(`${VK_BOT_URL}?ref=GDJS6NQB9`);
+  });
+
+  test("без кода — за помощью, а не в пустой диалог сообщества", () => {
+    expect(vkBotHref()).toBe(`${VK_BOT_URL}?ref=${VK_HELP_REF}`);
+    expect(vkBotHref("")).toBe(`${VK_BOT_URL}?ref=${VK_HELP_REF}`);
+    expect(vkBotHref(null)).toBe(`${VK_BOT_URL}?ref=${VK_HELP_REF}`);
+  });
+});
+
 describe("страницы коридора", () => {
   test.each(CORRIDOR)("%s не собирает ссылку на бота руками", (file) => {
     const source = read(file).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     const bare = source.match(/"https:\/\/t\.me\/RobloxBankBot"/g) ?? [];
     expect(bare).toHaveLength(0);
     expect(source).toContain("tgBotHref(");
+  });
+
+  // Вторая половина той же правки: голая `vk.me/club…` уводила гостя из ВК в
+  // сообщество, которое его не знает, — ровно как голая `t.me` до 07.09.2026.
+  test.each([...CORRIDOR, "src/app/api/wb-link/route.ts"])("%s не собирает ссылку в ВК руками", (file) => {
+    const source = read(file).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    expect(source.match(/vk\.me\/club/g) ?? []).toHaveLength(0);
+    expect(source).toContain("vkBotHref(");
   });
 });
 
