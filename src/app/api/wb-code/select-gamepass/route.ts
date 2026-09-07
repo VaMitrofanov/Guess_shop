@@ -7,6 +7,7 @@ import { buildSplitParts, type SplitPart } from "@/lib/order-gamepass-split";
 import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
 import { PRICE_TOL, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "@/lib/order-audit";
+import { countPreviousOrders } from "../../../../../bots/shared/order-loyalty";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -278,7 +279,10 @@ export async function POST(request: Request) {
           where: { id: order.userId },
           select: { tgId: true, vkId: true, name: true, username: true },
         }),
-        prisma.wbOrder.count({ where: { userId: order.userId, status: "COMPLETED" } }),
+        // Тот же счёт, что у ботов: «повторный» значит «уже что-то заказывал»,
+        // а не «уже что-то получил» — иначе одна и та же карточка называет
+        // человека по-разному в зависимости от того, кто её собрал.
+        countPreviousOrders(prisma as never, { userId: order.userId, excludeOrderId: order.id }),
         // Пасс создан нашим ботом по ключу покупателя? Спрашиваем СОБЫТИЯ
         // заказа, а не клиента: маркер в карточке админа должен опираться на
         // то, что мы сами записали при создании, а не на поле в запросе.

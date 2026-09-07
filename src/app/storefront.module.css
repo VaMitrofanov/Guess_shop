@@ -73,6 +73,11 @@
 .codeTeaser strong { font-size:15px; }
 .codeTeaser small { margin-top:1px; color:#6e657f; font-size:14px; font-weight:700; }
 .codeTeaser a { color:#7556e8; font-size:14px; font-weight:900; white-space:nowrap; text-decoration:underline; text-underline-offset:3px; }
+/* Блок целиком стал ссылкой (вход по коду WB), поэтому «Ввести код» — обычный
+   span, но выглядеть должен так же, как выглядела ссылка внутри. */
+.codeTeaser > span:last-child { color:#7556e8; font-size:14px; font-weight:900; white-space:nowrap; text-decoration:underline; text-underline-offset:3px; }
+a.codeTeaser { text-decoration:none; transition:border-color .18s, transform .18s; }
+a.codeTeaser:hover { border-color:#7556e8; transform:translateY(-1px); }
 
 .calculator { position: relative; max-width: 100%; padding: 28px; border: 1px solid #cfc6ee; border-radius: 26px; background: rgba(255,255,255,.95); box-shadow: 12px 12px 0 #251b3f, 0 26px 70px rgba(54,35,91,.12); transform: rotate(1deg); }
 .calculatorBadge { position: absolute; right: 24px; top: -15px; padding: 7px 12px; border: 1px solid #251b3f; border-radius: 999px; background: #7556e8; color: white; font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }

@@ -7,9 +7,15 @@ import { useSession } from "next-auth/react";
 import { ArrowRight, Menu, Shield, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import ActiveOrderBar from "@/components/active-order-bar";
 
 const NAV_LINKS = [
   { href: "/", label: "Купить" },
+  // Вход по коду с карточки WB — такой же, как «напиши код боту». До 07.09.2026
+  // его на сайте не было вообще: человек с картой в руках попадал на витрину и
+  // шёл платить второй раз. Обычный `<a>`, а не `Link`: `?source=wb` обслуживает
+  // отдельный контейнер Guide, и клиентский переход внутри Next до него не дойдёт.
+  { href: "/guide?source=wb", match: "/guide", label: "Код WB", external: true },
   { href: "/guide?source=site&amount=1000", match: "/guide", label: "Инструкция" },
   { href: "/guarantees", label: "Гарантии" },
   { href: "/reviews", label: "Отзывы" },
@@ -38,9 +44,10 @@ export default function Navbar() {
         <div className="hidden items-center gap-1 lg:flex">
           {NAV_LINKS.map((item) => {
             const active = pathname === (item.match ?? item.href);
-            return (
-              <Link key={item.href} href={item.href} className={cn("rounded-full px-4 py-2 text-base font-bold transition-colors", active ? "bg-[var(--rb-accent-soft)] text-[var(--rb-accent)]" : "text-[var(--rb-muted)] hover:bg-[var(--rb-surface)] hover:text-[var(--rb-text)]")}>{item.label}</Link>
-            );
+            const className = cn("rounded-full px-4 py-2 text-base font-bold transition-colors", active ? "bg-[var(--rb-accent-soft)] text-[var(--rb-accent)]" : "text-[var(--rb-muted)] hover:bg-[var(--rb-surface)] hover:text-[var(--rb-text)]");
+            return item.external
+              ? <a key={item.href} href={item.href} className={className}>{item.label}</a>
+              : <Link key={item.href} href={item.href} className={className}>{item.label}</Link>;
           })}
         </div>
 
@@ -73,7 +80,9 @@ export default function Navbar() {
       {open && (
         <div className="border-t border-[var(--rb-border)] bg-[var(--rb-bg)] px-5 py-4 lg:hidden">
           <div className="mx-auto flex max-w-[620px] flex-col gap-1">
-            {NAV_LINKS.map((item) => <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className="rounded-xl px-4 py-3 text-sm font-bold text-[var(--rb-muted)] hover:bg-[var(--rb-accent-soft)] hover:text-[var(--rb-accent)]">{item.label}</Link>)}
+            {NAV_LINKS.map((item) => item.external
+              ? <a key={item.href} href={item.href} onClick={() => setOpen(false)} className="rounded-xl px-4 py-3 text-sm font-bold text-[var(--rb-muted)] hover:bg-[var(--rb-accent-soft)] hover:text-[var(--rb-accent)]">{item.label}</a>
+              : <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className="rounded-xl px-4 py-3 text-sm font-bold text-[var(--rb-muted)] hover:bg-[var(--rb-accent-soft)] hover:text-[var(--rb-accent)]">{item.label}</Link>)}
             {/* D1: здесь были литеральные `bg-white` и `border-[#dcd5ef]` без
                 цвета текста — он наследовался от `--rb-text`, и в тёмной теме
                 получался белый текст на белом фоне (контраст ≈1.05:1).
@@ -89,6 +98,11 @@ export default function Navbar() {
           </div>
         </div>
       )}
+
+      {/* Заказ всегда перед глазами: пока он живой, строка едет вместе с шапкой
+          на каждой странице сайта — так же, как приветствие бота показывает его
+          в Telegram и ВКонтакте. */}
+      <ActiveOrderBar enabled={loggedIn} />
     </nav>
   );
 }

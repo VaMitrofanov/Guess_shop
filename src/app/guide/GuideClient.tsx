@@ -22,6 +22,7 @@ import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
 import { ConnectivityAssistant } from "@/components/connectivity-assistant";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getOrInitSessionId, loadWBSession, saveWBSession, clearWBSession } from "@/lib/wb-session";
+import { tgBotHref } from "@/lib/bot-links";
 
 // ─── Step definitions ──────────────────────────────────────────────────────────
 
@@ -1872,7 +1873,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         {/* Telegram Button */}
         <div className="h-16 md:h-20 flex items-stretch border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
           <a
-            href={code ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}` : "https://t.me/RobloxBankBot"}
+            href={tgBotHref(code, code ? getOrInitSessionId() : null)}
             target="_blank" rel="noopener noreferrer"
             className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-xs md:text-sm uppercase tracking-widest text-white"
           >
@@ -3014,9 +3015,7 @@ export default function GuideClient({
     // спиннер завис бы навсегда. Фолбэк ниже всплывает чистым CSS через 12 с и
     // работает без JS: перезагрузка страницы + продолжение в боте (бот-коридор
     // от сайта не зависит).
-    const tgFallbackHref = wbCodeFromUrl
-      ? `https://t.me/RobloxBankBot?start=wb_${encodeURIComponent(wbCodeFromUrl)}`
-      : "https://t.me/RobloxBankBot";
+    const tgFallbackHref = tgBotHref(wbCodeFromUrl);
     return (
       <div className="guideRestoreRoot">
         <style>{`
@@ -3088,6 +3087,11 @@ export default function GuideClient({
         mode="WB"
         amount={denomination || 1000}
         code={activeCode || undefined}
+        /* Ник из ссылки бота (`guideUrlFor` кладёт `&username=`). Он сюда не
+           передавался вовсе, и «персональная» кнопка из бота приводила
+           покупателя в пустое поле «как тебя зовут в Roblox» — на шаг, который
+           он в боте только что прошёл. */
+        initialUsername={initialUsername}
         onReset={directInstruction ? undefined : handleWBReset}
         testMode={testMode}
         initialPlatform={initialPlatform}

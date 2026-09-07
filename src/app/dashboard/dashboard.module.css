@@ -52,6 +52,13 @@
 .keyScanDone{color:rgba(246,242,255,.8)}
 .keyScanDone i{background:rgba(69,214,170,.22);color:#8ff0d2}
 @keyframes rb-key-pulse{0%,100%{box-shadow:0 0 0 0 rgba(141,114,255,.5)}50%{box-shadow:0 0 0 6px rgba(141,114,255,0)}}
+/* Что ключ сделал с живым заказом: главный ответ карточки, поэтому зелёный и
+   первым. До 07.09.2026 такого блока не было — ключ молча ложился в базу. */
+.keyApplied{display:grid;gap:5px;margin-top:12px;padding:13px;border:1px solid rgba(69,214,170,.42);border-radius:14px;background:rgba(69,214,170,.13)}
+.keyApplied strong{font-size:15.5px;line-height:1.35;color:#fff}
+.keyApplied small{color:rgba(246,242,255,.78);font-size:13.5px;line-height:1.5}
+.keyApplied a{justify-self:start;margin-top:5px;display:inline-flex;align-items:center;gap:5px;min-height:40px;padding:0 15px;border-radius:11px;background:#2fbf94;color:#06251c;font-size:14px;font-weight:900;text-decoration:none}
+.keyApplied a:hover{background:#45d6aa}
 .keyFail{display:grid;gap:4px;padding:12px;border:1px solid rgba(255,155,173,.4);border-radius:13px;background:rgba(234,86,111,.14)}
 .keyFail strong{color:#ffc2cd;font-size:14px}
 .keyFail span{color:rgba(246,242,255,.82);font-size:13.5px;line-height:1.5}

@@ -52,6 +52,9 @@ import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
+import { countPreviousOrders } from "../shared/order-loyalty";
+import { corridorHoldText, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
+import { VK_HELP_REF } from "../shared/bot-links";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -1214,6 +1217,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleStartDirect(ctx, vkUserId);
     return;
   }
+  // «Всё равно куплю» — обход экрана «сначала закончим оплаченный заказ».
+  if (msgPayload?.command === "start_direct_any") {
+    await handleStartDirect(ctx, vkUserId, { force: true });
+    return;
+  }
   if (msgPayload?.command === "direct_pack") {
     const packAmt = typeof msgPayload.amount === "number" ? msgPayload.amount : NaN;
     if (!isNaN(packAmt) && DIRECT_PACKS.includes(packAmt)) {
@@ -1790,11 +1798,60 @@ async function vkOfferPreselectedGamepass(
 // A — Activation via ref link
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * `?ref=WBHELP` — пришёл из инструкции, кода при себе нет.
+ *
+ * Пара к Telegram-ветке `wbhelp`. Сначала показываем ЕГО заказ, если он есть:
+ * человек чаще всего просто потерял ссылку. Если заказа нет — просим код с
+ * карточки или код доставки из чата WB; общий велком здесь читается как
+ * «твоего заказа у нас нет».
+ */
+async function handleHelpRef(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await db.user
+    .findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } })
+    .catch(() => null);
+  if (user) {
+    const live = await db.wbOrder.findFirst({
+      where: { userId: user.id, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] } },
+      orderBy: { createdAt: "desc" },
+      select: { wbCode: true },
+    }).catch(() => null);
+    if (live) {
+      // «статус» — тот же вход, что у кнопки «📊 Мой заказ»: покупатель с живым
+      // заказом должен увидеть его, а не просьбу прислать код, который у него
+      // уже принят.
+      await handleIdleMessage(ctx, vkUserId, "статус");
+      return;
+    }
+  }
+  await ctx.reply({
+    message:
+      "Привет! 👋 Ты открыл меня со страницы инструкции — заказа за тобой я пока не вижу.\n\n" +
+      "Пришли сюда одно из двух, и я его найду:\n" +
+      "🔑 код с карточки WB — 7 символов, буквы и цифры\n" +
+      "📦 код доставки — цифры из чата Wildberries, тот самый, которым закрывают доставку\n\n" +
+      "Просто отправь его сообщением — разберусь сам.",
+    keyboard: Keyboard.builder()
+      .urlButton({ label: "📖 Где взять код", url: "https://robloxbank.ru/guide?source=wb" })
+      .row()
+      .textButton({ label: "💬 Не нашёл код — помогите", payload: { command: "support", context: "wbhelp_no_code" }, color: "secondary" })
+      .inline(),
+  });
+}
+
 async function handleRefActivation(
   ctx: MessageContext,
   vkUserId: number,
   rawCode: string
 ): Promise<void> {
+  // Гость со страницы инструкции без кода (`?ref=WBHELP`). Кода у него нет, в
+  // базе искать нечего — но и «код не найден» ему говорить не за что. Сначала
+  // смотрим, нет ли за ним заказа, потом просим то, чем заказ находится.
+  if (rawCode === VK_HELP_REF) {
+    await handleHelpRef(ctx, vkUserId);
+    return;
+  }
+
   const isGuideMode = rawCode.startsWith("GD") && rawCode.length === 9;
   const code = isGuideMode ? rawCode.substring(2) : rawCode;
 
@@ -2227,9 +2284,7 @@ async function handleGamepassLink(
   // entirely (by wbCode): if it was already promoted to PENDING (e.g. by the
   // site one-tap a minute earlier), the old status-only filter counted the
   // order itself → false «ПОВТОРНЫЙ КЛИЕНТ» badge.
-  const previousOrderCount = await (db as any).wbOrder.count({
-    where: { userId: user.id, status: { notIn: ["AWAITING_GAMEPASS"] }, wbCode: { not: wbCode } },
-  }).catch(() => 0);
+  const previousOrderCount = await countPreviousOrders(db as any, { userId: user.id, excludeWbCode: wbCode });
 
   // ── Atomic claim + order creation ──────────────────────────────────────
   // Roblox validation passed above — now commit in a single transaction:
@@ -3228,7 +3283,11 @@ async function handleOrderPick(ctx: MessageContext, vkUserId: number, code: stri
 // B3 — Direct order flow (no WB card needed)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise<void> {
+async function handleStartDirect(
+  ctx: MessageContext,
+  vkUserId: number,
+  opts?: { force?: boolean },
+): Promise<void> {
   // Subscription gate — same as TG bot
   if (process.env.VK_GROUP_ID) {
     const subbed = await isVkSubscribed(ctx, vkUserId);
@@ -3260,6 +3319,22 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
       select: { amount: true },
     });
     if (lastOrder) lastOrderAmount = lastOrder.amount;
+  }
+
+  // Сначала — оплаченное. Тот же экран, что и в Telegram: не запрет, а выбор,
+  // где «продолжить заказ» стоит первым.
+  if (!opts?.force && user?.id) {
+    const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, user.id);
+    if (held) {
+      const kb = Keyboard.builder()
+        .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrlFor(held.wbCode, held.nick ?? undefined) })
+        .row()
+        .textButton({ label: "🔎 Продолжить заказ", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💎 Всё равно купить напрямую", payload: { command: "start_direct_any" }, color: "secondary" });
+      await ctx.reply({ message: plainText(corridorHoldText(held)), keyboard: kb.inline() });
+      return;
+    }
   }
 
   const notes: string[] = [];

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { createGamePassViaBridge } from "@/lib/roblox-gamepass-create";
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
-import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
-import { appendOrderAudit } from "@/lib/order-recovery";
-import { auditGamepassAutocreated, type OrderAuditClient } from "@/lib/order-audit";
+import { loadRobloxApiKeyForUser } from "@/lib/roblox-api-key-store";
+import {
+  CODE_RE,
+  createPassesWithKey,
+  sanitizeTargets,
+} from "@/lib/gamepass-key-create";
+import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
 
 /**
  * Создание геймпасса по ключу покупателя (инструкция V2, шаг «вставь ключ»).
@@ -15,6 +18,16 @@ import { auditGamepassAutocreated, type OrderAuditClient } from "@/lib/order-aud
  * только зашифрованным (`RobloxApiKey`) — решение владельца 06.09.2026:
  * ключ бессрочен, ограничен геймпассами и нужен нам, чтобы чинить созданный
  * пасс без покупателя и создавать пасс сразу на следующем заказе.
+ *
+ * Второй режим — `useStored` (07.09.2026). Ключ уже привязан (в кабинете или
+ * на прошлом заказе), и покупателю не нужно ни ходить в Roblox, ни что-то
+ * присылать: одно нажатие в квесте — и пассы созданы. Ровно это уже умеют боты
+ * (`createPassesWithStoredKey`), а сайт до сих пор просил ключ заново.
+ *
+ * Кто владелец ключа в этом режиме, решает КОД ВБ: заказ по коду знает своего
+ * покупателя, а `loadRobloxApiKeyForUser` берёт ключ строго этого покупателя и
+ * строго на этот ник. «По нику» брать нельзя — чужой ник стал бы способом
+ * создать геймпасс на чужом аккаунте.
  *
  * Что остаётся в заказе после удачного создания:
  *   • `AUDIT_GAMEPASS_AUTOCREATED` на каждый пасс — лента событий в TWA и
@@ -29,25 +42,43 @@ import { auditGamepassAutocreated, type OrderAuditClient } from "@/lib/order-aud
 
 export const dynamic = "force-dynamic";
 
-/** Больше двух пассов на один заказ не бывает (разбивка номинала 2000). */
-const MAX_TARGETS = 2;
-const MIN_PRICE = 1;
-const MAX_PRICE = 100_000;
-/**
- * Ключ Open Cloud — длинный блоб. Предел общий с ботами
- * (`bots/shared/gamepass-autocreate.ts`): это предел одного сообщения в TG и
- * ВК, и опускать его ниже транспорта нельзя — настоящий длинный ключ получил
- * бы отказ «это не похоже на ключ».
- */
-const MAX_KEY_LEN = 4096;
-const CODE_RE = /^[A-Z0-9]{7}$/;
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
-interface CreatedPass {
-  gamePassId: number;
-  priceInRobux: number;
-  name?: string;
-  universeId?: string;
+/** Покупатель этого заказа — единственный, чей ключ здесь разрешено брать. */
+async function orderOwnerId(code: string): Promise<string | null> {
+  if (!CODE_RE.test(code)) return null;
+  const order = await prisma.wbOrder
+    .findFirst({
+      where: { wbCode: { equals: code, mode: "insensitive" } },
+      orderBy: { createdAt: "desc" },
+      select: { userId: true },
+    })
+    .catch(() => null);
+  return order?.userId ?? null;
+}
+
+/**
+ * Есть ли у покупателя привязанный ключ на этот ник.
+ *
+ * Нужно квесту, чтобы показать дверь «создать сейчас» первой. Отвечает только
+ * «да/нет» и только держателю кода заказа — сам ключ отсюда не уходит.
+ */
+export async function GET(req: NextRequest) {
+  if (!gamepassAutocreateEnabled()) {
+    return NextResponse.json({ stored: false }, { headers: { "cache-control": "private, no-store" } });
+  }
+  const { ok } = rateLimit(`gp-stored:${clientIp(req)}`, 30, 0.5);
+  if (!ok) return NextResponse.json({ stored: false }, { status: 429 });
+
+  const url = new URL(req.url);
+  const code = (url.searchParams.get("code") ?? "").trim().toUpperCase();
+  const nick = (url.searchParams.get("nick") ?? "").trim().replace(/^@/, "");
+  if (!CODE_RE.test(code) || !NICK_RE.test(nick)) {
+    return NextResponse.json({ stored: false }, { headers: { "cache-control": "private, no-store" } });
+  }
+  const userId = await orderOwnerId(code);
+  const stored = userId ? Boolean(await loadRobloxApiKeyForUser(userId, nick).catch(() => null)) : false;
+  return NextResponse.json({ stored }, { headers: { "cache-control": "private, no-store" } });
 }
 
 export async function POST(req: NextRequest) {
@@ -71,18 +102,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "roblox_error" });
   }
 
-  const key = typeof body.key === "string" ? body.key.trim() : "";
+  const useStored = body.useStored === true;
   const nick = typeof body.nick === "string" ? body.nick.trim().replace(/^@/, "") : "";
   const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
-  const rawTargets = Array.isArray(body.targets) ? body.targets : [];
-  const targets = rawTargets
-    .map((t) => Number(t))
-    .filter((t) => Number.isInteger(t) && t >= MIN_PRICE && t <= MAX_PRICE)
-    .slice(0, MAX_TARGETS);
+  const targets = sanitizeTargets(body.targets);
 
-  if (!key || key.length > MAX_KEY_LEN) {
-    return NextResponse.json({ ok: false, error: "bad_key" });
-  }
   if (targets.length === 0) {
     return NextResponse.json({ ok: false, error: "bad_price" });
   }
@@ -90,88 +114,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "no_universe" });
   }
 
-  // Пассы создаём по одному и по порядку: create не идемпотентен, а параллельный
-  // запуск на одном ключе легко ловит лимиты Roblox.
-  const created: CreatedPass[] = [];
-  let failure: string | null = null;
-  for (const priceInRobux of targets) {
-    const res = await createGamePassViaBridge({ apiKey: key, priceInRobux, username: nick });
-    if (!res.ok || !res.gamePassId) {
-      // Первый пасс мог уже создаться — отдаём его, чтобы заказ собрался хотя бы наполовину.
-      failure = res.error ?? "roblox_error";
-      console.warn(`[gamepass-create] отказ: ${failure} (создано ${created.length})`);
-      break;
+  let key: string;
+  if (useStored) {
+    const userId = await orderOwnerId(code);
+    const stored = userId ? await loadRobloxApiKeyForUser(userId, nick).catch(() => null) : null;
+    if (!stored) return NextResponse.json({ ok: false, error: "no_stored_key" });
+    key = stored.key;
+  } else {
+    key = typeof body.key === "string" ? body.key.trim() : "";
+    if (!key || key.length > MAX_KEY_LEN || !looksLikeApiKey(key)) {
+      return NextResponse.json({ ok: false, error: "bad_key" });
     }
-    created.push({
-      gamePassId: res.gamePassId,
-      priceInRobux: res.priceInRobux ?? priceInRobux,
-      name: res.name,
-      universeId: res.universeId,
-    });
   }
 
-  // Побочные эффекты — только когда что-то реально создано. Ни один из них не
-  // должен превратить созданный пасс в ошибку для покупателя.
-  if (created.length > 0) {
-    await recordCreation({ code, nick, key, created, partial: Boolean(failure) }).catch((err) => {
-      console.warn("[gamepass-create] след не записан:", err instanceof Error ? err.message : err);
-    });
+  const outcome = await createPassesWithKey({ key, nick, code, targets });
+
+  if (outcome.error) {
+    return NextResponse.json({ ok: false, error: outcome.error, created: outcome.created });
   }
-
-  if (failure) {
-    return NextResponse.json({ ok: false, error: failure, created });
-  }
-  console.log(`[gamepass-create] создано пассов: ${created.length}`);
-  return NextResponse.json({ ok: true, created });
-}
-
-/**
- * След созданного пасса: событие аудита на каждый пасс, строка в заметке заказа
- * и сохранённый ключ. Заказа может не быть вовсе (покупка на сайте без кода WB) —
- * тогда остаётся только ключ.
- */
-async function recordCreation(opts: {
-  code: string;
-  nick: string;
-  key: string;
-  created: CreatedPass[];
-  partial: boolean;
-}): Promise<void> {
-  const order = CODE_RE.test(opts.code)
-    ? await prisma.wbOrder.findFirst({
-        where: { wbCode: { equals: opts.code, mode: "insensitive" } },
-        orderBy: { createdAt: "desc" },
-        select: { id: true, userId: true, adminNote: true },
-      })
-    : null;
-
-  await rememberRobloxApiKey({
-    key: opts.key,
-    robloxUsername: opts.nick,
-    userId: order?.userId ?? null,
-    orderId: order?.id ?? null,
-    result: opts.partial ? "partial" : "ok",
-    createdPasses: opts.created.length,
-  });
-
-  if (!order) return;
-
-  for (const pass of opts.created) {
-    await auditGamepassAutocreated(prisma as unknown as OrderAuditClient, {
-      gamepassId: String(pass.gamePassId),
-      price: pass.priceInRobux,
-      robloxUsername: opts.nick,
-      orderId: order.id,
-      universeId: pass.universeId ?? null,
-    });
-  }
-
-  // Заметка — то, что админ видит в карточке заказа и в TWA, не открывая ленту.
-  const line = `🔑 Пасс создан по API-ключу покупателя: ${opts.created
-    .map((p) => `${p.gamePassId} · ${p.priceInRobux} R$`)
-    .join(", ")}`;
-  await prisma.wbOrder.update({
-    where: { id: order.id },
-    data: { adminNote: appendOrderAudit(order.adminNote, line) },
-  });
+  console.log(`[gamepass-create] создано пассов: ${outcome.created.length}`);
+  return NextResponse.json({ ok: true, created: outcome.created });
 }

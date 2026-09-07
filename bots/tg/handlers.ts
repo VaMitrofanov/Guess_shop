@@ -52,6 +52,8 @@ import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-creat
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
+import { countPreviousOrders } from "../shared/order-loyalty";
+import { corridorHoldText, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -76,6 +78,7 @@ import { notifyDbsBuyerFoundLate, notifyDbsUnknownDeliveryCode } from "../shared
 import { dbsRef, noteDbsBuyerSignedIn, refreshDbsCardByCode } from "../shared/wb-dbs-thread";
 import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/order-thread";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
+import { TG_HELP_START } from "../shared/bot-links";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -410,6 +413,19 @@ export function registerStart(bot: Telegraf): void {
       sessionId = parts[2] || null;
     }
 
+    /**
+     * Гость со страницы инструкции, у которого кода при себе нет.
+     *
+     * До 07.09.2026 кнопка «Telegram» без кода вела на ГОЛЫЙ `t.me/RobloxBankBot`,
+     * и такой человек попадал в бота, который его не знает: постоянный клиент
+     * получал велком «купи напрямую», новый — общий велком. Оба ответа мимо:
+     * человек пришёл ЗА ЗАКАЗОМ. `wbhelp` — признак «пришёл из инструкции без
+     * кода», ничего не активирует и в базу не ходит (`code` остаётся пустым,
+     * дальше работает обычная ветка «без кода»: сначала ищем его заказ).
+     */
+    const helpMode = rawPayload.toLowerCase() === TG_HELP_START;
+    if (helpMode) code = "";
+
     // If this /start carries a code, mark the user immediately so a concurrent
     // plain /start (iOS deep-link duplicate) is suppressed below.
     if (code) {
@@ -546,6 +562,29 @@ export function registerStart(bot: Telegraf): void {
             return;
           }
         }
+      }
+
+      // Пришёл из инструкции без кода, а заказа за ним не нашлось (ветки выше
+      // ничего не вернули). Единственный полезный ответ — попросить то, чем его
+      // заказ находится: код с карточки или код доставки из чата WB. Апселл
+      // «купи напрямую» здесь читается как «твоего заказа у нас нет».
+      if (helpMode && !isAdmin) {
+        await ctx.reply(
+          `Привет! 👋 Ты открыл меня со страницы инструкции — заказа за тобой я пока не вижу.\n\n` +
+          `Пришли сюда одно из двух, и я его найду:\n` +
+          `🔑 <b>код с карточки WB</b> — 7 символов, буквы и цифры\n` +
+          `📦 <b>код доставки</b> — цифры из чата Wildberries, тот самый, которым закрывают доставку\n\n` +
+          `Просто отправь его сообщением — разберусь сам.`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Где взять код", "https://robloxbank.ru/guide?source=wb")],
+              [supportBtn("💬 Не нашёл код — помогите", "wbhelp_no_code", ctx)],
+            ]),
+          },
+        );
+        return;
       }
 
       if (custStatus.isReturning && !isAdmin) {
@@ -1279,12 +1318,36 @@ async function handleDirectGamepassLink(ctx: DirectLinkCtx, passId: string): Pro
  * Open the direct-order flow (predefined Robux packs). Shared by the
  * `💎 Купить напрямую` callback and the `/direct` command.
  */
-async function startDirectFlow(ctx: any): Promise<void> {
+async function startDirectFlow(ctx: any, opts?: { force?: boolean }): Promise<void> {
   const tgId = String(ctx.from.id);
   const dirUser = await (db as any).user.findUnique({
     where: { tgId },
     select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true, promoExpiresAt: true, robloxUsername: true },
   });
+
+  // Сначала — оплаченное. Заказ коридора, ждущий геймпасс, стоит на пути к
+  // прямой покупке ОДНИМ экраном: продолжить его или всё-таки купить ещё.
+  if (!opts?.force && dirUser?.id) {
+    const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, dirUser.id);
+    if (held) {
+      pendingLink.set(ctx.from.id, { wbCode: held.wbCode, denomination: held.amount });
+      await ctx.reply(corridorHoldText(held), {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([
+          // «Найти у сохранённого ника» умеет только тот случай, когда ник лежит
+          // у ПОЛЬЗОВАТЕЛЯ: вероятный ник заказа этой кнопке не подойдёт.
+          [Markup.button.callback(
+            dirUser.robloxUsername ? `🔎 Найти геймпассы у ${dirUser.robloxUsername}` : "🔎 Продолжить заказ",
+            dirUser.robloxUsername ? CB.findGpSaved : CB.findGpStart,
+          )],
+          [Markup.button.url("📖 Открыть инструкцию", guideUrlFor(held.wbCode, held.nick ?? undefined))],
+          [Markup.button.callback("💎 Всё равно купить напрямую", CB.startDirectAnyway)],
+        ]),
+      });
+      return;
+    }
+  }
   const now = new Date();
   const rawBonus = dirUser?.balance ?? 0;
   const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= now : false;
@@ -3410,11 +3473,11 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
   const bonusLine = bonus > 0 ? `🎁 Использован бонус: <b>${bonus} R$</b>\n` : "";
   const reviewLine = wbCode?.reviewBonusClaimed ? `🌟 Отзыв: <b>Оставлен (+100 R$)</b>\n` : `🌟 Отзыв: <b>Нет</b>\n`;
 
-  // Loyalty tag — orders that moved past AWAITING, excluding this one. A
-  // freshly promoted order used to count itself → false «ПОВТОРНЫЙ КЛИЕНТ».
-  const prev = await (db as any).wbOrder.count({
-    where: { userId: order.userId, id: { not: order.id }, status: { notIn: ["AWAITING_GAMEPASS"] } },
-  }).catch(() => 0);
+  // Метка лояльности — общий счёт (`countPreviousOrders`): текущий заказ не
+  // считает сам себя, а брошенная касса и незакрытая корзина не считаются
+  // заказами вовсе. До 07.09.2026 здесь стоял свой фильтр, и неоплаченный
+  // заказ с сайта делал первого покупателя «повторным» (случай `JS6NQB9`).
+  const prev = await countPreviousOrders(db as any, { userId: order.userId, excludeOrderId: order.id });
   const loyaltyLine =
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
       prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` :
@@ -5199,8 +5262,8 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 💎 DIRECT ORDER callbacks ─────────────────────────────────────────────
 
     // start_direct: user opens direct order flow — show predefined packs
-    if (data === CB.startDirect) {
-      await startDirectFlow(ctx);
+    if (data === CB.startDirect || data === CB.startDirectAnyway) {
+      await startDirectFlow(ctx, { force: data === CB.startDirectAnyway });
       await ctx.answerCbQuery().catch(() => {});
       return;
     }

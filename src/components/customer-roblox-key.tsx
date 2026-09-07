@@ -46,6 +46,16 @@ export interface KeyAccount {
   avatarUrl: string | null;
 }
 
+/** Живой заказ, который ключ доделал в момент привязки. */
+export interface AppliedOrder {
+  ref: string;
+  amount: number;
+  href: string;
+  /** Цены созданных пассов. */
+  created: number[];
+  error?: string;
+}
+
 export interface LinkedKeyView {
   id: string;
   username: string;
@@ -65,12 +75,15 @@ export default function CustomerRobloxKeyCard({
   initialKeys,
   username,
   enabled,
+  activeOrderHref = null,
 }: {
   initialKeys: LinkedKeyView[];
   /** Ник выбранного профиля — на его аккаунте ключ и работает. */
   username: string | null;
   /** Метод включён флагом `GAMEPASS_AUTOCREATE`. */
   enabled: boolean;
+  /** Ссылка «продолжить» у живого заказа: инструкция под ЕГО код. */
+  activeOrderHref?: string | null;
 }) {
   const [keys, setKeys] = useState(initialKeys);
   const [open, setOpen] = useState(initialKeys.length === 0);
@@ -88,6 +101,13 @@ export default function CustomerRobloxKeyCard({
   const [platform, setPlatform] = useState<GuidePlatform>("mobile");
   /** Аккаунт, подтверждённый самим Roblox после приёма ключа (с аватаром). */
   const [confirmed, setConfirmed] = useState<KeyAccount | null>(null);
+  /**
+   * Что ключ СДЕЛАЛ с живым заказом прямо сейчас.
+   *
+   * Без этого экран говорил «ключ привязан, пригодится в следующий раз» человеку,
+   * у которого заказ висит в эту самую минуту (жалоба владельца 07.09.2026).
+   */
+  const [applied, setApplied] = useState<AppliedOrder | null>(null);
   /**
    * Поле ника показываем, только когда его негде взять. Ник уже спрашивают
    * выше, в профиле, и второе такое же поле рядом читается как ошибка формы
@@ -138,7 +158,7 @@ export default function CustomerRobloxKeyCard({
         body: JSON.stringify({ key, username: account }),
       });
       const body = (await response.json().catch(() => null)) as
-        | { ok?: boolean; error?: string; keys?: LinkedKeyView[]; account?: KeyAccount | null }
+        | { ok?: boolean; error?: string; keys?: LinkedKeyView[]; account?: KeyAccount | null; applied?: AppliedOrder | null }
         | null;
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, SCAN_MIN_MS - (Date.now() - started))));
 
@@ -148,6 +168,7 @@ export default function CustomerRobloxKeyCard({
         setTypedNick(null);
         setKeys(body.keys);
         setConfirmed(body.account ?? null);
+        setApplied(body.applied ?? null);
         setPhase("done");
         setOpen(false);
         setNickOpen(false);
@@ -187,6 +208,31 @@ export default function CustomerRobloxKeyCard({
         {!linked && <span className={styles.keyNew}>НОВОЕ</span>}
         {linked && <span className={styles.keyOk}><CheckCircle2 size={15} /> Привязан</span>}
       </header>
+
+      {/* Что ключ сделал с живым заказом — первым, до всего остального: это и
+          есть ответ на вопрос «а дальше что». */}
+      {applied && (
+        <div className={styles.keyApplied} role="status">
+          {applied.created.length > 0 ? (
+            <>
+              <strong>
+                Геймпасс{applied.created.length > 1 ? "ы" : ""} для заказа {applied.ref} уже созданы
+                {" "}({applied.created.map((price) => `${price} R$`).join(" + ")})
+              </strong>
+              <small>
+                Осталось подтвердить заказ на {applied.amount.toLocaleString("ru-RU")} R$ — проверишь ник и геймпасс и нажмёшь «Подтвердить».
+              </small>
+              <a href={applied.href}>Подтвердить заказ <ChevronRight size={15} /></a>
+            </>
+          ) : (
+            <>
+              <strong>Ключ принят, но геймпасс для заказа {applied.ref} создать не вышло</strong>
+              <small>{keyCreateVerdict(applied.error ?? "roblox_error").text}</small>
+              <a href={applied.href}>Открыть инструкцию по заказу <ChevronRight size={15} /></a>
+            </>
+          )}
+        </div>
+      )}
 
       {linked ? (
         <div className={styles.keyLinked}>
@@ -325,8 +371,12 @@ export default function CustomerRobloxKeyCard({
                 />
                 <figcaption>Тот самый шаг с правами: в рамке должно лежать <b>две</b> плашки.</figcaption>
               </figure>
-              <a className={styles.keyGuideLink} href="/guide?source=site&flow=order&amount=1000" target="_blank" rel="noopener noreferrer">
-                Полная инструкция со скриншотами <ChevronRight size={15} />
+              {/* Без `flow=order`: этот признак включает на странице кнопку
+                  «Перейти к оформлению» и уводит в кассу. Читателю справки
+                  оформлять нечего, а у покупателя с живым заказом ссылка ведёт
+                  в ЕГО коридор — с его кодом и его номиналом. */}
+              <a className={styles.keyGuideLink} href={activeOrderHref ?? "/guide?source=site&amount=1000"} target="_blank" rel="noopener noreferrer">
+                {activeOrderHref ? "Инструкция по твоему заказу" : "Полная инструкция со скриншотами"} <ChevronRight size={15} />
               </a>
             </div>
           </details>

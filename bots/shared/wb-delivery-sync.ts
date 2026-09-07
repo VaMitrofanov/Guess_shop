@@ -73,6 +73,7 @@ import {
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
 } from "./wb-delivery-admin-notify";
+import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
@@ -110,6 +111,8 @@ export type WbDeliverySyncResult = {
   chats: number;
   chatEvents: number;
   capturedCodes: number;
+  /** Геймпассы, подставленные в заказ прямо из переписки WB. */
+  attachedGamepasses: number;
   buyerNames: number;
   /** Orders WB cancelled since the previous cycle, mirrored into our own side. */
   cancellations: number;
@@ -129,6 +132,7 @@ function result(acquired = false): WbDeliverySyncResult {
     chats: 0,
     chatEvents: 0,
     capturedCodes: 0,
+    attachedGamepasses: 0,
     buyerNames: 0,
     cancellations: 0,
     shipped: 0,
@@ -1238,6 +1242,25 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     if (order && deliveryCode && !order.completedAt && !order.cancelledAt) {
       const captured = await captureDeliveryCode(db, order, deliveryCode, sentAt, `delivery-code:${event.eventID}`, event.chatID);
       if (captured) out.capturedCodes += 1;
+    }
+    // Геймпасс, присланный покупателем прямо в переписку WB. До 07.09.2026
+    // такие сообщения не разбирались вовсе: оператору уходило превью текста, а
+    // заказ продолжал висеть в «ждёт геймпасс». Разбор и все проверки —
+    // в `wb-chat-gamepass`; сюда возвращается только исход для счётчиков.
+    // Разбор текста — в процессе и бесплатно; в базу идём только когда в
+    // сообщении действительно что-то похожее на пасс (каждый заход в Neon с
+    // прод-хоста стоит ~200 мс, а сообщений в чатах несоизмеримо больше).
+    if (isNewEvent && order && isBuyerSender(event.sender) && rawText
+      && findGamepassRefInChatText(rawText) && !order.completedAt && !order.cancelledAt) {
+      const ref = await dbsRef(db, order.id, order.wbOrderId);
+      if (ref.code) {
+        const outcome = await tryAttachGamepassFromChat(db as unknown as ChatGamepassDb, { ref, wbCode: ref.code, text: rawText })
+          .catch((err) => {
+            console.warn("[WbDbsSync] разбор геймпасса из чата:", err instanceof Error ? err.message : err);
+            return { kind: "skipped" as const };
+          });
+        if (outcome.kind === "attached") out.attachedGamepasses += 1;
+      }
     }
     // Runs after capture so an opening message that already carries the code
     // never triggers a request for it.

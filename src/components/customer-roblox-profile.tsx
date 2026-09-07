@@ -283,6 +283,7 @@ export default function CustomerRobloxProfileCard({
         initialKeys={keys}
         username={profile?.username ?? null}
         enabled={keyAutoEnabled}
+        activeOrderHref={activeOrderHref}
       />
     </div>
   );

@@ -126,6 +126,16 @@ function CheckoutContent() {
   // про конкретного пользователя, и для гостя он всегда false.
   const [acquiringAccepting, setAcquiringAccepting] = useState(true);
   const [error, setError] = useState("");
+  /**
+   * Заказ коридора, который ещё не собран.
+   *
+   * Такой покупатель УЖЕ заплатил на Wildberries, и касса ему не нужна — нужна
+   * его собственная инструкция. Разбор 07.09.2026 по `JS6NQB9`: человек дошёл
+   * сюда из кабинета и завёл второй заказ на те же 500 R$, зависший в ожидании
+   * оплаты. Сервер такой заказ теперь не создаёт (409 `CORRIDOR_ORDER_ACTIVE`),
+   * а экран говорит об этом ДО того, как человек заполнит форму.
+   */
+  const [corridorOrder, setCorridorOrder] = useState<{ ref: string; amount: number; href: string } | null>(null);
   // ── Запасной вход: ссылка или ID геймпасса ────────────────────────────────
   // Поиск по нику стоит на публичных списках Roblox (`accessFilter=Public` +
   // обход игр), и они молчат при живом геймпассе чаще, чем кажется: скрытый
@@ -140,6 +150,27 @@ function CheckoutContent() {
   /** Поиск по нику уже отработал и ничего не дал — открываем запасной вход сами. */
   const [nickDeadEnd, setNickDeadEnd] = useState(false);
   const idempotencyKey = useRef(crypto.randomUUID());
+
+  useEffect(() => {
+    if (authenticated !== true) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/account/active-order");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          order: { ref: string; amount: number; href: string; corridor: boolean; needsGamepass: boolean } | null;
+        };
+        const order = data.order;
+        if (alive && order?.corridor && order.needsGamepass) {
+          setCorridorOrder({ ref: order.ref, amount: order.amount, href: order.href });
+        }
+      } catch {
+        // Подсказка, а не функциональность: сервер всё равно не даст создать заказ.
+      }
+    })();
+    return () => { alive = false; };
+  }, [authenticated]);
 
   const customerRate = quote
     ? (quote.finalAmountKopecks / 100) / Math.max(1, quote.requestedRobux + quote.bonusRobux)
@@ -567,6 +598,9 @@ function CheckoutContent() {
           idempotencyKey.current = crypto.randomUUID();
         }
         if (res.status === 401) setAuthenticated(false);
+        if (data.code === "CORRIDOR_ORDER_ACTIVE" && typeof data.continueHref === "string") {
+          setCorridorOrder({ ref: String(data.orderRef), amount: Number(data.orderAmount), href: data.continueHref });
+        }
         setError(data.error || "Не удалось открыть оплату.");
       }
     } catch {
@@ -599,6 +633,19 @@ function CheckoutContent() {
               <span className={styles.stageActive}>1</span><i /><span className={stage === "confirm" ? styles.stageActive : ""}>2</span><i /><span className={stage === "confirm" && authenticated ? styles.stageActive : ""}>3</span>
             </div>}
       </div>
+
+      {authenticated === true && corridorOrder && (
+        <div className={styles.paymentNotice} role="alert">
+          <BadgeCheck size={21} />
+          <span>
+            <strong>Заказ {corridorOrder.ref} уже оплачен на Wildberries</strong>
+            <small>
+              {corridorOrder.amount.toLocaleString("ru-RU")} R$ ждут только геймпасс — платить второй раз не нужно.{" "}
+              <a href={corridorOrder.href}>Закончить заказ →</a>
+            </small>
+          </span>
+        </div>
+      )}
 
       {stage === "select" && !authenticated && (
         <div className={styles.paymentNotice} role="status">

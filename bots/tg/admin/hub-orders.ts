@@ -13,6 +13,7 @@ import { CB, ADMIN_IDS, formatUserHandle } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAdminSearch, pendingBatchFulfill } from "../session";
 import { formatOrderAge } from "../../shared/order-age";
+import { countPreviousOrders } from "../../shared/order-loyalty";
 
 // ── VK community ID for direct-message links ────────────────────────────────
 const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
@@ -166,11 +167,9 @@ export async function renderExtendedCard(order: any) {
     }
   }
 
-  // Loyalty — прошлые заказы без текущего и без висячих AWAITING (иначе
-  // свежепромоутнутый заказ считает сам себя → ложный «ПОВТОРНЫЙ КЛИЕНТ»).
-  const prev = await (db as any).wbOrder.count({
-    where: { userId: order.userId, id: { not: order.id }, status: { notIn: ["AWAITING_GAMEPASS"] } },
-  }).catch(() => 0);
+  // Loyalty — общий счёт `countPreviousOrders`: без текущего заказа, без
+  // висячих корзин и без неоплаченных касс.
+  const prev = await countPreviousOrders(db as any, { userId: order.userId, excludeOrderId: order.id });
   const loyaltyLine =
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` : "";

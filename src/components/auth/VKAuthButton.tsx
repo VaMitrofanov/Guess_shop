@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import * as VKID from "@vkid/sdk";
 import { VK_AUTH_ENABLED } from "@/lib/vk-auth-availability";
+import { VK_HELP_REF } from "@/lib/bot-links";
 
 // VK community ID for order-mode redirect
 const VK_CLUB_HREF = "https://vk.me/club237309399";
@@ -142,9 +143,12 @@ export default function VKAuthButton({
 
   if (!VK_AUTH_ENABLED) {
     if (mode === "login") return null;
+    // Без кода — не голая ссылка на сообщество, а `ref=WBHELP`: бот тогда знает,
+    // что гость пришёл со страницы инструкции, и просит код, а не показывает
+    // общий велком. Ровно та же правка, что у Telegram-кнопки (`tgBotHref`).
     const directHref = customRedirectUrl || (wbCodeProp
       ? `${VK_CLUB_HREF}?ref=${encodeURIComponent(wbCodeProp.toUpperCase())}`
-      : VK_CLUB_HREF);
+      : `${VK_CLUB_HREF}?ref=${VK_HELP_REF}`);
     return (
       <a
         href={directHref}

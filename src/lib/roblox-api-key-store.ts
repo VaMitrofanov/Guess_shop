@@ -11,6 +11,7 @@ import {
   forgetRobloxApiKey as forgetShared,
   listRobloxApiKeys as listShared,
   loadRobloxApiKey as loadShared,
+  loadRobloxApiKeyForUser as loadForUserShared,
   rememberRobloxApiKey as rememberShared,
   type LinkedRobloxKey,
   type RememberKeyInput,
@@ -26,6 +27,17 @@ export function rememberRobloxApiKey(input: RememberKeyInput): Promise<"saved" |
 
 export function loadRobloxApiKey(robloxUsername: string): Promise<StoredRobloxApiKey | null> {
   return loadShared(prisma as never, robloxUsername);
+}
+
+/**
+ * Ключ ЭТОГО покупателя на ЭТОТ ник — для одно-нажатия «создать сейчас».
+ *
+ * Фильтр по `userId` не подлежит ослаблению: ключ — креденшл, и брать его «по
+ * нику» значит позволить любому, кто знает чужой ник, создавать геймпассы на
+ * чужом аккаунте.
+ */
+export function loadRobloxApiKeyForUser(userId: string, robloxUsername: string): Promise<StoredRobloxApiKey | null> {
+  return loadForUserShared(prisma as never, userId, robloxUsername);
 }
 
 /** Ключи, привязанные покупателем в личном кабинете. Значения не отдаются. */

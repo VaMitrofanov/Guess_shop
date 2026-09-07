@@ -317,6 +317,58 @@ export function notifyDbsUnknownDeliveryCode(who: string, digits: string) {
   });
 }
 
+/**
+ * Покупатель прислал геймпасс в чат WB, и автоматика собрала им заказ.
+ *
+ * Требование владельца 07.09.2026: «обязательно нужен увед, что в такой-то
+ * заказ поставил такой-то гп айди». Сообщение отдельное от карточки выкупа
+ * намеренно — карточка отвечает на вопрос «что купить», а это на вопрос
+ * «откуда он взялся и почему заказ вдруг собрался сам».
+ */
+export function notifyDbsChatGamepassAttached(
+  ref: DbsRef,
+  info: { wbCode: string; gamepassId: string; nick: string; price: number; amount: number },
+) {
+  broadcast({
+    marker: "progress",
+    zone: "DBS",
+    title: "геймпасс из чата WB подставлен в заказ",
+    lines: [
+      refLine(ref),
+      `🔑 Код: <code>${escapeHtml(info.wbCode)}</code>`,
+      `🎫 Pass ID: <code>${escapeHtml(info.gamepassId)}</code> · <b>${info.price} R$</b>`,
+      `🎮 Владелец пасса: <b>${escapeHtml(info.nick)}</b> — робуксы уйдут сюда`,
+      `💎 Номинал заказа: <b>${info.amount} R$</b>`,
+      "Покупатель прислал пасс в переписку WB; цену и владельца сверили у Roblox.",
+    ],
+    next: "карточка выкупа придёт следом — выкупить и нажать «ВЫКУПЛЕНО»",
+  }, ref);
+}
+
+/**
+ * В чате нашёлся пасс, но собрать им заказ нельзя.
+ *
+ * Молчать здесь нельзя: покупатель СВОЮ часть сделал и ждёт: он прислал пасс
+ * туда, где с ним до этого разговаривали. Ответить ему может только человек.
+ */
+export function notifyDbsChatGamepassRejected(
+  ref: DbsRef,
+  info: { gamepassId: string; reason: string; expectedPrice: number },
+) {
+  broadcast({
+    marker: "action",
+    zone: "DBS",
+    title: "покупатель прислал геймпасс в чат WB, но он не подошёл",
+    lines: [
+      refLine(ref),
+      `🎫 Pass ID: <code>${escapeHtml(info.gamepassId)}</code>`,
+      `❌ ${escapeHtml(info.reason)}`,
+      `💰 Ждём пасс за <b>${info.expectedPrice} R$</b>`,
+    ],
+    next: "ответить покупателю в чате WB — он уже прислал пасс и ждёт",
+  }, ref);
+}
+
 /** Э2: заказ на выкуп открыт вручную и висит на служебном аккаунте. */
 export function notifyDbsBuyerUnlinked(ref: DbsRef) {
   broadcast({

@@ -17,6 +17,7 @@ import VKAuthButton from "@/components/auth/VKAuthButton";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { getOrInitSessionId } from "@/lib/wb-session";
+import { tgBotHref } from "@/lib/bot-links";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
 import { parseGamepassRef, parseGamepassUrl } from "@/lib/gamepass-id";
@@ -100,9 +101,7 @@ export default function WBInstructionV2({
   const [nom, setNom] = useState<number>(nomDefault);
   const root = useReveal();
 
-  const tgHref = code
-    ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}`
-    : "https://t.me/RobloxBankBot";
+  const tgHref = tgBotHref(code, code ? getOrInitSessionId() : null);
 
   // ── Step 7: live gamepass search by Roblox nick (one-tap handoff to bot) ──
   // WB is fixed by the activated card. SITE/BOT can edit the desired amount at

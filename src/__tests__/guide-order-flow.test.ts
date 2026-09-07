@@ -16,6 +16,9 @@ import path from "node:path";
  */
 
 const read = (file: string) => fs.readFileSync(path.join(process.cwd(), file), "utf8");
+/** Тот же файл без комментариев: разбор инцидента в шапке — не ссылка в коде. */
+const code = (file: string) =>
+  read(file).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
 const BUYING = [
   "src/app/checkout/page.tsx",
@@ -42,12 +45,27 @@ describe("ссылки на /guide", () => {
     for (const link of links) expect(link).not.toContain("flow=order");
   });
 
-  test("в личном кабинете ссылка на заказ несёт flow=order, а общая «Инструкция» — нет", () => {
-    const source = read("src/app/dashboard/page.tsx");
-    const orderLinks = (source.match(/\/guide\?source=site[^"`]*/g) ?? []).filter((l) => l.includes("amountRobux"));
-    expect(orderLinks.length).toBeGreaterThan(0);
-    for (const link of orderLinks) expect(link).toContain("flow=order");
+  /**
+   * Правка 07.09.2026. В кабинете «продолжить заказ» больше НЕ собирается
+   * руками: у коридорного заказа (карта WB, доставка DBS) деньги уже получены,
+   * и ссылка `flow=order` вела его в кассу — покупатель `JS6NQB9` завёл там
+   * второй заказ на те же 500 R$ и бросил его в оплате. Адрес продолжения
+   * теперь один и считается `continueHref` из `@/lib/active-order`.
+   */
+  test("в кабинете «продолжить» идёт через continueHref, а не через flow=order", () => {
+    const source = code("src/app/dashboard/page.tsx");
+    const handmade = (source.match(/`\/guide\?source=site[^`]*`/g) ?? []);
+    expect(handmade).toHaveLength(0);
+    expect(source).toContain('from "@/lib/active-order"');
+    expect(source).toContain("continueHref(");
+    // Общая «Инструкция» в кабинете остаётся читательской — без flow=order.
     expect(source).toContain('href="/guide?source=site&amount=1000"');
+  });
+
+  test("continueHref коридорного заказа ведёт в его собственный гейт", () => {
+    const source = code("src/lib/active-order.ts");
+    expect(source).toContain("/guide?source=wb&skip=1&code=");
+    expect(source).not.toContain("flow=order");
   });
 });
 

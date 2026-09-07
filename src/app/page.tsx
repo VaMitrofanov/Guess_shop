@@ -133,14 +133,18 @@ export default function Home() {
             </div>
           </a>
 
-          <div className={styles.codeTeaser}>
+          {/* Код с карточки Wildberries. До 07.09.2026 ввести его на сайте было
+              негде вообще: человек с оплаченной картой в руках попадал на
+              витрину и уходил платить второй раз. Обычный `<a>`: `?source=wb`
+              обслуживает отдельный контейнер Guide. */}
+          <a className={styles.codeTeaser} href="/guide?source=wb">
             <span className={styles.codeTeaserIcon}><KeyRound size={18} /></span>
             <p>
-              <strong>Коды мгновенной активации</strong>
-              <small>Готовим запуск</small>
+              <strong>Купил карточку на Wildberries?</strong>
+              <small>Введи код — откроем твой заказ</small>
             </p>
-            <a href="#codes">Что это</a>
-          </div>
+            <span>Ввести код</span>
+          </a>
         </div>
       </section>
 
@@ -189,6 +193,7 @@ export default function Home() {
                 состояния со ссылкой на способ, который работает. */}
             <p className={styles.codesStatus}>
               Покупка кодов пока не включена. Сейчас Robux можно купить <a href="#calculator">через геймпасс</a>.
+              {" "}Карточку купил на Wildberries? <a href="/guide?source=wb">Активировать код</a>.
             </p>
           </article>
         </div>

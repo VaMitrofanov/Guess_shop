@@ -679,6 +679,8 @@ export const CB = {
 
   // ── Direct order ──────────────────────────────────────────────────────────
   startDirect:         "start_direct",
+  /** «Всё равно куплю напрямую» — обход экрана «сначала закончим оплаченный заказ». */
+  startDirectAnyway:   "start_direct_any",
   confirmDirect:       "confirm_direct",
   confirmDirectNb:     "confirm_direct_nb",
   cancelDirect:        "cancel_direct",
@@ -774,6 +776,8 @@ export interface OrderCardPayload {
   replacedGamepassUrl?: string;
   /** Пасс(ы) создал наш бот по Open Cloud-ключу покупателя — цену и «в продаже» выставили мы. */
   viaKey?:             boolean;
+  /** Покупатель прислал пасс в чат Wildberries, автоматика подставила его сама. */
+  viaChat?:            boolean;
   /** Заказ закрывается несколькими пассами: каждую часть покупает ОТДЕЛЬНЫЙ донор. */
   splitParts?:         { gamepassId: string; amount: number }[];
 }
@@ -867,6 +871,12 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const viaKeyLine = order.viaKey
     ? `🔑 <b>ПАСС СОЗДАН ПО API-КЛЮЧУ</b> — цену и «в продаже» выставили мы\n`
     : "";
+  // Пасс приехал из переписки WB, а не из бота и не с сайта: покупатель туда
+  // его и прислал, а мы разобрали и подставили. Плашка идёт вместе с прочими
+  // исключениями — она меняет то, как читать ник и цену ниже.
+  const viaChatLine = order.viaChat
+    ? `📨 <b>ПАСС ИЗ ЧАТА WB</b> — прислан покупателем в переписку, подставлен автоматически\n`
+    : "";
   // Разбивка: у каждой части свой номинал, и покупать их надо с РАЗНЫХ доноров
   // (повтор одного пасса с того же аккаунта вернёт AlreadyOwned).
   const parts = order.splitParts ?? [];
@@ -913,6 +923,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       // Плашки-исключения идут ДО полей: они меняют то, как читать всё ниже.
       replacedLine.trim() || null,
       viaKeyLine.trim() || null,
+      viaChatLine.trim() || null,
       webOneTapLine.trim() || null,
       manualLinkLine.trim() || null,
       loyaltyLine.trim() || null,

@@ -23,6 +23,7 @@ import Footer from "@/components/footer";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getOrInitSessionId } from "@/lib/wb-session";
+import { tgBotHref } from "@/lib/bot-links";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import {
   coveredRobux,
@@ -34,6 +35,7 @@ import {
   type CreateTarget,
   type OwnedPass,
 } from "@/lib/gamepass-plan";
+import { keyCreateVerdict } from "@/lib/gamepass-create-messages";
 import { GUIDE_CSS } from "./guide-css";
 import GuideSteps from "./guide-steps";
 import KeyCreate from "./KeyCreate";
@@ -108,6 +110,18 @@ export default function GamepassCheck({
   const [manualBusy, setManualBusy] = useState(false);
   const [manualErr, setManualErr] = useState<string | null>(null);
 
+  /**
+   * У покупателя уже привязан ключ на этот ник.
+   *
+   * Ровно это боты умеют с 07.09 (`hasStoredKeyFor` → дверь «создать сейчас»),
+   * а сайт до сих пор просил ключ заново — у человека, который привязал его в
+   * кабинете десять минут назад. Ответ даёт сервер по коду заказа: ключ —
+   * креденшл, и «по нику» его брать нельзя.
+   */
+  const [storedKey, setStoredKey] = useState(false);
+  const [storedBusy, setStoredBusy] = useState(false);
+  const [storedErr, setStoredErr] = useState<string | null>(null);
+
   const [confirming, setConfirming] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const [orderPlaced, setOrderPlaced] = useState(false);
@@ -135,9 +149,7 @@ export default function GamepassCheck({
     if (window.location.hash.toLowerCase() === "#key") keyWanted.current = true;
   }, []);
 
-  const tgHref = code
-    ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}`
-    : "https://t.me/RobloxBankBot";
+  const tgHref = tgBotHref(code, code ? getOrInitSessionId() : null);
   const returnHref = channel === "VK" ? (code ? `${VK_RETURN_HREF}?ref=${code}` : VK_RETURN_HREF) : tgHref;
 
   // Канал (TG/VK) и уже оформленный заказ — чтобы повторный вход на страницу не
@@ -158,6 +170,27 @@ export default function GamepassCheck({
     })();
     return () => { alive = false; };
   }, [code, testMode, initialUsername]);
+
+  // Есть ли привязанный ключ на этот ник — спрашиваем один раз на результат.
+  useEffect(() => {
+    if (!keyAutoEnabled || !code || testMode || phase !== "result") return;
+    const value = (account?.username ?? nick).trim();
+    if (!NICK_RE.test(value)) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/roblox/gamepass-create?code=${encodeURIComponent(code)}&nick=${encodeURIComponent(value)}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive) setStoredKey(data?.stored === true);
+      } catch {
+        // Не фатально: покупателю просто не покажем самую короткую дверь.
+      }
+    })();
+    return () => { alive = false; };
+  }, [keyAutoEnabled, code, testMode, phase, account, nick]);
 
   const replan = useCallback((passes: OwnedPass[]) => {
     setOwned(passes);
@@ -223,6 +256,25 @@ export default function GamepassCheck({
   }, [nick, code, replan, keyAutoEnabled]);
 
   /**
+   * Ник пришёл ссылкой — проверяем сами, не заставляя вводить его второй раз.
+   *
+   * Персональная кнопка бота несёт `&username=`: там ник уже спросили и
+   * проверили. Пустое поле «как тебя зовут в Roblox» на этом шаге читается как
+   * «всё сначала» и обнуляет ощущение, что человека ведут за руку.
+   */
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (autoChecked.current) return;
+    const value = initialUsername.trim().replace(/^@/, "");
+    if (!NICK_RE.test(value)) return;
+    autoChecked.current = true;
+    // Следующим тиком, а не прямо здесь: проверка начинается с трёх setState
+    // подряд, и в теле эффекта это лишний каскадный рендер на первом кадре.
+    const timer = setTimeout(() => void runCheck(value), 0);
+    return () => clearTimeout(timer);
+  }, [initialUsername, runCheck]);
+
+  /**
    * Запасной вход: пасс есть, но поиск по нику его не видит (скрытый плейс, свежий пасс).
    *
    * Просим **Pass ID**, а не ссылку: публичной ссылки у скрытого плейса может не
@@ -282,6 +334,59 @@ export default function GamepassCheck({
       setManualBusy(false);
     }
   }, [manualRef, code, owned, account, nick, replan]);
+
+  /**
+   * «Создать сейчас» привязанным ключом — одно нажатие вместо похода в Roblox.
+   *
+   * Набор берём ЭТАЛОННЫЙ (`createTargetsFor`), а не «чего не хватает»: руками
+   * тут никто ничего не делает, и подстраиваться под мелочь на аккаунте значит
+   * получать пассы, неудобные для выкупа. То же правило у ботов и у ветки ключа.
+   */
+  const runStoredKey = useCallback(async () => {
+    if (!code || storedBusy) return;
+    const value = (account?.username ?? nick).trim();
+    const targets = createTargetsFor(amount, !isSite);
+    if (targets.length === 0) return;
+    setStoredBusy(true);
+    setStoredErr(null);
+    try {
+      const res = await fetch("/api/roblox/gamepass-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ useStored: true, code, nick: value, targets: targets.map((t) => t.price) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const created = (Array.isArray(data?.created) ? data.created : []) as Array<Record<string, unknown>>;
+      if (created.length > 0) {
+        setKeyDone(true);
+        replan([
+          ...owned,
+          ...created.map((pass) => ({
+            gamepassId: String(pass.gamePassId ?? ""),
+            name: typeof pass.name === "string" && pass.name ? pass.name : `Пасс ${Number(pass.priceInRobux)}`,
+            price: Number(pass.priceInRobux ?? 0),
+            image: null,
+            isForSale: true,
+          })),
+        ]);
+        setStage("result");
+        requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
+      if (!data?.ok) {
+        // Ключ мог протухнуть или потерять права — человека не бросаем в тупик,
+        // а возвращаем на развилку с обычными способами.
+        setStoredErr(keyCreateVerdict(typeof data?.error === "string" ? data.error : "roblox_error").text);
+        if (created.length === 0) {
+          setStoredKey(data?.error !== "no_stored_key");
+          setStage("fork");
+        }
+      }
+    } catch {
+      setStoredErr("Не удалось связаться с Roblox. Попробуй ещё раз через минуту.");
+    } finally {
+      setStoredBusy(false);
+    }
+  }, [code, storedBusy, account, nick, amount, isSite, owned, replan]);
 
   const confirm = useCallback(async () => {
     if (!plan || (plan.kind !== "ready" && plan.kind !== "assembled")) return;
@@ -503,6 +608,9 @@ export default function GamepassCheck({
                 isSite={isSite}
                 peek={peek}
                 onPeek={() => setPeek((v) => !v)}
+                storedKey={keyAutoEnabled && storedKey}
+                storedBusy={storedBusy}
+                onStoredKey={() => void runStoredKey()}
                 onConfirm={confirm}
                 onOpenFork={() => {
                   setStage("fork");
@@ -522,10 +630,24 @@ export default function GamepassCheck({
                 <p>
                   {toCreate.length > 1
                     ? <>Нужны два: на <b>{toCreate[0].price}</b> и <b>{toCreate[1].price} R$</b>. Способ один на оба — выбирай любой, результат одинаковый.</>
-                    : <>Нужен один геймпасс за <b>{toCreate[0].price} R$</b>. Сделать его можно {keyAutoEnabled ? "тремя способами" : "двумя способами"} — выбирай любой, результат одинаковый.</>}
+                    : <>Нужен один геймпасс за <b>{toCreate[0].price} R$</b>. {keyAutoEnabled && storedKey ? "Быстрее всего — первым способом: ключ у нас уже есть." : `Сделать его можно ${keyAutoEnabled ? "тремя способами" : "двумя способами"} — выбирай любой, результат одинаковый.`}</>}
                 </p>
               </div>
+              {storedErr && <div className="wbi-warn" style={{ marginBottom: 12 }}>{storedErr}</div>}
               <div className="wbi-opts">
+                {/* Ключ уже привязан — самая короткая дверь идёт первой: ради
+                    этого ключи и хранятся. Тот же порядок, что у ботов. */}
+                {keyAutoEnabled && storedKey && (
+                  <button className="wbi-opt key" onClick={() => void runStoredKey()} disabled={storedBusy}>
+                    <span className="i">✨</span>
+                    <span>
+                      <span className="t">{storedBusy ? "Создаём…" : <>Создать сейчас<span className="wbi-new">КЛЮЧ ПРИВЯЗАН</span></>}</span>
+                      <span className="s">Ключ от твоего аккаунта уже у нас — сделаем геймпасс сами, делать ничего не нужно.</span>
+                      <span className="chip">одно нажатие</span>
+                    </span>
+                    <span className="a" aria-hidden="true">›</span>
+                  </button>
+                )}
                 <button className="wbi-opt usual" onClick={() => setStage("manual")}>
                   <span className="i">📖</span>
                   <span>
@@ -786,7 +908,8 @@ function toOwned(gp: Record<string, unknown>): OwnedPass {
 const TONE: Record<CheckPlan["kind"], string> = { ready: "ok", assembled: "mix", build: "half", empty: "none" };
 
 function ResultCard({
-  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek, onConfirm, onChangeNick, onOpenFork,
+  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek,
+  storedKey, storedBusy, onStoredKey, onConfirm, onChangeNick, onOpenFork,
 }: {
   plan: CheckPlan;
   amount: number;
@@ -798,6 +921,10 @@ function ResultCard({
   isSite: boolean;
   peek: boolean;
   onPeek: () => void;
+  /** Ключ этого покупателя уже привязан — можно создать пасс одним нажатием. */
+  storedKey: boolean;
+  storedBusy: boolean;
+  onStoredKey: () => void;
   onConfirm: () => void;
   onChangeNick: () => void;
   /** Открыть экран выбора способа — единственная дверь из «чего не хватает». */
@@ -884,10 +1011,26 @@ function ResultCard({
       )}
 
       {done && (
-        <div className="wbi-total">
-          <span className="l">Итого на руки</span>
-          <span className="r">{amount.toLocaleString("ru-RU")} R$</span>
-        </div>
+        <>
+          <div className="wbi-total">
+            <span className="l">Итого на руки</span>
+            <span className="r">{amount.toLocaleString("ru-RU")} R$</span>
+          </div>
+          {/* Последний экран обязан отвечать на три вопроса разом: сколько, за
+              что и КОМУ. Робуксы Roblox переводит владельцу геймпасса, а не
+              тому, кого назвали в заказе, — и это последнее место, где
+              расхождение ещё можно поймать глазами. */}
+          {!orderPlaced && (
+            <div className="wbi-confirmsum">
+              <div><span>Сколько</span><b>{amount.toLocaleString("ru-RU")} R$</b></div>
+              <div><span>Кому</span><b>{account?.username ?? nick}</b></div>
+              <div>
+                <span>За что</span>
+                <b>{rows.length > 1 ? `${rows.length} геймпасса` : `Геймпасс ${rows[0]?.gamepassId ?? "—"}`}</b>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {confirmErr && <div className="wbi-warn" style={{ marginTop: 14 }}>{confirmErr}</div>}
@@ -895,10 +1038,21 @@ function ResultCard({
       {!done && !orderPlaced && (
         <>
           <div className="wbi-actions">
-            <button className="wbi-bigbtn" onClick={onOpenFork}>Выбрать, как это сделать →</button>
+            {storedKey ? (
+              <>
+                <button className="wbi-bigbtn" onClick={onStoredKey} disabled={storedBusy}>
+                  {storedBusy ? "Создаём геймпасс…" : "✨ Создать за меня — ключ уже привязан"}
+                </button>
+                <button className="wbi-ghostbtn" onClick={onOpenFork}>Другой способ</button>
+              </>
+            ) : (
+              <button className="wbi-bigbtn" onClick={onOpenFork}>Выбрать, как это сделать →</button>
+            )}
           </div>
           <div className="wbi-note" style={{ marginTop: 10, textAlign: "center" }}>
-            Три способа — выбери любой, результат одинаковый.
+            {storedKey
+              ? "Ключ от твоего аккаунта у нас уже есть — идти в Roblox не нужно."
+              : "Три способа — выбери любой, результат одинаковый."}
           </div>
         </>
       )}

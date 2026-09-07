@@ -15,6 +15,7 @@ import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
 import { siteAcquiringDecision } from "@/lib/site-acquiring";
 import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
+import { findBlockingCorridorOrder } from "@/lib/active-order";
 import {
   createPaymentRetry,
   isLivePaymentAttempt,
@@ -248,6 +249,32 @@ export async function POST(req: NextRequest) {
           retryable: true,
         }, { status: 502 });
       }
+    }
+
+    // Коридор WB закрывает кассу. Покупатель с картой Wildberries УЖЕ заплатил:
+    // пока его заказ ждёт геймпасс, вторая оплата — не выручка, а деньги,
+    // которые придётся возвращать. Разбор 07.09.2026 по `JS6NQB9`: заказ на
+    // 500 R$ ждал геймпасс, а покупатель из кабинета уехал в кассу и завёл
+    // `WEB-07E4BC…` на те же 500 R$ с тем же ником и тем же геймпассом.
+    //
+    // Проверка стоит ЗДЕСЬ, после ветки «заказ уже создан»: повтор оплаты
+    // существующего заказа блокировать нельзя — он уже заведён, и человеку
+    // осталось только дойти до банка. Закрываем ровно создание НОВОГО.
+    //
+    // Отказ мягкий и с адресом: ответ несёт ссылку «продолжить». Как только
+    // заказ собран (`PENDING`), запрет снимается сам — дальше свободное плавание.
+    const blocking = await findBlockingCorridorOrder(userId).catch(() => null);
+    if (blocking) {
+      return NextResponse.json(
+        {
+          error: `Твой заказ ${blocking.ref} на ${blocking.amount} R$ уже оплачен на Wildberries — платить второй раз не нужно. Закончи его: осталось выбрать геймпасс.`,
+          code: "CORRIDOR_ORDER_ACTIVE",
+          continueHref: blocking.href,
+          orderRef: blocking.ref,
+          orderAmount: blocking.amount,
+        },
+        { status: 409 },
+      );
     }
 
     const quote = await prisma.priceQuote.findUnique({

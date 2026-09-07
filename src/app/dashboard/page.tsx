@@ -42,6 +42,7 @@ import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
 import CustomerRobloxProfileCard from "@/components/customer-roblox-profile";
 import { loadCustomerRobloxProfile } from "@/lib/roblox-profile";
+import { continueHref } from "@/lib/active-order";
 import { listRobloxApiKeys } from "@/lib/roblox-api-key-store";
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
 
@@ -57,6 +58,8 @@ export const metadata: Metadata = {
 type DashboardOrder = {
   id: string;
   displayId: string;
+  /** Код заказа: у коридора — код с карточки WB, им же открывается инструкция. */
+  wbCode: string;
   publicOrderId: string | null;
   kind: CustomerOrderKind;
   source: "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL";
@@ -121,6 +124,25 @@ function sourceLabel(source: DashboardOrder["source"]) {
 
 function orderHref(order: DashboardOrder) {
   return order.publicOrderId ? `/payment/status?orderId=${encodeURIComponent(order.publicOrderId)}` : null;
+}
+
+/**
+ * «Продолжить заказ» — ссылка, ведущая в СОБСТВЕННЫЙ коридор этого заказа.
+ *
+ * До 07.09.2026 у заказа в статусе «нужен геймпасс» здесь стояла ссылка
+ * `/guide?source=site&flow=order&amount=…`. Это страница ПОКУПКИ: её кнопка
+ * подтверждения уводит в `/checkout`. Покупатель `JS6NQB9`, уже оплативший
+ * заказ на Wildberries, нажал в кабинете «Подробнее» и через три минуты имел
+ * второй заказ на те же 500 R$ — в ожидании оплаты, навсегда. Правильный адрес
+ * у заказа ровно один, и считает его `continueHref`.
+ */
+function resumeHref(order: DashboardOrder) {
+  return continueHref({
+    wbCode: order.wbCode,
+    orderSource: order.source,
+    publicOrderId: order.publicOrderId,
+    robloxUsername: order.customer,
+  });
 }
 
 async function RobloxProfileSection({
@@ -227,6 +249,7 @@ export default async function DashboardPage() {
     ...canonicalOrders.map((order) => ({
       id: order.id,
       displayId: order.publicOrderId ?? order.wbCode,
+      wbCode: order.wbCode,
       publicOrderId: order.publicOrderId,
       kind: "canonical" as const,
       source: order.orderSource,
@@ -262,9 +285,7 @@ export default async function DashboardPage() {
   const checkoutHref = "/checkout";
   const latestActive = orders.find((order) => customerOrderStatus(order.kind, order.status).active);
   const latestActiveProgress = latestActive ? customerOrderProgress(latestActive.kind, latestActive.status) : 0;
-  const latestActiveHref = latestActive?.status === "AWAITING_GAMEPASS"
-    ? `/guide?source=site&flow=order&amount=${latestActive.amountRobux}&username=${encodeURIComponent(latestActive.customer ?? "")}`
-    : latestActive ? orderHref(latestActive) : null;
+  const latestActiveHref = latestActive ? resumeHref(latestActive) : null;
 
   // После A1 админа делает не `User.role`, а проверенная TG-личность из
   // ADMIN_IDS, поэтому ЛК обязан спрашивать то же правило, что и гейт админки.
@@ -323,9 +344,13 @@ export default async function DashboardPage() {
               <div className={styles.noticeList}>
                 {notices.map((notice) => {
                   const relatedOrder = notice.orderId ? orders.find((order) => order.id === notice.orderId) : null;
-                  const href = relatedOrder?.status === "AWAITING_GAMEPASS"
-                    ? `/guide?source=site&flow=order&amount=${relatedOrder.amountRobux}&username=${encodeURIComponent(relatedOrder.customer ?? "")}`
-                    : relatedOrder ? orderHref(relatedOrder) : notice.id === "identity" ? "#identity-settings" : null;
+                  // Довести до конца можно только живой заказ; у отклонённого
+                  // ссылка в инструкцию открывала бы квест по использованному коду.
+                  const href = relatedOrder
+                    ? (customerOrderStatus(relatedOrder.kind, relatedOrder.status).active
+                        ? resumeHref(relatedOrder)
+                        : orderHref(relatedOrder))
+                    : notice.id === "identity" ? "#identity-settings" : null;
                   const NoticeIcon = notice.tone === "danger" ? XCircle : notice.tone === "waiting" ? Clock : notice.tone === "success" ? CheckCircle2 : Radio;
                   const content = <><span className={`${styles.noticeIcon} ${styles[`tone_${notice.tone}`]}`}><NoticeIcon size={18} /></span><span><strong>{notice.title}</strong><small>{notice.text}</small></span>{href && <ChevronRight size={18} className={styles.noticeArrow} />}</>;
                   return href ? <Link key={notice.id} href={href} className={styles.notice}>{content}</Link> : <div key={notice.id} className={styles.notice}>{content}</div>;

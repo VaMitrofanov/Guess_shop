@@ -562,6 +562,13 @@ export const GUIDE_CSS = `
 .wbi-total .r{font-size:24px;font-weight:800;color:var(--rb-text);font-variant-numeric:tabular-nums}
 .wbi-total.short{background:rgba(215,155,40,.12);border-color:#d79b28}
 .wbi-total.short .l{color:#b06e0a}
+/* Финальный экран: сколько / кому / за что — три ответа рядом, чтобы
+   расхождение «ник в заказе ≠ владелец пасса» ловилось глазами до нажатия. */
+.wbi-confirmsum{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.wbi-confirmsum>div{display:grid;gap:3px;padding:11px 12px;border:1px solid var(--rb-border);border-radius:13px;background:var(--rb-surface);min-width:0}
+.wbi-confirmsum span{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)}
+.wbi-confirmsum b{font-size:15px;font-weight:800;color:var(--rb-text);overflow-wrap:anywhere}
+@media(max-width:560px){.wbi-confirmsum{grid-template-columns:1fr}}
 :is(html[data-theme="dark"]) .wbi-total.short .l{color:#f0c469}
 .wbi-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px;align-items:center}
 .wbi-bigbtn{appearance:none;border:0;cursor:pointer;font:inherit;font-size:17px;font-weight:800;color:#fff;background:#7556e8;padding:0 28px;min-height:58px;border-radius:14px;box-shadow:4px 4px 0 #45d6aa;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
