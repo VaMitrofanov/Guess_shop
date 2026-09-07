@@ -11,21 +11,34 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
 import { vkBotHref } from "@/lib/bot-links";
+import { publicAppOrigin } from "@/lib/email-account-lifecycle";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
 const GUIDE_URL = "/guide?source=wb";
 
-export async function GET(request: NextRequest) {
+/**
+ * Адрес инструкции строится от ПУБЛИЧНОГО origin, а не от `request.url`.
+ *
+ * Внутри контейнера `request.url` — это `http://0.0.0.0:3001/api/wb-link`, и
+ * редирект уходил на `https://0.0.0.0:3001/guide?source=wb`: покупатель без
+ * живой сессии (окно VK ID не вернулось, кука протухла) упирался в мёртвый
+ * адрес вместо инструкции. Проверено на проде 08.09.2026.
+ */
+function guideRedirect() {
+  return NextResponse.redirect(new URL(GUIDE_URL, publicAppOrigin()));
+}
+
+export async function GET(_request: NextRequest) {
   const session = await auth();
 
   if (!session?.user) {
-    return NextResponse.redirect(new URL(GUIDE_URL, request.url));
+    return guideRedirect();
   }
 
   const userId = (session.user as any).id as string | undefined;
   if (!userId) {
-    return NextResponse.redirect(new URL(GUIDE_URL, request.url));
+    return guideRedirect();
   }
 
   // wb_code comes from the JWT session (saved during authorize in auth.ts)

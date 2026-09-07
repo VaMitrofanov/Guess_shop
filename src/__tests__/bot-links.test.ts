@@ -70,6 +70,17 @@ describe("страницы коридора", () => {
   });
 });
 
+describe("/api/wb-link", () => {
+  // На проде 08.09.2026 роут без сессии отдавал 307 на
+  // `https://0.0.0.0:3001/guide?source=wb`: внутри контейнера `request.url` —
+  // это адрес слушателя, а не сайта, и покупатель упирался в мёртвый хост.
+  test("редирект на инструкцию строится от публичного origin, а не от request.url", () => {
+    const source = read("src/app/api/wb-link/route.ts");
+    expect(source).toContain("publicAppOrigin()");
+    expect(source).not.toMatch(/new URL\(\s*GUIDE_URL\s*,\s*request\.url\s*\)/);
+  });
+});
+
 describe("боты знают этот payload", () => {
   test("Telegram разбирает wbhelp и не идёт с ним в базу за кодом", () => {
     const source = read("bots/tg/handlers.ts");
