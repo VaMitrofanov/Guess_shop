@@ -4,26 +4,23 @@ import { prisma } from "@/lib/prisma";
 import { normalizeRobloxSecurityCookie } from "@/lib/roblox-cookie";
 import { browserFailureMessage, getBrowserSession } from "@/lib/browser-purchase";
 
-async function robloxApiFallback(cookie: string): Promise<{
-  ok: boolean;
-  accountName: string | null;
-  accountId: number | null;
-  balance: number | null;
-}> {
-  try {
-    const headers = { Cookie: `.ROBLOSECURITY=${cookie}` };
-    const [userRes, balRes] = await Promise.all([
-      fetch("https://users.roblox.com/v1/users/authenticated", { headers, signal: AbortSignal.timeout(10_000) }),
-      fetch("https://economy.roblox.com/v1/user/currency", { headers, signal: AbortSignal.timeout(10_000) }),
-    ]);
-    if (!userRes.ok) return { ok: false, accountName: null, accountId: null, balance: null };
-    const user = await userRes.json();
-    const bal = balRes.ok ? await balRes.json() : null;
-    return { ok: true, accountName: user.name ?? user.displayName, accountId: user.id, balance: bal?.robux ?? null };
-  } catch {
-    return { ok: false, accountName: null, accountId: null, balance: null };
-  }
-}
+/**
+ * Запасного пути «сходить в Roblox напрямую» здесь больше нет.
+ *
+ * Он существовал на случай, когда браузерный сервис недоступен, и слал cookie
+ * донора прямо в `users.roblox.com` — то есть второй выход наружу мимо
+ * единственной разрешённой точки (контракт `donor-single-egress`). С 27.08.2026
+ * Roblox с RF-хоста недоступен вовсе, так что путь и работать перестал: два
+ * запроса по 10 секунд в таймаут, а результат `ok: false` подставлялся как
+ * вердикт «Cookie невалиден — Roblox не принял». Оператор шёл перевыпускать
+ * рабочий cookie, хотя лежал purchase-service.
+ *
+ * Теперь недоступность сервиса называется своим именем: `cookieValid: null`
+ * (не проверяли), `browserUnavailable: true` и 503 на запись. Непроверенный
+ * cookie не сохраняется — хранить донорский креденшл, ни разу не подтверждённый
+ * Roblox, хуже, чем попросить повторить попытку.
+ */
+const BROWSER_DOWN = "BROWSER_SERVICE_UNAVAILABLE";
 
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req))
@@ -57,27 +54,18 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  if (browser.code === "BROWSER_SERVICE_UNAVAILABLE") {
-    const api = await robloxApiFallback(cookie);
-    return NextResponse.json({
-      hasCookie: true,
-      cookieValid: api.ok,
-      cookieUpdatedAt,
-      accountName: api.accountName ?? settings?.robloxAccountName ?? null,
-      accountId: api.accountId ?? null,
-      balance: api.balance,
-      browserUnavailable: true,
-      failureCode: api.ok ? null : "DONOR_COOKIE_INVALID",
-    });
-  }
-
+  // `cookieValid: null` — «не проверяли», а не «плохой»: клиент считает плохим
+  // только явный `false` (`cookieValid !== false`), и падать в красный статус
+  // из-за лежащего сервиса нельзя.
+  const serviceDown = browser.code === BROWSER_DOWN;
   return NextResponse.json({
     hasCookie: true,
-    cookieValid: false,
+    cookieValid: serviceDown ? null : false,
     cookieUpdatedAt,
     accountName: settings?.robloxAccountName ?? null,
     accountId: null,
     balance: null,
+    browserUnavailable: serviceDown,
     failureCode: browser.code,
   });
 }
@@ -112,25 +100,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (browser.code === "BROWSER_SERVICE_UNAVAILABLE") {
-      const api = await robloxApiFallback(rawCookie);
-      if (!api.ok) {
-        return NextResponse.json({ error: "Cookie невалиден — Roblox не принял" }, { status: 400 });
-      }
-      await (prisma as any).globalSettings.upsert({
-        where: { id: "global" },
-        create: { id: "global", usdToRub: 90, robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: api.accountName },
-        update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: api.accountName },
-      });
-      return NextResponse.json({
-        ok: true,
-        accountName: api.accountName,
-        accountId: api.accountId,
-        balance: api.balance,
-        browserUnavailable: true,
-      });
-    }
-
     const status = browser.code === "DONOR_COOKIE_INVALID" ? 400 : 503;
     return NextResponse.json({ error: browserFailureMessage(browser.reason, browser.code), failureCode: browser.code }, { status });
   }
@@ -149,20 +118,6 @@ export async function POST(req: NextRequest) {
         accountName: browser.session.accountName,
         accountId: browser.session.accountId,
         balance: browser.session.balance,
-      });
-    }
-
-    if (browser.code === "BROWSER_SERVICE_UNAVAILABLE") {
-      const api = await robloxApiFallback(cookie);
-      if (!api.ok) {
-        return NextResponse.json({ error: "Cookie невалиден — Roblox не принял" }, { status: 400 });
-      }
-      return NextResponse.json({
-        ok: true,
-        accountName: api.accountName,
-        accountId: api.accountId,
-        balance: api.balance,
-        browserUnavailable: true,
       });
     }
 

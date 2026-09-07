@@ -828,6 +828,24 @@ gamepass-данными. Ручной скрипт не может быть вы
 `purchase-script` потеряла явную проверку `buyerAccountId`; guard восстановлен до deploy и
 закреплён полным `donor-single-egress` suite 14/14.
 
+**07.09.2026 — один fallback всё-таки уцелел, и это видно было по красному гейту.**
+`src/app/api/twa/roblox-account/route.ts` держал `robloxApiFallback`: при
+`BROWSER_SERVICE_UNAVAILABLE` он слал `.ROBLOSECURITY` прямо в
+`users.roblox.com` и `economy.roblox.com`. Contract-test `donor-single-egress`
+падал на нём всё это время и числился «предсуществующим красным», то есть гейт,
+поставленный ровно против такого кода, месяцами игнорировали.
+
+Хуже утечки был вердикт. С 27.08 Roblox с RF-хоста недоступен, значит fallback
+всегда возвращал `ok: false` — и роут подставлял это как «Cookie невалиден —
+Roblox не принял», хотя про cookie никто ничего не узнал: лежал purchase-service.
+Оператор шёл перевыпускать рабочий cookie. Плюс роут МОГ сохранить cookie,
+подтверждённый только этим прямым запросом, — то есть непроверенный.
+
+Fallback удалён целиком. Теперь недоступность сервиса называется своим именем:
+`cookieValid: null` («не проверяли»), `browserUnavailable: true`, 503 на запись,
+и непроверенный cookie не сохраняется вовсе. Закреплено `donor-single-egress`
+(14/14 зелёный) и новым `src/__tests__/rf-host-egress.test.ts`.
+
 ### 20. Email account lifecycle и доказательство consent — 🟡 КОД ГОТОВ / SMTP ACCEPTANCE (2026-07-18)
 
 Регистрация требует `agreedToPrivacy: true` и bcrypt-хеширует пароль, однако email не

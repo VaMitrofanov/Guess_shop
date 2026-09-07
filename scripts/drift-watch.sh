@@ -68,31 +68,86 @@ psql_coolify() {
   docker exec "$COOLIFY_DB_CONTAINER" psql -U coolify -d coolify -tAc "$1" 2>/dev/null | tr -d '[:space:]'
 }
 
-# Телеграм с RF-хоста отвечает не всегда (в логе есть таймауты до api.telegram.org),
-# поэтому отправка — best effort, а не условие работы скрипта.
+# Значение из окружения контейнера Web. Переменная, заданная снаружи, имеет
+# приоритет: так `notify` можно прогнать руками против тестового моста, не
+# поднимая контейнер, — а раньше проверить отправку было нечем, и она полтора
+# месяца молча не работала.
+container_env() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]]; then
+    printf '%s' "${!name}"
+    return 0
+  fi
+  docker exec "$WEB_CONTAINER" printenv "$name" 2>/dev/null || true
+}
+
+# ── Почему алерт идёт через мост, а не в api.telegram.org (07.09.2026) ───────
+#
+# RF-хост Telegram НЕ видит — ровно поэтому оба бота и сайт живут за
+# сингапурским мостом. Этот скрипт ходил напрямую и с 27.07 не доставил ни
+# одного сообщения: 3046 строк `alert to <id> failed`, `curl: (28) Failed to
+# connect to api.telegram.org`. Монитор при этом исправно ЧИНИЛ Guide — то есть
+# полгода работал вслепую: если бы самолечение перестало справляться, никто бы
+# не узнал.
+#
+# Теперь отправка идёт тем же путём, что у сайта: `POST $VALIDATOR_SOURCE_URL/tg-proxy`
+# (`src/lib/telegram.ts`). Токен в тело НЕ кладём: мост берёт свой
+# `TG_TOKEN` и чужой игнорирует — значит секрет не попадает ни в аргументы
+# curl, ни в `ps` на хосте. Прямой вызов остаётся запасным на случай хоста,
+# который Telegram видит.
+#
+# Отправка по-прежнему best effort, но больше не молчаливая: считаем реально
+# доставленные сообщения и пишем в лог итог, а не только ошибку curl. Раньше
+# `-o /dev/null` прятал ответ, и `{"ok":false}` от Telegram выглядел успехом.
 notify() {
   local text="$1"
-  local token chats
-  token="$(docker exec "$WEB_CONTAINER" printenv TG_TOKEN 2>/dev/null || true)"
-  chats="$(docker exec "$WEB_CONTAINER" printenv ADMIN_IDS 2>/dev/null || true)"
-  [[ -z "$chats" ]] && chats="$(docker exec "$WEB_CONTAINER" printenv TG_CHAT_ID 2>/dev/null || true)"
-  if [[ -z "$token" || -z "$chats" ]]; then
-    echo "$STAMP alert skipped: нет TG_TOKEN/ADMIN_IDS в контейнере $WEB_CONTAINER"
+  local token chats bridge bkey
+  chats="$(container_env ADMIN_IDS)"
+  [[ -z "$chats" ]] && chats="$(container_env TG_CHAT_ID)"
+  bridge="$(container_env VALIDATOR_SOURCE_URL)"
+  bridge="${bridge%/}"
+  bkey="$(container_env VALIDATOR_KEY)"
+  [[ -z "$bridge" ]] && token="$(container_env TG_TOKEN)"
+
+  if [[ -z "$chats" ]]; then
+    echo "$STAMP alert skipped: нет ADMIN_IDS/TG_CHAT_ID в контейнере $WEB_CONTAINER"
     return 1
   fi
+  if [[ -z "$bridge" && -z "$token" ]]; then
+    echo "$STAMP alert skipped: нет ни VALIDATOR_SOURCE_URL, ни TG_TOKEN в контейнере $WEB_CONTAINER"
+    return 1
+  fi
+
   local payload
   payload="$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-  local ids chat_id
+  # Заголовки — массивом, а не подстановкой `${bkey:+-H "…"}`: кавычки внутри
+  # подстановки bash уже не разбирает, и ключ моста уехал бы битым (401).
+  local -a curl_headers=(-H "Content-Type: application/json")
+  [[ -n "$bkey" ]] && curl_headers+=(-H "x-validator-key: $bkey")
+
+  local ids chat_id body sent=0 total=0
   IFS=',' read -ra ids <<< "$chats"
   for chat_id in "${ids[@]}"; do
     chat_id="$(echo "$chat_id" | xargs)"
     [[ -z "$chat_id" ]] && continue
-    curl -sS --max-time 20 -o /dev/null \
-      -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-      -H "Content-Type: application/json" \
-      -d "$(printf '{"chat_id":"%s","text":%s}' "$chat_id" "$payload")" \
-      || echo "$STAMP alert to $chat_id failed"
+    total=$((total + 1))
+    if [[ -n "$bridge" ]]; then
+      body="$(curl -sS --max-time 20 -X POST "$bridge/tg-proxy" \
+        "${curl_headers[@]}" \
+        -d "$(printf '{"chat_id":"%s","text":%s}' "$chat_id" "$payload")" 2>&1)"
+    else
+      body="$(curl -sS --max-time 20 -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+        -H "Content-Type: application/json" \
+        -d "$(printf '{"chat_id":"%s","text":%s}' "$chat_id" "$payload")" 2>&1)"
+    fi
+    if [[ "$body" == *'"ok":true'* ]]; then
+      sent=$((sent + 1))
+    else
+      echo "$STAMP alert to $chat_id failed: $(printf '%s' "$body" | tr -d '\n' | cut -c1-200)"
+    fi
   done
+  echo "$STAMP alert delivered $sent/$total via ${bridge:-api.telegram.org (напрямую)}"
+  [[ "$sent" -gt 0 ]]
 }
 
 # ── Проверка ────────────────────────────────────────────────────────────────
