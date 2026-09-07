@@ -15,11 +15,11 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string; keyauto?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string; keyauto?: string; stage?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom, preview, amount, username, flow, keyauto } = await searchParams;
+  const { source, skip, code, test, nom, preview, amount, username, flow, keyauto, stage } = await searchParams;
   // Телефон или компьютер: вход в Creator Hub на них разный, и кадры инструкции
   // тоже. Догадка приходит в первом HTML, чтобы страница не мигала после
   // гидратации; в браузере она уточняется, а переключатель её перекрывает.
@@ -52,6 +52,11 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   // ТОЛЬКО в тестовом/превью-режиме и вёрстку показывает, а метод не включает:
   // роут без флага всё равно ответит 404.
   const keyAutoPreview = (testMode || previewMode) && keyauto === "1";
+  // `?stage=key` — вход сразу в ветку ключа: по этой ссылке приходят из ботов,
+  // из сообщения, которое ключ и просит. Белый список из одного значения, а не
+  // «любое состояние страницы из адреса»: остальные ветки без пройденной
+  // проверки ника рисовать не на чем, и открывать их снаружи незачем.
+  const initialStage = stage === "key" ? ("key" as const) : undefined;
 
   return (
     <>
@@ -75,6 +80,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         orderFlow={orderFlow}
         initialPlatform={initialPlatform}
         keyAutoEnabled={gamepassAutocreateEnabled() || keyAutoPreview}
+        initialStage={initialStage}
       />
     </>
   );

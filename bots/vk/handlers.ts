@@ -3075,7 +3075,7 @@ async function handleVkApiKeyInput(
       message:
         "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».",
       keyboard: Keyboard.builder()
-        .urlButton({ label: "📸 Шаги с картинками", url: `${guideUrlFor(pending.wbCode, pending.nick)}#key` })
+        .urlButton({ label: "📸 Шаги с картинками", url: guideUrlFor(pending.wbCode, pending.nick, "key") })
         .row()
         .textButton({ label: "↩️ Другой способ", payload: { command: "quest_fork" }, color: "secondary" })
         .inline(),

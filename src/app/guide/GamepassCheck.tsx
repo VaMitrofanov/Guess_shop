@@ -65,6 +65,7 @@ export default function GamepassCheck({
   onReset,
   initialPlatform = "mobile",
   keyAutoEnabled = false,
+  initialStage,
 }: {
   mode: "WB" | "SITE" | "BOT";
   amount: number;
@@ -76,6 +77,8 @@ export default function GamepassCheck({
   initialPlatform?: GuidePlatform;
   /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE). */
   keyAutoEnabled?: boolean;
+  /** `?stage=key` — человек пришёл по ссылке, которая ключ и просит. */
+  initialStage?: "key";
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
@@ -116,6 +119,21 @@ export default function GamepassCheck({
   const rescueRef = useRef<HTMLElement | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
+
+  /**
+   * Ссылка привела прямо в ветку ключа (`?stage=key`).
+   *
+   * Открыть её на входе нельзя: до проверки ника нет ни аккаунта, ни плана —
+   * блок ключа не на чем рисовать. Поэтому намерение ждёт первого результата
+   * проверки и тратится ОДИН раз: иначе возврат к проверке после созданного
+   * пасса каждый раз выбрасывал бы человека обратно в форму ключа.
+   */
+  const keyWanted = useRef(initialStage === "key");
+  useEffect(() => {
+    // Кнопки живут в переписке дольше кода: разосланные до этой правки ссылки
+    // несут якорь `#key`. Принимаем и его, чтобы старые сообщения не вели в пустоту.
+    if (window.location.hash.toLowerCase() === "#key") keyWanted.current = true;
+  }, []);
 
   const tgHref = code
     ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}`
@@ -191,12 +209,18 @@ export default function GamepassCheck({
       setAccount(data.account ?? { id: "", username: data.detectedUsername ?? value, avatarUrl: null });
       replan(((data.gamepasses ?? []) as Array<Record<string, unknown>>).map(toOwned));
       setPhase("result");
+      if (keyWanted.current) {
+        keyWanted.current = false;
+        // Флаг мог выключиться, пока сообщение с ссылкой лежало в чате: тогда
+        // человек просто остаётся на результате — обещать выключённый метод нельзя.
+        if (keyAutoEnabled) setStage("key");
+      }
       requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch {
       setError("Не удалось связаться с Roblox. Попробуй ещё раз через минуту.");
       setPhase("entry");
     }
-  }, [nick, code, replan]);
+  }, [nick, code, replan, keyAutoEnabled]);
 
   /**
    * Запасной вход: пасс есть, но поиск по нику его не видит (скрытый плейс, свежий пасс).
@@ -309,7 +333,22 @@ export default function GamepassCheck({
   const stepTargets = toCreate.length > 0 ? toCreate : peekTargets;
   /** Справочный показ инструкции: создавать нечего, человек просто смотрит. */
   const reference = toCreate.length === 0;
-  const showSteps = (stage === "manual" && toCreate.length > 0) || peek;
+  // Условие «и создавать есть что» отсюда убрано: в ветку ключа теперь можно
+  // прийти по ссылке с планом, в котором создавать нечего, а из неё открыта
+  // дверь «создам сам». С прежним условием эта дверь вела в пустой экран;
+  // теперь показывается справочный вариант шагов (`reference`).
+  const showSteps = stage === "manual" || peek;
+  /**
+   * Ветка ключа открыта, а пасс ещё не создан.
+   *
+   * По `?stage=key` сюда приходят и с планом, где создавать нечего: так
+   * выглядит заказ, который не выкупается ИМЕННО из-за одного крупного пасса.
+   * Карточку результата в этот момент показывать нельзя — «создавать ничего не
+   * нужно» прямо над формой ключа читается как спор страницы с самой собой.
+   * После создания (`keyDone`) карточка возвращается: в ней кнопка
+   * «Подтвердить заказ», ради которой человек сюда и шёл.
+   */
+  const keyPending = stage === "key" && !keyDone;
 
   return (
     <>
@@ -450,7 +489,7 @@ export default function GamepassCheck({
           {/* Внутри ветки карточка результата сворачивается в строку-крошку
               сверху: держать её на экране целиком — значит заставлять человека
               прокручивать мимо неё каждый шаг инструкции. */}
-          {phase === "result" && plan && (stage === "result" || toCreate.length === 0 || orderPlaced) && (
+          {phase === "result" && plan && (stage === "result" || orderPlaced || (toCreate.length === 0 && !keyPending)) && (
             <div ref={resultRef}>
               <div className="wbi-sechead"><b>Результат проверки</b></div>
               <ResultCard

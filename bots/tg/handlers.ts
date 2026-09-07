@@ -2772,7 +2772,7 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
     await ctx.reply(
       "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой <b>Copy Key To Clipboard</b>.",
       { parse_mode: "HTML", ...Markup.inlineKeyboard([
-        [Markup.button.url("📸 Шаги с картинками", `${guideUrlFor(pending.wbCode, pending.nick)}#key`)],
+        [Markup.button.url("📸 Шаги с картинками", guideUrlFor(pending.wbCode, pending.nick, "key"))],
         [Markup.button.callback("↩️ Другой способ", QUEST.fork)],
       ]) },
     );

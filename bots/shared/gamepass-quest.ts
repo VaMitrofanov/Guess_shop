@@ -79,10 +79,19 @@ export function plainText(html: string): string {
     .replace(/&gt;/g, ">");
 }
 
-/** Персональная ссылка на инструкцию: код открывает нужный заказ, ник — проверку. */
-export function guideUrlFor(wbCode: string, nick?: string): string {
+/**
+ * Персональная ссылка на инструкцию: код открывает нужный заказ, ник — проверку.
+ *
+ * `stage: "key"` открывает сразу ветку ключа — тем же словом, что и внутреннее
+ * состояние страницы. Раньше на её месте стоял якорь `#key`, но якоря с таким
+ * именем на странице нет и никогда не было: кнопка «те же шаги с картинками»
+ * роняла человека в начало проверки ника, ровно в тот экран, из которого он
+ * только что ушёл.
+ */
+export function guideUrlFor(wbCode: string, nick?: string, stage?: "key"): string {
   const base = `https://robloxbank.ru/guide?source=wb&skip=1&code=${encodeURIComponent(wbCode)}`;
-  return nick ? `${base}&username=${encodeURIComponent(nick)}` : base;
+  const withNick = nick ? `${base}&username=${encodeURIComponent(nick)}` : base;
+  return stage ? `${withNick}&stage=${stage}` : withNick;
 }
 
 /** Готов ли план к оформлению: создавать больше нечего. */
@@ -320,7 +329,7 @@ export function questKeyScreen(opts: {
   return {
     text,
     rows: [
-      [{ id: "url", label: "📸 Те же шаги с картинками", url: `${guideUrlFor(wbCode, nick)}#key` }],
+      [{ id: "url", label: "📸 Те же шаги с картинками", url: guideUrlFor(wbCode, nick, "key") }],
       [{ id: QUEST.fork, label: "↩️ Другой способ", tone: "secondary" }],
     ],
     photos: withPhotos ? KEY_FRAMES[platform] : undefined,

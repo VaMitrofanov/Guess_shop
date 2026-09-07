@@ -2873,6 +2873,7 @@ export default function GuideClient({
   orderFlow = false,
   initialPlatform = "mobile",
   keyAutoEnabled = false,
+  initialStage,
 }: {
   isWB: boolean;
   guideMode?: "WB" | "SITE" | "BOT";
@@ -2889,6 +2890,8 @@ export default function GuideClient({
   initialPlatform?: GuidePlatform;
   /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE, читается на сервере). */
   keyAutoEnabled?: boolean;
+  /** `?stage=key` — открыть ветку ключа сразу после проверки аккаунта. */
+  initialStage?: "key";
 }) {
   // Both modes open the instruction directly (no gate/intro/bot/DB/session).
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
@@ -3089,6 +3092,7 @@ export default function GuideClient({
         testMode={testMode}
         initialPlatform={initialPlatform}
         keyAutoEnabled={keyAutoEnabled}
+        initialStage={initialStage}
       />
     );
   }
@@ -3102,6 +3106,7 @@ export default function GuideClient({
         initialUsername={initialUsername}
         initialPlatform={initialPlatform}
         keyAutoEnabled={keyAutoEnabled}
+        initialStage={initialStage}
       />
     );
   }
