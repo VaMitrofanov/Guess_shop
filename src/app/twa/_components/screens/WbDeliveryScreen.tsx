@@ -106,6 +106,14 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
   const [focus, setFocus] = useState<WbDeliveryFocus | null>(initialFocus ?? null);
   const [query, setQuery] = useState(initialQuery ?? "");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /* Открытый заказ держим отдельным DTO, а не ссылкой в `data.orders`: найденный
+     поиском заказ в обзорное окно может не входить вовсе, и карточка по тапу не
+     открывалась бы. */
+  const [detail, setDetail] = useState<WbDeliveryOrderDto | null>(null);
+  /* Результат серверного поиска. `null` — поиска нет, пустой массив — искали и
+     не нашли: между этими случаями экран говорит разное. */
+  const [found, setFound] = useState<WbDeliveryOrderDto[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [manualCode, setManualCode] = useState("");
   const [message, setMessage] = useState("");
   const [confirming, setConfirming] = useState<{ action: WbDeliveryAction; title: string; body: string; cta: string; facts: [string, string][] } | null>(null);
@@ -141,6 +149,7 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
       }
       const body = await response.json() as WbDeliveryOrderResponse & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Не удалось обновить чат");
+      setDetail(body.order);
       setData((current) => {
         if (!current) return current;
         const index = current.orders.findIndex((order) => order.id === body.order.id);
@@ -199,26 +208,41 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
     }
   }
 
+  /* Поиск спрашивает сервер, а не фильтрует загруженное окно.
+     До 08.09.2026 он шёл по тем же 150 строкам, что пришли в обзор, — и заказ,
+     закрытый неделю назад, из поиска пропадал вместе со своим чатом WB. Строку
+     из ленты заказов такой поиск встречал словами «Ничего не найдено». */
+  useEffect(() => {
+    const needle = query.trim();
+    if (needle.length < 2) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void (async () => {
+        try {
+          const response = await fetch(`/api/twa/wb-delivery?q=${encodeURIComponent(needle)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (!response.ok) return;
+          const body = await response.json() as { orders: WbDeliveryOrderDto[] };
+          setFound(body.orders ?? []);
+        } catch { /* отменённый или упавший поиск экран не ломает */ }
+        finally { setSearching(false); }
+      })();
+    }, 350);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [query, token]);
+
   const orders = useMemo(() => {
     const all = data?.orders ?? [];
-    const needle = query.trim().toLowerCase();
-    const searched = needle
-      ? all.filter((order) => [
-        order.wbOrderId,
-        order.buyerName,
-        order.activationCode,
-        order.vendorCode,
-        order.fulfillment?.robloxUsername,
-        order.denomination != null ? String(order.denomination) : null,
-      ].some((value) => value?.toLowerCase().includes(needle)))
-      : all;
-    // A search is a search: it looks across every queue, not inside the tab.
-    if (needle) return searched;
-    if (focus) return searched.filter(FOCUS[focus].match);
-    if (tab === "done") return searched.filter((order) => WB_TERMINAL_STAGES.includes(order.stage));
-    if (tab === "urgent") return searched.filter((order) => WB_URGENT_STAGES.includes(order.stage));
-    return searched.filter((order) => !WB_TERMINAL_STAGES.includes(order.stage));
-  }, [data?.orders, focus, query, tab]);
+    if (query.trim().length >= 2) return found ?? [];
+    if (focus) return all.filter(FOCUS[focus].match);
+    if (tab === "done") return all.filter((order) => WB_TERMINAL_STAGES.includes(order.stage));
+    if (tab === "urgent") return all.filter((order) => WB_URGENT_STAGES.includes(order.stage));
+    return all.filter((order) => !WB_TERMINAL_STAGES.includes(order.stage));
+  }, [data?.orders, focus, found, query, tab]);
 
   const grouped = useMemo(() => {
     if (query.trim() || focus || tab !== "active") return null;
@@ -227,7 +251,9 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
       .filter((section) => section.orders.length > 0);
   }, [focus, orders, query, tab]);
 
-  const selected = data?.orders.find((order) => order.id === selectedId) ?? null;
+  const selected = selectedId
+    ? (detail?.id === selectedId ? detail : data?.orders.find((order) => order.id === selectedId) ?? null)
+    : null;
 
   if (loading) return <div className={css.loading}>{[1,2,3].map((item) => <i key={item} />)}</div>;
   if (!data) return <div className={css.empty}><AlertTriangle /><strong>Контур недоступен</strong><button onClick={() => void load()}>Повторить</button></div>;
@@ -242,7 +268,7 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
         message={message}
         setManualCode={setManualCode}
         setMessage={setMessage}
-        onBack={() => { haptic.select(); setSelectedId(null); void load(true); }}
+        onBack={() => { haptic.select(); setSelectedId(null); setDetail(null); void load(true); }}
         onAction={(action, extra) => void act(action, selected, extra)}
         onConfirm={setConfirming}
         post={post}
@@ -295,8 +321,14 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
         <Search />
         <input
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Имя, номер WB, код, ник Roblox"
+          /* Короткий запрос гасит прошлую выдачу здесь, а не в эффекте: иначе
+             под двумя оставшимися символами висел бы результат от трёх. */
+          onChange={(event) => {
+            const value = event.target.value;
+            setQuery(value);
+            if (value.trim().length < 2) { setFound(null); setSearching(false); }
+          }}
+          placeholder="Имя, номер WB, код, артикул, ник"
           aria-label="Поиск по заказам DBS"
         />
         {query && <button type="button" onClick={() => { haptic.select(); setQuery(""); }} aria-label="Очистить"><X /></button>}
@@ -310,18 +342,22 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
         <span>{FOCUS[focus].label}</span><b>{orders.length}</b><X />
       </button>}
 
-      {query.trim() && <div className={css.searchSummary}>Найдено: <b>{orders.length}</b> · поиск идёт по всем очередям</div>}
+      {query.trim() && <div className={css.searchSummary}>
+        {searching && found === null
+          ? "Ищу по всем заказам…"
+          : <>Найдено: <b>{orders.length}</b> · поиск идёт по всей базе, а не только по очередям</>}
+      </div>}
 
       <div className={css.orderList}>
         {grouped
           ? grouped.map((section) => (
             <div key={section.id} className={css.section}>
               <div className={css.sectionHead}><strong>{section.title}</strong><span>{section.hint}</span><b>{section.orders.length}</b></div>
-              {section.orders.map((order) => <OrderRow key={order.id} order={order} onOpen={() => { haptic.impact("light"); setSelectedId(order.id); }} />)}
+              {section.orders.map((order) => <OrderRow key={order.id} order={order} onOpen={() => { haptic.impact("light"); setDetail(order); setSelectedId(order.id); }} />)}
             </div>
           ))
-          : orders.map((order) => <OrderRow key={order.id} order={order} onOpen={() => { haptic.impact("light"); setSelectedId(order.id); }} />)}
-        {!orders.length && <div className={css.empty}><Truck /><strong>{query.trim() ? "Ничего не найдено" : focus ? FOCUS[focus].empty : tab === "urgent" ? "Срочных заказов нет" : "В этой очереди пусто"}</strong><span>{query.trim() ? "Попробуйте имя покупателя, номер заказа или код." : "Здесь только реальные заказы WB."}</span></div>}
+          : orders.map((order) => <OrderRow key={order.id} order={order} onOpen={() => { haptic.impact("light"); setDetail(order); setSelectedId(order.id); }} />)}
+        {!orders.length && !(searching && found === null) && <div className={css.empty}><Truck /><strong>{query.trim() ? "Ничего не найдено" : focus ? FOCUS[focus].empty : tab === "urgent" ? "Срочных заказов нет" : "В этой очереди пусто"}</strong><span>{query.trim() ? "Попробуйте имя покупателя, номер заказа или код." : "Здесь только реальные заказы WB."}</span></div>}
       </div>
     </div>
   );

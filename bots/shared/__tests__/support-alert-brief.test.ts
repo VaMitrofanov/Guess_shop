@@ -125,6 +125,58 @@ describe("справка по заказу внутри алерта подде�
     expect(text).toContain("✅ Выкуплен");
   });
 
+  /* 08.09.2026, 49ANALQ. Клиент писал «долго в обработке» через три дня после
+     выкупа: он ждал робуксы, которые Roblox держит в Pending пять дней. Дату
+     ему назвали в сообщении о выкупе, а у админа её не было — алерт говорил
+     только «прошло 2 дня 13 ч», и срок приходилось считать в уме в разговоре. */
+  it("у выкупленного называет дату разблокировки робуксов, а не только возраст", async () => {
+    orderFindUnique.mockResolvedValue(order({
+      status: "COMPLETED",
+      completedAt: new Date(Date.now() - 2 * DAY),
+    }));
+    await call();
+
+    const text = sentText();
+    expect(text).toContain("💎 робуксы выйдут из Pending");
+    // Дата — та же, что видит клиент: выкуп + 5 дней.
+    const expected = new Date(Date.now() + 3 * DAY)
+      .toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
+    expect(text).toContain(expected);
+  });
+
+  it("когда срок вышел, не обещает Pending, а отправляет к Roblox", async () => {
+    orderFindUnique.mockResolvedValue(order({
+      status: "COMPLETED",
+      completedAt: new Date(Date.now() - 9 * DAY),
+    }));
+    await call();
+    expect(sentText()).toContain("робуксы разблокированы");
+  });
+
+  /* `[НИК? …]` пишет `capture-nick`, и никто её не снимает — заметка это журнал.
+     На выкупленном заказе с подтверждённым ником последняя строка заметки
+     оказывалась маркером сомнения и читалась как «ник не проверен». */
+  it("не тычет маркером «[НИК?]», когда ник давно подтверждён", async () => {
+    orderFindUnique.mockResolvedValue(order({
+      status: "COMPLETED",
+      completedAt: new Date(Date.now() - 2 * DAY),
+      robloxUsername: "lox23_limon33",
+      adminNote: "[НИК? 2026-09-02] lox23_limon33 (nick-search)",
+    }));
+    await call();
+    expect(sentText()).not.toContain("[НИК?");
+  });
+
+  it("но на неподтверждённом нике маркер остаётся — это и есть новость", async () => {
+    orderFindUnique.mockResolvedValue(order({
+      robloxUsername: null,
+      probableNick: "lox23_limon33",
+      adminNote: "[НИК? 2026-09-02] lox23_limon33 (nick-search)",
+    }));
+    await call();
+    expect(sentText()).toContain("[НИК?");
+  });
+
   it("у разбитого заказа видно, сколько частей закрыто", async () => {
     orderFindUnique.mockResolvedValue(order({
       status: "PENDING",

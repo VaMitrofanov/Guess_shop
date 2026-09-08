@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  ageBasis, ageTone, fmtAge, grossOf, laneOf, LANE_META, orderBadge, orderFlag, primaryActionFor,
+  ageBasis, ageTone, fmtAge, fmtUnlockDate, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
+  primaryActionFor, robuxUnlockAt,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
@@ -22,10 +23,15 @@ interface EventRow { id: string; type: string; payload: unknown; createdAt: stri
 /** Статусы, в которых сервер разрешает менять разбиение (`set-gamepass-split`). */
 const SPLITTABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
 
+/** Дата и время события — там, где «сколько прошло» не отвечает на вопрос. */
+function fmtWhen(iso: string): string {
+  return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "");
+}
+
 const EVENT_LABELS: Record<string, string> = {
   ORDER_CREATED: "Заказ создан",
   ORDER_PAID: "Оплата подтверждена",
-  ORDER_COMPLETED: "Заказ закрыт — робуксы зачислены",
+  ORDER_COMPLETED: "Заказ выкуплен — робуксы ушли в Pending у Roblox",
   ORDER_REJECTED: "Заказ отменён",
   GAMEPASS_ATTACHED: "Привязан геймпасс",
   AUDIT_NICK_ENTERED: "Покупатель ввёл ник",
@@ -277,6 +283,29 @@ export default function OrderDossier({
               <div><div className={styles.kvKey}>Оплачено</div><div className={styles.kvValue}>{payment ? rub(payment.amountKopecks) : rub(order.saleAmountKopecks)}</div></div>
               <div><div className={styles.kvKey}>Создан</div><div className={styles.kvValue}>{fmtAge(order.createdAt)} назад</div></div>
               <div><div className={styles.kvKey}>В очереди</div><div className={styles.kvValue}>{order.pendingAt ? `${fmtAge(order.pendingAt)}` : "—"}</div></div>
+              {/* «Когда выкупили» и «когда придут робуксы» — два вопроса, с
+                  которыми к заказу возвращаются чаще всего. Оба ответа лежали в
+                  базе и не показывались нигде. */}
+              {order.status === "COMPLETED" && (
+                <div>
+                  <div className={styles.kvKey}>Выкуплен</div>
+                  <div className={styles.kvValue}>
+                    {order.completedAt ? fmtWhen(order.completedAt) : "—"}
+                    {(order.purchaserUsername ?? order.completedBy) && (
+                      <small> · {order.purchaserUsername ?? order.completedBy}</small>
+                    )}
+                  </div>
+                </div>
+              )}
+              {order.status === "COMPLETED" && order.completedAt && (
+                <div>
+                  <div className={styles.kvKey}>Робуксы</div>
+                  <div className={styles.kvValue}>
+                    {fmtUnlockDate(robuxUnlockAt(order.completedAt))}
+                    <small> из Pending</small>
+                  </div>
+                </div>
+              )}
               <div><div className={styles.kvKey}>Источник</div><div className={styles.kvValue}>{order.orderSource}</div></div>
             </div>
 

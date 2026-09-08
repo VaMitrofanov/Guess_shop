@@ -351,31 +351,16 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
   };
 }
 
-async function loadOrders() {
-  const orders = await db.wbMarketplaceOrder.findMany({
-    // Synthetic rows bypass both live flags and the WB chat entirely, so they
-    // prove nothing about the real flow while sitting next to real money.
-    //
-    // A buyer's own cancellation is dead weight: the money went back and there
-    // is nothing to do. The exception is a cancellation that still carries a
-    // minted code — that one is money at risk and is kept, then surfaced as
-    // `attention` by `wbCancelledCodeAtRisk`.
-    where: {
-      isTest: false,
-      ...NON_CORRIDOR_EXCLUDED,
-      OR: [
-        { cancelledAt: null },
-        { cancelledAt: { not: null }, gateState: { in: ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"] } },
-      ],
-    },
-    // Postgres sorts NULLs last on ASC, so ordering by `completedAt` alone put
-    // every finished order above the live queue. Open work comes first.
-    orderBy: [{ completedAt: { sort: "asc", nulls: "first" } }, { updatedAt: "desc" }],
-    take: 150,
-    include: {
-      ...listOrderInclude,
-    },
-  });
+/** Сколько заказов держит консоль. Окно нужно ради веса ответа (у каждой
+ *  строки чат и аудит), а не ради смысла: всё, что за ним, достаётся поиском. */
+const WB_DELIVERY_WINDOW = 150;
+
+/** Поиск идёт по всей таблице, поэтому берёт немного и от самых свежих. */
+const WB_DELIVERY_SEARCH_TAKE = 30;
+
+/** Вторая половина жизни заказа — выкуп — живёт в `WbOrder`, и связь идёт через
+ *  код гейта. Достраиваем её одним запросом на всю пачку. */
+async function withFulfillment<T extends { wbCode: { code: string } | null }>(orders: T[]) {
   const codes = orders.flatMap((order) => order.wbCode?.code ? [order.wbCode.code] : []);
   const fulfillmentRows = codes.length
     ? await db.wbOrder.findMany({
@@ -402,6 +387,86 @@ async function loadOrders() {
     ...order,
     internalFulfillment: order.wbCode?.code ? fulfillment.get(order.wbCode.code) ?? null : null,
   }));
+}
+
+/**
+ * Поиск по всей таблице DBS — не по загруженному окну.
+ *
+ * 08.09.2026 (разбор 49ANALQ): консоль фильтровала те самые 150 строк, что
+ * пришли в обзор, а окно сортировалось «сначала самые СТАРЫЕ закрытые». Всё,
+ * что закрылось за последнюю неделю, из него выпадало — 60 заказов. Поиск в
+ * ленте заказов такую строку находил и вёл сюда, а здесь она превращалась в
+ * «Ничего не найдено»: вместе с ней становились недоступны чат WB, код
+ * получения и аудит.
+ *
+ * Отменённые заказы обзор прячет намеренно (деньги вернулись, делать нечего) —
+ * но искать их надо: разговор с покупателем по отменённому заказу случается
+ * чаще, чем по любому другому.
+ */
+export async function searchWbDeliveryOrders(rawQuery: string): Promise<WbDeliveryOrderDto[]> {
+  const needle = rawQuery.trim();
+  if (needle.length < 2) return [];
+  const digits = needle.replace(/\D/g, "");
+  // Ник Roblox живёт на заказе выкупа: разворачиваем его в коды гейта.
+  const nickCodes = needle.length >= 3
+    ? await db.wbOrder.findMany({
+      where: { robloxUsername: { contains: needle, mode: "insensitive" } },
+      select: { wbCode: true },
+      take: 50,
+    }).then((rows) => rows.map((row) => row.wbCode)).catch(() => [])
+    : [];
+
+  const orders = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      ...NON_CORRIDOR_EXCLUDED,
+      OR: [
+        ...(digits.length >= 3 ? [{ wbOrderId: { contains: digits } }] : []),
+        { buyerName: { contains: needle, mode: "insensitive" as const } },
+        { wbCode: { code: { contains: needle.toUpperCase() } } },
+        // Артикул и номинал искали и раньше, фильтром по окну; при переезде на
+        // сервер терять ключи нельзя — иначе «поиск стал хуже, но по-другому».
+        { vendorCode: { contains: needle } },
+        ...(/^\d{3,5}$/.test(needle) ? [{ denominationSnapshot: Number(needle) }] : []),
+        ...(nickCodes.length ? [{ wbCode: { code: { in: nickCodes } } }] : []),
+      ],
+    },
+    orderBy: [{ completedAt: { sort: "desc", nulls: "first" } }, { updatedAt: "desc" }],
+    take: WB_DELIVERY_SEARCH_TAKE,
+    include: { ...listOrderInclude },
+  });
+  return (await withFulfillment(orders)).map((order) => toDto(order));
+}
+
+async function loadOrders() {
+  const orders = await db.wbMarketplaceOrder.findMany({
+    // Synthetic rows bypass both live flags and the WB chat entirely, so they
+    // prove nothing about the real flow while sitting next to real money.
+    //
+    // A buyer's own cancellation is dead weight: the money went back and there
+    // is nothing to do. The exception is a cancellation that still carries a
+    // minted code — that one is money at risk and is kept, then surfaced as
+    // `attention` by `wbCancelledCodeAtRisk`.
+    where: {
+      isTest: false,
+      ...NON_CORRIDOR_EXCLUDED,
+      OR: [
+        { cancelledAt: null },
+        { cancelledAt: { not: null }, gateState: { in: ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"] } },
+      ],
+    },
+    /* Открытая работа идёт первой (NULL в `completedAt`), а закрытая — от самых
+       СВЕЖИХ. С `asc` окно держало самые старые закрытые заказы и выбрасывало
+       всё, что закрылось за последнюю неделю: 60 строк на 08.09.2026, включая
+       вчерашние. Ровно на этом «Готово» показывало август, а сегодняшний заказ
+       не открывался ниоткуда. */
+    orderBy: [{ completedAt: { sort: "desc", nulls: "first" } }, { updatedAt: "desc" }],
+    take: WB_DELIVERY_WINDOW,
+    include: {
+      ...listOrderInclude,
+    },
+  });
+  return withFulfillment(orders);
 }
 
 export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {

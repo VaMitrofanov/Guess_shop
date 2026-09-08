@@ -1,4 +1,9 @@
 import { prisma } from "@/lib/prisma";
+import {
+  ROBUX_UNLOCK_DAYS as PRESENTATION_UNLOCK_DAYS,
+  fmtUnlockDate,
+  robuxUnlockAt,
+} from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
 
@@ -73,16 +78,12 @@ async function vkPost(vkUserId: string, message: string, extra: Record<string, s
 // напоминание о бонусе на балансе → TIER-2 питч → благодарность (+скидка DIR<500).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Roblox держит робуксы за геймпасс в Pending ~5 дней. */
-export const ROBUX_UNLOCK_DAYS = 5;
-
-export function robuxUnlockDate(completedAt: Date): Date {
-  return new Date(completedAt.getTime() + ROBUX_UNLOCK_DAYS * 86_400_000);
-}
-
-export function fmtDateRu(d: Date): string {
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
-}
+/* Правило «робуксы разблокируются через 5 дней» живёт в `order-presentation`:
+   на него смотрят и экраны админки, и это сообщение клиенту. Здесь только
+   имена, под которыми оно исторически известно в этом файле. */
+export const ROBUX_UNLOCK_DAYS = PRESENTATION_UNLOCK_DAYS;
+export const robuxUnlockDate = (completedAt: Date): Date => robuxUnlockAt(completedAt);
+export const fmtDateRu = (d: Date): string => fmtUnlockDate(d);
 
 type CompletedButton = {
   label: string;

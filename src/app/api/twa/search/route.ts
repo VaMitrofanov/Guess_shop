@@ -5,6 +5,8 @@ import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import type { Prisma } from "@prisma/client";
 import { getOrderMatchReason } from "@/lib/twa-search-match";
 import { gateCodesForWbOrderNumber } from "@/lib/wb-order-number-search";
+import { WB_FUNNEL_LABEL } from "@/lib/wb-delivery-labels";
+import { wbFunnelStep } from "../../../../../bots/shared/wb-delivery-policy";
 
 interface RobloxProductInfo {
   Name?: string;
@@ -75,6 +77,11 @@ export async function GET(req: NextRequest) {
   const scope = req.nextUrl.searchParams.get("scope") ?? "all";
   const wantDb = scope === "all" || scope === "db";
   const robloxAllowed = scope === "all" || scope === "roblox";
+  /* Заказы на выкуп лента берёт своим запросом (`/api/twa/orders?q=`), а этот
+     роут зовут только за строками DBS и пассами Roblox. Половина `orders`
+     считалась на каждый ввод и выбрасывалась — лишний заход в Сингапур (210 мс)
+     за результат, который никто не читает. `scope=all` остаётся полным. */
+  const wantOrders = scope === "all";
 
   const clean = query.replace(/^@/, "");
   const digits = query.replace(/\D/g, "");
@@ -96,7 +103,7 @@ export async function GET(req: NextRequest) {
     clauses.push({ gamepassId: digits });
     // Номер заказа WB → код гейта → заказ на выкуп. Строку доставки этот роут
     // и так находил; не хватало самого заказа, ради которого сюда идут.
-    if (wantDb) {
+    if (wantOrders) {
       const dbsCodes = await gateCodesForWbOrderNumber(digits);
       if (dbsCodes.length) clauses.push({ wbCode: { in: dbsCodes } });
     }
@@ -123,7 +130,7 @@ export async function GET(req: NextRequest) {
     },
   }).catch(() => []);
 
-  const ordersPromise = !wantDb ? Promise.resolve([]) : prisma.wbOrder.findMany({
+  const ordersPromise = !wantOrders ? Promise.resolve([]) : prisma.wbOrder.findMany({
     where: { isTest: false, OR: clauses },
     orderBy: { createdAt: "desc" },
     take: 8,
@@ -167,7 +174,27 @@ export async function GET(req: NextRequest) {
     }
   })();
 
-  const [orders, gamepasses, dbs] = await Promise.all([ordersPromise, livePromise, dbsPromise]);
+  /* Чем живёт найденный DBS-заказ. Строка говорила «закрыт» и для выданного
+     заказа, и для ОТМЕНЁННОГО (`completedAt || cancelledAt`) — то есть возврат
+     денег выглядел как успешная выдача; а пока заказ не закрыт, наружу тёк
+     сырой `supplierStatus` («receive», «deliver»). Настоящее состояние второй
+     половины жизни знает заказ на выкуп, поэтому спрашиваем и его: гейт-код —
+     единственный ключ между двумя таблицами. */
+  const dbsStatePromise = dbsPromise.then(async (rows) => {
+    const codes = rows.flatMap((row) => (row.wbCode?.code ? [row.wbCode.code] : []));
+    if (!codes.length) return new Map<string, string>();
+    const internal = await prisma.wbOrder
+      .findMany({ where: { wbCode: { in: codes } }, select: { wbCode: true, status: true, robloxUsername: true } })
+      .catch(() => []);
+    return new Map(internal.map((row) => [row.wbCode, WB_FUNNEL_LABEL[wbFunnelStep({
+      internalStatus: row.status,
+      internalRobloxUsername: row.robloxUsername,
+    } as Parameters<typeof wbFunnelStep>[0])]]));
+  });
+
+  const [orders, gamepasses, dbs, dbsFunnel] = await Promise.all([
+    ordersPromise, livePromise, dbsPromise, dbsStatePromise,
+  ]);
   const matchedOrders = orders.map(order => ({
     ...order,
     source: "db" as const,
@@ -177,15 +204,22 @@ export async function GET(req: NextRequest) {
     query,
     orders: matchedOrders,
     gamepasses: gamepasses.map(pass => ({ ...pass, source: "live" as const })),
-    dbs: dbs.map(order => ({
-      id: order.id,
-      wbOrderId: order.wbOrderId,
-      buyerName: order.buyerName,
-      supplierStatus: order.supplierStatus,
-      denomination: order.denominationSnapshot,
-      code: order.wbCode?.code ?? null,
-      closed: Boolean(order.completedAt || order.cancelledAt),
-    })),
+    dbs: dbs.map(order => {
+      const funnel = order.wbCode?.code ? dbsFunnel.get(order.wbCode.code) : undefined;
+      return {
+        id: order.id,
+        wbOrderId: order.wbOrderId,
+        buyerName: order.buyerName,
+        denomination: order.denominationSnapshot,
+        code: order.wbCode?.code ?? null,
+        /* Отмена бьёт завершение: покупатель забрал деньги, и это не «закрыт».
+           Дальше говорит воронка выкупа, а если её ещё нет — сама доставка. */
+        state: order.cancelledAt ? "cancelled" : order.completedAt ? "closed" : "open",
+        label: order.cancelledAt
+          ? "отменён на WB"
+          : funnel ?? (order.completedAt ? "доставка закрыта · код не активирован" : "доставка в работе"),
+      };
+    }),
     counts: {
       all: matchedOrders.length + gamepasses.length + dbs.length,
       orders: matchedOrders.length,

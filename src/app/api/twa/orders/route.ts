@@ -11,7 +11,7 @@ import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purch
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, PRICE_TOL, checkGamepassPrice, expectedGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
-import { recordOrderStatusChange } from "@/lib/order-status-event";
+import { ORDER_STATUS_EVENT, recordOrderStatusChange } from "@/lib/order-status-event";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
@@ -506,8 +506,17 @@ export async function GET(req: NextRequest) {
     const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);
     const wbCodeValues     = completedWbOrders.map((o: any) => o.wbCode as string);
     const uniqueUserIds    = [...new Set<string>(completedWbOrders.map((o: any) => o.userId as string))];
+    /* Кто нажал «Выкуплено». Ручное закрытие не пишет `purchaserUsername` (это
+       поле аккаунта донора у автовыкупа), и карточка говорила безличное
+       «вручную» — при трёх админах это «кто-то из нас». Актор лежит в журнале
+       переходов, поэтому берём его оттуда: работает и на старых заказах, в
+       отличие от нового поля в `WbOrder`. Запрос уходит в той же волне, что и
+       остальная обвязка страницы, — лишнего похода в Сингапур не добавляет. */
+    const manualCompletedIds: string[] = orders
+      .filter((o) => o.status === "COMPLETED" && !o.purchaserUsername)
+      .map((o) => o.id);
 
-    const [clusterOrders, codeRecords, firstOrderRows] = await Promise.all([
+    const [clusterOrders, codeRecords, firstOrderRows, statusEvents] = await Promise.all([
       // «Заказ №N из M» у покупателя — один заход в базу, а не два.
       // Через Prisma это `findMany` с вложенным `user`, и вложенность стоит
       // ОТДЕЛЬНОГО запроса за пользователями: с базой в Сингапуре это лишние
@@ -540,7 +549,30 @@ export async function GET(req: NextRequest) {
             _min: { createdAt: true },
           })
         : [],
+      manualCompletedIds.length > 0
+        ? prisma.orderEvent.findMany({
+            where: { orderId: { in: manualCompletedIds }, type: ORDER_STATUS_EVENT },
+            orderBy: { createdAt: "desc" },
+            select: { orderId: true, payload: true },
+          })
+        : [],
     ]);
+
+    if (manualCompletedIds.length > 0) {
+      // Последний переход в COMPLETED и есть тот, кто закрыл заказ: события
+      // отсортированы по убыванию, поэтому первое встреченное — оно.
+      const completedByOrder = new Map<string, string>();
+      for (const event of statusEvents) {
+        const payload = (event.payload ?? {}) as { to?: string; actor?: string };
+        if (payload.to !== "COMPLETED" || !payload.actor) continue;
+        if (completedByOrder.has(event.orderId)) continue;
+        // `admin:Sergei` → `Sergei`; бот и воркер остаются как есть.
+        completedByOrder.set(event.orderId, payload.actor.replace(/^admin:/, ""));
+      }
+      for (const order of orders) {
+        if (completedByOrder.has(order.id)) order.completedBy = completedByOrder.get(order.id);
+      }
+    }
 
     for (const order of orders) {
       const myTg     = order.user?.tgId     ?? null;

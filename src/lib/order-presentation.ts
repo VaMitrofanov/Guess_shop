@@ -49,6 +49,26 @@ export interface GpLive {
 /** Грязные робуксы: цена пасса, которая спишется с донора. */
 export const grossOf = (amount: number): number => expectedGamepassPrice(amount);
 
+/* ── Робуксы после выкупа ────────────────────────────────────────────────────
+   Roblox держит выручку за геймпасс в Pending ~5 дней, и клиенту эту дату
+   называют в первом же сообщении после выкупа. Админ до 08.09.2026 её нигде не
+   видел: и карточка, и алерт поддержки говорили только «выкуплен», а вопрос у
+   человека был «когда придут» (49ANALQ). Правило живёт здесь, потому что это
+   ПРЕДСТАВЛЕНИЕ заказа — им пользуются и экраны, и `twa-notify`.
+   ────────────────────────────────────────────────────────────────────────── */
+
+export const ROBUX_UNLOCK_DAYS = 5;
+
+export function robuxUnlockAt(completedAt: string | Date): Date {
+  const at = completedAt instanceof Date ? completedAt : new Date(completedAt);
+  return new Date(at.getTime() + ROBUX_UNLOCK_DAYS * 86_400_000);
+}
+
+/** Дата разблокировки словами — одинаково в боте, в алерте и на экране. */
+export function fmtUnlockDate(d: Date): string {
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
+}
+
 /* ── Возраст ─────────────────────────────────────────────────────────────────
    Шкала считает от «сколько это ждёт человека»: до двух часов — норма рабочего
    ритма, до полусуток — стоит посмотреть, до суток — уже плохо, дальше красное.

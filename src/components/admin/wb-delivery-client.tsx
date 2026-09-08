@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -147,6 +147,11 @@ export default function WbDeliveryClient({
   );
   const [filter, setFilter] = useState<typeof FILTERS[number][0]>(initialFilter ?? "active");
   const [query, setQuery] = useState("");
+  /* Результат серверного поиска: консоль держит окно из 150 заказов, а искать
+     приходится и то, что закрылось раньше. `null` — поиска нет. */
+  const [found, setFound] = useState<WbDeliveryOrderDto[] | null>(null);
+  /* Открытый заказ отдельным DTO: найденного поиском может не быть в окне. */
+  const [detail, setDetail] = useState<WbDeliveryOrderDto | null>(null);
   const [busy, setBusy] = useState<WbDeliveryAction | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [manualCode, setManualCode] = useState("");
@@ -159,7 +164,10 @@ export default function WbDeliveryClient({
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Не удалось обновить очередь");
       setData(body);
-      setSelectedId((current) => body.orders.some((order: WbDeliveryOrderDto) => order.id === current) ? current : body.orders[0]?.id ?? "");
+      /* Выбор не сбрасываем, если заказ просто не попал в окно обзора: найденный
+         поиском заказ живёт в `detail`, и переключать с него на первый в очереди
+         посреди разговора с покупателем — худшее, что можно сделать. */
+      setSelectedId((current) => current || body.orders[0]?.id || "");
     } catch (error) {
       if (!silent) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Ошибка обновления" });
     } finally {
@@ -176,6 +184,7 @@ export default function WbDeliveryClient({
       }
       const body = await response.json() as WbDeliveryOrderResponse & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Не удалось обновить чат");
+      setDetail(body.order);
       setData((current) => {
         const index = current.orders.findIndex((order) => order.id === body.order.id);
         if (index < 0) return current;
@@ -207,7 +216,10 @@ export default function WbDeliveryClient({
   }, []);
 
   async function act(action: WbDeliveryAction, extra: Record<string, unknown> = {}) {
-    const order = data.orders.find((item) => item.id === selectedId);
+    // Подтверждение необратимого действия ищем и среди найденных поиском: иначе
+    // у заказа вне окна обзора окно «вы уверены?» просто не появилось бы.
+    const order = data.orders.find((item) => item.id === selectedId)
+      ?? found?.find((item) => item.id === selectedId);
     if (["confirm", "deliver", "receive"].includes(action) && order) {
       const label = action === "receive" ? "завершить выдачу кодом покупателя" : action === "deliver" ? "перевести заказ в доставку" : "подтвердить сборку";
       if (!window.confirm(`Подтвердите действие с реальным заказом WB: ${label}?`)) return;
@@ -228,19 +240,38 @@ export default function WbDeliveryClient({
     }
   }
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return data.orders.filter((order) => filterOrder(order, filter)).filter((order) => !needle || [
-      order.wbOrderId,
-      order.buyerName,
-      order.vendorCode,
-      String(order.nmId),
-      String(order.denomination ?? ""),
-      order.activationCode,
-      order.fulfillment?.robloxUsername,
-    ].some((value) => value?.toLowerCase().includes(needle)));
-  }, [data.orders, filter, query]);
-  const selected = data.orders.find((order) => order.id === selectedId) ?? visible[0] ?? null;
+  useEffect(() => {
+    const needle = query.trim();
+    if (needle.length < 2) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch(`/api/admin/wb-delivery?q=${encodeURIComponent(needle)}`, {
+            cache: "no-store", signal: controller.signal,
+          });
+          if (!response.ok) return;
+          const body = await response.json() as { orders: WbDeliveryOrderDto[] };
+          setFound(body.orders ?? []);
+        } catch { /* упавший поиск консоль не ломает */ }
+      })();
+    }, 350);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [query]);
+
+  /* Поиск — по всей базе и поверх вкладок: искали заказ, а не «заказ в этой
+     очереди». Мобильная консоль ведёт себя так же, и расходиться им нельзя. */
+  const searching = query.trim().length >= 2;
+  const pool = useMemo(() => searching ? (found ?? []) : data.orders, [data.orders, found, searching]);
+  const visible = useMemo(
+    () => searching ? pool : pool.filter((order) => filterOrder(order, filter)),
+    [filter, pool, searching],
+  );
+  const selected = (detail?.id === selectedId ? detail : null)
+    ?? pool.find((order) => order.id === selectedId)
+    ?? data.orders.find((order) => order.id === selectedId)
+    ?? visible[0]
+    ?? null;
   const step = selected ? stageIndex(selected) : 0;
 
   /** «В работе» плоским списком не читается: заказ, ждущий геймпасса от
@@ -248,14 +279,16 @@ export default function WbDeliveryClient({
    * закрытия. Группировка по тому, чей сейчас ход, — та же, что уже работает в
    * мобильной консоли, чтобы обе поверхности показывали одну структуру (F8). */
   const sections = useMemo(() => {
-    if (filter !== "active") return [];
+    // В поиске группировки нет: найденное показывается плоским списком, иначе
+    // завершённый заказ не попал бы ни в одну секцию и исчез бы с экрана.
+    if (searching || filter !== "active") return [];
     return WB_QUEUE_SECTIONS
       .map((section) => ({ ...section, orders: visible.filter((order) => (section.stages as readonly string[]).includes(order.stage)) }))
       .filter((section) => section.orders.length > 0);
-  }, [filter, visible]);
+  }, [filter, searching, visible]);
 
   const renderOrderCard = (order: WbDeliveryOrderDto) => (
-    <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => setSelectedId(order.id)}>
+    <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => { setDetail(order); setSelectedId(order.id); }}>
       <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
       <strong>{order.buyerName ? `${order.buyerName} · #${order.wbOrderId}` : `WB #${order.wbOrderId}`}</strong>
       <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"}</p>
@@ -319,7 +352,7 @@ export default function WbDeliveryClient({
         <aside className={css.queue}>
           <div className={css.queueHead}>
             <div><strong>Очередь</strong><span>{visible.length} заказов</span></div>
-            <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, ID, артикул, код, ник" /></label>
+            <label><Search /><input value={query} onChange={(event) => { const value = event.target.value; setQuery(value); if (value.trim().length < 2) setFound(null); }} placeholder="Имя, номер WB, код, ник" /></label>
           </div>
           <div className={css.filters}>
             {FILTERS.map(([id, label]) => <button key={id} className={filter === id ? css.activeFilter : ""} onClick={() => setFilter(id)}>{label}</button>)}

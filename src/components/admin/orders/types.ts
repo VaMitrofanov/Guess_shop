@@ -28,6 +28,8 @@ export interface AdminOrder {
   updatedAt: string;
   pendingAt: string | null;
   completedAt?: string | null;
+  /** Кто нажал «Выкуплено» (у автовыкупа пусто — там `purchaserUsername`). */
+  completedBy?: string | null;
   remindersSent?: number | null;
   robloxUsername: string | null;
   probableNick: string | null;

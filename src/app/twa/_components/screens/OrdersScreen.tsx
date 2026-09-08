@@ -15,6 +15,8 @@ import {
   orderBadge as sharedOrderBadge,
   orderFlag as sharedOrderFlag,
   primaryActionFor as sharedPrimaryAction,
+  fmtUnlockDate,
+  robuxUnlockAt,
   type Tone,
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
@@ -67,10 +69,12 @@ interface LiveDbsOrder {
   id: string;
   wbOrderId: string;
   buyerName: string | null;
-  supplierStatus: string;
   denomination: number | null;
   code: string | null;
-  closed: boolean;
+  /** `cancelled` — покупатель забрал деньги; это НЕ «закрыт». */
+  state: "cancelled" | "closed" | "open";
+  /** Готовая строка состояния: воронка выкупа, если она началась. */
+  label: string;
 }
 interface LiveSearch {
   gamepasses: LiveGamepass[];
@@ -104,6 +108,13 @@ interface Order {
   createdAt: string;
   updatedAt: string;
   pendingAt: string | null;
+  /** Момент выкупа. Приходил на клиент и раньше, но не был описан типом — и
+   *  потому не рисовался нигде: «выкуплен или нет» приходилось выяснять по
+   *  серой строке «выкуп: вручную» (49ANALQ, владелец, 08.09.2026). */
+  completedAt: string | null;
+  /** Кто нажал «Выкуплено» — выводится из `OrderEvent` на сервере. У автовыкупа
+   *  пусто: там покупателя называет `purchaserUsername` (аккаунт донора). */
+  completedBy?: string | null;
   /** Оплата прямого заказа подтверждена. null у прямого = вне очереди выкупа. */
   paidAt: string | null;
   takenAt: string | null;
@@ -1350,18 +1361,23 @@ function buildDoneGroups(orders: Order[], sourceFilter: SourceFilter): DoneGroup
   const filtered = sourceFilter === "ALL" ? orders : orders.filter(o => o.orderSource === sourceFilter);
   const map = new Map<string, Order[]>();
   for (const o of filtered) {
-    const key = o.purchaserUsername ?? "Ручные";
+    // Кто закрыл: аккаунт донора у автовыкупа, админ — у ручного. Общее
+    // «Ручные» сваливало в одну кучу работу трёх человек.
+    const key = o.purchaserUsername ?? o.completedBy ?? "Ручные";
     const arr = map.get(key);
     if (arr) arr.push(o); else map.set(key, [o]);
   }
   const groups: DoneGroup[] = [];
+  // Порядок — по моменту выкупа, а не по `updatedAt`: тот двигается от любой
+  // правки (заметка, избранное, заморозка) и перетасовывает закрытый день.
+  const doneAt = (o: Order) => new Date(o.completedAt ?? o.updatedAt).getTime();
   for (const [purchaser, ords] of map) {
-    ords.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    ords.sort((a, b) => doneAt(b) - doneAt(a));
     groups.push({
       purchaser,
       orders: ords,
       totalDirty: ords.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0),
-      latestDate: ords[0].updatedAt,
+      latestDate: ords[0].completedAt ?? ords[0].updatedAt,
     });
   }
   groups.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
@@ -2162,11 +2178,16 @@ function OrderMenuSheet({
 
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
-  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onTogglePriority, onMoved, live,
+  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onTogglePriority, onMoved, live, solo,
 }: {
   order: Order;
   token: string;
   currentTab: FilterTab;
+  /* Карточка стоит ОДНА, без ленты и без заголовка группы над ней — так её
+     рисует поиск по коду. Всё, что в ленте договаривает окружение (вкладка
+     называет состояние, шапка аккордеона «Готово» — покупателя), здесь обязано
+     быть на самой карточке. */
+  solo?: boolean;
   exiting: boolean;
   onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
   onSaveNote: (note: string) => Promise<ActionResult>;
@@ -2289,7 +2310,12 @@ function OrderCard({
   const displayAmount = showDirty ? dirtyAmount : order.amount;
   const showCleanHint = viewTab === "BUYOUT";
 
-  const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" || currentTab === "REJECTED"
+  /* Бейдж состояния. В ленте он нужен там, где во вкладке лежат заказы в разных
+     состояниях; в своём срезе состояние называет сама вкладка, и бейдж отдан
+     источнику. Одиночная карточка вкладки под собой не имеет — там состояние
+     показываем ВСЕГДА, иначе выкупленный заказ выглядит как любой другой
+     (49ANALQ: «WB DBS · 6д 2ч» и ни слова о том, что он закрыт). */
+  const tabBadge = solo || currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" || currentTab === "REJECTED"
     ? orderTabBadge(order)
     // «К выкупу» стала общей очередью: помечаем прямые, чтобы менеджер сразу видел,
     // что деньги от клиента уже пришли и это не WB-карта.
@@ -2326,6 +2352,20 @@ function OrderCard({
   // Second timer: how long the order has been sitting in the "К выкупу" queue
   // (since it entered PENDING). pendingAt is set when the gamepass link arrives.
   const inBuyoutQueue = !!order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status);
+  /* У закрытого заказа возраст отвечает не на тот вопрос. «6д 2ч» на выкупленном
+     читается как «висит шестой день», хотя спрашивают всегда одно: КОГДА выкупили.
+     Поэтому у него на месте возраста стоит дата выкупа. */
+  const boughtAt = order.status === "COMPLETED" ? order.completedAt : null;
+  /* Робуксы лежат у Roblox в Pending пять дней — ровно эту дату клиенту назвали
+     в сообщении о выкупе, и ровно с ней он приходит в поддержку («долго в
+     обработке»). Пока срок не вышел, он и есть ответ; после — строка уходит. */
+  const robuxUnlock = boughtAt ? robuxUnlockAt(boughtAt) : null;
+  const robuxPending = !!robuxUnlock && robuxUnlock.getTime() > Date.now();
+  /* Кто закрыл заказ. `purchaserUsername` — аккаунт донора у автовыкупа;
+     `completedBy` — админ, нажавший «Выкуплено». Раньше на их месте стояло
+     безличное «вручную», и рядом, через точку, шло имя КЛИЕНТА — строка
+     читалась как «выкуп вручную Анфисой» (49ANALQ). */
+  const boughtBy = order.purchaserUsername ?? order.completedBy ?? null;
 
   /* ── Четыре строки и три крупные цели ────────────────────────────────────
      Карточка обслуживает ручной цикл выкупа: скопировал ID → купил в доноре →
@@ -2385,7 +2425,9 @@ function OrderCard({
         <b style={{ color: tabBadge?.color ?? SOURCE_BADGE_META[order.orderSource]?.color ?? C.accent }}>
           {tabBadge?.label ?? SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}
         </b>
-        <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>{fmtAge(timeRef)}</small>
+        <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>
+          {boughtAt ? fmtTxDate(boughtAt) : fmtAge(timeRef)}
+        </small>
         {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
         {/* ⚡ виден прямо в ленте: иначе «подняли наверх» проверяется только
             тем, что заказ оказался сверху, — а это же место занимает и просто
@@ -2408,9 +2450,13 @@ function OrderCard({
         <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
       </span>
       <span className="twa-oc-meta">
+        {/* Одиночной карточке бейдж состояния занял место источника — а полоса
+            («WB DBS» против прямого заказа) для разговора с клиентом важна. */}
+        {solo && SOURCE_BADGE_META[order.orderSource] && <span>{SOURCE_BADGE_META[order.orderSource].label}</span>}
         {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
         {nickIsGuess && <span>вероятный ник</span>}
-        {order.status === "COMPLETED" && <span>выкуп: {order.purchaserUsername ?? "вручную"}</span>}
+        {order.status === "COMPLETED" && <span>выкуп: {boughtBy ?? "вручную"}</span>}
+        {robuxPending && <span>робуксы {fmtUnlockDate(robuxUnlock!)}</span>}
         <span>{shortName}</span>
       </span>
       {flag && <span className="twa-oc-flag" style={{ color: flag.color }}>{flag.text}</span>}
@@ -2719,13 +2765,26 @@ function OrderCard({
             </span>
           </DataRow>
         )}
-        {order.status === "COMPLETED" && currentTab !== "DONE" && (
-          <DataRow icon="💳" copyText={order.purchaserUsername ?? undefined}>
+        {/* Кто и когда выкупил. Условие «не на вкладке Готово» стояло тут потому,
+            что там покупателя называет заголовок аккордеона — но у одиночной
+            карточки заголовка нет, и строка исчезала вместе с ним. */}
+        {order.status === "COMPLETED" && (currentTab !== "DONE" || solo) && (
+          <DataRow icon="💳" copyText={boughtBy ?? undefined}>
             <span style={{ color: C.textSecondary }}>
               Выкуп:{" "}
-              <span style={{ fontWeight: 600, color: order.purchaserUsername ? "#e5e5ea" : C.textTertiary }}>
-                {order.purchaserUsername ?? "Ручные"}
+              <span style={{ fontWeight: 600, color: boughtBy ? "#e5e5ea" : C.textTertiary }}>
+                {boughtBy ?? "Ручные"}
               </span>
+              {boughtAt && <span style={{ color: C.textTertiary }}> · {fmtTxDate(boughtAt)}</span>}
+            </span>
+          </DataRow>
+        )}
+        {/* Ответ на «когда придут робуксы»: тот же срок, что назвали клиенту. */}
+        {robuxUnlock && (
+          <DataRow icon="💎">
+            <span style={{ color: robuxPending ? C.textPrimary : C.textSecondary }}>
+              {robuxPending ? "Робуксы выйдут из Pending" : "Робуксы разблокированы"}{" "}
+              <span style={{ fontWeight: 600 }}>{fmtUnlockDate(robuxUnlock)}</span>
             </span>
           </DataRow>
         )}
@@ -3823,7 +3882,8 @@ export default function OrdersScreen({
                     #{order.wbOrderId}
                     {order.denomination ? ` · ${order.denomination} R$` : ""}
                     {order.code ? ` · ${order.code}` : ""}
-                    {order.closed ? " · закрыт" : ` · ${order.supplierStatus}`}
+                    {" · "}
+                    <span style={order.state === "cancelled" ? { color: C.red } : undefined}>{order.label}</span>
                   </small>
                   <span>›</span>
                 </button>
@@ -4055,6 +4115,7 @@ export default function OrdersScreen({
                 order={allOrders[0]}
                 token={token}
                 currentTab={orderToTab(allOrders[0])}
+                solo
                 live={liveMap[allOrders[0].id]}
                 exiting={exiting.has(allOrders[0].id)}
                 onRunAction={(action, reason) => runAction(allOrders[0], action, reason)}

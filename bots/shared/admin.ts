@@ -17,6 +17,7 @@ import { refreshDbsCardByCode } from "./wb-dbs-thread";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 import { formatAdminNotice, mskTime, orderRef } from "./notify-format";
+import { fmtDateRu, robuxUnlockDate } from "./completed-messages";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -165,9 +166,16 @@ const SUPPORT_ORDER_SELECT = {
   splitGamepasses: { select: { purchasedAt: true } },
 } as const;
 
-/** Последняя строка заметки: там лежит то, что делали с заказом последним. */
-function lastNoteLine(note: string | null | undefined): string | null {
-  const lines = (note ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+/** Последняя строка заметки: там лежит то, что делали с заказом последним.
+ *
+ *  С одной поправкой: `[НИК? …]` — маркер сомнения, который пишет `capture-nick`
+ *  и который никто не снимает (заметка — журнал, из неё не стирают). Когда ник
+ *  давно подтверждён, эта строка в справке читается как «ник не проверен» —
+ *  ровно так она и приехала в алерт по выкупленному 49ANALQ. Свежесть строки не
+ *  делает её уместной. */
+function lastNoteLine(note: string | null | undefined, nickConfirmed = false): string | null {
+  const lines = (note ?? "").split("\n").map((line) => line.trim()).filter(Boolean)
+    .filter((line) => !(nickConfirmed && line.startsWith("[НИК?")));
   const last = lines[lines.length - 1];
   if (!last) return null;
   return last.length > 140 ? `${last.slice(0, 137)}…` : last;
@@ -210,13 +218,20 @@ function blockerLine(order: any): string | null {
     case "PAYMENT_PENDING":
       parts.push("💳 Деньги за прямой заказ не подтверждены");
       break;
-    case "COMPLETED":
+    case "COMPLETED": {
       // Самый частый разговор «долго в обработке» — про уже выкупленный заказ:
       // робуксы у Roblox лежат под замком пять дней, и это не наша задержка.
-      parts.push(order.completedAt
-        ? `✅ Выкуплен, прошло ${formatOrderAge(order.completedAt)}`
-        : "✅ Выкуплен");
+      if (!order.completedAt) { parts.push("✅ Выкуплен"); break; }
+      parts.push(`✅ Выкуплен, прошло ${formatOrderAge(order.completedAt)}`);
+      /* Человек спрашивает не «сколько прошло», а «когда придут». Дату ему уже
+         назвали в сообщении о выкупе — админ обязан видеть ТУ ЖЕ дату, иначе
+         считает пять дней в уме прямо в разговоре (49ANALQ, 08.09.2026). */
+      const unlock = robuxUnlockDate(new Date(order.completedAt));
+      parts.push(unlock.getTime() > Date.now()
+        ? `💎 робуксы выйдут из Pending ${fmtDateRu(unlock)}`
+        : `💎 робуксы разблокированы ${fmtDateRu(unlock)} — если их нет, это уже к Roblox`);
       break;
+    }
     case "REJECTED":
       parts.push(`⛔ Отклонён${order.rejectionReason ? `: ${escapeHtml(String(order.rejectionReason))}` : ""}`);
       break;
@@ -270,7 +285,7 @@ async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBr
     const blocker = blockerLine(order);
     if (blocker) lines.push(blocker);
     if (ordersTotal > 1) lines.push(`👤 ${ordersTotal}-й заказ этого клиента`);
-    const note = lastNoteLine(order.adminNote);
+    const note = lastNoteLine(order.adminNote, Boolean(order.robloxUsername));
     if (note) lines.push(`📝 ${escapeHtml(note)}`);
 
     return { lines, code: order.wbCode ?? null, denomination: order.amount ?? null };

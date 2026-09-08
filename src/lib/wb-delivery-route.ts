@@ -7,6 +7,7 @@ import {
   loadWbDeliveryOrder,
   loadWbDeliveryOverview,
   performWbDeliveryAction,
+  searchWbDeliveryOrders,
   WbDeliveryWorkflowError,
 } from "@/lib/wb-delivery-workflow";
 
@@ -41,7 +42,17 @@ export async function wbDeliveryGet(req: Request) {
   const actor = await requireAdmin(req);
   if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    const orderId = new URL(req.url).searchParams.get("orderId");
+    const params = new URL(req.url).searchParams;
+    /* Поиск — по всей таблице, а не по окну обзора: консоль держит 150 строк, а
+       спрашивают и о том, что закрылось раньше (см. `searchWbDeliveryOrders`). */
+    const query = params.get("q")?.trim();
+    if (query) {
+      return NextResponse.json(
+        { generatedAt: new Date().toISOString(), orders: await searchWbDeliveryOrders(query) },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
+    const orderId = params.get("orderId");
     if (orderId) {
       if (!/^[a-z0-9_-]{1,80}$/i.test(orderId)) {
         return NextResponse.json({ error: "Некорректный ID заказа", code: "VALIDATION_ERROR" }, { status: 400 });
