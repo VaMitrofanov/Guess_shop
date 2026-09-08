@@ -15,6 +15,9 @@ import { sweepStaleWebOrders } from "../shared/order-benefits";
 import { sweepPendingHolds } from "../shared/order-hold";
 import { runRetention } from "../shared/retention";
 import { startWbDeliveryWorker } from "../shared/wb-delivery-sync";
+import { getGamepassDetails } from "../shared/roblox";
+import { expectedGamepassPrice } from "../shared/gamepass-plan";
+import { formatAdminNotice, orderRef } from "../shared/notify-format";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -459,6 +462,71 @@ async function sweepStalePurchaseBatches(): Promise<void> {
   }
 }
 
+/**
+ * Сторож цены уже принятого пасса.
+ *
+ * Заявка проверяет пасс на входе, прайс-гард — в момент покупки, но между ними
+ * стоит очередь выкупа, и в ней заказ живёт часами. Цену пасса можно поднять в
+ * любую минуту: заказ на 200 R$ так и превратился бы в списание 715 R$, если бы
+ * админ не заметил глазами (DIR-39544969, 08.09.2026). Выкуп сейчас ручной,
+ * значит между приёмом и покупкой нет ни одной автоматической проверки — этот
+ * проход её и добавляет.
+ *
+ * Помечаем ОДИН раз на заказ: строка в заметке одновременно и след для админа,
+ * и защита от повторного алерта каждые пятнадцать минут.
+ */
+async function watchQueuedGamepassPrices(): Promise<void> {
+  const orders = await (db as any).wbOrder.findMany({
+    where: {
+      isTest: false,
+      status: { in: ["PENDING", "IN_PROGRESS"] },
+      gamepassId: { not: null },
+      heldAt: null,
+    },
+    select: { id: true, wbCode: true, amount: true, gamepassId: true, adminNote: true, robloxUsername: true },
+    orderBy: { pendingAt: "asc" },
+    take: 60,
+  });
+
+  for (const order of orders as Array<{ id: string; wbCode: string; amount: number; gamepassId: string; adminNote: string | null; robloxUsername: string | null }>) {
+    const note = order.adminNote ?? "";
+    // Уже помечен — второй алерт по тому же заказу ничего не добавляет.
+    if (note.includes("[ЦЕНА-ИЗМЕНИЛАСЬ") || note.includes("[ПАСС-СНЯТ")) continue;
+
+    const pass = await getGamepassDetails(String(order.gamepassId)).catch(() => null);
+    // Roblox молчит — это не повод обвинять покупателя.
+    if (!pass || pass.validationSkipped) continue;
+
+    const expected = expectedGamepassPrice(order.amount);
+    const priceBad = Math.abs(pass.price - expected) > 2;
+    if (pass.isActive && !priceBad) continue;
+
+    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const line = !pass.isActive
+      ? `[ПАСС-СНЯТ ${stamp}] пасс ${order.gamepassId} снят с продажи после приёма заказа`
+      : `[ЦЕНА-ИЗМЕНИЛАСЬ ${stamp}] пасс ${order.gamepassId}: ${pass.price} R$ вместо ${expected} R$ — выкупать нельзя`;
+
+    await (db as any).wbOrder.update({
+      where: { id: order.id },
+      data: { adminNote: (note ? `${note}\n${line}` : line).slice(-2000) },
+    }).catch(() => {});
+
+    const text = formatAdminNotice({
+      marker: "urgent",
+      zone: "ВЫКУП",
+      title: pass.isActive ? "цену пасса подменили ПОСЛЕ приёма" : "пасс сняли с продажи после приёма",
+      lines: [
+        orderRef({ code: order.wbCode, denomination: order.amount }, [order.robloxUsername ?? "—"]),
+        pass.isActive
+          ? `🎫 Пасс <code>${order.gamepassId}</code>: <b>${pass.price} R$</b> вместо <b>${expected} R$</b>`
+          : `🎫 Пасс <code>${order.gamepassId}</code> больше не продаётся`,
+      ],
+      next: "не выкупать — написать покупателю или отклонить заказ",
+    });
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+  }
+}
+
 export function startReviewReminderCron(bot: Telegraf): void {
   // Run once shortly after startup, then every hour
   setTimeout(() => {
@@ -511,6 +579,19 @@ export function startReviewReminderCron(bot: Telegraf): void {
       console.error("[UnlockPush] error:", err)
     );
   }, 60 * 60 * 1000); // every 1 hour
+
+  // Сторож цены принятого пасса — каждые 15 минут
+  setTimeout(() => {
+    watchQueuedGamepassPrices().catch(err =>
+      console.error("[GpPriceWatch] error:", err)
+    );
+  }, 120_000); // 2 мин после старта
+
+  setInterval(() => {
+    watchQueuedGamepassPrices().catch(err =>
+      console.error("[GpPriceWatch] error:", err)
+    );
+  }, 15 * 60 * 1000);
 
   // Stale purchase-batch sweeper — every 10 min
   setTimeout(() => {

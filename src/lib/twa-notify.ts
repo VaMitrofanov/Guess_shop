@@ -24,6 +24,13 @@ async function tgPost(chatId: string, text: string, extra: Record<string, unknow
     try {
       const r = await fetch(`${bridgeUrl}/tg-proxy`, { method: "POST", headers, body: JSON.stringify(payload) });
       const j: any = await r.json().catch(() => null);
+      /* `delivered: false` мост ставит там, где Telegram отказал, а `ok` он
+         оставляет true ради вызывающих, которым отказ не важен. Письму
+         покупателю он важен: «чат не найден» — это не доставка. */
+      if (j?.delivered === false) {
+        console.warn("[twa-notify] telegram отказал:", j?.warning ?? j?.description ?? "unknown");
+        return false;
+      }
       return r.ok && j?.ok !== false;
     } catch (e: any) {
       console.warn("[twa-notify] bridge error:", e?.message);
@@ -194,12 +201,33 @@ function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages 
   return { kind: "thanks", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
 }
 
+/** Чем закончилась попытка сказать покупателю «выкуплен». */
+export interface CompletedNoticeResult {
+  /** Главное (операционное) сообщение дошло. */
+  delivered: boolean;
+  /** Второе, бонусное сообщение дошло. */
+  bonusDelivered: boolean;
+  /** Какой именно питч ушёл вторым сообщением. */
+  kind: "review_pitch" | "bonus_reminder" | "tier2" | "thanks";
+  channel: "tg" | "vk" | "none";
+}
+
+/**
+ * Сказать покупателю, что заказ выкуплен.
+ *
+ * **Возвращает исход доставки, и его обязан проверять вызывающий.** До
+ * 08.09.2026 функция ничего не возвращала, а звали её как
+ * `notifyOrderCompleted(...).catch(() => {})` — недоставленное сообщение не
+ * оставляло следа нигде. По 49ANALQ покупательница три дня не знала, что заказ
+ * закрыт, и пришла в поддержку с «долго в обработке», а карточка показывала
+ * «📸 Ждёт отзыв», как будто питч ушёл.
+ */
 export async function notifyOrderCompleted(
   user: UserRef,
   orderId: string,
   amount: number,
   isDirectOrder: boolean
-) {
+): Promise<CompletedNoticeResult> {
   const [completedCount, order, dbUser] = await Promise.all([
     (prisma as any).wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
     (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
@@ -237,15 +265,21 @@ export async function notifyOrderCompleted(
   });
   if (m.kind === "tier2") console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
 
+  let delivered = false;
+  let bonusDelivered = false;
+  let channel: CompletedNoticeResult["channel"] = "none";
+
   if (user.tgId) {
-    await tgPost(user.tgId, m.tgMsg1);
-    await tgPost(user.tgId, m.tgMsg2, {
+    channel = "tg";
+    delivered = await tgPost(user.tgId, m.tgMsg1);
+    bonusDelivered = await tgPost(user.tgId, m.tgMsg2, {
       reply_markup: { inline_keyboard: m.buttons.map((b) => [{ text: b.label, callback_data: b.command }]) },
     });
     // pendingReview (питч отзыва) восстановит сам бот: callback review_hint
     // и фолбэк в photo-handler работают без предустановленного состояния.
   } else if (user.vkId) {
-    await vkPost(user.vkId, m.vkMsg1);
+    channel = "vk";
+    delivered = await vkPost(user.vkId, m.vkMsg1);
     const vkKb = JSON.stringify({
       inline: true,
       buttons: m.buttons.map((b) => [{
@@ -253,12 +287,14 @@ export async function notifyOrderCompleted(
         color: b.command === "start_direct" ? "positive" : "primary",
       }]),
     });
-    await vkPost(user.vkId, m.vkMsg2, { keyboard: vkKb });
+    bonusDelivered = await vkPost(user.vkId, m.vkMsg2, { keyboard: vkKb });
   }
 
   // Живая карточка DBS — единственное место, где виден весь заказ целиком;
   // «выкуплен» обязан появиться и в ней, а не только в чате с покупателем.
   await refreshDbsCardByCode(prisma, order?.wbCode ?? null).catch(() => {});
+
+  return { delivered, bonusDelivered, kind: m.kind, channel };
 }
 
 /** A safe full-price replacement was not found after Roblox enabled a donor-specific price. */

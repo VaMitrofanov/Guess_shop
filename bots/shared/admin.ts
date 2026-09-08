@@ -18,6 +18,7 @@ import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 import { formatAdminNotice, mskTime, orderRef } from "./notify-format";
 import { fmtDateRu, robuxUnlockDate } from "./completed-messages";
+import { getGamepassDetails } from "./roblox";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -719,6 +720,11 @@ export const CB = {
   directNickNew:      "dir_nick_new",                            // 12 b
   directGpPick:       (passId: string) => `dgp:${passId}`,      // ≤16 b
   directSubmit:       "dir_submit",                              // 10 b
+  /** Пересчитать заказ под цену уже созданного пасса (не отказывать, а назвать
+   *  честную цену — разбор DIR-39544969). */
+  directRequote:      "dir_requote",                             // 11 b
+  /** Ключ Roblox для прямого заказа: «сделаем пасс за тебя». */
+  directKey:          "dir_key",                                 // 7 b
   directPaySite:      (id: string) => `dps:${id}`,
   directPayBank:      (id: string) => `dpb:${id}`,
   directPayManual:    (id: string) => `dpm:${id}`,
@@ -1179,16 +1185,62 @@ async function broadcastPhotoCard(
  * Бросает, если не дошло ни до кого: клиент уже заплатил, и молча потерянный
  * скриншот оставляет его заказ висеть без объяснений.
  */
+/**
+ * Строка «что за пасс» для карточки оплаты: фактическая цена против ожидаемой
+ * и повтор уже выкупленного пасса. Никогда не бросает — карточка важнее строки.
+ */
+async function paymentCardPassLine(orderId: string): Promise<{ text: string; alarm: boolean } | null> {
+  const order = await (db as any).wbOrder.findUnique({
+    where: { id: orderId },
+    select: { amount: true, gamepassId: true, robloxUsername: true },
+  });
+  if (!order?.gamepassId) return null;
+  const expected = Math.ceil(order.amount / 0.7);
+
+  const reused = await (db as any).wbOrder.findFirst({
+    where: { gamepassId: String(order.gamepassId), status: "COMPLETED", isTest: false, id: { not: orderId } },
+    select: { wbCode: true },
+  }).catch(() => null);
+  if (reused) {
+    return { text: `♻️ Пасс <code>${order.gamepassId}</code> УЖЕ выкуплен в ${reused.wbCode} — второй раз не покупается`, alarm: true };
+  }
+
+  const pass = await getGamepassDetails(String(order.gamepassId)).catch(() => null);
+  if (!pass || pass.validationSkipped) {
+    return { text: `🎫 Пасс <code>${order.gamepassId}</code> · ожидаем ${expected} R$ (Roblox не ответил)`, alarm: false };
+  }
+  if (!pass.isActive) {
+    return { text: `⛔ Пасс <code>${order.gamepassId}</code> снят с продажи`, alarm: true };
+  }
+  const ok = Math.abs(pass.price - expected) <= 2;
+  return {
+    text: ok
+      ? `🎫 Пасс <b>${pass.price} R$</b> — сходится с заказом`
+      : `⚠️ Пасс <b>${pass.price} R$</b>, а для ${order.amount} R$ нужен <b>${expected} R$</b>`,
+    alarm: !ok,
+  };
+}
+
 export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
   const code = await orderCode(payload.orderId);
+  /* Цена пасса — прямо в карточке оплаты. Это последний человеческий шаг перед
+     очередью выкупа, и до 08.09.2026 на нём не было видно ГЛАВНОГО: сходится ли
+     пасс с заказом. По DIR-39544969 админ принял оплату 144 ₽ по заказу, к
+     которому был привязан пасс на 715 R$ — карточка об этом не сказала ни слова.
+     Считает карточка сама: заставлять три места помнить о проверке — значит
+     однажды её потерять. */
+  const passLine = await paymentCardPassLine(payload.orderId).catch(() => null);
   const caption = formatAdminNotice({
-    marker: "action",
+    marker: passLine?.alarm ? "urgent" : "action",
     zone: "ПРЯМОЙ",
-    title: "скриншот оплаты",
+    title: passLine?.alarm ? "скриншот оплаты · ПАСС НЕ СХОДИТСЯ" : "скриншот оплаты",
     lines: [
       orderRef({ code, denomination: payload.amount ?? null }, [payload.userDisplay]),
+      passLine?.text ?? null,
     ],
-    next: "сверить сумму и нажать «Оплата принята»",
+    next: passLine?.alarm
+      ? "НЕ принимать оплату вслепую: разобраться с пассом"
+      : "сверить сумму и нажать «Оплата принята»",
   });
 
   const reply_markup = {

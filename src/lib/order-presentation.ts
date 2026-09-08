@@ -44,6 +44,8 @@ export interface GpLive {
   livePrice?: number | null;
   priceMismatch?: boolean | null;
   expected?: number | null;
+  /** Код заказа, в котором этот пасс уже выкуплен. */
+  reusedIn?: string | null;
 }
 
 /** Грязные робуксы: цена пасса, которая спишется с донора. */
@@ -197,6 +199,11 @@ export function orderFlag(
   if (order.buyoutErrorCode === "REGIONAL_PRICE")
     return { text: "🌍 рег. цена на доноре — замена по нику не найдена", tone: "red" };
   if (live?.isForSale === false) return { text: "⛔ геймпасс снят с продажи", tone: "red" };
+  /* Пасс уже выкуплен по другому заказу. Второй раз тот же донор его не купит
+     (`AlreadyOwned`), а другой заплатит за то, что у нас уже есть. Сервер это
+     знал (`gp-live-check.reusedIn`) и молчал — строка появилась 08.09.2026
+     после DIR-39544969, где клиент подставил пасс из своего прошлого заказа. */
+  if (live?.reusedIn) return { text: `♻️ пасс уже выкуплен в ${live.reusedIn} — второй раз не покупается`, tone: "red" };
   if (live?.priceMismatch && live.livePrice != null)
     return {
       text: `⚠ цена пасса ${live.livePrice.toLocaleString("ru-RU")} R$ ≠ ${(live.expected ?? grossOf(order.amount)).toLocaleString("ru-RU")} R$`,

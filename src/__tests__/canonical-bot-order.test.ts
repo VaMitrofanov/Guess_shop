@@ -1,11 +1,21 @@
 const findExisting = jest.fn();
 const transaction = jest.fn();
+/* Гейт приёма заказа (08.09.2026) перепроверяет пасс ДО транзакции: цену,
+   владельца, «в продаже» и повтор уже выкупленного. Мок обязан это уметь,
+   иначе тест проверяет создание заказа в обход собственной защиты. */
+const intentFindUnique = jest.fn();
+const orderFindFirst = jest.fn();
+const gamepassById = jest.fn();
 
 jest.mock("@/lib/prisma", () => ({
   prisma: {
-    wbOrder: { findUnique: findExisting },
+    wbOrder: { findUnique: findExisting, findFirst: orderFindFirst },
+    directIntent: { findUnique: intentFindUnique },
     $transaction: transaction,
   },
+}));
+jest.mock("@/lib/roblox", () => ({
+  getGamepassById: (...args: unknown[]) => gamepassById(...args),
 }));
 
 import { createCanonicalBotOrder } from "@/lib/canonical-bot-order";
@@ -15,6 +25,18 @@ describe("canonical bot order", () => {
     jest.clearAllMocks();
     process.env.BOT_PAYMENT_API_SECRET = "test-secret-that-is-longer-than-thirty-two-characters";
     findExisting.mockResolvedValue(null);
+    orderFindFirst.mockResolvedValue(null);
+    intentFindUnique.mockResolvedValue({
+      id: "cm1234567890example",
+      totalAmount: 500,
+      robloxUsername: "Builderman",
+      gamepassId: "12345",
+      gamepassUrl: "https://www.roblox.com/game-pass/12345",
+      platform: "TG",
+      user: { tgId: "777", vkId: null },
+    });
+    // 500 R$ → пасс ровно на 715 R$ (ceil(500 / 0.7)).
+    gamepassById.mockResolvedValue({ price: 715, isForSale: true, creatorName: "Builderman" });
   });
 
   test("atomically consumes an owned intent and creates a manual payment attempt", async () => {
@@ -91,5 +113,42 @@ describe("canonical bot order", () => {
       receiptEmail: "buyer@example.com",
       method: "SITE",
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  describe("гейт приёма: пасс заявки перепроверяется перед созданием заказа", () => {
+    const call = () => createCanonicalBotOrder({
+      intentId: "cm1234567890example",
+      platform: "TG",
+      subject: "777",
+      receiptEmail: "buyer@example.com",
+      method: "MANUAL_TRANSFER",
+      manualConfigVersion: "2026-08-09-v1",
+    });
+
+    test("цену подняли после заявки — заказ не создаётся", async () => {
+      gamepassById.mockResolvedValue({ price: 1429, isForSale: true, creatorName: "Builderman" });
+      await expect(call()).rejects.toMatchObject({ code: "GAMEPASS_CHANGED" });
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    test("пасс сняли с продажи — заказ не создаётся", async () => {
+      gamepassById.mockResolvedValue({ price: 715, isForSale: false, creatorName: "Builderman" });
+      await expect(call()).rejects.toMatchObject({ code: "GAMEPASS_CHANGED" });
+    });
+
+    test("пасс чужого аккаунта — заказ не создаётся", async () => {
+      gamepassById.mockResolvedValue({ price: 715, isForSale: true, creatorName: "SomeoneElse" });
+      await expect(call()).rejects.toMatchObject({ code: "GAMEPASS_CHANGED" });
+    });
+
+    test("пасс уже выкуплен по другому заказу — заказ не создаётся", async () => {
+      orderFindFirst.mockResolvedValue({ wbCode: "M8L74FX" });
+      await expect(call()).rejects.toMatchObject({ code: "GAMEPASS_CHANGED" });
+    });
+
+    test("Roblox молчит — оплату не блокируем: это наша недоступность, не вина клиента", async () => {
+      gamepassById.mockResolvedValue(null);
+      transaction.mockImplementation(async () => { throw new Error("дошли до транзакции"); });
+      await expect(call()).rejects.toThrow("дошли до транзакции");
+    });
   });
 });

@@ -183,14 +183,22 @@ export function startBridgeServer(): http.Server {
         );
         const tgBody = await tgRes.json() as { description?: string; result?: unknown };
         if (!tgRes.ok) {
-          // Suppress "chat not found" noise from stale admin IDs
           const desc = tgBody.description ?? "";
+          /* «chat not found» на устаревшем ID админа — шум, и когда-то ради него
+             отказ выдавался за успех целиком. Но по этому же адресу идут письма
+             ПОКУПАТЕЛЯМ, и там «чат не найден» значит «человек не получил
+             ничего»: так уведомление о выкупе по 49ANALQ исчезло, а система
+             считала его отправленным (08.09.2026).
+
+             Компромисс: `ok` остаётся true — вызывающие, которым отказ не
+             важен, ведут себя как раньше, — но появляется `delivered: false`.
+             Кому доставка важна, тот её теперь ВИДИТ. */
           if (tgRes.status === 400 && desc.includes("chat not found")) {
-            respond(200, { ok: true, warning: "chat_not_found" });
+            respond(200, { ok: true, delivered: false, warning: "chat_not_found" });
             return;
           }
           if (isBenignTelegramRefusal(tgRes.status, desc)) {
-            respond(200, { ok: true, warning: "no_change" });
+            respond(200, { ok: true, delivered: true, warning: "no_change" });
             return;
           }
           console.error(
@@ -198,17 +206,19 @@ export function startBridgeServer(): http.Server {
             `method=${resolvedMethod}: HTTP ${tgRes.status}`,
             tgBody
           );
-          respond(502, { ok: false, error: "tg_error", detail: tgBody });
+          // Причина отказа нужна вызывающему целиком: «bot was blocked by the
+          // user» и «chat not found» требуют разных действий с заказом.
+          respond(502, { ok: false, delivered: false, error: "tg_error", detail: tgBody, description: desc });
           return;
         }
         console.log(`[Bridge/tg-proxy] → chat_id=${chat_id} method=${resolvedMethod} delivered`);
         // Read-only calls power server-side operational metrics on the RF Web
         // host, which cannot reach api.telegram.org directly. Do not widen the
         // response for send methods: message/chat payloads are unnecessary there.
-        respond(200, telegramProxySuccessPayload(resolvedMethod, tgBody.result));
+        respond(200, { ...telegramProxySuccessPayload(resolvedMethod, tgBody.result), delivered: true });
       } catch (err: any) {
         console.error("[Bridge/tg-proxy] fetch failed:", err?.message ?? err);
-        respond(502, { ok: false, error: "tg_unreachable" });
+        respond(502, { ok: false, delivered: false, error: "tg_unreachable" });
       }
       return;
     }

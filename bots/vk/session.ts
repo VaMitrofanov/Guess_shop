@@ -43,6 +43,9 @@ export type VKState =
   // ник и не ссылка. Отдельный стейт, потому что ключ — длинная строка, и в
   // разборе ника он получил бы «ник не похож на ник Roblox».
   | { type: "AWAITING_API_KEY";        wbCode: string; denomination: number; nick: string }
+  /* То же для ПРЯМОГО заказа: кода WB у него нет, зато есть весь флоу — после
+     создания пасса человек возвращается к подтверждению заказа, а не в квест. */
+  | { type: "AWAITING_DIRECT_API_KEY"; robloxUsername: string; passPrice: number } & DirectFlowData
   | { type: "AWAITING_NICK_EDIT" };
 
 const store = new Map<number, VKState>();

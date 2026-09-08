@@ -89,7 +89,11 @@ export function plainText(html: string): string {
  * только что ушёл.
  */
 export function guideUrlFor(wbCode: string, nick?: string, stage?: "key"): string {
-  const base = `https://robloxbank.ru/guide?source=wb&skip=1&code=${encodeURIComponent(wbCode)}`;
+  /* Прямой заказ приходит сюда без кода WB: у него кода нет вовсе. Ссылка с
+     пустым `code=` вела бы в коридор WB, который просит несуществующий код. */
+  const base = wbCode
+    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${encodeURIComponent(wbCode)}`
+    : "https://robloxbank.ru/guide?source=direct";
   const withNick = nick ? `${base}&username=${encodeURIComponent(nick)}` : base;
   return stage ? `${withNick}&stage=${stage}` : withNick;
 }
@@ -226,30 +230,35 @@ export function questForkScreen(opts: {
       ? `Нужны два: на <b>${targets[0].price}</b> и <b>${targets[1].price} R$</b>. Способ один на оба — результат одинаковый.`
       : `Нужен один геймпасс за <b>${targets[0]?.price ?? 0} R$</b>. Сделать его можно ${keyEnabled ? "тремя способами" : "двумя способами"} — результат одинаковый.`,
     "",
-    "📖 <b>Создам сам</b> — покажем каждое нажатие с картинкой · 3–5 минут",
   ];
+  /* Порядок путей задан владельцем 08.09.2026 и обратен прежнему: сначала ключ,
+     потом ручная инструкция, и только потом «пасс уже есть». Раньше первым
+     везде стоял «создам сам» — самый долгий путь предлагался как основной, а
+     самый быстрый прятался вторым и читался как экзотика. */
   if (keyEnabled && storedKey) {
     lines.push("✨ <b>Создать за меня</b> — ключ уже привязан в твоём кабинете, делать ничего не нужно · минута");
   } else if (keyEnabled) {
-    lines.push("🔑 <b>Сделайте за меня</b> · НОВОЕ — пришлёшь один ключ из Roblox, создадим сами. Пароль не нужен · минута");
+    lines.push("🔑 <b>Сделайте за меня</b> — пришлёшь один ключ из Roblox, создадим сами. Пароль не нужен · минута. <b>Настроил один раз — и про геймпассы можно забыть</b>");
   }
   lines.push(
+    "📖 <b>Создам сам</b> — покажем каждое нажатие с картинкой · 3–5 минут",
     "🔢 <b>Он у меня уже есть</b> — найдём по номеру, даже скрытый · 10 секунд",
     "",
     storedKey
       ? "Твой ключ уже привязан в личном кабинете — жми первую кнопку, и через минуту всё будет готово."
-      : "Не знаешь, что выбрать? Жми первый — это обычный путь.",
+      : keyEnabled
+        ? "Не знаешь, что выбрать? Жми первый — это самый быстрый путь, и он же избавит от возни в следующий раз."
+        : "Не знаешь, что выбрать? Жми первый — это обычный путь.",
   );
 
   const rows: QuestButton[][] = [];
   if (keyEnabled && storedKey) {
     // Ключ уже привязан в кабинете — человеку не за чем идти в Roblox вообще.
-    // Эта дверь идёт первой и одна выделена: остальные остаются на случай
-    // «хочу другой аккаунт» или «пасс уже есть».
     rows.push([{ id: QUEST.keyStored, label: `✨ Создать за меня — ${many ? "оба пасса" : "пасс"}`, tone: "positive" }]);
+  } else if (keyEnabled) {
+    rows.push([{ id: QUEST.key, label: "🔑 Сделайте за меня", tone: "positive" }]);
   }
   rows.push([{ id: "url", label: "📖 Создам сам (инструкция)", url: guideUrlFor(wbCode, nick) }]);
-  if (keyEnabled && !storedKey) rows.push([{ id: QUEST.key, label: "🔑 Сделайте за меня", tone: "positive" }]);
   rows.push([{ id: QUEST.passid, label: "🔢 Он у меня уже есть", tone: "primary" }]);
   if (!storedKey) rows.push([{ id: QUEST.recheck, label: "🔄 Уже сделал — проверить", tone: "secondary" }]);
 
@@ -295,8 +304,11 @@ export function questKeyScreen(opts: {
    * обещать это там нельзя — попросим человека.
    */
   deleteBy?: "bot" | "user";
+  /** Куда ведёт «другой способ». По умолчанию — развилка квеста WB; прямой
+   *  заказ подставляет свою кнопку, иначе человек уходит в чужой флоу. */
+  backTo?: string;
 }): QuestScreen {
-  const { targets, wbCode, nick, withPhotos = false, platform = "mobile", deleteBy = "bot" } = opts;
+  const { targets, wbCode, nick, withPhotos = false, platform = "mobile", deleteBy = "bot", backTo } = opts;
   const prices = targets.map((t) => t.price);
   const many = prices.length > 1;
 
@@ -330,7 +342,9 @@ export function questKeyScreen(opts: {
     text,
     rows: [
       [{ id: "url", label: "📸 Те же шаги с картинками", url: guideUrlFor(wbCode, nick, "key") }],
-      [{ id: QUEST.fork, label: "↩️ Другой способ", tone: "secondary" }],
+      // Идентификатор кнопки — это просто callback_data; прямой заказ живёт вне
+      // словаря квеста, поэтому здесь он приходит строкой.
+      [{ id: (backTo ?? QUEST.fork) as QuestActionId, label: "↩️ Другой способ", tone: "secondary" }],
     ],
     photos: withPhotos ? KEY_FRAMES[platform] : undefined,
   };

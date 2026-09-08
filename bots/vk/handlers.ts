@@ -58,6 +58,10 @@ import { VK_HELP_REF } from "../shared/bot-links";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
+import { requoteForPass } from "../shared/direct-requote";
+import { keyPitchText, noGamepassText, priceMismatchText } from "../shared/direct-gamepass-copy";
+import { expectedGamepassPrice } from "../shared/gamepass-plan";
+import { rememberRobloxApiKey } from "../shared/roblox-api-key-store";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { assertOwnsIntent, vkActor } from "../shared/ownership";
 import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
@@ -1328,6 +1332,37 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleVkDirectGpPick(ctx, vkUserId, msgPayload.passId);
     return;
   }
+  /* Пересчёт заказа под цену уже созданного пасса — зеркало TG `dir_requote`. */
+  if (msgPayload?.command === "direct_requote") {
+    const st = getState(vkUserId);
+    if (!st || st.type !== "AWAITING_DIRECT_SUMMARY") {
+      await ctx.reply("⏳ Сессия истекла. Начни заново.");
+      return;
+    }
+    const q = requoteForPass({
+      passPrice: st.gamepassRobux ?? 0,
+      bonus: st.bonus,
+      rubleDiscount: st.rubleDiscount,
+    });
+    if (!q) {
+      await ctx.reply("Под этот пасс заказ не собрать — сделай пасс нужной цены.");
+      return;
+    }
+    setState(vkUserId, { ...st, amount: q.amount, totalAmount: q.totalAmount, rublePrice: q.rublePrice });
+    await showVkSummary(
+      ctx,
+      { totalAmount: q.totalAmount, bonus: st.bonus, rubleDiscount: st.rubleDiscount, rublePrice: q.rublePrice, hasBonusStep: st.hasBonusStep },
+      st.robloxUsername, st.gamepassId, st.gamepassRobux ?? q.passPrice, st.gamepassName,
+    );
+    return;
+  }
+
+  /* «Сделайте пасс за меня» в прямом заказе. */
+  if (msgPayload?.command === "direct_key") {
+    await startVkDirectKey(ctx, vkUserId, typeof msgPayload.nick === "string" ? msgPayload.nick : undefined);
+    return;
+  }
+
   if (msgPayload?.command === "direct_submit") {
     await handleVkDirectSubmit(ctx, vkUserId);
     return;
@@ -1497,6 +1532,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // «Напиши свой ник…» при заказе давно в очереди). Перепроверяем статус.
   // Ветка ключа идёт ПЕРЕД ником и ссылкой: ключ — длинная строка, и в разборе
   // ника он получил бы «ник не похож на ник Roblox».
+  // Ключ в прямом заказе — своя ветка: возврат идёт к подтверждению заказа.
+  if (state?.type === "AWAITING_DIRECT_API_KEY") {
+    await handleVkDirectApiKey(ctx, vkUserId, text);
+    return;
+  }
+
   if (state?.type === "AWAITING_API_KEY") {
     const sweep = await sweepStaleVkOrderState(ctx, vkUserId, state.wbCode, text);
     if (sweep === "replied") return;
@@ -3589,21 +3630,24 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     return;
   }
   if (result.status === "no_gamepasses") {
+    /* Пасса нет. Первым идёт ключ (решение владельца 08.09.2026): он снимает
+       задачу целиком и делает следующие заказы мгновенными. Инструкция и
+       «пришлю ссылку» остаются вторым и третьим путём. */
     setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
     const kb = Keyboard.builder();
-    kb.urlButton({ label: "📖 Инструкция", url: "https://robloxbank.ru/guide?source=direct" });
+    if (gamepassAutocreateEnabled()) {
+      kb.textButton({ label: "🔑 Сделайте пасс за меня", payload: { command: "direct_key", nick }, color: "positive" });
+      kb.row();
+    }
+    kb.urlButton({ label: "📖 Создам сам (инструкция)", url: "https://robloxbank.ru/guide?source=direct" });
     kb.row();
     kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
     kb.row();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await showResult({
-      message:
-        `⚠️ У ${nick} не нашли геймпассов на продаже.\n\n` +
-        `✅ Геймпасс уже создан? Поиск иногда его не видит — например, когда плейс скрыт. ` +
-        `Пришли ссылку на геймпасс, и мы оформим заказ по ней.\n\n` +
-        `⚠️ Ещё не создан — сделай по инструкции и отправь ник ещё раз:`,
-      keyboard: kb.inline(),
+      message: noGamepassText({ nick, passPrice, plain: true }),
+      keyboard: enforceVkInlineKbLimits(kb.inline(), "VK/direct-nogp"),
     });
     return;
   }
@@ -3635,13 +3679,25 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   // и прямой заказ падал у любого клиента с ≥5 геймпассами (кейс ypa_0982).
   const kb = Keyboard.builder();
   const listIsWrongPriceOnly = matches.length === 0 && nonMatches.length > 0;
+  // Кнопка ключа занимает ряд — список пассов ужимается на неё, иначе ограничитель
+  // срежет служебные кнопки «Назад/Отменить» (лимит VK: 6 рядов).
+  const keyRowShown = listIsWrongPriceOnly && gamepassAutocreateEnabled();
+  const pickLimit = keyRowShown ? MAX_PICK_BUTTONS - 1 : MAX_PICK_BUTTONS;
   const shownPasses = listIsWrongPriceOnly
-    ? nonMatches.slice(0, MAX_PICK_BUTTONS)
-    : [...matches, ...nonMatches.slice(0, 3)].slice(0, MAX_PICK_BUTTONS);
+    ? nonMatches.slice(0, pickLimit)
+    : [...matches, ...nonMatches.slice(0, 3)].slice(0, pickLimit);
 
+  if (keyRowShown) {
+    kb.textButton({ label: "🔑 Сделайте пасс за меня", payload: { command: "direct_key", nick }, color: "positive" });
+    kb.row();
+  }
   for (const g of shownPasses) {
-    const prefix = g.isPriceMatch ? "✅ " : "";
-    kb.textButton({ label: `${prefix}${g.robux} R$ · ${g.name.slice(0, 16)}`, payload: { command: "direct_gp_pick", passId: String(g.gamepassId) }, color: g.isPriceMatch ? "positive" : "primary" });
+    // Пасс не той цены подписан тем, во что он превращается: тап ведёт на
+    // честный пересчёт, а не на молчаливое «оформить не то».
+    const label = g.isPriceMatch
+      ? `✅ ${g.robux} R$ · ${g.name.slice(0, 16)}`
+      : `${g.robux} R$ → заказ на ${Math.floor(g.robux * 0.7)} R$`;
+    kb.textButton({ label, payload: { command: "direct_gp_pick", passId: String(g.gamepassId) }, color: g.isPriceMatch ? "positive" : "primary" });
     kb.row();
   }
   kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
@@ -3649,7 +3705,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
 
   const listMessage = listIsWrongPriceOnly
-    ? `${gpHeader}\n\n⚠️ Нет геймпассов с нужной ценой ${passPrice} R$.\n\nВот что нашлось у ${nick} — выбери подходящий или создай новый с правильной ценой:`
+    ? `${gpHeader}\n\n⚠️ Геймпасса на ${passPrice} R$ у ${nick} нет.\n\n${keyPitchText(true)}\n\nЛибо возьмём то, что уже есть, — но тогда и заказ будет на другой объём:`
     : `${gpHeader}\n\n🎫 Геймпассы ${nick} — выбери для заказа:`;
 
   try {
@@ -3680,14 +3736,38 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
     }
   } catch { /* non-critical */ }
 
-  // П5: клиент выбрал пасс с ценой ≠ расчётной — предупреждаем его,
-  // а не только админскую карточку (зеркально TG showSummary).
-  const expectedGp = Math.ceil(flowState.totalAmount / 0.7);
-  const wrongPriceLine = expectedGp > 0 && Math.abs(gpRobux - expectedGp) > 2
-    ? `\n\n⚠️ Цена геймпасса не совпадает: этот пасс стоит ${gpRobux} R$, ` +
-      `а для ${flowState.totalAmount} R$ нужен пасс на ${expectedGp} R$. ` +
-      `Лучше создать новый с правильной ценой — иначе выкуп задержится.`
-    : "";
+  /* Цена пасса ≠ расчётной. Зеркало TG: не предупреждение при живой кнопке
+     «Оформить», а развилка с честным пересчётом (разбор DIR-39544969). */
+  const expectedGp = expectedGamepassPrice(flowState.totalAmount);
+  const mismatch = expectedGp > 0 && Math.abs(gpRobux - expectedGp) > 2;
+  if (mismatch) {
+    const requote = requoteForPass({
+      passPrice: gpRobux,
+      bonus: flowState.bonus,
+      rubleDiscount: flowState.rubleDiscount,
+    });
+    const kbM = Keyboard.builder();
+    if (requote) {
+      kbM.textButton({
+        label: `✅ Едем на ${requote.totalAmount} R$ — ${fmtRub(requote.rublePrice)}`,
+        payload: { command: "direct_requote" },
+        color: "positive",
+      });
+      kbM.row();
+    }
+    kbM.textButton({ label: "🔑 Сделайте пасс за меня", payload: { command: "direct_key" }, color: "primary" });
+    kbM.row();
+    kbM.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
+    kbM.row();
+    kbM.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
+    kbM.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
+    const text = priceMismatchText({ passRobux: gpRobux, totalAmount: flowState.totalAmount, requote, plain: true })
+      + `\n\n📖 Инструкция: https://robloxbank.ru/guide?source=direct`;
+    const kbInline = enforceVkInlineKbLimits(kbM.inline(), "VK/direct-mismatch");
+    if (edit) await edit({ message: text, keyboard: kbInline });
+    else await ctx.reply({ message: text, keyboard: kbInline });
+    return;
+  }
 
   const summaryText =
     `${stepBar(...dirStep(flowState, "summary"), "Подтверждение")}\n\n` +
@@ -3696,7 +3776,7 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
     `🎫 Геймпасс:    ${gpRobux} R$ · "${gpName.slice(0, 30)}"${discountLine}\n` +
     `📊 Твой курс:   ${(flowState.rublePrice / flowState.totalAmount).toFixed(3)} ₽/R$\n` +
     `💰 К оплате:    ${fmtRub(flowState.rublePrice)}` +
-    mpLine + wrongPriceLine;
+    mpLine;
 
   const kb = Keyboard.builder();
   kb.textButton({ label: "✅ Оформить", payload: { command: "direct_submit" }, color: "positive" });
@@ -3708,6 +3788,106 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
   // «Ищу…», чтобы ответ был виден без пролистывания (edit-in-place, пункт F).
   if (edit) await edit({ message: summaryText, keyboard: kb.inline() });
   else await ctx.reply({ message: summaryText, keyboard: kb.inline() });
+}
+
+/**
+ * «Сделайте пасс за меня» в прямом заказе (VK).
+ *
+ * Зеркало телеграмной ветки: следующий текст — ключ Open Cloud, а после
+ * создания пасса человек возвращается к подтверждению заказа, а не в квест WB.
+ */
+async function startVkDirectKey(ctx: MessageContext, vkUserId: number, nickFromPayload?: string): Promise<void> {
+  const st = getState(vkUserId);
+  /* Ник берём из стейта, а на экране «пассов нет» — из payload кнопки: там стейт
+     ждёт ник или ссылку и самого ника не хранит. */
+  const nick = st && "robloxUsername" in st ? (st as { robloxUsername: string }).robloxUsername : nickFromPayload;
+  const flowState = st && nick && (st.type === "AWAITING_DIRECT_SUMMARY" || st.type === "AWAITING_DIRECT_GAMEPASS" || st.type === "AWAITING_DIRECT_NICK_INPUT")
+    ? { ...st, robloxUsername: nick }
+    : null;
+  if (!flowState) {
+    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    return;
+  }
+  if (!gamepassAutocreateEnabled()) {
+    await ctx.reply({
+      message: "Этот способ сейчас недоступен — создай геймпасс по инструкции: https://robloxbank.ru/guide?source=direct",
+    });
+    return;
+  }
+  const passPrice = expectedGamepassPrice(flowState.totalAmount);
+  setState(vkUserId, {
+    type: "AWAITING_DIRECT_API_KEY",
+    robloxUsername: flowState.robloxUsername,
+    passPrice,
+    amount: flowState.amount,
+    totalAmount: flowState.totalAmount,
+    bonus: flowState.bonus,
+    rubleDiscount: flowState.rubleDiscount,
+    rublePrice: flowState.rublePrice,
+    hasBonusStep: flowState.hasBonusStep,
+  });
+  await showVkQuest(ctx, questKeyScreen({
+    targets: [{ amount: flowState.totalAmount, price: passPrice }],
+    wbCode: "",
+    nick: flowState.robloxUsername,
+    // Сообщество ВК не может удалить сообщение человека — просим его самого.
+    deleteBy: "user",
+    backTo: "direct_back",
+  }), "VK/direct-key");
+}
+
+/** Ключ пришёл в прямом заказе: создаём пасс и возвращаем к подтверждению. */
+async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: string): Promise<void> {
+  const st = getState(vkUserId);
+  if (!st || st.type !== "AWAITING_DIRECT_API_KEY") return;
+  const key = raw.trim();
+
+  if (!looksLikeApiKey(key)) {
+    await ctx.reply("Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».");
+    return;
+  }
+
+  await ctx.reply(questKeyWorkingText([st.passPrice]).replace(/<\/?b>/g, ""));
+  const outcome = await createPassesByKey({ apiKey: key, nick: st.robloxUsername, targets: [st.passPrice] });
+  const created = outcome.created[0];
+
+  if (!created) {
+    const verdict = keyCreateVerdict(outcome.error);
+    await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: st.robloxUsername }), "VK/direct-key-fail");
+    return;
+  }
+
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+  await rememberRobloxApiKey(db as any, {
+    key,
+    robloxUsername: st.robloxUsername,
+    userId: user?.id ?? null,
+    orderId: null,
+    result: outcome.error ? "partial" : "ok",
+    createdPasses: outcome.created.length,
+  }).catch((err: any) => console.warn("[VK/direct-key] ключ не сохранён:", err?.message ?? err));
+
+  const gamepassUrl = `https://www.roblox.com/game-pass/${created.gamePassId}`;
+  setState(vkUserId, {
+    type: "AWAITING_DIRECT_SUMMARY",
+    robloxUsername: st.robloxUsername,
+    gamepassId: String(created.gamePassId),
+    gamepassUrl,
+    gamepassName: created.name || `Пасс ${created.priceInRobux}`,
+    gamepassRobux: created.priceInRobux,
+    amount: st.amount,
+    totalAmount: st.totalAmount,
+    bonus: st.bonus,
+    rubleDiscount: st.rubleDiscount,
+    rublePrice: st.rublePrice,
+    hasBonusStep: st.hasBonusStep,
+  });
+  await ctx.reply(`✅ Сделали за тебя\n\n${keyCreateSuccessText([created.priceInRobux], st.robloxUsername).replace(/<\/?b>/g, "")}`);
+  await showVkSummary(
+    ctx,
+    { totalAmount: st.totalAmount, bonus: st.bonus, rubleDiscount: st.rubleDiscount, rublePrice: st.rublePrice, hasBonusStep: st.hasBonusStep },
+    st.robloxUsername, String(created.gamePassId), created.priceInRobux, created.name || `Пасс ${created.priceInRobux}`,
+  );
 }
 
 async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passId: string): Promise<void> {
@@ -3797,10 +3977,15 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     return;
   }
 
+  // Цена пасса в карточке заявки обязательна — см. тот же комментарий в TG.
+  const gpExpected = expectedGamepassPrice(state.totalAmount);
+  const gpOk = Math.abs((state.gamepassRobux ?? gpExpected) - gpExpected) <= 2;
   await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
     id,
     `🔷 <b>Новая заявка · клиент выбирает оплату</b>\n` +
-    `Канал: VK · Ник: <b>${escapeHtml(state.robloxUsername)}</b> · ${state.totalAmount} R$ · ${fmtRub(state.rublePrice)}`,
+    `Канал: VK · Ник: <b>${escapeHtml(state.robloxUsername)}</b> · ${state.totalAmount} R$ · ${fmtRub(state.rublePrice)}\n` +
+    `🎫 Пасс: <b>${state.gamepassRobux ?? "?"} R$</b>` +
+    (gpOk ? ` (норма)` : ` ⚠️ <b>ожидалось ${gpExpected} R$</b>`),
   )));
 
   const receiptLine = user.email

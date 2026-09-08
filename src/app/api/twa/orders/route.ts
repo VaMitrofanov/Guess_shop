@@ -12,6 +12,7 @@ import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 import { ORDER_STATUS_EVENT, recordOrderStatusChange } from "@/lib/order-status-event";
+import { recordCompletedNotice } from "@/lib/notice-delivery";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
@@ -1658,11 +1659,64 @@ export async function POST(req: NextRequest) {
       extra: { wbCode: order.wbCode, amount: order.amount, gross: purchaseRobux },
     });
     cachedCounts = null;
-    // Уведомление клиенту уходит ТОЛЬКО здесь — при закрытии всего заказа.
-    // Отметка отдельной части (`mark-split-part`) клиенту не видна: он получил
-    // не всё, за что заплатил, и «заказ выполнен» было бы неправдой.
-    notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
+    /* Уведомление клиенту уходит ТОЛЬКО здесь — при закрытии всего заказа.
+       Отметка отдельной части (`mark-split-part`) клиенту не видна: он получил
+       не всё, за что заплатил, и «заказ выполнен» было бы неправдой.
+
+       Через `after`, а не плавающим промисом: работа после ответа обязана быть
+       заявлена, иначе рантайм вправе оборвать её вместе с запросом. И исход
+       теперь записывается в заказ — недоставленное письмо больше не выглядит
+       как отправленное (49ANALQ, 08.09.2026). */
+    after(async () => {
+      try {
+        const notice = await notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder);
+        await recordCompletedNotice({
+          orderId,
+          wbCode: order.wbCode,
+          amount: order.amount,
+          userDisplay: order.user?.username ? `@${order.user.username}` : order.user?.tgId ?? order.user?.vkId ?? "—",
+          result: notice,
+        });
+      } catch (error) {
+        console.error("[orders/complete] уведомление о выкупе упало:", error);
+        await recordCompletedNotice({
+          orderId,
+          wbCode: order.wbCode,
+          amount: order.amount,
+          userDisplay: order.user?.username ? `@${order.user.username}` : order.user?.tgId ?? order.user?.vkId ?? "—",
+          result: { delivered: false, bonusDelivered: false, kind: "thanks", channel: order.user?.tgId ? "tg" : order.user?.vkId ? "vk" : "none" },
+        }).catch(() => {});
+      }
+    });
     return NextResponse.json({ ok: true });
+  }
+
+  /* ── Повторить уведомление о выкупе ───────────────────────────────────────
+     Нужна ровно тогда, когда след доставки говорит «не дошло»: сообщение о
+     выкупе — единственное, из которого покупатель узнаёт дату разблокировки
+     робуксов, и терять его нельзя (49ANALQ: три дня тишины и обращение в
+     поддержку). Действие идемпотентности не требует — админ жмёт осознанно. */
+  if (action === "resend-completed-notice") {
+    if (order.status !== "COMPLETED") {
+      return NextResponse.json({ error: "Заказ ещё не выкуплен" }, { status: 400 });
+    }
+    const notice = await notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder);
+    await recordCompletedNotice({
+      orderId,
+      wbCode: order.wbCode,
+      amount: order.amount,
+      userDisplay: order.user?.username ? `@${order.user.username}` : order.user?.tgId ?? order.user?.vkId ?? "—",
+      result: notice,
+    });
+    return NextResponse.json({
+      ok: true,
+      delivered: notice.delivered,
+      bonusDelivered: notice.bonusDelivered,
+      channel: notice.channel,
+      msg: notice.delivered
+        ? `Отправлено (${notice.channel.toUpperCase()})${notice.bonusDelivered ? "" : " — второе сообщение не дошло"}`
+        : "Не доставлено — Telegram/VK отказал",
+    });
   }
 
   // ── Ручная отметка части: выкупили руками, вне нашей кнопки ───────────────

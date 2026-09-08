@@ -14,7 +14,7 @@ import { getSbpQrBuffer } from "../shared/sbp";
 import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { assertOrderNotHeld } from "../shared/order-hold";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -57,6 +57,11 @@ import { corridorHoldText, findUnfinishedCorridorOrder, type CorridorGuardClient
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
+import { recordCompletedNotice } from "../shared/notice-delivery";
+import { requoteForPass } from "../shared/direct-requote";
+import { keyPitchText, noGamepassText, priceMismatchText } from "../shared/direct-gamepass-copy";
+import { expectedGamepassPrice } from "../shared/gamepass-plan";
+import { rememberRobloxApiKey } from "../shared/roblox-api-key-store";
 import { formatOrderAge } from "../shared/order-age";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { twaLaunchUrl } from "../shared/twa-link";
@@ -1069,14 +1074,43 @@ async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpN
     }
   } catch { /* non-critical */ }
 
-  // П5: клиент выбрал пасс с ценой ≠ расчётной (например, старый пасс от
-  // прошлого заказа) — предупреждаем его, а не только админскую карточку.
-  const expectedGp = flow.passPrice ?? Math.ceil((flow.totalAmount ?? 0) / 0.7);
-  const wrongPriceLine = expectedGp > 0 && Math.abs(gpRobux - expectedGp) > 2
-    ? `\n\n⚠️ <b>Цена геймпасса не совпадает:</b> этот пасс стоит ${gpRobux} R$, ` +
-      `а для ${flow.totalAmount} R$ нужен пасс на <b>${expectedGp} R$</b>. ` +
-      `Лучше создать новый с правильной ценой — иначе выкуп задержится.`
-    : "";
+  /* Цена пасса ≠ расчётной. До 08.09.2026 здесь стояло предупреждение, а кнопка
+     «✅ Оформить» оставалась живой — так заказ DIR-39544969 уехал в очередь с
+     пассом на 715 R$ вместо 286. Отказывать тоже неправильно: у пасса есть своя
+     честная цена заказа, и её надо назвать. Поэтому вместо одной кнопки —
+     развилка, и «оформить не то» среди вариантов больше нет. */
+  const expectedGp = flow.passPrice ?? expectedGamepassPrice(flow.totalAmount ?? 0);
+  const mismatch = expectedGp > 0 && Math.abs(gpRobux - expectedGp) > 2;
+  const requote = mismatch
+    ? requoteForPass({ passPrice: gpRobux, bonus: flow.bonus ?? 0, rubleDiscount: flow.rubleDiscount ?? 0 })
+    : null;
+
+  if (mismatch) {
+    flow.requote = requote ?? undefined;
+    const rows: any[] = [];
+    if (requote) {
+      rows.push([Markup.button.callback(
+        `✅ Едем на ${requote.totalAmount} R$ — ${fmtRub(requote.rublePrice)}`,
+        CB.directRequote,
+      )]);
+    }
+    rows.push([Markup.button.callback("🔑 Сделайте пасс за меня", CB.directKey)]);
+    rows.push([Markup.button.url("📖 Создам сам (инструкция)", "https://robloxbank.ru/guide?source=direct")]);
+    rows.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
+    rows.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
+    const text = priceMismatchText({ passRobux: gpRobux, totalAmount: flow.totalAmount!, requote });
+    const kb = Markup.inlineKeyboard(rows);
+    try {
+      if (editTarget) {
+        await ctx.telegram.editMessageText(editTarget.chatId, editTarget.messageId, undefined, text, { parse_mode: "HTML", ...kb });
+      } else {
+        await ctx.editMessageText(text, { parse_mode: "HTML", ...kb });
+      }
+    } catch {
+      await ctx.reply(text, { parse_mode: "HTML", ...kb });
+    }
+    return;
+  }
 
   const summaryText =
     `${stepBar(...dirStep(flow, "summary"), "Подтверждение")}\n\n` +
@@ -1085,7 +1119,7 @@ async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpN
     `🎫 Геймпасс:    <b>${gpRobux} R$</b> · "${escapeHtml(gpName.slice(0, 30))}"${discountLine}\n` +
     `📊 Твой курс:   <b>${(flow.rublePrice! / flow.totalAmount!).toFixed(3)} ₽/R$</b>\n` +
     `💰 К оплате:    <b>${fmtRub(flow.rublePrice!)}</b>` +
-    mpLine + wrongPriceLine;
+    mpLine;
 
   const summaryKb = Markup.inlineKeyboard([
     [Markup.button.callback("✅ Оформить", CB.directSubmit)],
@@ -1159,20 +1193,19 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     return;
   }
   if (result.status === "no_gamepasses") {
+    /* Пасса нет — самый частый тупик прямого заказа. Первым идёт ключ: он
+       снимает задачу с человека целиком и делает следующие заказы мгновенными
+       (порядок путей задан владельцем 08.09.2026). Ручная инструкция и «пасс
+       уже есть, пришлю ссылку» остаются, но вторым и третьим. */
     flow.step = "nick_input";
+    const rows: any[] = [];
+    if (gamepassAutocreateEnabled()) rows.push([Markup.button.callback("🔑 Сделайте пасс за меня", CB.directKey)]);
+    rows.push([Markup.button.url("📖 Создам сам (инструкция)", "https://robloxbank.ru/guide?source=direct")]);
+    rows.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
+    rows.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
     await showResult(
-      `⚠️ У <b>${escapeHtml(nick)}</b> не нашли геймпассов на продаже.\n\n` +
-      `✅ Геймпасс уже создан? Поиск иногда его не видит — например, когда плейс скрыт. ` +
-      `Пришли <b>ссылку на геймпасс</b>, и мы оформим заказ по ней.\n\n` +
-      `⚠️ Ещё не создан — сделай по инструкции и отправь ник ещё раз:`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
-          [Markup.button.callback("✏️ Другой ник", CB.directNickNew)],
-          [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
-        ]),
-      }
+      noGamepassText({ nick: escapeHtml(nick), passPrice: flow.passPrice }),
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) },
     );
     return;
   }
@@ -1196,18 +1229,25 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   }
 
   if (matches.length === 0 && nonMatches.length > 0) {
-    const topWrong = nonMatches.slice(0, 5);
-    const btns = topWrong.map(g => [
-      Markup.button.callback(
-        `${g.robux} R$ · ${g.name.slice(0, 20)}`,
-        CB.directGpPick(String(g.gamepassId))
-      ),
-    ]);
+    /* Нужной цены нет. Раньше здесь кнопками предлагались чужие по цене пассы
+       со словами «выбери подходящий» — так и уехал DIR-39544969. Теперь пасс
+       подписан тем, во что он превращается: тап ведёт на честный пересчёт, а
+       не на молчаливое «оформить не то». Первым — ключ. */
+    const topWrong = nonMatches.slice(0, 4);
+    const btns: any[] = [];
+    if (gamepassAutocreateEnabled()) btns.push([Markup.button.callback("🔑 Сделайте пасс за меня", CB.directKey)]);
+    for (const g of topWrong) {
+      btns.push([Markup.button.callback(
+        `${g.robux} R$ → заказ на ${Math.floor(g.robux * 0.7)} R$`,
+        CB.directGpPick(String(g.gamepassId)),
+      )]);
+    }
     btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
     btns.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
     await showResult(
-      `${gpHeader}\n\n⚠️ Нет геймпассов с нужной ценой <b>${flow.passPrice} R$</b>.\n\n` +
-      `Вот что нашлось у <b>${escapeHtml(nick)}</b> — выбери подходящий или создай новый с правильной ценой:`,
+      `${gpHeader}\n\n⚠️ Геймпасса на <b>${flow.passPrice} R$</b> у <b>${escapeHtml(nick)}</b> нет.\n\n` +
+      `${keyPitchText()}\n\n` +
+      `Либо возьмём то, что уже есть, — но тогда и заказ будет на другой объём:`,
       { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
     );
     return;
@@ -2032,6 +2072,13 @@ export function registerText(bot: Telegraf): void {
     // Идёт ПЕРЕД ником и ссылкой: ключ — длинная строка, и в разборе ника он
     // получил бы «ник не похож на ник Roblox», а в разборе ссылки — «это не
     // геймпасс». Сообщение с ключом хендлер удаляет сразу.
+    // Ключ для ПРЯМОГО заказа: своя ветка, потому что возврат идёт не в квест
+    // WB, а в итог прямого заказа (у него нет ни кода, ни заказа в базе).
+    if (!isAdmin && pendingDirectKey.has(ctx.from.id)) {
+      await handleDirectApiKeyInput(bot, ctx, text);
+      return;
+    }
+
     if (!isAdmin && pendingApiKey.has(ctx.from.id)) {
       const keyState = pendingApiKey.get(ctx.from.id)!;
       const sweep = await sweepStaleOrderState(ctx, keyState.wbCode, text);
@@ -2912,6 +2959,78 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
 
   const verdict = keyCreateVerdict(outcome.error);
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }), edit);
+}
+
+/**
+ * Ключ Roblox в ПРЯМОМ заказе: создаём пасс нужной цены и возвращаем человека
+ * к подтверждению заказа.
+ *
+ * Ветка отдельная от квеста WB намеренно: там ключ достраивает набор под
+ * номинал уже существующего заказа, здесь заказа ещё нет — есть только цена
+ * пасса, которую посчитал флоу. Ключ сохраняем на пользователя: ради этого он
+ * и присылается один раз («сделал и забыл»).
+ */
+async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
+  const pending = pendingDirectKey.get(ctx.from.id);
+  const flow = pendingDirectFlow.get(ctx.from.id);
+  if (!pending || !flow) return;
+  const key = raw.trim();
+
+  // Своё сообщение убираем первым делом, ещё до похода в Roblox.
+  try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* нет прав/старое — не беда */ }
+
+  const backKb = Markup.inlineKeyboard([
+    [Markup.button.url("📸 Шаги с картинками", "https://robloxbank.ru/guide?source=direct&stage=key")],
+    [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+  ]);
+
+  if (!looksLikeApiKey(key)) {
+    await ctx.reply(
+      "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой <b>Copy Key To Clipboard</b>.",
+      { parse_mode: "HTML", ...backKb },
+    );
+    return;
+  }
+
+  const working = await ctx.reply(questKeyWorkingText([pending.passPrice]), { parse_mode: "HTML" });
+  const edit = async (t: string, extra: Record<string, unknown>) => {
+    try {
+      await bot.telegram.editMessageText(ctx.chat.id, working.message_id, undefined, t, extra as any);
+    } catch { await ctx.reply(t, extra); }
+  };
+
+  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: [pending.passPrice] });
+  const created = outcome.created[0];
+
+  if (created) {
+    // Ключ храним зашифрованным на пользователе — следующий заказ создаст пасс
+    // сам, без единого действия покупателя. Это и есть обещание «раз и навсегда».
+    const dbUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
+    await rememberRobloxApiKey(db as any, {
+      key,
+      robloxUsername: pending.nick,
+      userId: dbUser?.id ?? null,
+      orderId: null,
+      result: outcome.error ? "partial" : "ok",
+      createdPasses: outcome.created.length,
+    }).catch((err) => console.warn("[TG/direct-key] ключ не сохранён:", err?.message ?? err));
+
+    pendingDirectKey.delete(ctx.from.id);
+    flow.gamepassId = String(created.gamePassId);
+    flow.gamepassUrl = `https://www.roblox.com/game-pass/${created.gamePassId}`;
+    flow.gamepassName = created.name || `Пасс ${created.priceInRobux}`;
+    flow.gamepassRobux = created.priceInRobux;
+    flow.step = "summary";
+    await edit(
+      `✅ <b>Сделали за тебя</b>\n\n${keyCreateSuccessText([created.priceInRobux], pending.nick)}`,
+      { parse_mode: "HTML" },
+    );
+    await showSummary(ctx, flow, created.priceInRobux, flow.gamepassName);
+    return;
+  }
+
+  const verdict = keyCreateVerdict(outcome.error);
+  await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: pending.nick }), edit);
 }
 
 /**
@@ -5499,6 +5618,61 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    /* dir_requote: «едем на цену моего пасса». Не отказ и не уговоры поменять
+       цену — просто честный пересчёт заказа под то, что у человека уже есть. */
+    if (data === CB.directRequote) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow?.requote || !flow.gamepassId) {
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
+        return;
+      }
+      const q = flow.requote;
+      flow.amount = q.amount;
+      flow.totalAmount = q.totalAmount;
+      flow.passPrice = q.passPrice;
+      flow.rublePrice = q.rublePrice;
+      flow.requote = undefined;
+      flow.step = "summary";
+      await ctx.answerCbQuery(`Пересчитал на ${q.totalAmount} R$`).catch(() => {});
+      await showSummary(ctx, flow, flow.gamepassRobux ?? q.passPrice, flow.gamepassName ?? "геймпасс");
+      return;
+    }
+
+    /* dir_key: «сделайте пасс за меня». Первый по порядку путь везде, где пасса
+       нет или он не той цены (решение владельца 08.09.2026): один ключ — и
+       геймпассы перестают быть заботой покупателя навсегда. */
+    if (data === CB.directKey) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      await ctx.answerCbQuery().catch(() => {});
+      if (!flow?.robloxUsername || !flow.passPrice) {
+        await ctx.reply("Начни заново — пришли ник Roblox.", Markup.inlineKeyboard([
+          [Markup.button.callback("◀️ Назад", CB.directBack)],
+        ]));
+        return;
+      }
+      if (!gamepassAutocreateEnabled()) {
+        await ctx.reply(
+          "Этот способ сейчас недоступен — создай геймпасс по инструкции, там всё по шагам.",
+          Markup.inlineKeyboard([
+            [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
+            [Markup.button.callback("◀️ Назад", CB.directBack)],
+          ]),
+        );
+        return;
+      }
+      // Ключ придёт обычным текстом — снимаем ожидание ника, иначе длинная
+      // строка уедет в разбор ника («это не похоже на ник»).
+      pendingDirectFlow.set(ctx.from.id, { ...flow, step: "gamepass" });
+      pendingDirectKey.set(ctx.from.id, { nick: flow.robloxUsername, passPrice: flow.passPrice });
+      await showQuest(ctx, questKeyScreen({
+        targets: [{ amount: flow.totalAmount ?? 0, price: flow.passPrice }],
+        wbCode: "",
+        nick: flow.robloxUsername,
+        backTo: CB.directBack,
+      }));
+      return;
+    }
+
     // dir_submit: user confirms the full intent → save to DB and choose payment
     if (data === CB.directSubmit) {
       const flow = pendingDirectFlow.get(ctx.from.id);
@@ -5572,10 +5746,17 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
+      /* Цена пасса в карточке заявки — обязательна. Раньше здесь была голая
+         строка без неё, а богатая карточка `sendAdminIntentCard` с проверкой
+         цены не вызывалась ниоткуда: заявка с пассом не по номиналу выглядела
+         как обычная (DIR-39544969, 08.09.2026). */
+      const gpOk = Math.abs((flow.gamepassRobux ?? flow.passPrice!) - flow.passPrice!) <= 2;
       await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
         id,
         `🔷 <b>Новая заявка · клиент выбирает оплату</b>\n` +
-        `Канал: TG · Ник: <b>${escapeHtml(flow.robloxUsername!)}</b> · ${flow.totalAmount} R$ · ${fmtRub(flow.rublePrice!)}`,
+        `Канал: TG · Ник: <b>${escapeHtml(flow.robloxUsername!)}</b> · ${flow.totalAmount} R$ · ${fmtRub(flow.rublePrice!)}\n` +
+        `🎫 Пасс: <b>${flow.gamepassRobux ?? "?"} R$</b>` +
+        (gpOk ? ` (норма)` : ` ⚠️ <b>ожидалось ${flow.passPrice} R$</b>`),
       )));
 
       const receiptLine = dirUser.email
@@ -6621,15 +6802,33 @@ export async function notifyUserCompleted(
   });
   if (m.kind === "tier2") console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
 
+  /* Исход доставки — факт заказа, а не «побочный эффект». Раньше здесь стоял
+     голый `catch { /* user may have blocked the bot *\/ }`: заблокировавший бота
+     покупатель молча оставался без единственного сообщения о том, что заказ
+     закрыт, и в заказе об этом не было ни строчки (49ANALQ, 08.09.2026). */
+  let delivered = false;
+  let bonusDelivered = false;
+  let channel: "tg" | "vk" | "none" = "none";
+
   if (user.tgId) {
+    channel = "tg";
     try {
       await bot.telegram.sendMessage(user.tgId, m.tgMsg1, { parse_mode: "HTML" });
+      delivered = true;
+    } catch (err) {
+      console.warn("[TG] сообщение о выкупе не доставлено:", (err as Error)?.message ?? err);
+    }
+    try {
       const keyboard = Markup.inlineKeyboard(m.buttons.map((b) => [Markup.button.callback(b.label, b.command)]));
       await bot.telegram.sendMessage(user.tgId, m.tgMsg2, { parse_mode: "HTML", ...keyboard });
+      bonusDelivered = true;
       if (m.kind === "review_pitch") pendingReview.set(parseInt(user.tgId), orderId);
-    } catch { /* user may have blocked the bot */ }
+    } catch (err) {
+      console.warn("[TG] бонусное сообщение не доставлено:", (err as Error)?.message ?? err);
+    }
   } else if (user.vkId) {
-    await vkSend(user.vkId, m.vkMsg1);
+    channel = "vk";
+    delivered = Boolean(await vkSend(user.vkId, m.vkMsg1));
     const vkKb = JSON.stringify({
       inline: true,
       buttons: m.buttons.map((b) => [{
@@ -6637,8 +6836,16 @@ export async function notifyUserCompleted(
         color: b.command === "start_direct" ? "positive" : "primary",
       }]),
     });
-    await vkSend(user.vkId, m.vkMsg2, { keyboard: vkKb });
+    bonusDelivered = Boolean(await vkSend(user.vkId, m.vkMsg2, { keyboard: vkKb }));
   }
+
+  await recordCompletedNotice(db as never, {
+    orderId,
+    wbCode: order?.wbCode ?? "—",
+    amount,
+    userDisplay: user.tgId ? `tg:${user.tgId}` : user.vkId ? `vk:${user.vkId}` : "—",
+    result: { delivered, bonusDelivered, channel },
+  }).catch((err) => console.warn("[TG] след доставки не записан:", err?.message ?? err));
 }
 
 async function notifyUserRejected(

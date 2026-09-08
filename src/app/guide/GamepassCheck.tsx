@@ -629,7 +629,7 @@ export default function GamepassCheck({
                 <p>
                   {toCreate.length > 1
                     ? <>Нужны два: на <b>{toCreate[0].price}</b> и <b>{toCreate[1].price} R$</b>. Способ один на оба — выбирай любой, результат одинаковый.</>
-                    : <>Нужен один геймпасс за <b>{toCreate[0].price} R$</b>. {keyAutoEnabled && storedKey ? "Быстрее всего — первым способом: ключ у нас уже есть." : `Сделать его можно ${keyAutoEnabled ? "тремя способами" : "двумя способами"} — выбирай любой, результат одинаковый.`}</>}
+                    : <>Нужен один геймпасс за <b>{toCreate[0].price} R$</b>. {keyAutoEnabled && storedKey ? "Быстрее всего — первым способом: ключ у нас уже есть." : `Сделать его можно ${keyAutoEnabled ? "тремя способами" : "двумя способами"} — результат одинаковый, но первый быстрее всех.`}</>}
                 </p>
               </div>
               {storedErr && <div className="wbi-warn" style={{ marginBottom: 12 }}>{storedErr}</div>}
@@ -647,26 +647,29 @@ export default function GamepassCheck({
                     <span className="a" aria-hidden="true">›</span>
                   </button>
                 )}
-                <button className="wbi-opt usual" onClick={() => setStage("manual")}>
-                  <span className="i">📖</span>
-                  <span>
-                    <span className="t">Создам сам <em>(инструкция)</em></span>
-                    <span className="s">Покажем каждое нажатие с картинкой. Ничего сложного, просто по шагам.</span>
-                    <span className="chip">обычный путь · 3–5 минут</span>
-                  </span>
-                  <span className="a" aria-hidden="true">›</span>
-                </button>
-                {keyAutoEnabled && (
+                {/* Порядок путей: сначала ключ, потом ручная инструкция, потом
+                    «пасс уже есть» (решение владельца 08.09.2026). Раньше первым
+                    стоял самый долгий путь, а самый быстрый читался как экзотика. */}
+                {keyAutoEnabled && !storedKey && (
                   <button className="wbi-opt key" onClick={() => setStage("key")}>
                     <span className="i">🔑</span>
                     <span>
                       <span className="t">Сделайте за меня<span className="wbi-new">НОВОЕ</span></span>
-                      <span className="s">Пришлёшь один ключ из Roblox — создадим сами. Пароль не нужен.</span>
+                      <span className="s">Пришлёшь один ключ из Roblox — создадим сами. Пароль не нужен. Настроил один раз — и про геймпассы можно забыть.</span>
                       <span className="chip">минута</span>
                     </span>
                     <span className="a" aria-hidden="true">›</span>
                   </button>
                 )}
+                <button className="wbi-opt usual" onClick={() => setStage("manual")}>
+                  <span className="i">📖</span>
+                  <span>
+                    <span className="t">Создам сам <em>(инструкция)</em></span>
+                    <span className="s">Покажем каждое нажатие с картинкой. Ничего сложного, просто по шагам.</span>
+                    <span className="chip">3–5 минут</span>
+                  </span>
+                  <span className="a" aria-hidden="true">›</span>
+                </button>
                 <button className="wbi-opt" onClick={() => setStage("passid")}>
                   <span className="i">🔢</span>
                   <span>
@@ -678,7 +681,9 @@ export default function GamepassCheck({
                 </button>
               </div>
               <div className="wbi-note" style={{ marginTop: 14, textAlign: "center" }}>
-                Не знаешь, что выбрать? Жми первый — это обычный путь.
+                {keyAutoEnabled
+                  ? "Не знаешь, что выбрать? Жми первый — это самый быстрый путь, и он же избавит от возни в следующий раз."
+                  : "Не знаешь, что выбрать? Жми первый — это обычный путь."}
               </div>
             </section>
           )}

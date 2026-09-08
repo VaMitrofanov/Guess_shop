@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { BONUS_REASONS, applyBonusDeltaTx, directOrderBonusKey } from "@/lib/bonus-ledger";
 import { hashStatusToken } from "@/lib/canonical-web-order";
 import { deterministicBotPublicOrderId, deterministicBotStatusToken } from "@/lib/bot-payment-auth";
+import { getGamepassById } from "@/lib/roblox";
+import { expectedGamepassPrice } from "../../bots/shared/gamepass-plan";
+import { passFitsAmount } from "../../bots/shared/direct-requote";
 
 export const BOT_ORDER_TERMS_VERSION = "2026-08-09";
 export const DIRECT_INTENT_TTL_MS = 24 * 60 * 60_000;
@@ -13,7 +16,7 @@ export type BotPlatform = "TG" | "VK";
 
 export class BotPaymentError extends Error {
   constructor(
-    public readonly code: "NOT_FOUND" | "ALREADY_PROCESSED" | "EXPIRED" | "BENEFITS_CHANGED" | "CONFIGURATION",
+    public readonly code: "NOT_FOUND" | "ALREADY_PROCESSED" | "EXPIRED" | "BENEFITS_CHANGED" | "CONFIGURATION" | "GAMEPASS_CHANGED",
     message: string,
   ) {
     super(message);
@@ -43,6 +46,57 @@ export async function findExistingBotOrder(intentId: string, platform: BotPlatfo
   return order;
 }
 
+/**
+ * Пасс заявки всё ещё тот, за который человек собирается платить?
+ *
+ * Бросает `GAMEPASS_CHANGED` с текстом для покупателя. Молчит (пропускает),
+ * только если Roblox недоступен: отказывать в оплате из-за нашей недоступности
+ * нельзя — на этот случай остаётся прайс-гард выкупа.
+ */
+async function assertIntentGamepassStillValid(intentId: string, platform: BotPlatform, subject: string) {
+  const intent = await prisma.directIntent.findUnique({
+    where: { id: intentId },
+    include: { user: { select: { tgId: true, vkId: true } } },
+  });
+  if (!intent || !actorMatches(intent as never, platform, subject)) return;
+  const gamepassId = intent.gamepassId ?? intent.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/)?.[1];
+  if (!gamepassId) return;
+
+  const pass = await getGamepassById(String(gamepassId)).catch(() => null);
+  // Roblox молчит — не наш повод не пускать оплату.
+  if (!pass || !pass.price) return;
+
+  if (pass.isForSale === false) {
+    throw new BotPaymentError("GAMEPASS_CHANGED", "Геймпасс снят с продажи — включи «Item for sale» и оформи заказ заново");
+  }
+  if (!passFitsAmount(pass.price, intent.totalAmount)) {
+    const need = expectedGamepassPrice(intent.totalAmount);
+    throw new BotPaymentError(
+      "GAMEPASS_CHANGED",
+      `Цена геймпасса изменилась: сейчас ${pass.price} R$, а для ${intent.totalAmount} R$ нужен пасс на ${need} R$. Поправь цену и оформи заказ заново`,
+    );
+  }
+  if (intent.robloxUsername && pass.creatorName
+      && pass.creatorName.toLowerCase() !== intent.robloxUsername.toLowerCase()) {
+    throw new BotPaymentError("GAMEPASS_CHANGED", "Геймпасс принадлежит другому аккаунту Roblox — оформи заказ заново со своим");
+  }
+
+  /* Уже выкупленный нами пасс второй раз не продаётся: Roblox ответит
+     `AlreadyOwned`, а другой донор заплатил бы за то, что у нас уже есть.
+     Клиент Kratos01395 привязал к заказу на 200 R$ пасс, купленный нами
+     четырьмя днями раньше по другому заказу (08.09.2026). */
+  const reused = await prisma.wbOrder.findFirst({
+    where: { gamepassId: String(gamepassId), status: "COMPLETED", isTest: false },
+    select: { wbCode: true },
+  }).catch(() => null);
+  if (reused) {
+    throw new BotPaymentError(
+      "GAMEPASS_CHANGED",
+      "Этот геймпасс уже выкуплен по прошлому заказу — создай новый и оформи заказ заново",
+    );
+  }
+}
+
 export async function createCanonicalBotOrder(input: {
   intentId: string;
   platform: BotPlatform;
@@ -59,6 +113,14 @@ export async function createCanonicalBotOrder(input: {
 
   const existing = await findExistingBotOrder(input.intentId, input.platform, input.subject);
   if (existing) return { order: existing, attempt: existing.paymentAttempts[0], attemptCount: existing.paymentAttempts.length, statusToken, alreadyExists: true };
+
+  /* Пасс перепроверяется ПЕРЕД созданием заказа — тем же правилом, что и на
+     сайте (`validateCheckoutGamepass`). До 08.09.2026 бот копировал пасс из
+     заявки как есть: ни цены, ни владельца, ни «в продаже». Заявка живёт до
+     суток, и за это время цену можно поднять — ровно этот вектор закрывал
+     прайс-гард выкупа, но там он срабатывает, когда деньги уже приняты.
+     Проверка стоит до транзакции: ходить в Roblox из неё нельзя. */
+  await assertIntentGamepassStillValid(input.intentId, input.platform, input.subject);
 
   const result = await prisma.$transaction(async (tx) => {
     const intent = await tx.directIntent.findUnique({

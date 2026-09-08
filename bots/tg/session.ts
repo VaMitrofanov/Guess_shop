@@ -6,6 +6,8 @@
  * replace this with a Redis-backed store.
  */
 
+import type { DirectRequote } from "../shared/direct-requote";
+
 export interface LinkState {
   wbCode:      string;
   denomination: number;
@@ -50,6 +52,8 @@ export interface DirectFlowState {
   gamepassName?: string;
   /** Actual price of the picked gamepass (may differ from expected passPrice). */
   gamepassRobux?: number;
+  /** Пересчёт заказа под цену выбранного пасса — предложен, ещё не применён. */
+  requote?: DirectRequote;
 }
 export const pendingDirectFlow = new Map<number, DirectFlowState>();
 
@@ -177,3 +181,10 @@ export const questPlans = new Map<number, QuestPlanState>();
  * бот удаляет сразу после чтения.
  */
 export const pendingApiKey = new Map<number, { wbCode: string; denomination: number; nick: string }>();
+
+/**
+ * То же, но для ПРЯМОГО заказа: у него ещё нет ни кода, ни заказа в базе —
+ * только цена пасса, который надо создать, и ник. Отдельный стейт, потому что
+ * возврат после создания идёт не в квест WB, а в итог прямого заказа.
+ */
+export const pendingDirectKey = new Map<number, { nick: string; passPrice: number }>();

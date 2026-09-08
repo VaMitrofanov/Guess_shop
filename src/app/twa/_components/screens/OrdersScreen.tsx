@@ -2242,6 +2242,28 @@ function OrderCard({
     return () => cancelAnimationFrame(frame);
   }, [scrollTo, expanded]);
 
+  /* Повтор уведомления о выкупе. Кнопка нужна ровно там, где след доставки
+     сказал «не дошло»: без неё единственный выход — писать клиенту руками. */
+  const [resendBusy, setResendBusy] = useState(false);
+  async function resendCompletedNotice() {
+    if (resendBusy) return;
+    setResendBusy(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "resend-completed-notice", orderId: order.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      haptic.notify(d.delivered ? "success" : "error");
+      toast(d.delivered ? `✅ ${d.msg}` : `⛔ ${d.msg}`, d.delivered ? "success" : "error");
+      onMoved();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setResendBusy(false); }
+  }
+
   async function gpwNotify() {
     if (gpwLoading) return;
     setGpwLoading(true);
@@ -2366,6 +2388,9 @@ function OrderCard({
      безличное «вручную», и рядом, через точку, шло имя КЛИЕНТА — строка
      читалась как «выкуп вручную Анфисой» (49ANALQ). */
   const boughtBy = order.purchaserUsername ?? order.completedBy ?? null;
+  /* Машинная строка следа доставки. Читаем её, а не «отправляли ли мы»: до
+     08.09.2026 отправка ничего о себе не сообщала. */
+  const noticeFailed = (order.adminNote ?? "").includes("[УВЕД-НЕ-ДОШЛО");
 
   /* ── Четыре строки и три крупные цели ────────────────────────────────────
      Карточка обслуживает ручной цикл выкупа: скопировал ID → купил в доноре →
@@ -2414,6 +2439,42 @@ function OrderCard({
     setCopied(mark);
     setTimeout(() => setCopied(c => (c === mark ? null : c)), 1400);
     toast(toastText, "success");
+  }
+
+  /* Копирование ID пасса — последний момент перед тем, как деньги уйдут в
+     доноре: дальше человек покупает вручную и возвращается уже с фактом. Здесь
+     и спрашиваем Roblox заново — пока выкуп ручной, это единственная проверка
+     цены на пути (ЦЕНА-СТОП живёт в автовыкупе, которым сейчас не пользуются).
+     Проверка живая, а не из `liveMap`: цену могли поднять минуту назад. */
+  async function copyPassAndVerify(text: string, label: string) {
+    copyAnd(text, "pass", `${label} скопирован`);
+    if (order.status === "COMPLETED" || order.status === "REJECTED") return;
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "gp-live-check", orderIds: [order.id] }),
+      });
+      const d = await r.json().catch(() => null);
+      const info = d?.results?.[order.id];
+      if (!info) return;
+      if (info.reusedIn) {
+        haptic.notify("error");
+        toast(`♻️ СТОП: пасс уже выкуплен в ${info.reusedIn} — второй раз не покупается`, "error");
+        return;
+      }
+      if (info.isForSale === false) {
+        haptic.notify("error");
+        toast("⛔ СТОП: пасс снят с продажи", "error");
+        return;
+      }
+      if (info.priceMismatch && info.livePrice != null) {
+        haptic.notify("error");
+        toast(`⛔ СТОП: пасс ${info.livePrice} R$ ≠ нужных ${info.expected} R$ — не выкупать`, "error");
+        return;
+      }
+      toast(`✓ цена сходится: ${info.livePrice} R$`, "success");
+    } catch { /* проверка не обязана мешать копированию */ }
   }
 
   // Компактная сводка используется дважды: строкой в ленте и шапкой detail-sheet.
@@ -2502,7 +2563,10 @@ function OrderCard({
             onClick={e => {
               e.stopPropagation();
               if (copySlot.hint) { void gpwNotify(); return; }
-              copyAnd(copySlot.text, "pass", splitIds.length > 0 ? `${splitIds.length} ID скопированы` : "ID пасса скопирован");
+              // Разбитый заказ проверяется по своим частям в блоке разбиения —
+              // сверять пачку с номиналом ВСЕГО заказа было бы ложной тревогой.
+              if (splitIds.length > 0) copyAnd(copySlot.text, "pass", `${splitIds.length} ID скопированы`);
+              else void copyPassAndVerify(copySlot.text, "ID пасса");
             }}
           >
             <i>{copySlot.hint ? "👁" : copied === "pass" ? "✓" : "⧉"}</i>
@@ -2751,6 +2815,15 @@ function OrderCard({
             <span style={{ color: C.red, fontWeight: 600 }}>геймпасс не на продаже</span>
           </DataRow>
         )}
+        {/* Пасс уже выкуплен по другому заказу: второй раз тот же донор его не
+            купит, а другой заплатит за то, что у нас уже есть (DIR-39544969). */}
+        {live?.reusedIn && (
+          <DataRow icon="♻️">
+            <span style={{ color: C.red, fontWeight: 600 }}>
+              Этот пасс уже выкуплен в заказе {live.reusedIn}
+            </span>
+          </DataRow>
+        )}
         {order.buyoutErrorCode === "REGIONAL_PRICE" && (
           <DataRow icon="🌍">
             <span style={{ color: C.red, fontWeight: 600 }}>
@@ -2788,6 +2861,13 @@ function OrderCard({
             </span>
           </DataRow>
         )}
+        {/* Дошло ли до покупателя «заказ выкуплен». Строку пишет сам сервер
+            после отправки; пока её нет — заказ закрыт до появления следа. */}
+        {order.status === "COMPLETED" && noticeFailed && (
+          <DataRow icon="📵">
+            <span style={{ color: C.red, fontWeight: 600 }}>Покупатель НЕ извещён о выкупе</span>
+          </DataRow>
+        )}
         {order.status === "COMPLETED" && order.reviewStatus && (() => {
           const granted = order.user.reviewBonusGrantedAt;
           if (order.reviewStatus === "PENDING") {
@@ -2816,6 +2896,25 @@ function OrderCard({
             </DataRow>
           );
         })()}
+
+        {/* 📨 Повтор уведомления о выкупе. Стоит у КАЖДОГО закрытого заказа, а не
+            только у провалившегося: «клиент говорит, что ничего не получал» —
+            обычный разговор, и ответ на него должен быть в один тап. */}
+        {order.status === "COMPLETED" && (
+          <button
+            className="twa-press-sm"
+            disabled={resendBusy}
+            onClick={e => { e.stopPropagation(); resendCompletedNotice(); }}
+            style={{
+              width: "100%", marginTop: 8, padding: "10px", borderRadius: 10,
+              border: `1px solid ${noticeFailed ? C.red + "77" : C.border}`,
+              background: "transparent", color: noticeFailed ? C.red : C.textSecondary,
+              fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: resendBusy ? 0.5 : 1,
+            }}
+          >
+            {resendBusy ? "Отправляю…" : noticeFailed ? "📨 Отправить уведомление ещё раз" : "📨 Повторить уведомление о выкупе"}
+          </button>
+        )}
 
         {/* Notes */}
         <div style={{ marginTop: 8 }}>
@@ -3318,6 +3417,8 @@ export default function OrdersScreen({
   // Прайс-гард (Ш4): живая цена ГП для карточек выкупных статусов —
   // бейдж «⚠️ цена ≠ номиналу» до нажатия «Выкупить», не блокируя список.
   const [liveMap, setLiveMap] = useState<Record<string, GpLiveInfo>>({});
+  /** Заказы, по которым запрос живой проверки прямо сейчас в полёте. */
+  const liveInFlightRef = useRef<Set<string>>(new Set());
   const liveRequestedRef = useRef<Set<string>>(new Set());
 
   const applyCache = useCallback((list: Order[]): Order[] =>
@@ -3501,16 +3602,22 @@ export default function OrdersScreen({
 
   // gp-live-check для карточек с геймпассом в выкупных статусах (сервер отдаёт
   // expected/livePrice/priceMismatch, режет пачку до 30). Ошибки не критичны.
+  /* Живую проверку помечаем выполненной ПОСЛЕ ответа, а не до запроса.
+     До 08.09.2026 id попадал в «уже спрошено» перед fetch, а сам ответ
+     отбрасывался, если список успел смениться (`cancelled` в cleanup). Список
+     же меняется от первого символа в поиске — и найденная карточка оставалась
+     без цены пасса навсегда: ровно поэтому расхождение 715 R$ против 286 R$ по
+     DIR-39544969 не было видно ни в ленте, ни в досье. */
   useEffect(() => {
     const need = allOrders
       .filter(o => o.gamepassUrl
         && ["PENDING", "IN_PROGRESS", "ERROR"].includes(o.status)
-        && !liveRequestedRef.current.has(o.id))
+        && !liveRequestedRef.current.has(o.id)
+        && !liveInFlightRef.current.has(o.id))
       .map(o => o.id)
       .slice(0, 30);
     if (need.length === 0) return;
-    need.forEach(id => liveRequestedRef.current.add(id));
-    let cancelled = false;
+    need.forEach(id => liveInFlightRef.current.add(id));
     (async () => {
       try {
         const r = await fetch("/api/twa/orders", {
@@ -3519,11 +3626,13 @@ export default function OrdersScreen({
           body: JSON.stringify({ action: "gp-live-check", orderIds: need }),
         });
         const d = await r.json().catch(() => null);
-        if (cancelled || !r.ok || !d?.results) return;
+        if (!r.ok || !d?.results) return;
+        // Успех — только теперь заказ считается спрошенным.
+        Object.keys(d.results).forEach(id => liveRequestedRef.current.add(id));
         setLiveMap(prev => ({ ...prev, ...d.results }));
-      } catch { /* non-fatal */ }
+      } catch { /* следующий проход попробует снова */ }
+      finally { need.forEach(id => liveInFlightRef.current.delete(id)); }
     })();
-    return () => { cancelled = true; };
   }, [allOrders, token]);
 
   const loadMore = useCallback(() => {
