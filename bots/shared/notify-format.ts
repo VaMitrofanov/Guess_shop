@@ -112,6 +112,22 @@ export function denomLine(denomination: number | null | undefined, priceKopecks?
   return parts.length ? parts.join(" · ") : null;
 }
 
+const ORDER_STATUS_WORDS: Record<string, string> = {
+  AWAITING_PAYMENT:  "ждёт оплаты",
+  PAYMENT_PENDING:   "оплата в обработке",
+  AWAITING_GAMEPASS: "ждёт ссылку на геймпасс",
+  PENDING:           "в очереди на выкуп",
+  IN_PROGRESS:       "выкупается",
+  COMPLETED:         "выкуплен",
+  REJECTED:          "отклонён",
+  ERROR:             "ошибка выкупа",
+};
+
+/** Статус заказа человеческим языком; незнакомый показываем как есть. */
+export function orderStatusWord(status: string): string {
+  return ORDER_STATUS_WORDS[status] ?? status;
+}
+
 /** Время по Москве — единственная зона, в которой владелец читает сообщения. */
 export function mskTime(date: Date): string {
   return date.toLocaleTimeString("ru-RU", {

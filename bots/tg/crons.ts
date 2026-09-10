@@ -18,6 +18,7 @@ import { startWbDeliveryWorker } from "../shared/wb-delivery-sync";
 import { getGamepassDetails } from "../shared/roblox";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
+import { priceWatchFlagged, priceWatchTargets, type PriceWatchPart } from "../shared/queued-price-watch";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -472,58 +473,75 @@ async function sweepStalePurchaseBatches(): Promise<void> {
  * значит между приёмом и покупкой нет ни одной автоматической проверки — этот
  * проход её и добавляет.
  *
- * Помечаем ОДИН раз на заказ: строка в заметке одновременно и след для админа,
+ * Помечаем ОДИН раз на пасс: строка в заметке одновременно и след для админа,
  * и защита от повторного алерта каждые пятнадцать минут.
+ *
+ * С чем сверять цену — решает `queued-price-watch.ts`: у разбитого заказа
+ * эталон это номинал ЧАСТИ, а не заказа.
  */
 async function watchQueuedGamepassPrices(): Promise<void> {
   const orders = await (db as any).wbOrder.findMany({
     where: {
       isTest: false,
       status: { in: ["PENDING", "IN_PROGRESS"] },
-      gamepassId: { not: null },
       heldAt: null,
+      OR: [{ gamepassId: { not: null } }, { splitGamepasses: { some: {} } }],
     },
-    select: { id: true, wbCode: true, amount: true, gamepassId: true, adminNote: true, robloxUsername: true },
+    select: {
+      id: true, wbCode: true, amount: true, gamepassId: true, adminNote: true, robloxUsername: true,
+      splitGamepasses: {
+        select: { gamepassId: true, amount: true, purchasedAt: true, position: true },
+        orderBy: { position: "asc" },
+      },
+    },
     orderBy: { pendingAt: "asc" },
     take: 60,
   });
 
-  for (const order of orders as Array<{ id: string; wbCode: string; amount: number; gamepassId: string; adminNote: string | null; robloxUsername: string | null }>) {
-    const note = order.adminNote ?? "";
-    // Уже помечен — второй алерт по тому же заказу ничего не добавляет.
-    if (note.includes("[ЦЕНА-ИЗМЕНИЛАСЬ") || note.includes("[ПАСС-СНЯТ")) continue;
+  for (const order of orders as Array<{ id: string; wbCode: string; amount: number; gamepassId: string | null; adminNote: string | null; robloxUsername: string | null; splitGamepasses: PriceWatchPart[] }>) {
+    let note = order.adminNote ?? "";
 
-    const pass = await getGamepassDetails(String(order.gamepassId)).catch(() => null);
-    // Roblox молчит — это не повод обвинять покупателя.
-    if (!pass || pass.validationSkipped) continue;
+    for (const target of priceWatchTargets(order)) {
+      if (priceWatchFlagged(note, target.gamepassId)) continue;
 
-    const expected = expectedGamepassPrice(order.amount);
-    const priceBad = Math.abs(pass.price - expected) > 2;
-    if (pass.isActive && !priceBad) continue;
+      const pass = await getGamepassDetails(target.gamepassId).catch(() => null);
+      // Roblox молчит — это не повод обвинять покупателя.
+      if (!pass || pass.validationSkipped) continue;
 
-    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-    const line = !pass.isActive
-      ? `[ПАСС-СНЯТ ${stamp}] пасс ${order.gamepassId} снят с продажи после приёма заказа`
-      : `[ЦЕНА-ИЗМЕНИЛАСЬ ${stamp}] пасс ${order.gamepassId}: ${pass.price} R$ вместо ${expected} R$ — выкупать нельзя`;
+      const expected = expectedGamepassPrice(target.amount);
+      const priceBad = Math.abs(pass.price - expected) > 2;
+      if (pass.isActive && !priceBad) continue;
 
-    await (db as any).wbOrder.update({
-      where: { id: order.id },
-      data: { adminNote: (note ? `${note}\n${line}` : line).slice(-2000) },
-    }).catch(() => {});
+      const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+      const scope = target.partLabel ? ` (${target.partLabel}, номинал ${target.amount} R$)` : "";
+      const line = !pass.isActive
+        ? `[ПАСС-СНЯТ ${stamp}] пасс ${target.gamepassId}${scope} снят с продажи после приёма заказа`
+        : `[ЦЕНА-ИЗМЕНИЛАСЬ ${stamp}] пасс ${target.gamepassId}${scope}: ${pass.price} R$ вместо ${expected} R$ — выкупать нельзя`;
 
-    const text = formatAdminNotice({
-      marker: "urgent",
-      zone: "ВЫКУП",
-      title: pass.isActive ? "цену пасса подменили ПОСЛЕ приёма" : "пасс сняли с продажи после приёма",
-      lines: [
-        orderRef({ code: order.wbCode, denomination: order.amount }, [order.robloxUsername ?? "—"]),
-        pass.isActive
-          ? `🎫 Пасс <code>${order.gamepassId}</code>: <b>${pass.price} R$</b> вместо <b>${expected} R$</b>`
-          : `🎫 Пасс <code>${order.gamepassId}</code> больше не продаётся`,
-      ],
-      next: "не выкупать — написать покупателю или отклонить заказ",
-    });
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+      note = (note ? `${note}\n${line}` : line).slice(-2000);
+      await (db as any).wbOrder.update({
+        where: { id: order.id },
+        data: { adminNote: note },
+      }).catch(() => {});
+
+      const partLine = target.partLabel
+        ? `🧩 Разбивка: ${target.partLabel} · номинал <b>${target.amount} R$</b>`
+        : null;
+      const text = formatAdminNotice({
+        marker: "urgent",
+        zone: "ВЫКУП",
+        title: pass.isActive ? "цену пасса подменили ПОСЛЕ приёма" : "пасс сняли с продажи после приёма",
+        lines: [
+          orderRef({ code: order.wbCode, denomination: order.amount }, [order.robloxUsername ?? "—"]),
+          partLine,
+          pass.isActive
+            ? `🎫 Пасс <code>${target.gamepassId}</code>: <b>${pass.price} R$</b> вместо <b>${expected} R$</b>`
+            : `🎫 Пасс <code>${target.gamepassId}</code> больше не продаётся`,
+        ],
+        next: "не выкупать — написать покупателю или отклонить заказ",
+      });
+      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+    }
   }
 }
 

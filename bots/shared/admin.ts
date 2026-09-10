@@ -16,7 +16,7 @@ import { orderCardRoots, orderThreadRoots, replyToRoot } from "./order-thread";
 import { refreshDbsCardByCode } from "./wb-dbs-thread";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
-import { formatAdminNotice, mskTime, orderRef } from "./notify-format";
+import { formatAdminNotice, mskTime, orderRef, orderStatusWord } from "./notify-format";
 import { fmtDateRu, robuxUnlockDate } from "./completed-messages";
 import { getGamepassDetails } from "./roblox";
 export {
@@ -139,17 +139,6 @@ async function heldLinesFor(p: SupportAlertPayload): Promise<string[]> {
    Ничего не бросает: сообщение в поддержку важнее, чем справка внутри него
    (то же правило, что и у `heldLinesFor`).
    ────────────────────────────────────────────────────────────────────────── */
-
-const SUPPORT_STATUS_LABELS: Record<string, string> = {
-  AWAITING_PAYMENT:  "ждёт оплаты",
-  PAYMENT_PENDING:   "оплата в обработке",
-  AWAITING_GAMEPASS: "ждёт ссылку на геймпасс",
-  PENDING:           "в очереди на выкуп",
-  IN_PROGRESS:       "выкупается",
-  COMPLETED:         "выкуплен",
-  REJECTED:          "отклонён",
-  ERROR:             "ошибка выкупа",
-};
 
 /** Коды `buyoutErrorCode` человеческим языком; незнакомый показываем как есть. */
 const BUYOUT_ERROR_LABELS: Record<string, string> = {
@@ -276,7 +265,7 @@ async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBr
       .count({ where: { userId: order.userId, isTest: false } })
       .catch(() => 0);
 
-    const status = SUPPORT_STATUS_LABELS[order.status] ?? String(order.status);
+    const status = orderStatusWord(String(order.status));
     // Полосу называем только у DBS: там у разговора другие сроки и другой чат.
     // У обычного WB-заказа источник совпал бы с платформой из шапки — шум.
     const lane = order.orderSource === "WB_DBS" ? " · 🚚 WB DBS" : "";

@@ -3,7 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import { sendTelegramMessageId } from "@/lib/telegram";
+import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
 import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 import { verifyTelegramLogin } from "@/lib/telegram-login";
@@ -15,7 +15,7 @@ import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
 import { noteDbsBuyerSignedIn } from "../bots/shared/wb-dbs-thread";
 import { recordOrderCardRoot } from "../bots/shared/order-thread";
-import { formatAdminNotice, orderRef } from "../bots/shared/notify-format";
+import { formatAdminNotice, orderRef, orderStatusWord } from "../bots/shared/notify-format";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -268,16 +268,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               const tgToken = process.env.TG_TOKEN;
               const chatIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
                 .split(",").map((id) => id.trim()).filter(Boolean);
-              await Promise.allSettled(chatIds.map((chatId) =>
-                fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    text: `⚠️ Код ${wbCode} пытались активировать вторым аккаунтом (VK-вход). Возможен вскрытый на ПВЗ код — проверьте.`,
-                  }),
-                })
-              ));
+              // Через `sendTelegramMessage`, а не прямым fetch: прод стоит в
+              // России, api.telegram.org оттуда недоступен, и этот алерт молча
+              // никуда не уходил — ровно то, ради чего весь трафик уведён на
+              // сингапурский мост.
+              const text = formatAdminNotice({
+                marker: "urgent",
+                zone: "САЙТ",
+                title: "код активируют вторым аккаунтом",
+                lines: [
+                  orderRef({ code: wbCode }),
+                  `👤 Пытался: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a> · VK ID <code>${vkId}</code>`,
+                  `🕵️ Похоже на код, вскрытый на ПВЗ (риск №15 в docs/security.md)`,
+                ],
+                next: "проверить, кому код принадлежит, и при подтверждении заморозить его",
+              });
+              if (tgToken) {
+                await Promise.allSettled(chatIds.map((chatId) =>
+                  sendTelegramMessage(tgToken, chatId, text)));
+              }
             } catch { /* уведомление не должно ломать вход */ }
           }
 
@@ -376,7 +385,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   ],
                 };
               } else if (!foldedIntoDbsCard && shouldSendLoginNotif(vkId)) {
-                /* Голая карточка входа — только для входа БЕЗ заказа.
+                /* Карточка входа — только для входа БЕЗ активации кода.
                  *
                  * Раньше здесь стоял просто `else if`, и вход, успешно
                  * свёрнутый в живую карточку DBS, проваливался сюда: под
@@ -384,11 +393,47 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                  * 🆔 VK ID» — без кода, без номера WB и мимо ветки. Условие
                  * `!foldedIntoDbsCard` доводит до конца замысел от 01.09.2026:
                  * о заказе DBS говорит одна карточка, и личность покупателя
-                 * теперь строка в ней самой. */
-                msg =
-                  `${isNewUser ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
-                  `👤 ${escapeHtml(name)}\n` +
-                  `🆔 VK ID: <code>${vkId}</code>`;
+                 * теперь строка в ней самой.
+                 *
+                 * Сами три строки тоже были вне общего языка: значок не кодировал
+                 * срочность, зоны не было, ключа заказа не было, и понять, зачем
+                 * сообщение показано, было нельзя (скрин владельца, 10.09.2026).
+                 * Теперь оно отвечает на «почему я это вижу»: называет живой
+                 * заказ человека, если он есть, а если его нет — говорит об этом
+                 * прямо. Синий значок: делать нечего, это ход воронки. */
+                const liveOrder = await prisma.wbOrder.findFirst({
+                  where: {
+                    userId: user.id,
+                    isTest: false,
+                    status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] },
+                  },
+                  orderBy: { createdAt: "desc" },
+                  select: { wbCode: true, amount: true, status: true },
+                }).catch(() => null);
+                // Код в ссылке был, а записи под него нет — опечатка или чужой
+                // код. Без этой строки вход выглядит беспричинным именно там,
+                // где причина есть.
+                const unknownCode = wbCode && wbCode.length === 7 && !wbCodeRecord ? wbCode : null;
+                msg = formatAdminNotice({
+                  marker: "progress",
+                  zone: "САЙТ",
+                  title: isNewUser ? "новый пользователь вошёл" : "вход на сайт",
+                  lines: [
+                    liveOrder
+                      ? orderRef(
+                          { code: liveOrder.wbCode, denomination: liveOrder.amount },
+                          [orderStatusWord(String(liveOrder.status))],
+                        )
+                      : unknownCode
+                        ? `🔎 Код <code>${escapeHtml(unknownCode)}</code> не найден — опечатка или чужой код`
+                        : `🗂 Заказа в работе нет`,
+                    `📘 Источник: <b>VK (сайт)</b>`,
+                    `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a> · VK ID <code>${vkId}</code>`,
+                  ],
+                  next: liveOrder
+                    ? "ничего — покупатель вернулся к своему заказу"
+                    : "ничего — вход без активации кода",
+                });
               }
               if (msg) {
                 const sentIds = await Promise.all(

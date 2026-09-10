@@ -79,6 +79,10 @@ export function buildWebOrderCardText(
     : "";
 
   const parts = order.splitParts ?? [];
+  // Сумма разбивки — сложение цен ЧАСТЕЙ, а не цена номинала заказа: округление
+  // вверх у каждой части даёт свой рубль, и 1000 R$ двумя частями стоят 1430, а
+  // не 1429. Админ по этой цифре набирает донора.
+  const splitGross = parts.reduce((sum, part) => sum + Math.ceil(part.amount / 0.7), 0);
   const splitLines = parts.length > 1
     ? [
         `🧩 <b>РАЗБИВКА: ${parts.length} ${parts.length === 1 ? "часть" : parts.length < 5 ? "части" : "частей"}</b> — каждую покупать с ОТДЕЛЬНОГО донора`,
@@ -102,7 +106,9 @@ export function buildWebOrderCardText(
     lines: [
       orderRef(
         { wbOrderId, code: order.wbCode, denomination: order.amount },
-        [parts.length > 1 ? `${parts.length} пасса на ${passPrice} R$ суммарно` : `геймпасс ${passPrice} R$`],
+        [parts.length > 1
+          ? `${parts.length} ${parts.length < 5 ? "пасса" : "пассов"} на ${splitGross} R$ суммарно`
+          : `геймпасс ${passPrice} R$`],
       ),
       order.viaKey
         ? `🔑 <b>ПАСС СОЗДАН ПО API-КЛЮЧУ</b> — цену и «в продаже» выставили мы`
