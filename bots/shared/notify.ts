@@ -296,6 +296,45 @@ export async function vkGetName(vkUserId: number): Promise<string> {
 }
 
 /**
+ * Разрешил ли этот человек сообществу писать ему?
+ *
+ * VK-вход на сайте создаёт профиль БЕЗ диалога с сообществом: чтобы бот мог
+ * написать, нужно нажать «Начать». Замер 11.09.2026: из 151 VK-покупателя за
+ * 30 дней **37 (24,5 %) не нажали** — им не ушло ни одного сообщения, включая
+ * «заказ выкуплен» по 17 закрытым заказам.
+ *
+ * `null` — VK не ответил (лимит, сеть). Это НЕ «нельзя писать»: вызывающий
+ * должен отличать «точно нет» от «не знаем», иначе один таймаут VK превращается
+ * в отказ обслуживать человека.
+ */
+export async function vkCanReceive(vkUserId: string | number): Promise<boolean | null> {
+  const token = process.env.VK_TOKEN;
+  const groupId = process.env.VK_GROUP_ID;
+  if (!token || !groupId) return null;
+  try {
+    const params = new URLSearchParams({
+      group_id: String(groupId),
+      user_id: String(vkUserId),
+      access_token: token,
+      v: "5.131",
+    });
+    const res = await fetch(vkApiUrl("messages.isMessagesFromGroupAllowed"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+      signal: AbortSignal.timeout(5_000),
+    });
+    const json = (await res.json().catch(() => null)) as
+      | { response?: { is_allowed?: number }; error?: unknown }
+      | null;
+    if (!json || json.error) return null;
+    return Boolean(json.response?.is_allowed);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Send a text message to a VK user. Pass `extra` for e.g. an inline `keyboard`.
  * Returns true only when VK confirmed the send — error 901 (user never wrote
  * to the community) and friends otherwise vanish silently, and callers like the

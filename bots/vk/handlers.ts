@@ -12,7 +12,7 @@
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
-import { vkGetName, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
+import { vkGetName, vkSend, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState, getQuestPlan, setQuestPlan, clearQuestPlan } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
@@ -76,6 +76,23 @@ import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
 import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/order-thread";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { wbGateUrl } from "../shared/wb-gate-link";
+import {
+  buildXlinkPayload,
+  confirmXlink,
+  linkClaimantToCodeOwner,
+  parseXlinkPayload,
+  resolveCodeClaim,
+  type CodeOwner,
+  type ConflictReason,
+} from "../shared/cross-platform-claim";
+import {
+  xlinkAdminNotice,
+  xlinkConflictText,
+  xlinkLinkedText,
+  xlinkOwnerAskText,
+  xlinkOwnerConfirmedText,
+  xlinkWaitingText,
+} from "../shared/cross-platform-notify";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -842,6 +859,35 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   if (ref) {
     await handleRefActivation(ctx, vkUserId, ref.trim().toUpperCase());
+    return;
+  }
+
+  // ── Б1: владелец кода подтверждает свою вторую площадку ──────────────────
+  if (typeof msgPayload?.command === "string" && msgPayload.command.startsWith("xlink:")) {
+    const parsed = parseXlinkPayload(msgPayload.command);
+    if (!parsed) return;
+    const presser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    if (!presser) {
+      await ctx.reply("Не нашёл твой профиль — напиши нам: https://t.me/RobloxBank_PA");
+      return;
+    }
+    const result = await confirmXlink(db as any, {
+      code: parsed.code,
+      claimantUserId: parsed.claimantUserId,
+      pressedByUserId: presser.id,
+    });
+    if (!result.ok) {
+      await ctx.reply(result.reason === "not_owner"
+        ? "Этот код уже не за тобой."
+        : "Не получилось связать — напиши нам: https://t.me/RobloxBank_PA");
+      return;
+    }
+    await ctx.reply(stripHtml(xlinkOwnerConfirmedText(parsed.code, result.claimant.tgId ? "TG" : "VK")));
+    if (result.claimant.tgId) {
+      await tgSend(result.claimant.tgId, xlinkLinkedText(parsed.code, "VK"), { parse_mode: "HTML" }).catch(() => {});
+    } else if (result.claimant.vkId) {
+      await vkSend(result.claimant.vkId, stripHtml(xlinkLinkedText(parsed.code, "TG"))).catch(() => {});
+    }
     return;
   }
 
@@ -1880,6 +1926,99 @@ async function handleHelpRef(ctx: MessageContext, vkUserId: number): Promise<voi
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Б1: код гейта открывает заказ на любой площадке
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Спросить владельца кода там, где он есть: в TG или здесь же, в VK. */
+async function askCodeOwnerFromVk(
+  owner: CodeOwner,
+  code: string,
+  claimantUserId: string,
+  claimantLabel: string,
+): Promise<void> {
+  const text = xlinkOwnerAskText(code, escapeHtml(claimantLabel), "VK");
+  const payload = buildXlinkPayload(code, claimantUserId);
+  if (owner.tgId) {
+    await tgSend(owner.tgId, text, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [[{ text: "✅ Да, это я", callback_data: payload }]] },
+    });
+    return;
+  }
+  if (owner.vkId) {
+    await vkSend(owner.vkId, stripHtml(text), {
+      keyboard: JSON.stringify({
+        inline: true,
+        buttons: [[{ action: { type: "text", label: "✅ Да, это я", payload: JSON.stringify({ command: payload }) }, color: "positive" }]],
+      }),
+    });
+  }
+}
+
+/**
+ * Код предъявлен во ВКонтакте, а числится за другим профилем.
+ *
+ * Зеркало `settleForeignCodeClaim` из TG-бота: правила одни (`resolveCodeClaim`),
+ * различаются только способ ответить человеку и клавиатура.
+ */
+async function settleForeignCodeClaimVk(
+  ctx: MessageContext,
+  vkUserId: number,
+  code: string,
+  denomination: number | null,
+  claimantName: string,
+): Promise<"proceed" | "handled"> {
+  const vkId = String(vkUserId);
+  const claimant = await (db as any).user.findUnique({ where: { vkId }, select: { id: true, name: true } });
+  const verdict = await resolveCodeClaim(db as any, {
+    code,
+    claimantUserId: claimant?.id ?? null,
+    provider: "VK",
+  });
+  if (verdict.kind === "free" || verdict.kind === "mine") return "proceed";
+
+  const claimantLabel = claimantName || `vk:${vkId}`;
+  const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
+    Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
+      kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
+      claimantLabel: escapeHtml(claimantLabel), platform: "VK", reason,
+    })))).catch(() => undefined);
+
+  if (verdict.kind === "conflict") {
+    await ctx.reply(stripHtml(xlinkConflictText()) + "\nhttps://t.me/RobloxBank_PA");
+    void notifyAdmins("conflict", verdict.reason);
+    return "handled";
+  }
+
+  if (verdict.kind === "ask_owner") {
+    const claimantUser = claimant ?? await (db as any).user.create({ data: { vkId, name: claimantName || null } });
+    await askCodeOwnerFromVk(verdict.owner, code, claimantUser.id, claimantLabel).catch((error) =>
+      console.warn("[VK] xlink: владельцу не ушло:", error?.message ?? error));
+    await ctx.reply(stripHtml(xlinkWaitingText()));
+    void notifyAdmins("asked");
+    return "handled";
+  }
+
+  try {
+    await linkClaimantToCodeOwner(db as any, {
+      ownerUserId: verdict.owner.id,
+      provider: "VK",
+      subject: vkId,
+      name: claimantName || null,
+      method: "gate-code-bearer",
+    });
+  } catch (error) {
+    console.error("[VK] xlink: слияние не прошло:", (error as Error)?.message ?? error);
+    await ctx.reply(stripHtml(xlinkConflictText()) + "\nhttps://t.me/RobloxBank_PA");
+    void notifyAdmins("conflict", "claimant_has_own_orders");
+    return "handled";
+  }
+  await ctx.reply(stripHtml(xlinkLinkedText(code, verdict.owner.tgId ? "TG" : null)));
+  void notifyAdmins("linked");
+  return "proceed";
+}
+
 async function handleRefActivation(
   ctx: MessageContext,
   vkUserId: number,
@@ -1910,30 +2049,39 @@ async function handleRefActivation(
     // If THIS user owns the code and already has a placed order (e.g. they
     // materialised it from the website one-tap), greet with the order status
     // instead of the "уже активирован" dead-end.
-    const owner = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
-    if (owner && owner.id === wbCode.userId) {
+    const greetOwnerIfPlaced = async (ownerId: string): Promise<boolean> => {
       const placedOrder = await (db as any).wbOrder.findFirst({
-        where: { userId: owner.id, wbCode: { equals: code, mode: "insensitive" } },
+        where: { userId: ownerId, wbCode: { equals: code, mode: "insensitive" } },
         orderBy: { createdAt: "desc" },
         select: { id: true, status: true },
       });
-      if (placedOrder && ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) {
-        const done = placedOrder.status === "COMPLETED";
-        await ctx.reply({
-          message: done
-            ? `✅ Заказ выполнен — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
-            : `✅ Заказ оформлен — твой геймпасс принят! 🙌\n\n` +
-              `🔑 Код ВБ: ${code}\n` +
-              `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
-              `Как только выкупим — сразу напишу сюда.`,
-          keyboard: Keyboard.builder()
-            .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
-            .row()
-            .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "primary" })
-            .inline(),
-        });
-        return;
-      }
+      if (!placedOrder || !["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) return false;
+      const done = placedOrder.status === "COMPLETED";
+      await ctx.reply({
+        message: done
+          ? `✅ Заказ выполнен — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
+          : `✅ Заказ оформлен — твой геймпасс принят! 🙌\n\n` +
+            `🔑 Код ВБ: ${code}\n` +
+            `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
+            `Как только выкупим — сразу напишу сюда.`,
+        keyboard: Keyboard.builder()
+          .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
+          .row()
+          .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "primary" })
+          .inline(),
+      });
+      return true;
+    };
+
+    const owner = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    if (owner && owner.id === wbCode.userId) {
+      if (await greetOwnerIfPlaced(owner.id)) return;
+    } else {
+      // Б1: код за другим профилем — чаще всего тот же человек со второй площадки.
+      const claimantName = await vkGetName(vkUserId);
+      if (await settleForeignCodeClaimVk(ctx, vkUserId, wbCode.code, wbCode.denomination, claimantName) === "handled") return;
+      const linked = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      if (linked && await greetOwnerIfPlaced(linked.id)) return;
     }
     await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка твоя — напиши нам: https://t.me/RobloxBank_PA");
     return;
@@ -1961,10 +2109,11 @@ async function handleRefActivation(
     });
   }
 
-  // If code is CLAIMED by a different user, block
+  // Код числится за другим профилем — Б1 решает, тупик это или вторая площадка.
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.\nНапиши нам: https://t.me/RobloxBank_PA");
-    return;
+    if (await settleForeignCodeClaimVk(ctx, vkUserId, wbCode.code, wbCode.denomination, fullName) === "handled") return;
+    user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    if (!user) return;
   }
 
   // Bonus balance is NOT applied to WB-code orders — strictly for direct bot orders only.

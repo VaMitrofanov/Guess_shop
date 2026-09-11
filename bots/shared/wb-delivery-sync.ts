@@ -16,6 +16,7 @@ import {
   deliverDbsOrder,
   fetchBuyerChatEvents,
   fetchBuyerChats,
+  fetchBuyerClaims,
   fetchCompletedDbsOrders,
   fetchDbsClients,
   fetchDbsDeliveryDates,
@@ -72,6 +73,7 @@ import {
   notifyDbsOrderCancelled,
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
+  notifyWbBuyerClaim,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
@@ -86,6 +88,7 @@ const RECHECK_STREAM = "wb-dbs-closed-recheck";
 const COMPLETED_STREAM = "wb-dbs-completed";
 const CLIENTS_STREAM = "wb-dbs-clients";
 const REMINDERS_STREAM = "wb-dbs-gate-reminders";
+const CLAIMS_STREAM = "wb-dbs-claims";
 const HEARTBEAT_KEY = "wb-dbs-sync";
 const LEASE_MS = 45_000;
 /** How far back a closed order is still re-checked for a late cancellation or
@@ -120,6 +123,8 @@ export type WbDeliverySyncResult = {
   shipped: number;
   /** Nudges sent to buyers who never opened their gate link. */
   gateReminders: number;
+  /** Заявки на возврат, впервые увиденные в этом цикле. */
+  newClaims: number;
   errorCode: string | null;
 };
 
@@ -137,6 +142,7 @@ function result(acquired = false): WbDeliverySyncResult {
     cancellations: 0,
     shipped: 0,
     gateReminders: 0,
+    newClaims: 0,
     errorCode: null,
   };
 }
@@ -1537,6 +1543,66 @@ async function purgeExpiredDeliverySecrets(db: Db) {
   });
 }
 
+/**
+ * Заявки покупателей на возврат → отметка на заказе доставки.
+ *
+ * Зачем вообще: в статусах DBS возврата не видно. `XKFFJUU` (WB 5722328333)
+ * числился `receive/sold`, покупатель уже открыл заявку («заказали подруге, а
+ * там надо создавать геймпасс»), а бот продолжал слать «ваши 500 R$ ждут
+ * получения» — два напоминания поверх открытого спора.
+ *
+ * Связь — по `srid`, это тот же `rid`, что у нашей строки доставки. Текст
+ * заявки сохраняем: чаще всего это диагноз продукту, а не жалоба на доставку,
+ * и читать его стоит целиком.
+ */
+async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
+  const seen = new Map<string, { dt: string | undefined; reason: string | undefined }>();
+  for (const isArchive of [false, true]) {
+    const page = await fetchBuyerClaims(isArchive);
+    for (const claim of page.claims) {
+      if (!claim.srid) continue;
+      // Заявок по одному заказу может быть несколько (отказ → повтор): держим
+      // самую раннюю, потому что важен момент, когда спор начался.
+      const prev = seen.get(claim.srid);
+      if (!prev || (claim.dt && prev.dt && claim.dt < prev.dt)) {
+        seen.set(claim.srid, { dt: claim.dt, reason: claim.user_comment });
+      }
+    }
+  }
+  if (seen.size === 0) return;
+
+  const orders = await db.wbMarketplaceOrder.findMany({
+    where: { rid: { in: [...seen.keys()] } },
+    select: {
+      id: true, rid: true, wbOrderId: true, claimOpenedAt: true,
+      denominationSnapshot: true, buyerName: true,
+      wbCode: { select: { code: true } },
+    },
+  });
+
+  for (const order of orders) {
+    const claim = order.rid ? seen.get(order.rid) : undefined;
+    if (!claim || order.claimOpenedAt) continue;
+    const openedAt = safeDate(claim.dt);
+    await db.wbMarketplaceOrder.update({
+      where: { id: order.id },
+      data: { claimOpenedAt: openedAt, claimReason: claim.reason?.slice(0, 500) ?? null },
+    });
+    await audit(db, order.id, "BUYER_CLAIM_SEEN", `claim:${order.id}`, {
+      openedAt: openedAt.toISOString(),
+      reason: claim.reason ?? null,
+    });
+    out.newClaims += 1;
+    await notifyWbBuyerClaim({
+      wbOrderId: order.wbOrderId,
+      code: order.wbCode?.code ?? null,
+      denomination: order.denominationSnapshot,
+      buyerName: order.buyerName,
+      reason: claim.reason ?? null,
+    }).catch(() => undefined);
+  }
+}
+
 /** Э7: a gate link nobody opened is a paid order we never delivered.
  *
  * Five of the first thirty-six codes were never opened — 14 % of paid orders
@@ -1551,6 +1617,11 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
     where: {
       isTest: false,
       cancelledAt: null,
+      // Человек уже просит деньги назад — «ваши 500 R$ ждут получения» в этот
+      // момент не напоминание, а спор. `XKFFJUU`: заявка открыта 10.09, бот
+      // напомнил и 10-го, и 11-го, потому что статус заказа у WB оставался
+      // `receive/sold` и про возврат не знал ничего.
+      claimOpenedAt: null,
       gateState: "SENT",
       gateReminderLevel: { lt: GATE_REMINDERS[GATE_REMINDERS.length - 1].level },
       gateSentAt: { not: null, lt: new Date(Date.now() - oldest) },
@@ -1722,6 +1793,15 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
         console.error(`[WbDbsSync] gate reminders skipped: ${safeErrorCode(error)}`);
       });
       await touchCursor(db, REMINDERS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
+    }
+    /* Заявки на возврат — отдельный контур WB, и статусы заказа про них не
+       знают. Раз в 15 минут: заявка живёт днями, а зря разбуженный цикл стоит
+       дороже, чем четверть часа задержки. Никогда не валит цикл. */
+    if (await streamDue(db, CLAIMS_STREAM, 15 * 60_000, force)) {
+      await syncBuyerClaims(db, out).catch((error) => {
+        console.error(`[WbDbsSync] claims skipped: ${safeErrorCode(error)}`);
+      });
+      await touchCursor(db, CLAIMS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }
 
     // «Здоров» — только когда действительно всё прошло. Частичный отказ виден

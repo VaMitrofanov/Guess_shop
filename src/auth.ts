@@ -230,17 +230,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // Link WB code if passed in credentials (works for both regular and guide mode
           // after the GD prefix has been stripped above)
           let wbCodeRecord: any = null;
-          // U8: раньше P2025 («код уже CLAIMED») ловился, логировался — и
-          // выполнение шло дальше: `provisionalOrder` подхватывал ЧУЖОЙ заказ,
-          // а `wb_code` всё равно клался в сессию. Пользователь уходил в
-          // коридор с ощущением успешной активации чужого кода. Теперь
-          // различаем «код наш» и «код занят другим аккаунтом».
+          /* U8: раньше P2025 («код уже CLAIMED») ловился, логировался — и
+             выполнение шло дальше: `provisionalOrder` подхватывал ЧУЖОЙ заказ,
+             а `wb_code` всё равно клался в сессию.
+
+             12.09.2026: у кода три состояния, а не два. Ветка «код УЖЕ МОЙ»
+             отсутствовала — повторный вход владельца проваливался в `update`
+             с условием `status: { not: "CLAIMED" }`, получал P2025 и объявлялся
+             чужой активацией. Прод за 20 часов: 4 блокировки, 2 кода, и в обоих
+             случаях «другой аккаунт» — сам владелец. Человека при этом
+             выбрасывало из собственного заказа на середине флоу. */
           let wbCodeClaimedByOther = false;
           if (wbCode && wbCode.length === 7) {
             try {
               wbCodeRecord = await (prisma as any).wbCode.findUnique({ where: { code: wbCode } });
               if (wbCodeRecord) {
-                if (wbCodeRecord.status === "CLAIMED" && wbCodeRecord.userId && wbCodeRecord.userId !== user.id) {
+                if (wbCodeRecord.userId === user.id) {
+                  // Код уже за этим человеком: повторный вход по своей же ссылке.
+                  console.log(`[auth] WbCode ${wbCode} already owned by ${user.id} — повторный вход`);
+                } else if (wbCodeRecord.userId) {
                   wbCodeClaimedByOther = true;
                 } else {
                   await (prisma as any).wbCode.update({
@@ -251,19 +259,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 }
               }
             } catch (linkErr: any) {
-              // P2025 = запись под условие не найдена, то есть код перехватили
-              // между чтением и записью. Это тот же исход «занят другим».
+              /* P2025 = под условие ничего не нашлось. Это ещё не «чужой»:
+                 гонка могла быть выиграна и нами самими. Спрашиваем базу, кто
+                 победил, и решаем по владельцу, а не по факту исключения. */
               if (linkErr?.code === "P2025") {
-                wbCodeClaimedByOther = true;
+                const winner = await (prisma as any).wbCode
+                  .findUnique({ where: { code: wbCode }, select: { userId: true } })
+                  .catch(() => null);
+                wbCodeClaimedByOther = Boolean(winner?.userId && winner.userId !== user.id);
+                if (!wbCodeClaimedByOther) {
+                  console.log(`[auth] WbCode ${wbCode}: гонку выиграли мы же (${user.id})`);
+                }
+              } else {
+                console.error("[auth] Failed to link WbCode during authorize:", linkErr);
               }
-              console.error("[auth] Failed to link WbCode during authorize:", linkErr);
             }
           }
 
           if (wbCodeClaimedByOther) {
-            // Сигнал админам: чужая активация кода — это ещё и индикатор
-            // ПВЗ-фрода (риск №15 в docs/security.md).
-            console.warn(`[auth] wb-code ${wbCode} already claimed by another account — login blocked for ${user.id}`);
+            /* Настоящий второй аккаунт: владельца у кода нет среди наших
+               идентичностей этого человека. Красный остаётся красным — но
+               теперь он значит ровно то, что написано (риск №15 в
+               docs/security.md). */
+            console.warn(`[auth] wb-code ${wbCode} claimed by a different account — login blocked for ${user.id}`);
             try {
               const tgToken = process.env.TG_TOKEN;
               const chatIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")

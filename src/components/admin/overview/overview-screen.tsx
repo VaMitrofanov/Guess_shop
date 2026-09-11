@@ -716,6 +716,7 @@ export default function OverviewScreen({
           <div className={styles.laneMeta}>
             <span>{plural(link.stale, "висяк", "висяка", "висяков")} без ссылки дольше двух недель</span>
             {link.silent > 0 && <span>бот отмолчал <b>{link.silent}</b></span>}
+            {link.unreached > 0 && <span>без единого сообщения <b>{link.unreached}</b></span>}
           </div>
           <div className={styles.laneRows}>
             <div className={styles.laneRow}>

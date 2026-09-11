@@ -1,6 +1,7 @@
 import "server-only";
 
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
+import { completedNoticeAuditLine, rescueCompletedNotice } from "../../bots/shared/notice-delivery";
 import { appendOrderAudit } from "@/lib/order-recovery";
 import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -22,6 +23,11 @@ import type { CompletedNoticeResult } from "@/lib/twa-notify";
    Первые два уровня починены там же, где сломаны. Здесь — третий: исход
    доставки становится фактом в заказе, а недоставка — поводом для алерта.
    Молчание больше не выглядит как успех.
+
+   12.09.2026. Алерт заработал — и сразу показал, что дело не в редком сбое:
+   24,5 % VK-покупателей не разрешили сообществу писать вовсе. Поэтому у
+   недоставки появился запасной канал — чат Wildberries (`wb-chat-notify`):
+   формулировки строки аудита и алерта общие с ботами.
    ───────────────────────────────────────────────────────────────────────── */
 
 function adminIds(): string[] {
@@ -31,23 +37,7 @@ function adminIds(): string[] {
     .filter(Boolean);
 }
 
-/** Что записать в заметку заказа: одна строка, читается глазами в карточке. */
-export function completedNoticeAuditLine(
-  result: Pick<CompletedNoticeResult, "delivered" | "bonusDelivered" | "channel">,
-  stamp: string,
-): string {
-  if (result.channel === "none") {
-    return `[УВЕД-НЕ-ДОШЛО ${stamp}] у покупателя нет ни TG, ни VK — сказать о выкупе некому`;
-  }
-  const via = result.channel.toUpperCase();
-  if (!result.delivered) {
-    return `[УВЕД-НЕ-ДОШЛО ${stamp}] ${via} не принял «заказ выкуплен» — покупатель НЕ знает, что заказ закрыт`;
-  }
-  if (!result.bonusDelivered) {
-    return `[УВЕД ${stamp}] ${via}: о выкупе сказали, второе сообщение (бонус/отзыв) не дошло`;
-  }
-  return `[УВЕД ${stamp}] ${via}: покупатель извещён о выкупе`;
-}
+export { completedNoticeAuditLine };
 
 /**
  * Записать исход и, если человек ничего не получил, разбудить админов.
@@ -60,10 +50,23 @@ export async function recordCompletedNotice(input: {
   wbCode: string;
   amount: number;
   userDisplay: string;
+  robloxUsername?: string | null;
+  completedAt?: Date | null;
   result: CompletedNoticeResult;
 }): Promise<void> {
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-  const line = completedNoticeAuditLine(input.result, stamp);
+
+  // Ни TG, ни VK не приняли — последняя дверь к покупателю DBS: чат WB.
+  const rescue = input.result.delivered
+    ? null
+    : await rescueCompletedNotice(prisma, {
+      wbCode: input.wbCode,
+      amount: input.amount,
+      robloxUsername: input.robloxUsername,
+      completedAt: input.completedAt,
+    });
+  const rescued = rescue?.sent === true;
+  const line = completedNoticeAuditLine(input.result, stamp, rescued);
 
   try {
     const order = await prisma.wbOrder.findUnique({
@@ -87,18 +90,25 @@ export async function recordCompletedNotice(input: {
   const failedAll = !input.result.delivered;
   const text = formatAdminNotice({
     // Человек заплатил, заказ закрыт, а он об этом не знает — это красный.
-    marker: failedAll ? "urgent" : "action",
+    // Спасённое чатом WB уведомление красным уже не является.
+    marker: rescued ? "action" : failedAll ? "urgent" : "action",
     zone: "ВЫКУП",
-    title: failedAll ? "покупатель НЕ извещён о выкупе" : "бонусное сообщение не дошло",
+    title: rescued
+      ? "покупателю сказали через чат WB"
+      : failedAll ? "покупатель НЕ извещён о выкупе" : "бонусное сообщение не дошло",
     lines: [
       orderRef({ code: input.wbCode, denomination: input.amount }, [input.userDisplay]),
-      failedAll
-        ? "📵 Telegram/VK не принял сообщение о выкупе"
-        : "📵 не дошло второе сообщение — питч отзыва или бонус",
+      rescued
+        ? "📵 Telegram/VK не принял — ушло в чат Wildberries"
+        : failedAll
+          ? `📵 Telegram/VK не принял сообщение о выкупе${rescue ? ` · чат WB тоже не сработал (${rescue.reason})` : ""}`
+          : "📵 не дошло второе сообщение — питч отзыва или бонус",
     ],
-    next: failedAll
-      ? "написать покупателю лично: он не знает, что заказ закрыт"
-      : "предложить отзыв вручную, если он нужен",
+    next: rescued
+      ? "ничего: человек узнал о выкупе, бонус и отзыв предложить вручную"
+      : failedAll
+        ? "написать покупателю лично: он не знает, что заказ закрыт"
+        : "предложить отзыв вручную, если он нужен",
   });
 
   await Promise.allSettled(

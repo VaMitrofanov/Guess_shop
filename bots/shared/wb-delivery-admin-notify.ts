@@ -77,6 +77,41 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string) {
   }, ref);
 }
 
+/**
+ * Покупатель открыл заявку на возврат.
+ *
+ * Это не «отмена»: деньги ещё у нас, заказ у WB по-прежнему `receive/sold`, и
+ * никакой другой сигнал о споре к нам не приходит. Зато текст заявки почти
+ * всегда — диагноз продукту («не знаем, как создать геймпасс»), поэтому он
+ * идёт в сообщение целиком, а не прячется за ссылкой в кабинет.
+ */
+export function notifyWbBuyerClaim(input: {
+  wbOrderId: string;
+  code: string | null;
+  denomination: number | null;
+  buyerName: string | null;
+  reason: string | null;
+}): Promise<void> {
+  const ref: DbsRef = {
+    wbOrderId: input.wbOrderId,
+    code: input.code,
+    denomination: input.denomination,
+    buyerName: input.buyerName,
+  };
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: "покупатель открыл возврат на WB",
+    lines: [
+      refLine(ref),
+      input.reason ? `💬 <i>${escapeHtml(input.reason)}</i>` : null,
+      "🔕 Напоминания по гейту для этого заказа остановлены",
+    ],
+    next: "ответить в чате WB и решить заявку в кабинете — статус заказа про неё не знает",
+  }, ref);
+  return Promise.resolve();
+}
+
 /** A WB cancellation is never routine: the buyer's money went back, and
  * whatever we opened on the back of that order has to stop. */
 export function notifyDbsOrderCancelled(

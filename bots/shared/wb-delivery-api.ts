@@ -7,11 +7,13 @@ import {
   WbDbsOrdersResponseSchema,
   WbDeliveryDatesResponseSchema,
   WbStatusesResponseSchema,
+  WbClaimsResponseSchema,
   type WbBulkMutationResponse,
 } from "./wb-delivery-contract";
 
 const MARKETPLACE_BASE = "https://marketplace-api.wildberries.ru";
 const CHAT_BASE = "https://buyer-chat-api.wildberries.ru";
+const RETURNS_BASE = "https://returns-api.wildberries.ru";
 
 type WbScope = "marketplace" | "chat";
 
@@ -137,6 +139,22 @@ export async function fetchDbsStatuses(orderIds: string[]) {
     `${MARKETPLACE_BASE}/api/marketplace/v3/dbs/orders/status/info`,
     WbStatusesResponseSchema,
     jsonBody({ ordersIds: orderIds.map(Number) }),
+  );
+}
+
+/**
+ * Заявки покупателей на возврат.
+ *
+ * Отдельный контур WB: в статусах DBS-заказа возврата не видно вообще, и заказ
+ * с открытой заявкой выглядит как обычный `receive/sold`. Архив спрашиваем
+ * тоже — решённая заявка уезжает туда сразу, а нам важен сам факт «человек
+ * просил деньги назад», а не её текущая стадия.
+ */
+export async function fetchBuyerClaims(isArchive: boolean) {
+  return requestJson(
+    "marketplace",
+    `${RETURNS_BASE}/api/v1/claims?is_archive=${isArchive ? "true" : "false"}&limit=200`,
+    WbClaimsResponseSchema,
   );
 }
 

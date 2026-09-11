@@ -85,6 +85,23 @@ import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/or
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { TG_HELP_START } from "../shared/bot-links";
 import { wbGateUrl } from "../shared/wb-gate-link";
+import {
+  buildXlinkPayload,
+  confirmXlink,
+  linkClaimantToCodeOwner,
+  parseXlinkPayload,
+  resolveCodeClaim,
+  type CodeOwner,
+  type ConflictReason,
+} from "../shared/cross-platform-claim";
+import {
+  xlinkAdminNotice,
+  xlinkConflictText,
+  xlinkLinkedText,
+  xlinkOwnerAskText,
+  xlinkOwnerConfirmedText,
+  xlinkWaitingText,
+} from "../shared/cross-platform-notify";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -656,33 +673,43 @@ export function registerStart(bot: Telegraf): void {
       // If THIS user owns the code and already has a placed order (e.g. they
       // materialised it from the website one-tap), greet with the order status
       // instead of the "уже активирован" dead-end.
-      const owner = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
-      if (owner && owner.id === wbCode.userId) {
+      const greetOwnerIfPlaced = async (ownerId: string): Promise<boolean> => {
         const placedOrder = await (db as any).wbOrder.findFirst({
-          where: { userId: owner.id, wbCode: { equals: code, mode: "insensitive" } },
+          where: { userId: ownerId, wbCode: { equals: code, mode: "insensitive" } },
           orderBy: { createdAt: "desc" },
           select: { id: true, status: true },
         });
-        if (placedOrder && ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) {
-          const done = placedOrder.status === "COMPLETED";
-          await ctx.reply(
-            (done
-              ? `✅ <b>Заказ выполнен</b> — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
-              : `✅ <b>Заказ оформлен</b> — твой геймпасс с сайта принят! 🙌\n\n` +
-                `🔑 Код ВБ: <code>${code}</code>\n` +
-                `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
-                `Как только выкупим — сразу напишу сюда.`),
-            {
-              parse_mode: "HTML",
-              link_preview_options: { is_disabled: true },
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
-                [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-              ]),
-            }
-          );
-          return;
-        }
+        if (!placedOrder || !["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) return false;
+        const done = placedOrder.status === "COMPLETED";
+        await ctx.reply(
+          (done
+            ? `✅ <b>Заказ выполнен</b> — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
+            : `✅ <b>Заказ оформлен</b> — твой геймпасс с сайта принят! 🙌\n\n` +
+              `🔑 Код ВБ: <code>${code}</code>\n` +
+              `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
+              `Как только выкупим — сразу напишу сюда.`),
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+            ]),
+          }
+        );
+        return true;
+      };
+
+      const owner = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      if (owner && owner.id === wbCode.userId) {
+        if (await greetOwnerIfPlaced(owner.id)) return;
+      } else {
+        // Б1: код за другим профилем — это чаще всего тот же человек, пришедший
+        // со второй площадки. Разбираем, а не упираемся в тупик.
+        if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
+        // Площадки связаны: заказ теперь и здесь — показываем его статус.
+        const linked = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+        if (linked && await greetOwnerIfPlaced(linked.id)) return;
       }
       await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
       return;
@@ -714,10 +741,11 @@ export function registerStart(bot: Telegraf): void {
       user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
     }
 
-    // If code is CLAIMED by a different user, block
+    // Код числится за другим профилем — Б1 решает, тупик это или вторая площадка.
     if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx) });
-      return;
+      if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
+      user = await (db as any).user.findUnique({ where: { tgId } });
+      if (!user) return;
     }
 
     // Bonus balance is NOT applied to WB-code orders — strictly for direct bot orders only.
@@ -3714,6 +3742,126 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
   return { text, buildReplyMarkup };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Б1: код гейта открывает заказ на любой площадке
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Как подписать предъявителя в сообщении владельцу и в алерте админам. */
+function tgClaimantLabel(ctx: any, tgId: string): string {
+  if (ctx.from?.username) return `@${ctx.from.username}`;
+  const name = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ");
+  return name || `tg:${tgId}`;
+}
+
+/** Спросить владельца кода там, где он есть: у себя в TG или в VK. */
+async function askCodeOwner(
+  owner: CodeOwner,
+  code: string,
+  claimantUserId: string,
+  claimantLabel: string,
+): Promise<void> {
+  const text = xlinkOwnerAskText(code, escapeHtml(claimantLabel), "TG");
+  const payload = buildXlinkPayload(code, claimantUserId);
+  if (owner.tgId) {
+    await tgSend(owner.tgId, text, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [[{ text: "✅ Да, это я", callback_data: payload }]] },
+    });
+    return;
+  }
+  if (owner.vkId) {
+    await vkSend(owner.vkId, stripHtml(text), {
+      keyboard: JSON.stringify({
+        inline: true,
+        buttons: [[{ action: { type: "text", label: "✅ Да, это я", payload: JSON.stringify({ command: payload }) }, color: "positive" }]],
+      }),
+    });
+  }
+}
+
+/**
+ * Код предъявлен в Telegram, а числится за другим профилем.
+ *
+ * `"proceed"` — дальше обычным путём: код свободен, код уже этого человека либо
+ * площадки только что связаны. `"handled"` — человеку ответили и ждать больше
+ * нечего (спросили владельца или это настоящий второй аккаунт).
+ */
+async function settleForeignCodeClaim(
+  ctx: any,
+  tgId: string,
+  code: string,
+  denomination: number | null,
+): Promise<"proceed" | "handled"> {
+  const claimant = await (db as any).user.findUnique({
+    where: { tgId },
+    select: { id: true, name: true },
+  });
+  const verdict = await resolveCodeClaim(db as any, {
+    code,
+    claimantUserId: claimant?.id ?? null,
+    provider: "TG",
+  });
+  if (verdict.kind === "free" || verdict.kind === "mine") return "proceed";
+
+  const claimantLabel = tgClaimantLabel(ctx, tgId);
+  const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
+    Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
+      kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
+      claimantLabel: escapeHtml(claimantLabel), platform: "TG", reason,
+    })))).catch(() => undefined);
+
+  if (verdict.kind === "conflict") {
+    await ctx.reply(xlinkConflictText(), {
+      parse_mode: "HTML",
+      ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx),
+    });
+    void notifyAdmins("conflict", verdict.reason);
+    return "handled";
+  }
+
+  if (verdict.kind === "ask_owner") {
+    // Владельцу нужно на что нажимать, поэтому предъявитель должен
+    // существовать в базе до вопроса — иначе подтверждать будет некого.
+    const claimantUser = claimant ?? await (db as any).user.create({
+      data: {
+        tgId,
+        name: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+        username: ctx.from?.username ?? null,
+      },
+    });
+    await askCodeOwner(verdict.owner, code, claimantUser.id, claimantLabel).catch((error) =>
+      console.warn("[TG] xlink: владельцу не ушло:", error?.message ?? error));
+    await ctx.reply(xlinkWaitingText(), { parse_mode: "HTML", ...withSupportKb("💬 Это мой заказ", "code_claimed", ctx) });
+    void notifyAdmins("asked");
+    return "handled";
+  }
+
+  // link_now: спросить некого — владельцу физически нельзя написать.
+  try {
+    await linkClaimantToCodeOwner(db as any, {
+      ownerUserId: verdict.owner.id,
+      provider: "TG",
+      subject: tgId,
+      name: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+      method: "gate-code-bearer",
+    });
+  } catch (error) {
+    console.error("[TG] xlink: слияние не прошло:", (error as Error)?.message ?? error);
+    await ctx.reply(xlinkConflictText(), {
+      parse_mode: "HTML",
+      ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx),
+    });
+    void notifyAdmins("conflict", "claimant_has_own_orders");
+    return "handled";
+  }
+  if (ctx.from?.username) {
+    await (db as any).user.updateMany({ where: { tgId }, data: { username: ctx.from.username } }).catch(() => {});
+  }
+  await ctx.reply(xlinkLinkedText(code, verdict.owner.vkId ? "VK" : null), { parse_mode: "HTML" });
+  void notifyAdmins("linked");
+  return "proceed";
+}
+
 /** Admin search logic by ID or WB Code */
 async function handleAdminSearch(ctx: any, query: string) {
   const q = query.trim().toUpperCase();
@@ -3750,6 +3898,78 @@ async function handleAdminSearch(ctx: any, query: string) {
     }
   }
 
+  const digits = query.replace(/\D/g, "");
+
+  /* Код доставки WB. Поиск по нему уже был написан — но лежал в покупательской
+     ветке (`handleWbDeliveryCodeEntry`), а у админа любой текст уходит сюда, и
+     единственный ключ, который у оператора реально на руках после разбора в
+     чате WB, не находил ничего (разбор 48BMVPF, 11.09.2026). Оракула здесь нет:
+     ветка admin-only. */
+  if (!order && /^\d{5,6}$/.test(digits)) {
+    const match = await findDbsOrderByDeliveryCode(db as any, digits).catch(() => null);
+    if (match?.activationCode) {
+      order = await (db as any).wbOrder.findFirst({
+        where: { wbCode: match.activationCode },
+        include: { user: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        return ctx.reply(
+          `📦 Код доставки <code>${digits}</code> → заказ WB <b>${match.wbOrderId}</b>, гейт <b>${match.activationCode}</b>.\n` +
+          `Заказа на выкуп ещё нет: покупатель код не активировал.`,
+          { parse_mode: "HTML" },
+        );
+      }
+    }
+  }
+
+  /* Номер заказа Wildberries. У `WbOrder` его нет — связь только через код
+     гейта (`WbMarketplaceOrder.wbOrderId → wbCode → WbOrder.wbCode`). Тот же
+     разворот, что в TWA (`gateCodesForWbOrderNumber`); бот не видит `src/`,
+     поэтому запрос повторён здесь. */
+  if (!order && digits.length >= 5) {
+    const rows = await (db as any).wbMarketplaceOrder.findMany({
+      where: { wbOrderId: { contains: digits } },
+      select: { wbOrderId: true, wbCode: { select: { code: true } } },
+      orderBy: { firstSeenAt: "desc" },
+      take: 5,
+    }).catch(() => []);
+    const codes = rows.map((row: any) => row.wbCode?.code).filter(Boolean);
+    if (codes.length) {
+      order = await (db as any).wbOrder.findFirst({
+        where: { wbCode: { in: codes } },
+        include: { user: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        return ctx.reply(
+          `📦 Заказ WB <b>${rows[0].wbOrderId}</b> → гейт <b>${codes[0]}</b>.\n` +
+          `Заказа на выкуп ещё нет: покупатель код не активировал.`,
+          { parse_mode: "HTML" },
+        );
+      }
+    }
+  }
+
+  /* Покупатель. «Написать человеку лично» — самая частая причина, по которой
+     оператор вообще сюда идёт, а искать людей бот не умел вовсе. */
+  if (!order) {
+    const clean = query.trim().replace(/^@/, "");
+    const buyerWhere: any[] = [
+      { user: { username: { equals: clean, mode: "insensitive" } } },
+      { user: { name: { contains: clean, mode: "insensitive" } } },
+      { robloxUsername: { equals: clean, mode: "insensitive" } },
+    ];
+    if (digits.length >= 5) {
+      buyerWhere.push({ user: { tgId: digits } }, { user: { vkId: digits } });
+    }
+    order = await (db as any).wbOrder.findFirst({
+      where: { OR: buyerWhere },
+      include: { user: true },
+      orderBy: { createdAt: "desc" },
+    }).catch(() => null);
+  }
+
   if (order) {
     const { text, buildReplyMarkup } = await renderOrderCard(order);
     return ctx.reply(text, {
@@ -3759,7 +3979,10 @@ async function handleAdminSearch(ctx: any, query: string) {
     });
   }
 
-  return ctx.reply("🔎 Ничего не найдено. Введи ID заказа (последние 6-8 символов) или код WB.");
+  return ctx.reply(
+    "🔎 Ничего не найдено.\n\nИщу по: ID заказа (последние 6-8 символов), коду гейта, " +
+    "коду доставки WB (5-6 цифр), номеру заказа WB, нику Roblox, @username, имени, TG/VK id.",
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3878,6 +4101,11 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
   // (bot claimed it but gamepass not sent yet), which should still be allowed through.
   if (wbCode.isUsed && wbCode.userId) {
+    const already = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+    if (!already || already.id !== wbCode.userId) {
+      // Б1: вторая площадка того же человека — не тупик.
+      if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
+    }
     await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
     return;
   }
@@ -3896,10 +4124,11 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
   }
 
-  // If code is CLAIMED by a different user, block
+  // Код числится за другим профилем — Б1 решает, тупик это или вторая площадка.
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx) });
-    return;
+    if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
+    user = await (db as any).user.findUnique({ where: { tgId } });
+    if (!user) return;
   }
 
   // Bonus balance is NOT applied to WB-code orders — strictly for direct bot orders only.
@@ -4480,6 +4709,38 @@ export function registerCallbacks(bot: Telegraf): void {
     // Dismiss Telegram's loading spinner immediately — before any DB/API work.
     // Handlers that need a visible toast re-answer below (harmless duplicate).
     await ctx.answerCbQuery().catch(() => {});
+
+    // ── Б1: владелец кода подтверждает свою вторую площадку ──────────────────
+    if (data.startsWith("xlink:")) {
+      const parsed = parseXlinkPayload(data);
+      if (!parsed) return;
+      const presser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      if (!presser) {
+        await ctx.answerCbQuery("Не нашёл твой профиль", { show_alert: true }).catch(() => {});
+        return;
+      }
+      const result = await confirmXlink(db as any, {
+        code: parsed.code,
+        claimantUserId: parsed.claimantUserId,
+        pressedByUserId: presser.id,
+      });
+      if (!result.ok) {
+        await ctx.answerCbQuery(
+          result.reason === "not_owner" ? "Этот код уже не за тобой" : "Не получилось — напиши нам",
+          { show_alert: true },
+        ).catch(() => {});
+        return;
+      }
+      await ctx.answerCbQuery("✅ Готово").catch(() => {});
+      await ctx.reply(xlinkOwnerConfirmedText(parsed.code, result.claimant.tgId ? "TG" : "VK"), { parse_mode: "HTML" });
+      // Предъявитель ждёт ответа на своей площадке — там и говорим.
+      if (result.claimant.tgId) {
+        await tgSend(result.claimant.tgId, xlinkLinkedText(parsed.code, "VK"), { parse_mode: "HTML" }).catch(() => {});
+      } else if (result.claimant.vkId) {
+        await vkSend(result.claimant.vkId, stripHtml(xlinkLinkedText(parsed.code, "TG"))).catch(() => {});
+      }
+      return;
+    }
 
     // ── 👁 GP-watch (+3): customer answers "this gamepass is/ isn't mine" ─────
     if (data.startsWith("gpw_ok:")) {
@@ -6766,7 +7027,7 @@ export async function notifyUserCompleted(
   // bots/shared/completed-messages.ts (зеркало — src/lib/twa-notify.ts).
   const [completedCount, order, dbUser] = await Promise.all([
     (db as any).wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
-    (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
+    (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true, robloxUsername: true } }),
     (db as any).user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
   ]);
 
@@ -6844,6 +7105,8 @@ export async function notifyUserCompleted(
     wbCode: order?.wbCode ?? "—",
     amount,
     userDisplay: user.tgId ? `tg:${user.tgId}` : user.vkId ? `vk:${user.vkId}` : "—",
+    robloxUsername: order?.robloxUsername ?? null,
+    completedAt: order?.completedAt ?? null,
     result: { delivered, bonusDelivered, channel },
   }).catch((err) => console.warn("[TG] след доставки не записан:", err?.message ?? err));
 }

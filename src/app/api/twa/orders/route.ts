@@ -1675,6 +1675,8 @@ export async function POST(req: NextRequest) {
           wbCode: order.wbCode,
           amount: order.amount,
           userDisplay: order.user?.username ? `@${order.user.username}` : order.user?.tgId ?? order.user?.vkId ?? "—",
+          robloxUsername: order.robloxUsername,
+          completedAt: order.completedAt,
           result: notice,
         });
       } catch (error) {
@@ -1684,6 +1686,8 @@ export async function POST(req: NextRequest) {
           wbCode: order.wbCode,
           amount: order.amount,
           userDisplay: order.user?.username ? `@${order.user.username}` : order.user?.tgId ?? order.user?.vkId ?? "—",
+          robloxUsername: order.robloxUsername,
+          completedAt: order.completedAt,
           result: { delivered: false, bonusDelivered: false, kind: "thanks", channel: order.user?.tgId ? "tg" : order.user?.vkId ? "vk" : "none" },
         }).catch(() => {});
       }
@@ -1706,6 +1710,8 @@ export async function POST(req: NextRequest) {
       wbCode: order.wbCode,
       amount: order.amount,
       userDisplay: order.user?.username ? `@${order.user.username}` : order.user?.tgId ?? order.user?.vkId ?? "—",
+      robloxUsername: order.robloxUsername,
+      completedAt: order.completedAt,
       result: notice,
     });
     return NextResponse.json({

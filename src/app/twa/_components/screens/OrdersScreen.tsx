@@ -3004,6 +3004,14 @@ function OrderCard({
           display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
         }}>
           <span style={{ fontWeight: 600 }}>🚫 Бот не может написать (VK)</span>
+          {/* У DBS есть рабочий канал: чат WB, которым человеку пришла ссылка
+              на гейт. «Выкуплено» уходит туда автоматически — говорим это
+              здесь, чтобы красная плашка не читалась как тупик. */}
+          {order.orderSource === "WB_DBS" && (
+            <span style={{ color: C.textSecondary, fontSize: 13 }}>
+              — о выкупе скажем в чат WB
+            </span>
+          )}
           <a
             href={`https://vk.com/id${order.user.vkId}`}
             target="_blank" rel="noreferrer"
@@ -4825,6 +4833,10 @@ function SliceTill({
               <span>
                 из <b>{slice.orders}</b> ждущих ссылку
                 {slice.silent > 0 && <> · <b>{slice.silent}</b> бот отмолчал 3/3</>}
+                {/* Ноль напоминаний — не «ещё не время», а «не дошло ни одно»:
+                    крон откатывает уровень при недоставке, и у недостижимого
+                    покупателя счётчик стоит на нуле неделями. */}
+                {slice.unreached > 0 && <> · <b style={{ color: C.red }}>{slice.unreached}</b> без единого сообщения</>}
               </span>
             </div>
           ) : (

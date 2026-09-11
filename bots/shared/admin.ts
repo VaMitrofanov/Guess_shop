@@ -723,6 +723,9 @@ export const CB = {
 
   // User actions
   refreshStatus: "refresh_status",
+  /** Владелец кода подтверждает, что вторая площадка — тоже он (Б1).
+   *  `xlink:CODE:userId` — 7 + 25 символов id, ≤ 40 b из 64 допустимых. */
+  crossLink:     (code: string, claimantUserId: string) => `xlink:${code}:${claimantUserId}`,
   /** Покупатель с несколькими активными заказами выбирает, с каким работает.
    * Код 7 символов → ≤11 b. */
   orderPick:     (wbCode: string) => `ord:${wbCode}`,

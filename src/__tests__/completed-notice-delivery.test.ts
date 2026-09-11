@@ -46,7 +46,11 @@ describe("Отправитель читает исход, а не выбрасы
 });
 
 describe("След доставки читается глазами", () => {
-  const noticeLib = read("src/lib/notice-delivery.ts");
+  // Формулировки строки аудита живут в общем ядре: веб и боты закрывают один
+  // и тот же заказ, и разные слова об одном событии читались бы как разные
+  // события. `src/lib/notice-delivery.ts` их переэкспортирует.
+  const noticeLib = read("bots/shared/notice-delivery.ts");
+  const webLib = read("src/lib/notice-delivery.ts");
 
   it("недоставка называется прямо, а не «отправлено»", () => {
     expect(noticeLib).toContain("[УВЕД-НЕ-ДОШЛО ${stamp}]");
@@ -61,11 +65,47 @@ describe("След доставки читается глазами", () => {
   it("недоставка будит админов, а не только пишется в заметку", () => {
     expect(noticeLib).toContain("покупатель НЕ извещён о выкупе");
     expect(noticeLib).toContain("написать покупателю лично");
+    expect(webLib).toContain("покупатель НЕ извещён о выкупе");
+  });
+
+  it("веб не держит собственную копию строки аудита", () => {
+    expect(webLib).toContain("completedNoticeAuditLine");
+    expect(webLib).not.toContain("[УВЕД-НЕ-ДОШЛО ${stamp}]");
   });
 
   it("у карточки заказа есть кнопка повторить уведомление", () => {
     const screen = read("src/app/twa/_components/screens/OrdersScreen.tsx");
     expect(screen).toContain('action: "resend-completed-notice"');
     expect(ordersRoute).toContain('if (action === "resend-completed-notice")');
+  });
+});
+
+/* 12.09.2026: алерт «не извещён» отработал трижды за трое суток, и каждый раз
+ * правдиво — VK отказал. Замер показал, что отказ не случайность: 24,5 %
+ * VK-покупателей не разрешили сообществу писать. Запасной канал — чат WB, тот
+ * самый, которым человеку пришла ссылка на гейт. */
+describe("Запасной канал: чат Wildberries", () => {
+  const rescue = read("bots/shared/wb-chat-notify.ts");
+  const notice = read("bots/shared/notice-delivery.ts");
+  const web = read("src/lib/notice-delivery.ts");
+
+  it("зовётся ТОЛЬКО когда основное сообщение не дошло", () => {
+    expect(notice).toContain("const rescue = input.result.delivered\n    ? null");
+    expect(web).toContain("const rescue = input.result.delivered\n    ? null");
+  });
+
+  it("в отменённый заказ «выкуплено» не пишем — деньги вернулись", () => {
+    expect(rescue).toContain('if (order.cancelledAt) return { sent: false, reason: "cancelled" };');
+  });
+
+  it("уважает флаг отправки и ключ шифрования", () => {
+    expect(rescue).toContain('process.env.WB_CHAT_SEND_ENABLED !== "true"');
+    expect(rescue).toContain("wbDeliveryCryptoReady()");
+  });
+
+  it("спасённое уведомление перестаёт быть красным", () => {
+    expect(notice).toContain('marker: rescued ? "action"');
+    expect(web).toContain('marker: rescued ? "action"');
+    expect(notice).toContain("чат WB: о выкупе сказали там");
   });
 });

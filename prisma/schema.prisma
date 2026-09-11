@@ -1146,6 +1146,13 @@ model WbMarketplaceOrder {
   lastSeenAt           DateTime               @default(now())
   completedAt          DateTime?
   cancelledAt          DateTime?
+  /// Покупатель открыл заявку на возврат. Статусы DBS про неё не знают вовсе:
+  /// XKFFJUU (WB 5722328333) висел `receive/sold`, пока заявка уже шла, и бот
+  /// двое суток слал «ваши 500 R$ ждут». Источник — returns-api WB.
+  claimOpenedAt        DateTime?
+  /// Своими словами покупателя из заявки: чаще всего это диагноз продукту
+  /// («не знаем, как создать геймпасс»), а не жалоба на доставку.
+  claimReason          String?
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
   chats                WbBuyerChat[]

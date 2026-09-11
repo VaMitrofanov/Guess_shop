@@ -203,3 +203,28 @@ export function deliveryWindow(
   };
   return { from: build(row.dTimeFrom, false), to: build(row.dTimeTo, true) };
 }
+
+/* ── Заявки покупателей на возврат ───────────────────────────────────────────
+   `returns-api.wildberries.ru/api/v1/claims`. Статус заказа в DBS-API про них
+   не знает ВООБЩЕ: `XKFFJUU` (WB 5722328333) числился `receive/sold`, пока
+   покупатель уже открыл возврат — и бот двое суток слал «ваши 500 R$ ждут».
+   Связь с нашим заказом — по `srid`, это тот же `rid`, что у доставки.
+   ───────────────────────────────────────────────────────────────────────── */
+export const WbClaimSchema = z.object({
+  id: z.string(),
+  srid: OptionalString,
+  nm_id: OptionalNumber,
+  /** 1 — на рассмотрении, 2 — решение принято (см. `status_ex`). */
+  status: OptionalNumber,
+  status_ex: OptionalNumber,
+  user_comment: OptionalString,
+  dt: OptionalString,
+  order_dt: OptionalString,
+});
+
+export const WbClaimsResponseSchema = z.object({
+  claims: OptionalArray(WbClaimSchema),
+  total: OptionalNumber,
+});
+
+export type WbClaim = z.infer<typeof WbClaimSchema>;

@@ -5,10 +5,15 @@
    менять СИНХРОННО). Причина появления одна: по 49ANALQ покупательница не
    узнала о выкупе, а система считала письмо отправленным — отказ Telegram
    глотался `catch {}` и не оставлял следа ни в заказе, ни в алертах.
+
+   12.09.2026 добавлен запасной канал: если ни TG, ни VK не приняли сообщение,
+   покупателю DBS пишем в чат Wildberries. Там доставка стопроцентная — этим
+   каналом человеку пришла сама ссылка на гейт.
    ───────────────────────────────────────────────────────────────────────── */
 
 import { tgSend } from "./notify";
 import { formatAdminNotice, orderRef } from "./notify-format";
+import { notifyBuyerViaWbChat, wbChatCompletedMessage, type WbChatNoticeResult } from "./wb-chat-notify";
 
 /** Список админов читается здесь, а не импортом из `admin.ts`: тот тянет за
  *  собой базу, и маленький модуль следа доставки становился бы неподъёмным. */
@@ -22,7 +27,15 @@ export interface CompletedNoticeResult {
   channel: "tg" | "vk" | "none";
 }
 
-export function completedNoticeAuditLine(result: CompletedNoticeResult, stamp: string): string {
+export function completedNoticeAuditLine(
+  result: CompletedNoticeResult,
+  stamp: string,
+  rescuedViaWbChat = false,
+): string {
+  if (rescuedViaWbChat) {
+    const via = result.channel === "none" ? "ни TG, ни VK" : result.channel.toUpperCase();
+    return `[УВЕД ${stamp}] чат WB: о выкупе сказали там (${via} не принял)`;
+  }
   if (result.channel === "none") {
     return `[УВЕД-НЕ-ДОШЛО ${stamp}] у покупателя нет ни TG, ни VK — сказать о выкупе некому`;
   }
@@ -41,15 +54,50 @@ type NoticeDb = {
     findUnique: (args: unknown) => Promise<{ adminNote: string | null } | null>;
     update: (args: unknown) => Promise<unknown>;
   };
+  wbMarketplaceOrder: unknown;
 };
+
+/**
+ * Последняя попытка достучаться: чат Wildberries.
+ *
+ * Зовётся только когда основное сообщение НЕ дошло — «выкуплено» в чате WB
+ * рядом с доставленным ботом дублем выглядело бы как сбой, а не как забота.
+ */
+export async function rescueCompletedNotice(
+  db: { wbMarketplaceOrder: unknown },
+  input: { wbCode: string; amount: number; robloxUsername?: string | null; completedAt?: Date | null },
+): Promise<WbChatNoticeResult> {
+  return notifyBuyerViaWbChat(
+    db as never,
+    input.wbCode,
+    wbChatCompletedMessage(input.amount, input.robloxUsername ?? null, input.completedAt ?? null),
+  ).catch((error) => {
+    console.warn("[notice-delivery] запасной канал WB упал:", (error as Error)?.message ?? error);
+    return { sent: false, reason: "send_failed" as const };
+  });
+}
 
 /** Записать исход и, если человек ничего не получил, разбудить админов. */
 export async function recordCompletedNotice(
   db: NoticeDb,
-  input: { orderId: string; wbCode: string; amount: number; userDisplay: string; result: CompletedNoticeResult },
+  input: {
+    orderId: string;
+    wbCode: string;
+    amount: number;
+    userDisplay: string;
+    robloxUsername?: string | null;
+    completedAt?: Date | null;
+    result: CompletedNoticeResult;
+  },
 ): Promise<void> {
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-  const line = completedNoticeAuditLine(input.result, stamp);
+
+  // Человек не узнал о выкупе ни от TG, ни от VK — пробуем чат WB.
+  const rescue = input.result.delivered
+    ? null
+    : await rescueCompletedNotice(db, input);
+  const rescued = rescue?.sent === true;
+  const line = completedNoticeAuditLine(input.result, stamp, rescued);
 
   try {
     const order = await db.wbOrder.findUnique({ where: { id: input.orderId }, select: { adminNote: true } });
@@ -68,18 +116,26 @@ export async function recordCompletedNotice(
 
   const failedAll = !input.result.delivered;
   const text = formatAdminNotice({
-    marker: failedAll ? "urgent" : "action",
+    // Красный — только когда человек и правда остался без ответа. Спасённое
+    // чатом WB уведомление это уже не «деньги взяли и молчим».
+    marker: rescued ? "action" : failedAll ? "urgent" : "action",
     zone: "ВЫКУП",
-    title: failedAll ? "покупатель НЕ извещён о выкупе" : "бонусное сообщение не дошло",
+    title: rescued
+      ? "покупателю сказали через чат WB"
+      : failedAll ? "покупатель НЕ извещён о выкупе" : "бонусное сообщение не дошло",
     lines: [
       orderRef({ code: input.wbCode, denomination: input.amount }, [input.userDisplay]),
-      failedAll
-        ? "📵 Telegram/VK не принял сообщение о выкупе"
-        : "📵 не дошло второе сообщение — питч отзыва или бонус",
+      rescued
+        ? "📵 Telegram/VK не принял — ушло в чат Wildberries"
+        : failedAll
+          ? `📵 Telegram/VK не принял сообщение о выкупе${rescue ? ` · чат WB тоже не сработал (${rescue.reason})` : ""}`
+          : "📵 не дошло второе сообщение — питч отзыва или бонус",
     ],
-    next: failedAll
-      ? "написать покупателю лично: он не знает, что заказ закрыт"
-      : "предложить отзыв вручную, если он нужен",
+    next: rescued
+      ? "ничего: человек узнал о выкупе, бонус и отзыв предложить вручную"
+      : failedAll
+        ? "написать покупателю лично: он не знает, что заказ закрыт"
+        : "предложить отзыв вручную, если он нужен",
   });
 
   await Promise.allSettled(adminIds().map((id) => tgSend(id, text)));

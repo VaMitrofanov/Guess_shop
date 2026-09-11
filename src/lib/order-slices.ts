@@ -77,6 +77,16 @@ export interface OrderSlice {
   exportable: number;
   /** «Дожать»: бот отмолчал все три напоминания — дальше только вручную. */
   silent: number;
+  /**
+   * «Дожать»: НИ ОДНОГО сообщения так и не ушло.
+   *
+   * Крон напоминаний откатывает уровень при недоставке (`bots/tg/crons.ts`),
+   * чтобы три письма не сгорели впустую. У недостижимого покупателя это вечный
+   * цикл на нуле: 18 из 20 таких заказов на 11.09.2026 стояли с
+   * `remindersSent = 0`, старейший — 26 дней. В счётчик «бот отмолчал 3/3» они
+   * не попадали никогда, и молчание не видел никто.
+   */
+  unreached: number;
   /** «Дожать»: ждут дольше двух недель. */
   stale: number;
   /** «Починить»: разбивка по причинам ошибки. */
@@ -222,6 +232,7 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
     parts.push(`COUNT(*) FILTER (WHERE ${ERROR_SLICE_SQL} AND ${reason.sql})::int AS "ERR_${reason.id}"`);
   }
   parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "remindersSent" >= 3)::int AS "LINK_SILENT"`);
+  parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "remindersSent" = 0 AND "createdAt" <= NOW() - INTERVAL '24 hours')::int AS "LINK_UNREACHED"`);
   parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days')::int AS "LINK_STALE"`);
   parts.push(`COUNT(*) FILTER (WHERE status = 'COMPLETED' AND COALESCE("completedAt", "updatedAt") >= ${dayStart})::int AS "TODAY_DONE"`);
   parts.push(`COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED' AND COALESCE("completedAt", "updatedAt") >= ${dayStart}), 0)::int AS "TODAY_DONE_SUM"`);
@@ -295,6 +306,7 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
         : [],
       exportable: withGamepass,
       silent: key === "AWAITING_LINK" ? num(r.LINK_SILENT) : 0,
+      unreached: key === "AWAITING_LINK" ? num(r.LINK_UNREACHED) : 0,
       stale: key === "AWAITING_LINK" ? num(r.LINK_STALE) : 0,
       reasons: key === "ERROR"
         ? ERROR_REASONS.map(reason => ({ id: reason.id, label: reason.label, count: num(r[`ERR_${reason.id}`]) }))
@@ -316,6 +328,7 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
     nominals: [],
     exportable: 0,
     silent: 0,
+    unreached: 0,
     stale: 0,
     reasons: [],
   };
