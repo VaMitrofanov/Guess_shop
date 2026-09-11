@@ -22,7 +22,7 @@ type Db = Pick<PrismaClient, "wbMarketplaceOrder">;
 
 export type WbChatNoticeResult =
   | { sent: true }
-  | { sent: false; reason: "disabled" | "no_crypto" | "not_dbs" | "no_chat" | "cancelled" | "send_failed" };
+  | { sent: false; reason: "disabled" | "no_crypto" | "not_dbs" | "no_chat" | "cancelled" | "claim_open" | "send_failed" };
 
 /**
  * Написать покупателю в чат WB по коду гейта.
@@ -34,6 +34,7 @@ export async function notifyBuyerViaWbChat(
   db: Db,
   wbCode: string,
   message: string,
+  options: { skipIfClaimOpen?: boolean } = {},
 ): Promise<WbChatNoticeResult> {
   if (process.env.WB_CHAT_SEND_ENABLED !== "true") return { sent: false, reason: "disabled" };
   if (!wbDeliveryCryptoReady()) return { sent: false, reason: "no_crypto" };
@@ -43,6 +44,7 @@ export async function notifyBuyerViaWbChat(
     orderBy: { firstSeenAt: "desc" },
     select: {
       cancelledAt: true,
+      claimOpenedAt: true,
       chats: { select: { replySignEncrypted: true }, take: 1 },
     },
   }).catch(() => null);
@@ -50,6 +52,10 @@ export async function notifyBuyerViaWbChat(
   if (!order) return { sent: false, reason: "not_dbs" };
   // Отменённый заказ — деньги вернулись; писать «заказ выкуплен» туда нельзя.
   if (order.cancelledAt) return { sent: false, reason: "cancelled" };
+  /* Человек открыл возврат — подгонять его «создайте геймпасс» в этот момент
+     значит спорить, а не помогать. На «заказ выкуплен» это не распространяется:
+     там мы сообщаем свершившийся факт, и он как раз закрывает спор. */
+  if (options.skipIfClaimOpen && order.claimOpenedAt) return { sent: false, reason: "claim_open" };
   const replySign = order.chats?.[0]?.replySignEncrypted;
   if (!replySign) return { sent: false, reason: "no_chat" };
 
@@ -89,5 +95,28 @@ export function wbChatCompletedMessage(
     `${pending}\n\n` +
     `Проверить можно в Roblox: раздел Transactions, строка Pending.\n\n` +
     `Если робуксы не появились — напишите сюда, разберёмся.`
+  );
+}
+
+/**
+ * «Код активирован, а геймпасса нет» — для чата WB.
+ *
+ * Напоминания по гейту (до активации) идут в тот же чат и работают безупречно,
+ * а после активации общение переезжало в TG/VK — канал с доставкой 75 %. У
+ * недостижимого покупателя это означало тишину навсегда: крон откатывает
+ * уровень при недоставке, и 18 из 20 застрявших заказов на 11.09.2026 стояли
+ * с `remindersSent = 0`, старейший — 26 дней.
+ *
+ * Текст умышленно не повторяет гейтовые напоминания: там «заберите робуксы»,
+ * здесь — «вы уже начали, остался геймпасс».
+ */
+export function wbChatGamepassNudgeMessage(amount: number, guideUrl: string, level: number): string {
+  const head = level >= 3
+    ? `Ваши ${amount} R$ всё ещё ждут — заказ открыт, но геймпасса для зачисления пока нет.`
+    : `Вы начали получение ${amount} R$, остался один шаг: создать геймпасс, на который мы их отправим.`;
+  return (
+    `${head}\n\n` +
+    `Пошаговая инструкция (код уже подставлен, вводить не нужно):\n${guideUrl}\n\n` +
+    `Если что-то не получается — напишите сюда, поможем прямо здесь.`
   );
 }

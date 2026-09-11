@@ -86,6 +86,7 @@ import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { TG_HELP_START } from "../shared/bot-links";
 import { wbGateUrl } from "../shared/wb-gate-link";
 import {
+  allowConflictAlert,
   buildXlinkPayload,
   confirmXlink,
   linkClaimantToCodeOwner,
@@ -701,15 +702,28 @@ export function registerStart(bot: Telegraf): void {
       };
 
       const owner = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      let justLinked = false;
       if (owner && owner.id === wbCode.userId) {
         if (await greetOwnerIfPlaced(owner.id)) return;
       } else {
         // Б1: код за другим профилем — это чаще всего тот же человек, пришедший
         // со второй площадки. Разбираем, а не упираемся в тупик.
         if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
+        justLinked = true;
         // Площадки связаны: заказ теперь и здесь — показываем его статус.
         const linked = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
         if (linked && await greetOwnerIfPlaced(linked.id)) return;
+      }
+      // Заказ есть, но он не в тех статусах, которые умеет показать приветствие
+      // (ERROR, REJECTED). Человеку, которому секунду назад сказали «нашёл твой
+      // заказ», нельзя отвечать «код уже активирован ранее» — это противоречие
+      // читается как сбой. Ведём его в «Мой заказ», где видно настоящее.
+      if (justLinked) {
+        await ctx.reply(
+          "📊 Заказ открыт здесь. Нажми «Мой заказ» — покажу, на чём он сейчас.",
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Мой заказ", CB.refreshStatus)]]) },
+        );
+        return;
       }
       await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
       return;
@@ -3805,7 +3819,8 @@ async function settleForeignCodeClaim(
 
   const claimantLabel = tgClaimantLabel(ctx, tgId);
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
-    Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
+    // Красный по одному коду — не чаще раза в час: тупик человек жмёт повторно.
+    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
       kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
       claimantLabel: escapeHtml(claimantLabel), platform: "TG", reason,
     })))).catch(() => undefined);

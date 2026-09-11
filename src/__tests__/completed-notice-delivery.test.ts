@@ -109,3 +109,30 @@ describe("Запасной канал: чат Wildberries", () => {
     expect(notice).toContain("чат WB: о выкупе сказали там");
   });
 });
+
+/* Напоминания «нет геймпасса» до 12.09.2026 умели только TG/VK, а крон при
+ * недоставке откатывал уровень — у недостижимого покупателя это вечный цикл на
+ * нуле: 18 из 20 застрявших заказов стояли с `remindersSent = 0`, старейший
+ * 26 дней, и ни одного сообщения человек не получил. */
+describe("Напоминание «нет геймпасса» тоже уходит в чат WB", () => {
+  const crons = read("bots/tg/crons.ts");
+  const rescue = read("bots/shared/wb-chat-notify.ts");
+
+  it("запасной канал включается только для DBS и только после отказа TG/VK", () => {
+    expect(crons).toContain('if (!delivered && order.orderSource === "WB_DBS") {');
+    expect(crons).toContain("wbChatGamepassNudgeMessage(order.amount, guideUrl, newLevel)");
+  });
+
+  it("успех в чате WB закрывает уровень, а не откатывает его", () => {
+    expect(crons).toContain("if (viaChat.sent) {\n        delivered = true;");
+  });
+
+  it("человека с открытым возвратом не подгоняем", () => {
+    expect(crons).toContain("{ skipIfClaimOpen: true }");
+    expect(rescue).toContain('if (options.skipIfClaimOpen && order.claimOpenedAt) return { sent: false, reason: "claim_open" };');
+  });
+
+  it("текст не повторяет гейтовые напоминания — шаг другой", () => {
+    expect(rescue).toContain("остался один шаг: создать геймпасс");
+  });
+});

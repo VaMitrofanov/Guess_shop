@@ -77,6 +77,7 @@ import { recordOrderCardRoot, orderThreadRoots, replyToRoot } from "../shared/or
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { wbGateUrl } from "../shared/wb-gate-link";
 import {
+  allowConflictAlert,
   buildXlinkPayload,
   confirmXlink,
   linkClaimantToCodeOwner,
@@ -1980,7 +1981,8 @@ async function settleForeignCodeClaimVk(
 
   const claimantLabel = claimantName || `vk:${vkId}`;
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
-    Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
+    // Красный по одному коду — не чаще раза в час: тупик человек жмёт повторно.
+    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
       kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
       claimantLabel: escapeHtml(claimantLabel), platform: "VK", reason,
     })))).catch(() => undefined);
@@ -2074,14 +2076,27 @@ async function handleRefActivation(
     };
 
     const owner = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    let justLinked = false;
     if (owner && owner.id === wbCode.userId) {
       if (await greetOwnerIfPlaced(owner.id)) return;
     } else {
       // Б1: код за другим профилем — чаще всего тот же человек со второй площадки.
       const claimantName = await vkGetName(vkUserId);
       if (await settleForeignCodeClaimVk(ctx, vkUserId, wbCode.code, wbCode.denomination, claimantName) === "handled") return;
+      justLinked = true;
       const linked = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
       if (linked && await greetOwnerIfPlaced(linked.id)) return;
+    }
+    // Зеркало TG: после «нашёл твой заказ» фраза «код уже активирован» читается
+    // как сбой. Ведём в «Мой заказ», а не в тупик.
+    if (justLinked) {
+      await ctx.reply({
+        message: "📊 Заказ открыт здесь. Нажми «Мой заказ» — покажу, на чём он сейчас.",
+        keyboard: Keyboard.builder()
+          .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
+          .inline(),
+      });
+      return;
     }
     await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка твоя — напиши нам: https://t.me/RobloxBank_PA");
     return;

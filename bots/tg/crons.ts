@@ -19,6 +19,7 @@ import { getGamepassDetails } from "../shared/roblox";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { priceWatchFlagged, priceWatchTargets, type PriceWatchPart } from "../shared/queued-price-watch";
+import { notifyBuyerViaWbChat, wbChatGamepassNudgeMessage } from "../shared/wb-chat-notify";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -324,6 +325,23 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
       try {
         delivered = await vkSend(order.user.vkId, buildReminderMsgPlain(newLevel, guideUrl));
       } catch { }
+    }
+
+    /* Ни TG, ни VK не взяли — последняя дверь к покупателю DBS: чат WB, тот
+       самый, которым ему пришла ссылка на гейт. Без этого откат уровня ниже
+       превращался в вечный цикл: 18 из 20 застрявших заказов на 11.09.2026
+       стояли с `remindersSent = 0`, старейший — 26 дней, и не видел их никто. */
+    if (!delivered && order.orderSource === "WB_DBS") {
+      const viaChat = await notifyBuyerViaWbChat(
+        db as never,
+        order.wbCode,
+        wbChatGamepassNudgeMessage(order.amount, guideUrl, newLevel),
+        { skipIfClaimOpen: true },
+      ).catch(() => ({ sent: false as const, reason: "send_failed" as const }));
+      if (viaChat.sent) {
+        delivered = true;
+        console.log(`[reminders] ${order.wbCode}: напоминание ${newLevel} ушло в чат WB (TG/VK отказали)`);
+      }
     }
 
     if (!delivered) {

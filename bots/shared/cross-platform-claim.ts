@@ -202,3 +202,24 @@ export async function confirmXlink(
     return { ok: false, reason: "failed" };
   }
 }
+
+/* ── Потолок на красный алерт ────────────────────────────────────────────────
+   Сигнал, который приходит пачкой, перестают читать — ровно это случилось с
+   прежним сторожем ПВЗ-фрода (4 ложных срабатывания за 20 часов). Настоящий
+   конфликт редок, но человек, упершийся в тупик, жмёт ещё и ещё, и каждая его
+   попытка поднимала бы новый красный. Раз в час на код — этого хватает, чтобы
+   узнать о проблеме, и достаточно, чтобы не утопить в ней остальные.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const conflictSeen = new Map<string, number>();
+
+export function allowConflictAlert(code: string, windowMs = 60 * 60_000): boolean {
+  const now = Date.now();
+  if (conflictSeen.size > 2_000) {
+    for (const [key, at] of conflictSeen) if (now - at > windowMs) conflictSeen.delete(key);
+  }
+  const last = conflictSeen.get(code);
+  if (last !== undefined && now - last < windowMs) return false;
+  conflictSeen.set(code, now);
+  return true;
+}

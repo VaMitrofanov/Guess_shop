@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ownerLabel, parseXlinkPayload, buildXlinkPayload, resolveCodeClaim } from "../cross-platform-claim";
+import { allowConflictAlert, ownerLabel, parseXlinkPayload, buildXlinkPayload, resolveCodeClaim } from "../cross-platform-claim";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Б1: код гейта открывает заказ на любой площадке.
@@ -141,5 +141,29 @@ describe("сайт: повторный вход владельца больше 
 
   it("P2025 больше не значит «занят другим» сам по себе", () => {
     expect(auth).toContain("wbCodeClaimedByOther = Boolean(winner?.userId && winner.userId !== user.id);");
+  });
+});
+
+/* Сигнал, приходящий пачкой, перестают читать — на этом уже обесценился
+ * прежний сторож ПВЗ-фрода. Тупик человек жмёт повторно, поэтому у красного
+ * есть потолок: раз в час на код. */
+describe("потолок красного алерта", () => {
+  it("первый раз пропускает, второй в то же окно — нет", () => {
+    const code = "TESTAAA";
+    expect(allowConflictAlert(code)).toBe(true);
+    expect(allowConflictAlert(code)).toBe(false);
+  });
+
+  it("другой код считается отдельно", () => {
+    expect(allowConflictAlert("TESTBBB")).toBe(true);
+    expect(allowConflictAlert("TESTCCC")).toBe(true);
+  });
+
+  it("по истечении окна снова пропускает", () => {
+    const code = "TESTDDD";
+    expect(allowConflictAlert(code, 1)).toBe(true);
+    return new Promise((r) => setTimeout(r, 5)).then(() => {
+      expect(allowConflictAlert(code, 1)).toBe(true);
+    });
   });
 });
