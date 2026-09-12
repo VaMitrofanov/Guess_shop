@@ -1,136 +1,174 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ArrowRight, Check, Gamepad2, Loader2, LockKeyhole, WalletCards } from "lucide-react";
 import { usePricing } from "@/hooks/usePricing";
+import { gamepassPriceMatches } from "@/lib/gamepass-search-view";
+import styles from "@/app/storefront.module.css";
 
-// Pixel Robux icon — inline SVG to match Roblox aesthetic
-function RobuxIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="9" y="2" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="3" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="18" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="6" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="9" y="19" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="8" width="6" height="6" fill="currentColor" />
-    </svg>
-  );
-}
+const PACKS = [500, 1000, 2000, 5000];
+const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
+const formatCustomerRate = (rate: number) => rate.toLocaleString("ru-RU", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 3,
+});
+
+type LookupState = {
+  status: "idle" | "loading" | "ready" | "wrong-price" | "no-passes" | "not-found" | "error";
+  key?: string;
+  account?: { username: string; displayName: string; avatarUrl?: string | null };
+  passes?: Array<{ id: string | number; price: number }>;
+};
 
 export default function Calculator() {
-  const [robux, setRobux] = useState<string>("1000");
-  const [rub, setRub] = useState<string>("");
-  const { rubPerRobux, loading, getPrice } = usePricing();
+  const [robux, setRobux] = useState("1000");
+  const [username, setUsername] = useState("");
+  const [lookup, setLookup] = useState<LookupState>({ status: "idle" });
+  const { loading, getPrice, getBreakdown } = usePricing();
+  const amount = Math.max(0, Number(robux) || 0);
+  const price = getPrice(amount);
+  const breakdown = getBreakdown(amount);
+  const normalizedUsername = username.trim();
+  const validUsername = /^[A-Za-z0-9_]{3,20}$/.test(normalizedUsername);
+  const lookupKey = `${normalizedUsername.toLowerCase()}:${amount}`;
+  const currentLookup: LookupState = lookup.key === lookupKey
+    ? lookup
+    : { status: validUsername ? "loading" : "idle", key: lookupKey };
 
-  const displayRub = rub !== ""
-    ? rub
-    : getPrice(parseFloat(robux) || 0).toString();
+  useEffect(() => {
+    fetch("/api/account/me")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((account) => {
+        if (account?.robloxUsername) setUsername(account.robloxUsername);
+      })
+      .catch(() => {});
+  }, []);
 
-  const handleRobuxChange = (val: string) => {
-    setRobux(val);
-    setRub(getPrice(parseFloat(val) || 0).toString());
-  };
+  useEffect(() => {
+    if (!validUsername || amount < 100 || amount > 100_000) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLookup({ status: "loading", key: lookupKey });
+      try {
+        const response = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(normalizedUsername)}`, { signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          setLookup({ status: "error", key: lookupKey });
+          return;
+        }
+        if (data.userExists === false) {
+          setLookup({ status: "not-found", key: lookupKey });
+          return;
+        }
+        const passes = (data.gamepasses ?? []) as Array<{ id: string | number; price: number }>;
+        const account = data.account ?? { username: normalizedUsername, displayName: normalizedUsername };
+        if (passes.length === 0) {
+          setLookup({ status: "no-passes", key: lookupKey, account, passes });
+          return;
+        }
+        const expected = grossPassPrice(amount);
+        setLookup({
+          status: passes.some((pass) => gamepassPriceMatches(Number(pass.price), expected)) ? "ready" : "wrong-price",
+          key: lookupKey,
+          account,
+          passes,
+        });
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setLookup({ status: "error", key: lookupKey });
+      }
+    }, 550);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [amount, lookupKey, normalizedUsername, validUsername]);
 
-  const handleRubChange = (val: string) => {
-    setRub(val);
-    setRobux(
-      rubPerRobux > 0
-        ? Math.round((parseFloat(val) || 0) / rubPerRobux).toString()
-        : "0"
-    );
-  };
+  const matchingPasses = currentLookup.passes?.filter((pass) => gamepassPriceMatches(Number(pass.price), grossPassPrice(amount))) ?? [];
+  const checkoutHref = `/checkout?amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}${matchingPasses.length === 1 ? `&gamepassId=${matchingPasses[0].id}` : ""}`;
+  const guideHref = `/guide?source=site&flow=order&amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}`;
+  const needsGuide = currentLookup.status === "not-found" || currentLookup.status === "no-passes" || currentLookup.status === "error";
 
   return (
-    <div className="w-full max-w-xl mx-auto gold-glow pixel-card p-8 rounded-none relative">
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-[#00b06f]/20 border border-[#00b06f]/30 flex items-center justify-center rounded-none">
-            <RobuxIcon className="w-4 h-4 text-[#00b06f]" />
-          </div>
-          <div>
-            <div className="text-[10px] font-pixel text-[#00b06f] tracking-wider">ROBLOX BANK</div>
-            <div className="text-sm font-black uppercase tracking-widest text-zinc-300 mt-0.5">Калькулятор</div>
-          </div>
-        </div>
-        {/* Live indicator */}
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-none bg-[#00b06f] animate-pulse block" />
-          <span className="text-xs font-black uppercase tracking-widest text-[#00b06f]/70">Live курс</span>
-        </div>
+    <div className={styles.calculator}>
+      <div className={styles.calculatorBadge}>Калькулятор</div>
+      <div className={styles.calculatorHead}>
+        <div><span>Твой пакет</span><h2>Сколько Robux нужно?</h2></div>
+        <div className={styles.rateState}><i /> Курс обновлён</div>
       </div>
 
-      <div className="space-y-5">
-        {/* Robux input */}
-        <div className="space-y-2">
-          <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
-            Вы получите (Robux)
-          </label>
-          <div className="relative">
-            <input
-              type="number"
-              value={robux}
-              onChange={(e) => handleRobuxChange(e.target.value)}
-              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 rounded-none pl-5 pr-16 text-2xl font-black outline-none transition-all hover:border-[#1e2a45]/80 text-white"
-              placeholder="0"
-            />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-2xl font-black text-[#00b06f]">R$</span>
-          </div>
-        </div>
-
-        {/* Arrow divider */}
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-[#1e2a45]" />
-          <div className="w-8 h-8 border-2 border-[#1e2a45] bg-[#080c18] flex items-center justify-center rounded-none flex-shrink-0">
-            <ChevronRight className="w-4 h-4 text-[#00b06f] rotate-90" />
-          </div>
-          <div className="flex-1 h-px bg-[#1e2a45]" />
-        </div>
-
-        {/* RUB input */}
-        <div className="space-y-2">
-          <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
-            Вы потратите (рублей)
-          </label>
-          <div className="relative">
-            <input
-              type="number"
-              value={loading ? "" : displayRub}
-              onChange={(e) => handleRubChange(e.target.value)}
-              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 rounded-none px-5 text-2xl font-black outline-none transition-all hover:border-[#1e2a45]/80 text-white"
-              placeholder={loading ? "Загрузка..." : "0"}
-            />
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-2xl font-black text-zinc-600">₽</span>
-          </div>
-        </div>
-
-        {/* Rate badge */}
-        {!loading && rubPerRobux > 0 && (
-          <div className="flex items-center justify-between px-3 py-2 bg-[#00b06f]/5 border border-[#00b06f]/15 rounded-none">
-            <span className="text-xs font-black uppercase tracking-widest text-zinc-400">Текущий курс</span>
-            <span className="text-[10px] font-pixel text-[#00b06f]">{rubPerRobux} ₽/R$</span>
-          </div>
-        )}
-
-        {/* CTA */}
-        <Link
-          href={`/checkout?amount=${robux}`}
-          className="w-full flex h-14 gold-gradient items-center justify-center gap-3 font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.98] transition-all rounded-none mt-2"
-        >
-          Перейти к оплате
-          <ChevronRight className="w-4 h-4" />
-        </Link>
+      <label className={styles.fieldLabel} htmlFor="robux-amount">
+        <span>Получишь на аккаунт</span><strong>R$</strong>
+      </label>
+      <div className={styles.amountField}>
+        <input
+          id="robux-amount"
+          inputMode="numeric"
+          min="100"
+          max="10000"
+          type="number"
+          value={robux}
+          onChange={(event) => setRobux(event.target.value)}
+          aria-label="Количество Robux"
+        />
+        <span>R$</span>
+      </div>
+      <div className={styles.packGrid}>
+        {PACKS.map((pack) => (
+          <button
+            key={pack}
+            type="button"
+            className={amount === pack ? styles.packActive : styles.pack}
+            onClick={() => setRobux(String(pack))}
+          >
+            {amount === pack && <Check size={13} />} {pack.toLocaleString("ru-RU")}
+          </button>
+        ))}
       </div>
 
-      <p className="mt-5 text-center text-xs text-zinc-500 uppercase tracking-widest">
-        * Цена включает 30% комиссию Roblox
+      <div className={styles.priceSummary}>
+        <div><span>Количество</span><strong>{amount.toLocaleString("ru-RU")} R$</strong></div>
+        <div><span>Комиссия Roblox</span><strong>Учтена в цене пасса</strong></div>
+        <div className={styles.total}><span>К оплате</span><strong>{loading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</strong></div>
+      </div>
+      {!loading && amount > 0 && (
+        <p className={styles.tierNote}>Твой курс: {formatCustomerRate(breakdown.rubPerRobux)} ₽/R$</p>
+      )}
+      <label className={styles.nicknameLabel} htmlFor="calculator-username">Куда зачислить Robux</label>
+      <div className={`${styles.nicknameField} ${validUsername ? styles.nicknameFieldReady : ""}`}>
+        <Gamepad2 size={20} />
+        <input
+          id="calculator-username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value.replace(/[^A-Za-z0-9_]/g, "").slice(0, 20))}
+          placeholder="Введи ник Roblox"
+          autoComplete="off"
+          aria-describedby="calculator-username-note"
+        />
+        {validUsername && <Check size={19} />}
+      </div>
+      <p id="calculator-username-note" className={styles.nicknameNote}>
+        {username && !validUsername ? "Нужно 3–20 латинских букв, цифр или _." : "Для зарегистрированных подставим сохранённый ник — его можно изменить."}
       </p>
+      {validUsername && currentLookup.status !== "idle" && <div className={styles.robloxLookup} aria-live="polite">
+        {currentLookup.status === "loading" ? <><span className={styles.lookupIcon}><Loader2 size={20} className={styles.lookupSpin} /></span><div><strong>Проверяем аккаунт и геймпассы…</strong><small>Обычно это занимает несколько секунд.</small></div></> : <>
+          <span className={styles.lookupAvatar}>{currentLookup.account?.avatarUrl ? <img src={currentLookup.account.avatarUrl} alt={`Аватар ${normalizedUsername}`} /> : <Gamepad2 size={21} />}</span>
+          <div><strong>{currentLookup.account ? `${currentLookup.account.displayName} · @${currentLookup.account.username}` : normalizedUsername}</strong><small>{currentLookup.status === "ready" ? `Готово: ${matchingPasses.length} подходящ${matchingPasses.length === 1 ? "ий геймпасс" : "их геймпасса"}.` : currentLookup.status === "wrong-price" ? `Найдено ${currentLookup.passes?.length ?? 0}: можно выбрать другой доступный пакет.` : currentLookup.status === "no-passes" ? "Аккаунт найден, но геймпассов на продажу нет." : currentLookup.status === "not-found" ? "Такой аккаунт Roblox не найден." : "Roblox временно не ответил — продолжим по инструкции."}</small></div>
+          {currentLookup.status === "ready" ? <Check size={20} /> : <WalletCards size={20} />}
+        </>}
+      </div>}
+      <Link
+        href={needsGuide ? guideHref : checkoutHref}
+        aria-disabled={!validUsername || currentLookup.status === "loading"}
+        onClick={(event) => { if (!validUsername || currentLookup.status === "loading") event.preventDefault(); }}
+        className={validUsername && currentLookup.status !== "loading" ? styles.checkoutAction : styles.checkoutActionDisabled}
+      >
+        {needsGuide ? "Продолжить по инструкции" : currentLookup.status === "wrong-price" ? "Выбрать найденный геймпасс" : "Проверить и оформить"} <ArrowRight size={18} />
+      </Link>
+      {currentLookup.status === "wrong-price" && <Link href={guideHref} className={styles.lookupGuideLink}>Создать геймпасс ровно на {grossPassPrice(amount).toLocaleString("ru-RU")} R$ по инструкции</Link>}
+      <p className={styles.securityNote}><LockKeyhole size={13} /> Пароль Roblox не потребуется</p>
     </div>
   );
 }

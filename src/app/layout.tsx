@@ -1,9 +1,11 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono, Press_Start_2P, Unbounded } from "next/font/google";
 import "./globals.css";
-import Script from "next/script";
 import SessionProvider from "@/components/session-provider";
-import { PageLoader } from "@/components/page-loader";
+import { ThemeProvider } from "@/components/theme-provider";
+import { SiteObservability } from "@/components/site-observability";
+import VKAuthCallback from "@/components/auth/VKAuthCallback";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme-boot";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,18 +17,53 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const pressStart = Press_Start_2P({
+  variable: "--font-pixel",
+  weight: "400",
+  subsets: ["latin", "cyrillic"],
+});
+
+const unbounded = Unbounded({
+  variable: "--font-display",
+  weight: ["600", "700"],
+  subsets: ["latin", "cyrillic"],
+});
+
 export const metadata: Metadata = {
+  // Absolute base for OG/canonical URLs and the auto-generated opengraph-image.
+  // Without it, relative asset URLs (og:image) don't resolve and link previews
+  // come up blank.
+  metadataBase: new URL("https://robloxbank.ru"),
   title: "Roblox Bank — купить Robux за рубли",
-  description: "Быстрая и безопасная покупка Robux за рубли. Лучший курс, мгновенная доставка через геймпасс.",
+  description: "Быстрая и безопасная покупка Robux за рубли. Актуальный курс, доставка через геймпасс без ввода пароля.",
   keywords: ["купить робуксы", "robux за рубли", "roblox bank", "робуксы дешево"],
   openGraph: {
     title: "Roblox Bank — купить Robux за рубли",
-    description: "Быстрая покупка Robux. Лучший курс на рынке.",
+    description: "Покупка Robux за рубли. Актуальный курс, доставка через геймпасс.",
     url: "https://robloxbank.ru",
     siteName: "Roblox Bank",
     locale: "ru_RU",
     type: "website",
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "Roblox Bank — купить Robux за рубли",
+    description: "Покупка Robux за рубли. Актуальный курс, доставка через геймпасс.",
+  },
+};
+
+// Keep form actions visible when iOS/Android or an embedded TG/VK browser
+// opens the software keyboard. `viewportFit: cover` also makes the safe-area
+// env variables available to the route CSS on notched devices.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fbfaff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0912" },
+  ],
 };
 
 export default function RootLayout({
@@ -37,21 +74,33 @@ export default function RootLayout({
   return (
     <html
       lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} ${unbounded.variable} h-full antialiased`}
+      // Boot-скрипт ниже намеренно правит `<html>` до гидратации: ставит
+      // `data-theme`, `data-theme-mode` и `color-scheme`. React считал это
+      // расхождением сервера и клиента и писал предупреждение о гидратации на
+      // КАЖДОЙ странице — из-за постоянного шума настоящие рассинхроны терялись
+      // (именно поэтому инцидент с CSP 28.07 заметили поздно). Подавляем ровно
+      // здесь: атрибуты этого узла ставит скрипт, всё остальное дерево
+      // проверяется как обычно.
+      suppressHydrationWarning
     >
+      <head>
+        {/* D3: ставит data-theme до первой отрисовки, иначе на тёмном телефоне
+            первый кадр приходит в светлой теме и потом скачком перекрашивается.
+            Разрешён в CSP по sha256-хешу (next-security.ts), не unsafe-inline. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
-        <SessionProvider>
-          <Script
-            src="https://telegram.org/js/telegram-web-app.js"
-            strategy="beforeInteractive"
-          />
-          <Script
-            src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"
-            strategy="afterInteractive"
-          />
-          <PageLoader />
-          {children}
-        </SessionProvider>
+        <ThemeProvider>
+          <SessionProvider>
+            <SiteObservability />
+            {/* Возврат из VK ID приходит на корень сайта. Если окно осталось
+                одно, довести вход больше некому — компонент делает это сам.
+                На страницах без параметров возврата не рендерит ничего. */}
+            <VKAuthCallback />
+            {children}
+          </SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

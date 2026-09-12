@@ -87,6 +87,7 @@ RUN rm -rf \
     src/app/guarantees \
     src/app/legal \
     src/app/login \
+    src/app/maintenance \
     src/app/payment \
     src/app/privacy \
     src/app/register \
@@ -101,6 +102,7 @@ RUN rm -rf \
     && rm -f \
     src/app/page.tsx \
     src/app/apple-icon.tsx \
+    src/proxy.ts \
     "src/app/api/auth/route.ts 1.md" \
     src/app/api/auth/route.ts.md
 

@@ -10,8 +10,10 @@
  * (built-in keyboard, focus, ARIA) at zero dep cost and matches the
  * hand-rolled pixel aesthetic used elsewhere.
  *
- * Pattern: invisible native input + decorative box rendered via sibling
- * selectors. The native input stays focusable so `Tab` and Space work.
+ * Pattern: invisible native input + decorative box. The native input stays
+ * focusable so `Tab` and Space work. The visible state is driven explicitly
+ * from React as well as the native input: this keeps the acknowledgement
+ * unmistakable even when page-level input styles override peer selectors.
  */
 
 import * as React from "react";
@@ -25,7 +27,19 @@ export interface CheckboxProps
 }
 
 export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
-  function Checkbox({ className, boxSize = 20, disabled, ...props }, ref) {
+  function Checkbox({
+    className,
+    boxSize = 20,
+    checked,
+    defaultChecked,
+    disabled,
+    onChange,
+    ...props
+  }, ref) {
+    const isControlled = checked !== undefined;
+    const [uncontrolledChecked, setUncontrolledChecked] = React.useState(Boolean(defaultChecked));
+    const isChecked = isControlled ? Boolean(checked) : uncontrolledChecked;
+
     return (
       <span
         className={cn(
@@ -40,20 +54,31 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
           type="checkbox"
           disabled={disabled}
           className="peer absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+          checked={checked}
+          defaultChecked={defaultChecked}
+          onChange={(event) => {
+            if (!isControlled) setUncontrolledChecked(event.target.checked);
+            onChange?.(event);
+          }}
           {...props}
         />
         <span
           aria-hidden
           className={cn(
-            "absolute inset-0 border-2 border-[#1e2a45] bg-[#080c18] transition-colors",
+            "absolute inset-0 rounded-[5px] border-2 transition-[background-color,border-color,transform] duration-150 ease-out",
             "peer-hover:border-[#00b06f]/40",
             "peer-focus-visible:ring-2 peer-focus-visible:ring-[#00b06f]/60 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#06080f]",
-            "peer-checked:bg-[#00b06f] peer-checked:border-[#00b06f]",
+            isChecked
+              ? "border-[#00b06f] bg-[#00b06f] scale-100"
+              : "border-[#1e2a45] bg-[#080c18] scale-95",
           )}
         />
         <Check
           aria-hidden
-          className="relative w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none"
+          className={cn(
+            "relative w-3.5 h-3.5 text-white pointer-events-none transition-[opacity,transform] duration-150 ease-out",
+            isChecked ? "opacity-100 scale-100" : "opacity-0 scale-75",
+          )}
           strokeWidth={3}
         />
       </span>

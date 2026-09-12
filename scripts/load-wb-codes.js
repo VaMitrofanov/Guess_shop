@@ -1,56 +1,22 @@
-const { neon } = require('@neondatabase/serverless');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
+#!/usr/bin/env node
+/**
+ * УДАЛЁН. Загрузчик кодов теперь один: scripts/push-wb-codes.js
+ *
+ * Этот скрипт молча глотал все ошибки вставки (`catch {}` с комментарием про дубликаты)
+ * и считал дубликаты как успешно добавленные, поэтому печатал «✅ ГОТОВО» даже когда
+ * коды в БД не попадали. Именно этот класс отказа привёл к инциденту 6QYDK79
+ * (карта напечатана, кода в базе нет) — см. docs/database.md.
+ *
+ * Файл оставлен заглушкой, чтобы старый вызов падал, а не «работал».
+ */
 
-// Прямое подключение через HTTP (самое надежное)
-const sql = neon(process.env.DATABASE_URL);
+console.error(`
+❌ scripts/load-wb-codes.js больше не используется.
 
-async function main() {
-  const filePath = process.argv[2];
-  if (!filePath) {
-    console.error('❌ Укажи файл: node scripts/push-wb-codes.js codes.csv');
-    process.exit(1);
-  }
+   Используй единственный загрузчик:
+     node scripts/push-wb-codes.js codes.csv --dry-run   # проверить
+     node scripts/push-wb-codes.js codes.csv             # загрузить
 
-  try {
-    const csvPath = path.resolve(process.cwd(), filePath);
-    const content = fs.readFileSync(csvPath, 'utf-8');
-    const lines = content.split('\n').filter(l => l.trim());
-    const dataLines = lines.slice(1); // убираем заголовок
-
-    console.log(`🚀 Начинаем загрузку ${dataLines.length} кодов через HTTP...`);
-
-    let added = 0;
-    for (const line of dataLines) {
-      const [code, denomination, batch] = line.split(',');
-      if (!code || !denomination) continue;
-
-      try {
-        // Прямой SQL запрос в Neon
-        await sql`
-          INSERT INTO "WbCode" (id, code, denomination, batch, "isUsed", "createdAt")
-          VALUES (
-            concat('wb_', replace(cast(gen_random_uuid() as text), '-', '')), 
-            ${code.trim()}, 
-            ${parseInt(denomination)}, 
-            ${batch ? batch.trim() : 'batch-01'},
-            false,
-            now()
-          )
-          ON CONFLICT (code) DO NOTHING
-        `;
-        added++;
-        if (added % 100 === 0) console.log(`⏳ Загружено: ${added}...`);
-      } catch (e) {
-        // игнорируем ошибки дубликатов
-      }
-    }
-
-    console.log(`\n✅ ГОТОВО! Успешно добавлено кодов: ${added}`);
-  } catch (err) {
-    console.error('\n❌ Ошибка:', err.message);
-  }
-}
-
-main();
+   Он сверяет, что каждый код из CSV реально доехал до БД, и падает, если нет.
+`);
+process.exit(1);

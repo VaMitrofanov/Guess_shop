@@ -146,16 +146,13 @@ async function main() {
     // ── Phase 1: Cleanup ───────────────────────────────────────────────────
     // FK safety:
     //   WbCode.userId  → User.id   (deleting WbCode is safe; no table FKs to WbCode.id)
-    //   Order.userId   → User.id   (deleting Order is safe; no table FKs to Order.id)
-    //   Order.productId → Product.id  (same)
     //   WbOrder.wbCode is a plain String — not a FK — unaffected by WbCode deletion
+    // U13: legacy-таблица `Order` удалена вместе со слоем старого магазина.
     console.log("\n🗑️   Cleaning up tables...");
-    const [wbResult, ordResult] = await db.$transaction([
+    const [wbResult] = await db.$transaction([
       db.wbCode.deleteMany({}),
-      db.order.deleteMany({}),
     ]);
     console.log(`    WbCode : ${wbResult.count} records deleted`);
-    console.log(`    Order  : ${ordResult.count} records deleted`);
 
     // ── Phase 2: Import ────────────────────────────────────────────────────
     console.log("\n📦  Importing new codes...");

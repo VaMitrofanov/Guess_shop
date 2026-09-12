@@ -6,9 +6,17 @@
  * replace this with a Redis-backed store.
  */
 
+import type { DirectRequote } from "../shared/direct-requote";
+
 export interface LinkState {
   wbCode:      string;
   denomination: number;
+  /**
+   * Покупателя привёл сюда провалившийся поиск по нику (кнопка «🔗 Прислать
+   * ссылку» или вставленная ссылка вместо ника). Метка едет в карточку админа:
+   * такой заказ почти всегда про скрытый плейс и стоит проверки глазами.
+   */
+  viaManualLink?: boolean;
 }
 
 /**
@@ -22,6 +30,52 @@ export const pendingLink = new Map<number, LinkState>();
  * Key: Telegram numeric user ID → WbOrder.id they should review.
  */
 export const pendingReview = new Map<number, string>();
+
+// ── Direct order session states ───────────────────────────────────────────────
+
+export type DirectFlowStep = "amount" | "bonus" | "nick" | "nick_input" | "gamepass" | "summary";
+
+export interface DirectFlowState {
+  step: DirectFlowStep;
+  /** Ф4 (О1): флоу 5 шагов с экраном «🎁 Бонус» (bonus>0) или 4 шага без него.
+   *  Фиксируется при выборе пака и не меняется, даже если юзер выбрал «Без бонуса». */
+  hasBonusStep?: boolean;
+  amount?: number;
+  bonus?: number;
+  totalAmount?: number;
+  passPrice?: number;
+  rublePrice?: number;
+  rubleDiscount?: number;
+  robloxUsername?: string;
+  gamepassId?: string;
+  gamepassUrl?: string;
+  gamepassName?: string;
+  /** Actual price of the picked gamepass (may differ from expected passPrice). */
+  gamepassRobux?: number;
+  /** Пересчёт заказа под цену выбранного пасса — предложен, ещё не применён. */
+  requote?: DirectRequote;
+}
+export const pendingDirectFlow = new Map<number, DirectFlowState>();
+
+export const pendingNickEdit = new Map<number, true>();
+
+/**
+ * Admin is typing payment details for a direct order.
+ * Key: admin tgId (number) → WbOrder.id
+ */
+export const pendingPaymentDetails = new Map<number, string>();
+
+/**
+ * User is expected to send a payment screenshot.
+ * Key: user tgId (number) → WbOrder.id
+ */
+export const pendingPaymentScreenshot = new Map<number, string>();
+
+/** Customer is entering the fiscal-receipt email after choosing a bot payment route. */
+export const pendingDirectPaymentEmail = new Map<number, {
+  intentId: string;
+  method: "SITE" | "BOT_ACQUIRING" | "MANUAL_TRANSFER";
+}>();
 /**
  * Admins currently writing a rejection reason for an order.
  * Key: Admin Telegram ID → WbOrder.id
@@ -78,5 +132,59 @@ export const pendingDenomInput = new Map<number, { nmID: number; vendorCode: str
 /** Admin is updating a global WB unit econ setting. */
 export const pendingUeSettingInput = new Map<number, { field: "kursRb" | "kursUsd" | "fixedCost" }>();
 
+/** Admin is using the what-if unit-econ calculator (typing "номинал цена [маржа%]"). */
+export const pendingWhatIfInput = new Set<number>();
+
 /** Admin is entering the auto-buy target rate. */
 export const pendingAutoBuyRateInput = new Map<number, true>();
+
+/** Admin is typing a gamepass name to search on bossrobux. */
+export const pendingBossrobuxSearch = new Map<number, true>();
+
+/** Cached search results per admin (cleared after successful purchase). */
+export const bossrobuxSearchCache = new Map<number, import("../shared/bossrobux").BossrobuxGamepass[]>();
+
+// ── Client-side: gamepass search by Roblox nick (item 7) ─────────────────────
+
+/**
+ * User clicked "🔎 Найти по моему нику Roblox" on the provisional welcome and
+ * is now expected to type their Roblox username. Carries the order context
+ * so we know which `wbCode` / `denomination` to validate the price against.
+ */
+export const pendingRobloxNick = new Map<number, LinkState>();
+
+// ── Квест «ник → что нашли → как сделаем» (общий с сайтом) ───────────────────
+
+/**
+ * Разбор аккаунта, показанный покупателю последним.
+ *
+ * Держим ЦЕЛИКОМ, а не один выбранный пасс: подтверждение оформляет заказ по
+ * всему набору (заказ на 2000 закрывается парой пассов), а ветка ключа
+ * пересчитывает план по тому, что мы только что создали. Без сохранённого
+ * плана «Подтвердить» пришлось бы гонять поиск по нику заново.
+ */
+export interface QuestPlanState {
+  wbCode: string;
+  denomination: number;
+  nick: string;
+  plan: import("../shared/gamepass-plan").CheckPlan;
+  /** Всё, что нашли на аккаунте, — по нему план пересчитывается после ключа. */
+  owned: import("../shared/gamepass-plan").OwnedPass[];
+}
+
+export const questPlans = new Map<number, QuestPlanState>();
+
+/**
+ * Покупатель в ветке «сделаем за тебя»: следующее текстовое сообщение — это
+ * Open Cloud ключ, а не ник и не ссылка. Стейт отдельный, потому что ключ
+ * приходит обычным текстом и его нельзя спутать с чем-то ещё: сообщение с ним
+ * бот удаляет сразу после чтения.
+ */
+export const pendingApiKey = new Map<number, { wbCode: string; denomination: number; nick: string }>();
+
+/**
+ * То же, но для ПРЯМОГО заказа: у него ещё нет ни кода, ни заказа в базе —
+ * только цена пасса, который надо создать, и ник. Отдельный стейт, потому что
+ * возврат после создания идёт не в квест WB, а в итог прямого заказа.
+ */
+export const pendingDirectKey = new Map<number, { nick: string; passPrice: number }>();

@@ -40,18 +40,16 @@ RUN apt-get update -y \
 # Cap install-time memory — `prisma generate` spawns its own node process.
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-# Copy bot manifest first for max layer-cache reuse.
-COPY bots/vk/package.json ./package.json
+# Copy bot manifests first for max layer-cache reuse and reproducible installs.
+COPY bots/vk/package.json bots/vk/package-lock.json ./
 
 # Copy the shared Prisma schema *before* install so we can run `prisma
 # generate` deterministically inside the image (matches the schema we just
 # committed, not whatever was on the dev machine).
 COPY prisma ./prisma
 
-# `npm install` (not `ci`) — the per-bot lockfile may not yet be committed
-# on first deploy. Switch to `npm ci` once bots/vk/package-lock.json lands.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm ci --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 # Generate the Prisma client against the *image's* schema path. The
 # bot script's relative path (../../prisma) is meant for local dev; here
@@ -67,8 +65,12 @@ RUN npx prisma generate --schema ./prisma/schema.prisma
 FROM node:${NODE_VERSION} AS runner
 WORKDIR /app
 
+# curl — не для кода, а для пробы живости. Coolify собирает healthcheck сам и
+# зовёт `curl … || wget … || exit 1`; в `bookworm-slim` нет ни того, ни другого,
+# поэтому включённая проба падала бы всегда и держала контейнер «нездоровым»
+# честнее, чем он есть. ~1 МБ на образ (07.09.2026).
 RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Build-time defaults only.

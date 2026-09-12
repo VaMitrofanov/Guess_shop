@@ -1,0 +1,100 @@
+.page { min-height: 100vh; color: #251b3f; background: #fbfaff; }
+.hero { position: relative; overflow: hidden; padding: 78px 20px 46px; background: radial-gradient(circle at 80% 20%,rgba(117,86,232,.18),transparent 26rem),linear-gradient(180deg,#fbfaff,#f1edff); border-bottom: 1px solid #ded8f1; }
+.hero::after { content:""; position:absolute; width:520px; height:520px; right:-260px; top:-260px; border:1px solid rgba(117,86,232,.14); border-radius:50%; box-shadow:0 0 0 70px rgba(117,86,232,.04),0 0 0 140px rgba(69,214,170,.025); }
+.heroInner { position: relative; z-index:1; width:min(1120px,100%); margin:0 auto; display:grid; grid-template-columns:1.1fr .9fr; gap:64px; align-items:center; }
+.kicker { color:#7556e8; font-size:15px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+.hero h1 { margin:16px 0 20px; font-family:var(--font-display),sans-serif; font-size:clamp(43px,5.8vw,70px); line-height:1.02; letter-spacing:-.065em; }
+.hero h1 span { color:#7556e8; }
+.heroCopy>p { max-width:620px; color:#706780; font-size:17px; line-height:1.65; }
+.heroFacts { display:flex; flex-wrap:wrap; gap:10px; margin-top:24px; }
+.heroFacts span { display:flex; align-items:center; gap:7px; padding:9px 12px; border:1px solid #dcd5ef; border-radius:999px; background:rgba(255,255,255,.75); color:#675e78; font-size:15px; font-weight:800; }
+.priceDock { position:relative; padding:24px; border:1px solid #cfc5ee; border-radius:23px; background:rgba(255,255,255,.94); box-shadow:9px 9px 0 #251b3f; }
+.priceDockLabel { margin-bottom:12px; color:#7a718b; font-size:15px; font-weight:900; letter-spacing:.07em; text-transform:uppercase; }
+.packButtons { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+.pack,.packActive { min-height:48px; display:flex; align-items:center; justify-content:center; gap:5px; border:1px solid #ded8ef; border-radius:10px; background:#f9f7ff; color:#645c75; font-size:15px; font-weight:800; }
+.packActive { border-color:#7556e8; background:#7556e8; color:white; }
+.customAmountLabel { display:block; margin:18px 0 8px; color:#665d78; font-size:14px; font-weight:850; }
+.customAmountField { min-height:56px; display:flex; align-items:center; gap:10px; padding:0 14px; border:1.5px solid #c5bae7; border-radius:14px; background:#fbfaff; }
+.customAmountField input { width:100%; min-width:0; border:0; outline:0; background:transparent; color:#251b3f; font-size:22px; font-weight:850; }
+.customAmountField strong { padding:6px 8px; border-radius:8px; background:#45d6aa; color:#17473a; font-size:13px; }
+.amountRange { margin:7px 0 0!important; color:#81778f!important; font-size:15px!important; }
+.priceResult { margin:18px 0 12px; padding:15px; border-radius:15px; background:#ece7ff; }
+.priceResult>span { display:block; margin-bottom:5px; color:#746a88; font-size:15px; font-weight:800; }
+.priceResult button { width:100%; display:flex; align-items:center; justify-content:space-between; border:0; background:transparent; color:#251b3f; cursor:pointer; }
+.priceResult strong { font-size:26px; }
+.priceDock>p { margin:0; color:#7a718b; font-size:16px; line-height:1.55; }
+.scrollHint { position:relative; z-index:1; width:max-content; margin:45px auto 0; display:flex; align-items:center; gap:7px; color:#6c6380; font-size:15px; font-weight:800; }
+.guideBody { width:min(1120px,calc(100% - 40px)); margin:0 auto; padding:78px 0 110px; display:grid; grid-template-columns:250px minmax(0,1fr); gap:48px; align-items:start; }
+.progressRail { position:sticky; top:100px; }
+.progressRail>strong { display:block; margin-top:9px; font-size:17px; line-height:1.35; }
+.railTrack { display:flex; flex-direction:column; margin:24px 0; }
+.railTrack a { position:relative; display:flex; align-items:center; gap:10px; min-height:52px; color:#81778f; font-size:15px; font-weight:850; }
+.railTrack a span { display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; }
+.railTrack a small { color:#9a91a8; font-size:13px; font-weight:750; }
+.railTrack a:not(:last-child)::after { content:""; position:absolute; left:14px; top:32px; bottom:-7px; width:1px; background:#dcd5ed; }
+.railTrack i { position:relative; z-index:1; width:29px; height:29px; display:grid; place-items:center; border:1px solid #d6ceec; border-radius:9px; background:#fff; color:#7556e8; font-style:normal; }
+.railHelp { display:flex; gap:10px; padding:15px; border-radius:15px; background:#ece7ff; color:#7556e8; }
+.railHelp svg { flex:0 0 auto; margin-top:2px; }.railHelp strong,.railHelp small { display:block; }.railHelp strong { font-size:15px; }.railHelp small { margin-top:4px; color:#756b88; font-size:15px; line-height:1.5; }
+.stepsColumn { display:flex; flex-direction:column; gap:18px; }
+.stepCard { scroll-margin-top:94px; padding:28px; border:1px solid #ded8ef; border-radius:22px; background:#fff; box-shadow:0 18px 50px rgba(68,48,109,.055); }
+.stepHeading { display:flex; gap:14px; align-items:flex-start; }
+.stepHeading>span { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px; background:#7556e8; color:white; font-family:var(--font-display),sans-serif; font-size:13px; }
+.stepHeading small { color:#8a8297; font-size:15px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.stepHeading h2 { margin:4px 0 0; font-size:25px; letter-spacing:-.04em; }
+.stepCard>p { margin:17px 0; color:#756d83; font-size:16px; line-height:1.65; }
+.externalAction { width:max-content; min-height:50px; display:flex; align-items:center; gap:8px; padding:0 16px; border-radius:11px; background:#251b3f; color:white; font-size:15px; font-weight:800; }
+.figure { position:relative; overflow:hidden; margin:20px 0 0; border:1px solid #dcd5ec; border-radius:16px; background:#eeeaf8; }
+.figure img { width:100%; height:auto; display:block; animation:guideImageFocus 7s cubic-bezier(.22,1,.36,1) infinite; }
+.figure::after { content:""; position:absolute; z-index:2; border:3px solid #335fff; border-radius:12px; box-shadow:0 0 0 999px rgba(17,18,20,.18),0 0 0 5px rgba(51,95,255,.2),0 0 28px rgba(51,95,255,.72); pointer-events:none; animation:guideTargetPulse 2.2s ease-in-out infinite; }
+.figure[data-step="2"]::after { left:9%; top:19%; width:77%; height:52%; }
+.figure[data-step="3"]::after { left:0; top:8%; width:29%; height:76%; }
+.figure[data-step="4"]::after { left:4%; top:20%; width:92%; height:14%; }
+.figure[data-step="5"]::after { left:6%; top:53%; width:55%; height:22%; }
+.focusLabel { position:absolute; z-index:3; left:50%; top:12px; transform:translateX(-50%); padding:7px 10px 7px 28px; border-radius:9px; background:#335fff; color:#fff; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; box-shadow:0 5px 18px rgba(0,0,0,.26); animation:guideLabelFloat 2.2s ease-in-out infinite; }
+.focusLabel::before { content:""; position:absolute; left:9px; top:50%; width:11px; height:11px; border:2px solid #fff; border-radius:50%; transform:translateY(-50%); box-shadow:0 0 0 4px rgba(255,255,255,.18); animation:guideRobloxTap 2.2s cubic-bezier(.22,1,.36,1) infinite; }
+.figure::before { content:"ROBLOX  ·  CREATOR HUB"; position:absolute; z-index:4; right:9px; bottom:9px; padding:5px 8px; border:1px solid rgba(255,255,255,.15); border-radius:7px; background:rgba(17,18,20,.9); color:#f7f7f8; font-size:12px; font-weight:800; letter-spacing:.08em; pointer-events:none; }
+@keyframes guideImageFocus { 0%,18%,100%{transform:scale(1)} 45%,72%{transform:scale(1.035)} }
+@keyframes guideTargetPulse { 50%{box-shadow:0 0 0 999px rgba(17,18,20,.22),0 0 0 9px rgba(51,95,255,.14),0 0 40px rgba(51,95,255,.9)} }
+@keyframes guideLabelFloat { 50%{transform:translate(-50%,-4px)} }
+@keyframes guideRobloxTap { 0%,18%,100%{opacity:.35;transform:translateY(-50%) scale(.65)} 35%,64%{opacity:1;transform:translateY(-50%) scale(1)} 76%{opacity:0;transform:translateY(-50%) scale(1.55)} }
+.criticalBox { display:flex; gap:12px; margin-top:16px; padding:15px; border:1px solid #d8c6ff; border-radius:15px; background:#f1ecff; color:#7556e8; }
+.criticalBox svg { flex:0 0 auto; }.criticalBox strong { display:block; color:#443360; font-size:16px; }.criticalBox p { margin:5px 0 0; color:#726582; font-size:16px; line-height:1.55; }
+.livePrice { margin-top:14px; padding:16px; border-radius:15px; background:#dff9f1; }
+.livePrice>span { display:block; margin-bottom:7px; color:#4d7c6d; font-size:15px; font-weight:800; text-transform:uppercase; }
+.livePrice button { width:100%; display:flex; align-items:center; justify-content:space-between; border:0; background:transparent; color:#214c3e; cursor:pointer; font-size:15px; font-weight:800; }.livePrice strong { font-size:26px; }
+.finishCard { border-color:#bfb1ef; background:linear-gradient(145deg,#fff,#f3efff); }
+.nickLabel { display:block; margin:22px 0 8px; color:#665d78; font-size:16px; font-weight:800; }
+.nickField { min-height:56px; display:flex; align-items:center; gap:10px; padding:0 15px; border:1.5px solid #bfb4e5; border-radius:13px; background:#fff; color:#7556e8; }
+.nickField input { width:100%; border:0; outline:0; background:transparent; color:#251b3f; font-size:15px; font-weight:700; }.nickField input::placeholder { color:#aaa3b4; }
+.nickError { margin:8px 0 0!important; color:#c74661!important; font-size:15px!important; }
+.buyAction,.buyActionDisabled { min-height:56px; margin-top:14px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; background:#7556e8; color:white; font-size:14px; font-weight:900; box-shadow:4px 4px 0 #251b3f; }
+.buyActionDisabled { background:#d7d0e6; color:#8e859b; box-shadow:none; cursor:not-allowed; }
+.finishNote { display:flex; align-items:flex-start; gap:9px; margin-top:16px; color:#796f89; font-size:16px; line-height:1.55; }.finishNote svg { flex:0 0 auto; color:#45a98a; }
+@media(max-width:900px){.heroInner{grid-template-columns:1fr}.priceDock{max-width:560px}.guideBody{grid-template-columns:1fr}.progressRail{position:static}.railTrack{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}.railTrack a{min-height:auto;flex-direction:column;gap:5px}.railTrack a::after{display:none}.railHelp{display:none}}
+@media(max-width:620px){.hero{padding:54px 14px 36px}.heroInner{gap:36px}.hero h1{font-size:40px}.heroCopy>p{font-size:18px}.packButtons{grid-template-columns:1fr 1fr}.guideBody{width:calc(100% - 28px);padding:52px 0 74px}.stepCard{padding:21px 17px}.stepHeading h2{font-size:24px}.stepHeading>span{width:38px;height:38px}.railTrack a span{font-size:14px}.railTrack a small{font-size:12px}.buyAction,.buyActionDisabled{padding:12px;text-align:center}.figure{border-radius:12px}}
+
+:global(html[data-theme="dark"]) .page { color:#f4f0ff; background:#0b0912; }
+:global(html[data-theme="dark"]) .hero { background:radial-gradient(circle at 80% 20%,rgba(117,86,232,.26),transparent 28rem),linear-gradient(180deg,#0b0912,#110d1b); border-color:#30283f; }
+:global(html[data-theme="dark"]) .heroCopy>p,
+:global(html[data-theme="dark"]) .amountRange,
+:global(html[data-theme="dark"]) .priceDock>p,
+:global(html[data-theme="dark"]) .stepCard>p,
+:global(html[data-theme="dark"]) .criticalBox p,
+:global(html[data-theme="dark"]) .finishNote { color:#aaa3b8!important; }
+:global(html[data-theme="dark"]) .heroFacts span,
+:global(html[data-theme="dark"]) .priceDock,
+:global(html[data-theme="dark"]) .stepCard { border-color:#352b48; background:rgba(22,17,33,.94); }
+:global(html[data-theme="dark"]) .priceDock { box-shadow:9px 9px 0 #7556e8; }
+:global(html[data-theme="dark"]) .pack,
+:global(html[data-theme="dark"]) .customAmountField,
+:global(html[data-theme="dark"]) .nickField { border-color:#3b304e; background:#100d18; color:#a68bff; }
+:global(html[data-theme="dark"]) .customAmountField input,
+:global(html[data-theme="dark"]) .nickField input,
+:global(html[data-theme="dark"]) .priceResult button,
+:global(html[data-theme="dark"]) .stepHeading h2 { color:#f4f0ff; }
+:global(html[data-theme="dark"]) .priceResult,
+:global(html[data-theme="dark"]) .finishCard { background:#1d162c; }
+:global(html[data-theme="dark"]) .criticalBox { border-color:#49396a; background:#211831; }
+:global(html[data-theme="dark"]) .criticalBox strong { color:#f4f0ff; }
+:global(html[data-theme="dark"]) .railTrack i { border-color:#403453; background:#171120; }
+@media(prefers-reduced-motion:reduce){.figure img,.figure::after,.focusLabel,.focusLabel::before{animation:none!important}}

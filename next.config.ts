@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { securityHeaders } from "./next-security";
 
 const nextConfig: NextConfig = {
   // ──────────────────────────────────────────────────────────────────────────
@@ -7,6 +8,8 @@ const nextConfig: NextConfig = {
   // Coolify/Docker/PM2 on Ubuntu VPS without changes.
   // ──────────────────────────────────────────────────────────────────────────
   output: "standalone",
+  poweredByHeader: false,
+  headers: securityHeaders,
 
   // ──────────────────────────────────────────────────────────────────────────
   // Production hardening for the 4 GB / 2-core deploy host (Coolify on
@@ -45,12 +48,15 @@ const nextConfig: NextConfig = {
     },
   },
 
-  // Image opt — keep defaults but disable the on-the-fly WebP/AVIF generator
-  // pipeline since the project ships pre-optimised assets and the generator
-  // alone can spike to 200+ MB RSS on small VPS instances.
+  // Keep remote image output bounded to WebP and cache it for 24 hours. Roblox
+  // avatars are proxied through this endpoint instead of fragile CDN hotlinks.
   images: {
     formats: ["image/webp"],
     minimumCacheTTL: 60 * 60 * 24, // 24h — Robux store assets rarely change
+    remotePatterns: [
+      { protocol: "https", hostname: "tr.rbxcdn.com", pathname: "/**" },
+      { protocol: "https", hostname: "www.roblox.com", pathname: "/asset-thumbnail/**" },
+    ],
   },
 
   // ──────────────────────────────────────────────────────────────────────────
