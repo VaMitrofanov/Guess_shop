@@ -14,6 +14,18 @@ import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/d
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
 import { vkGetName, vkSend, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState, getQuestPlan, setQuestPlan, clearQuestPlan } from "./session";
+import {
+  MAX_KEY_MISSES,
+  RESUME_KEYWORDS,
+  isSupportPaused as isSupportPausedStore,
+  looksLikeSupportRequest,
+  noteKeyMiss,
+  pauseSupport as pauseSupportStore,
+  resetKeyMisses,
+  resumeSupport as resumeSupportStore,
+  shouldHintSupportPause,
+  type SupportPauseDb,
+} from "./support-pause";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -100,34 +112,16 @@ import {
 let _vkApi: any = null;
 
 // ── Live-support pause ──────────────────────────────────────────────────────
-// When a user taps support, the manager joins THIS VK dialog and chats directly.
-// While that conversation is active the bot must stay silent on free text — else
-// the user's replies to the manager get parsed as gamepass links and the bot
-// spams "не принял ссылку" on top of the human chat. Keyed by VK user id → expiry.
-const SUPPORT_PAUSE_MS = 30 * 60 * 1000;
-const RESUME_KEYWORDS  = ["+бот", "+bot", "бот+"];
-const supportPause = new Map<number, { exp: number; hinted: boolean }>();
-
-function pauseSupport(vkUserId: number): void {
-  supportPause.set(vkUserId, { exp: Date.now() + SUPPORT_PAUSE_MS, hinted: false });
-}
-function isSupportPaused(vkUserId: number): boolean {
-  const p = supportPause.get(vkUserId);
-  if (!p) return false;
-  if (Date.now() < p.exp) return true;
-  supportPause.delete(vkUserId); // expired
-  return false;
-}
-function resumeSupport(vkUserId: number): void {
-  supportPause.delete(vkUserId);
-}
-/** Одноразовый (на окно паузы) хинт «бот на паузе» — true, если ещё не показывали. */
-function shouldHintSupportPause(vkUserId: number): boolean {
-  const p = supportPause.get(vkUserId);
-  if (!p || p.hinted) return false;
-  p.hinted = true;
-  return true;
-}
+// В VK у бота и у менеджера ОДИН диалог, поэтому пауза — условие того, что
+// человек вообще может разговаривать с клиентом. Хранение и правила окна — в
+// `./support-pause` (сутки, переживает рестарт, продлевается репликой
+// менеджера); здесь остаются только тонкие обёртки со «своим» клиентом БД.
+const pauseSupport = (vkUserId: number, reason: string) =>
+  pauseSupportStore(db as unknown as SupportPauseDb, vkUserId, reason);
+const isSupportPaused = (vkUserId: number) =>
+  isSupportPausedStore(db as unknown as SupportPauseDb, vkUserId);
+const resumeSupport = (vkUserId: number) =>
+  resumeSupportStore(db as unknown as SupportPauseDb, vkUserId);
 
 /** After the manager hands control back, nudge the user to continue the bot flow. */
 async function rePromptAfterSupport(vkUserId: number): Promise<void> {
@@ -148,17 +142,6 @@ async function rePromptAfterSupport(vkUserId: number): Promise<void> {
   } catch (e) {
     console.error("[VK] rePromptAfterSupport failed:", e);
   }
-}
-
-// Natural-language ways a user might ask for a human — so support is reachable by
-// simply writing, not only via the button. Substring match (stems cover endings).
-// «support» — ТОЛЬКО как отдельное слово: substring ловил латинские ники вида
-// Support_Kid и уводил ввод ника в саппорт-паузу (кириллические стемы в латинском
-// нике встретиться не могут, им substring безопасен).
-const SUPPORT_WORDS = ["оператор", "поддержк", "менеджер", "помощь", "помоги", "саппорт", "живой человек", "живого человека", "жалоб"];
-const SUPPORT_WORD_RE = /\bsupport\b/i;
-function looksLikeSupportRequest(lower: string): boolean {
-  return SUPPORT_WORDS.some((w) => lower.includes(w)) || SUPPORT_WORD_RE.test(lower);
 }
 
 /** Single entry point for "user wants a manager": alert admins, pause the bot,
@@ -188,7 +171,7 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
     vkId: String(vkUserId),
     contextKey: ctxKey, wbCode, denomination: denom,
   });
-  pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat
+  await pauseSupport(vkUserId, "клиент позвал человека"); // бот замолкает, чтобы не мешать разговору
   await ctx.reply(
     "✅ Готово! Дальше с тобой общается живой человек (не бот) — менеджер ответит прямо здесь, в этом чате.\n\n" +
     "Опиши, пожалуйста, что случилось, одним сообщением 👇\n" +
@@ -814,29 +797,69 @@ export async function handleVkGroupJoin(vkUserId: number): Promise<void> {
 
 // ── Entry point: called for every message_new event ───────────────────────────
 
+/** Не чаще одного уточняющего запроса в VK на диалог: `peer` → момент проверки. */
+const outboxProbeAt = new Map<number, number>();
+const OUTBOX_PROBE_THROTTLE_MS = 60 * 1000;
+
+/**
+ * Это писал живой менеджер или сам бот?
+ *
+ * Признак `admin_author_id` есть только у сообщений, отправленных человеком из
+ * интерфейса сообщества. Беда в том, что в событии LongPoll он приходит не
+ * всегда — и ветка «менеджер пишет» молча не срабатывала: в разборе диалога от
+ * 11.09 бот вклинился через ДВЕ МИНУТЫ после реплики менеджера, потому что
+ * паузу никто не поставил.
+ *
+ * Поэтому, когда признака в событии нет, спрашиваем сам VK (`messages.getById`
+ * — там поле есть всегда, проверено на истории того же диалога). Запрос
+ * throttling'ом ограничен одним на диалог в минуту: очередь собственных
+ * сообщений бота (квест шлёт их пачкой) не превращается в очередь запросов.
+ */
+async function isHumanOutbox(ctx: MessageContext, peer: number): Promise<boolean> {
+  const inEvent =
+    (ctx as any).adminAuthorId ??
+    (ctx as any)?.message?.admin_author_id ??
+    (ctx as any)?.payload?.admin_author_id;
+  if (inEvent) return true;
+
+  const messageId = (ctx as any).id ?? (ctx as any)?.payload?.id;
+  if (!_vkApi || !messageId) return false;
+
+  const last = outboxProbeAt.get(peer) ?? 0;
+  if (Date.now() - last < OUTBOX_PROBE_THROTTLE_MS) return false;
+  outboxProbeAt.set(peer, Date.now());
+
+  try {
+    const res = await _vkApi.messages.getById({ message_ids: messageId });
+    const item = res?.items?.[0];
+    return Boolean(item?.admin_author_id);
+  } catch (err) {
+    console.warn("[VK] support-pause: не спросили VK про автора сообщения:", (err as any)?.message ?? err);
+    return false;
+  }
+}
+
 /**
  * Исходящие сообщения сообщества (событие message_reply; в handleMessage —
- * страховка на message_new с out-флагом). Различаем живого менеджера и самого
- * бота по `admin_author_id`: он есть только у сообщений, отправленных админом
- * вручную из интерфейса сообщества (random_id ненадёжен — у менеджерских
- * сообщений он тоже бывает ненулевым, проверено историей). Сообщения бота
- * паузу НЕ трогают — иначе она самоподдерживалась бы бесконечно.
+ * страховка на message_new с out-флагом).
+ *
+ * Каждое сообщение живого менеджера ставит и ПРОДЛЕВАЕТ паузу: разговор живёт
+ * сутками, и молчать бот должен ровно столько, сколько идёт разговор.
+ * Сообщения самого бота паузу не трогают — иначе она самоподдерживалась бы.
  */
 export async function handleOutboxMessage(ctx: MessageContext): Promise<void> {
   const peer = typeof (ctx as any).peerId === "number" ? (ctx as any).peerId : undefined;
   if (peer === undefined || peer <= 0) return;
   const t = (ctx.text ?? "").trim().toLowerCase();
-  const adminAuthorId =
-    (ctx as any).adminAuthorId ??
-    (ctx as any)?.message?.admin_author_id ??
-    (ctx as any)?.payload?.admin_author_id;
   if (RESUME_KEYWORDS.includes(t)) {
     // Менеджер вернул бота командой «+бот» из чата сообщества.
-    resumeSupport(peer);
+    await resumeSupport(peer);
     void rePromptAfterSupport(peer);
-  } else if (adminAuthorId) {
+    return;
+  }
+  if (await isHumanOutbox(ctx, peer)) {
     // Живой менеджер пишет клиенту → бот замолкает (ставим/продлеваем паузу).
-    pauseSupport(peer);
+    await pauseSupport(peer, "пишет менеджер");
   }
 }
 
@@ -1088,8 +1111,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     looksLikeSupportRequest(lower) &&
     !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))
   ) {
-    if (isSupportPaused(vkUserId)) {
-      await ctx.reply("С тобой на связи живой человек (не бот) — менеджер ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
+    if (await isSupportPaused(vkUserId)) {
+      // Разговор с менеджером уже идёт. Раньше бот отвечал на КАЖДОЕ такое
+      // сообщение — человек писал менеджеру, а получал бота. Теперь напоминаем
+      // про живого человека один раз за окно паузы и молчим.
+      if (shouldHintSupportPause(vkUserId)) {
+        await ctx.reply("С тобой на связи живой человек (не бот) — менеджер ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
+      }
     } else {
       await triggerSupport(ctx, vkUserId, "general");
     }
@@ -1101,9 +1129,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // Button payload commands (start_direct, status, edit_nick, etc.) still work —
   // they are intentional user actions from inline keyboards, not free text.
   // The user can hand control back to the bot themselves with «+бот».
-  if (isSupportPaused(vkUserId)) {
+  if (await isSupportPaused(vkUserId)) {
     if (RESUME_KEYWORDS.includes(lower)) {
-      resumeSupport(vkUserId);
+      await resumeSupport(vkUserId);
       void rePromptAfterSupport(vkUserId);
       return;
     }
@@ -3338,6 +3366,17 @@ async function handleVkApiKeyInput(
   const key = raw.trim();
 
   if (!looksLikeApiKey(key)) {
+    // Ожидание ключа НЕ бесконечно. Раньше любой текст получал «это не похоже
+    // на ключ» — человек писал менеджеру, а бот отвечал ему этой фразой снова и
+    // снова (11.09 — четыре раза подряд, в том числе на «спасибо, чуть позже
+    // скину»). Второй промах заканчивает ожидание и зовёт живого человека.
+    if (noteKeyMiss(vkUserId) >= MAX_KEY_MISSES) {
+      resetKeyMisses(vkUserId);
+      clearState(vkUserId);
+      await ctx.reply("Похоже, с ключом не выходит — не мучайся, сейчас подключу живого человека 🤝");
+      await triggerSupport(ctx, vkUserId, "key-stuck");
+      return;
+    }
     await ctx.reply({
       message:
         "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».",
@@ -3349,6 +3388,7 @@ async function handleVkApiKeyInput(
     });
     return;
   }
+  resetKeyMisses(vkUserId);
 
   const targets = quest && targetsToCreate(quest.plan).length > 0
     ? createTargetsFor(quest.denomination)
@@ -4014,9 +4054,19 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
   const key = raw.trim();
 
   if (!looksLikeApiKey(key)) {
+    // Тот же предел, что и в ветке заказа по коду: два промаха — и разговор
+    // уходит человеку, а не крутится на одной фразе.
+    if (noteKeyMiss(vkUserId) >= MAX_KEY_MISSES) {
+      resetKeyMisses(vkUserId);
+      clearState(vkUserId);
+      await ctx.reply("Похоже, с ключом не выходит — не мучайся, сейчас подключу живого человека 🤝");
+      await triggerSupport(ctx, vkUserId, "key-stuck-direct");
+      return;
+    }
     await ctx.reply("Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».");
     return;
   }
+  resetKeyMisses(vkUserId);
 
   await ctx.reply(questKeyWorkingText([st.passPrice]).replace(/<\/?b>/g, ""));
   const outcome = await createPassesByKey({ apiKey: key, nick: st.robloxUsername, targets: [st.passPrice] });

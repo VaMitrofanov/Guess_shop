@@ -51,6 +51,12 @@ model User {
   reviewBonusClaimed      Boolean             @default(false)
   reviewBonusGrantedAt    DateTime?
   reviewReminderLevel     Int                 @default(0)
+  /// Живой менеджер ведёт диалог во ВКонтакте — бот молчит до этого момента.
+  /// В VK у бота и менеджера ОДИН диалог, и пока пауза не переживала рестарт
+  /// (жила в памяти), бот вклинивался в разговор после каждого деплоя и через
+  /// полчаса после последней реплики менеджера. Продлевается каждым сообщением
+  /// менеджера, снимается командой «+бот».
+  supportPausedUntil      DateTime?
   wbCodes                 WbCode[]
   wbOrders                WbOrder[]
   directIntents           DirectIntent[]
