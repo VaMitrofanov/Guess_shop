@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { REVOKED_CODE_REFUSAL, isRevokedCode } from "@/lib/wb-code-revocation";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
@@ -51,6 +52,11 @@ export async function POST(request: Request) {
 
       if (!wbCode) {
         throw { status: 404, message: "Код не найден. Проверьте правильность ввода." };
+      }
+
+      // Деньги за заказ вернулись на WB — код больше не наш долг.
+      if (isRevokedCode(wbCode)) {
+        throw { status: 409, message: REVOKED_CODE_REFUSAL, code: "CODE_REVOKED" };
       }
 
       if (wbCode.isUsed && wbCode.userId) {

@@ -36,6 +36,7 @@ import {
 import {
   NOT_HELD_SQL, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
 } from "@/lib/order-hold";
+import { isRevokedCode } from "@/lib/wb-code-revocation";
 import {
   buildNarrowWhere, isNarrowed, loadOrderSlices, parseNarrow, type OrderSlicesPayload,
 } from "@/lib/order-slices";
@@ -1033,10 +1034,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Код — 7 символов A-Z/0-9" }, { status: 400 });
       codeRow = await (prisma as any).wbCode.findUnique({
         where: { code: codeToUse },
-        select: { id: true, denomination: true, isTest: true, usedAt: true },
+        select: { id: true, denomination: true, isTest: true, usedAt: true, status: true },
       });
       if (!codeRow) return NextResponse.json({ error: `Код ${codeToUse} не найден` }, { status: 400 });
       if (codeRow.isTest) return NextResponse.json({ error: `Код ${codeToUse} — тестовый` }, { status: 400 });
+      /* Аннулированный код отсекает и заморозка ниже — её ставит то же ядро, —
+         но отказ должен называть настоящую причину: деньги вернулись, а не
+         «заказ заморожен». */
+      if (isRevokedCode(codeRow))
+        return NextResponse.json({ error: `Код ${codeToUse} аннулирован: заказ на WB отменён и деньги вернулись покупателю` }, { status: 409 });
       const orderOnCode = await (prisma as any).wbOrder.findFirst({
         where: { wbCode: codeToUse }, select: { status: true },
       });

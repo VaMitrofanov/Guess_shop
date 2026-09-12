@@ -15,6 +15,7 @@ export const WB_STAGE_LABEL: Record<WbDeliveryStage, string> = {
   link_sent: "Ссылка отправлена",
   ready_receive: "Закрыть на WB",
   in_bot: "В нашем боте",
+  stalled: "Покупатель пропал",
   complete: "Завершён",
   cancelled: "Отменён",
 };
@@ -54,6 +55,16 @@ export const WB_QUEUE_SECTIONS = [
     title: "В нашем боте",
     hint: "код выдан, покупатель идёт по воронке",
     stages: ["link_sent", "in_bot"],
+  },
+  /* Отдельная секция, а не хвост предыдущей: «идёт по воронке» и «не открыл
+     код вторые сутки» требуют разных действий, а выглядели одинаково. Не в
+     «Нашем ходе» намеренно — 11 вечно-красных карточек убивают доверие к
+     срочной вкладке быстрее, чем помогают (тот же урок, что с `800code`). */
+  {
+    id: "stalled",
+    title: "Пропали",
+    hint: "код выдан, покупатель молчит — нужен живой человек",
+    stages: ["stalled"],
   },
 ] as const satisfies readonly { id: string; title: string; hint: string; stages: readonly WbDeliveryStage[] }[];
 
@@ -147,6 +158,10 @@ const AUDIT_LABEL: Record<string, string> = {
   BUYER_NAME_RESOLVED: "Имя покупателя получено",
   WB_ORDER_CANCELLED: "WB отменил заказ",
   INTERNAL_ORDER_CREATED: "Заказ на выкуп создан вручную",
+  GATE_REVOKED: "Код гейта аннулирован",
+  GATE_REMINDER_SENT: "Напоминание покупателю",
+  BUYER_CLAIM_SEEN: "Покупатель открыл заявку на возврат",
+  BUYER_CLAIM_RESOLVED: "Заявка на возврат решена",
 };
 
 /** Never show a raw enum to the operator; an unmapped type degrades to readable

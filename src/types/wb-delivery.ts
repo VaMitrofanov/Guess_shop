@@ -88,6 +88,9 @@ export type WbDeliveryOrderDto = {
     /** The gate code exists but nobody activated it, so an operator may open
      * the buyout order by hand. */
     createInternalOrder: boolean;
+    /** Заказ отменён на WB, а выданный код остался бы рабочим: аннулирование —
+     * единственное действие, которое закрывает такой заказ. */
+    revokeGate: boolean;
     confirm: boolean;
     deliver: boolean;
     receive: boolean;
@@ -222,7 +225,8 @@ export type WbDeliveryAction =
   | "deliver"
   | "receive"
   | "preview_gamepass"
-  | "create_internal_order";
+  | "create_internal_order"
+  | "revoke_gate";
 
 /** What the console learned about a game pass before an operator commits to
  * opening a buyout order on it. */

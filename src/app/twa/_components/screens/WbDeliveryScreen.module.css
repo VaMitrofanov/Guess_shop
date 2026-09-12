@@ -96,7 +96,7 @@
 .stage_new,.stage_chat_ready{border-color:rgba(255,255,255,.12)!important}
 .stage_waiting_code{border-color:rgba(255,159,10,.24)!important}
 .stage_link_sent{border-color:rgba(120,180,255,.22)!important}
-.stage_cancelled{opacity:.62;border-color:rgba(255,255,255,.08)!important}
+.stage_stalled{border-color:rgba(255,171,65,.2)!important}.stage_cancelled{opacity:.62;border-color:rgba(255,255,255,.08)!important}
 
 /* Reveal/copy affordances inside the info tiles. */
 .revealButton{min-height:30px;display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:0 9px;border:1px solid rgba(167,139,250,.28);border-radius:9px;color:#d3c6ff;background:rgba(167,139,250,.12);font-size:12px;font-weight:700}

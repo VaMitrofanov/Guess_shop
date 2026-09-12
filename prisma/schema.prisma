@@ -330,6 +330,11 @@ enum WbCodeStatus {
   AVAILABLE
   RESERVED
   CLAIMED
+  /// Заказ на WB отменён, деньги вернулись покупателю — код больше не
+  /// активируется ни на сайте, ни в ботах. Ставится только через
+  /// `bots/shared/wb-code-revocation.ts`, которое заодно вешает на код
+  /// заморозку: вторая защёлка на случай новой двери активации без гарда.
+  REVOKED
 }
 
 enum WbMarketplaceChatState {
@@ -1153,6 +1158,12 @@ model WbMarketplaceOrder {
   /// Своими словами покупателя из заявки: чаще всего это диагноз продукту
   /// («не знаем, как создать геймпасс»), а не жалоба на доставку.
   claimReason          String?
+  /// Стадия заявки у WB: 1 — на рассмотрении, 2 — решение принято. Исход
+  /// заявки не виден больше нигде: статус DBS меняется только в момент
+  /// возврата денег, а это от полутора (XKFFJUU) до восьми (BJUM4MN) суток.
+  claimStatus          Int?
+  /// Когда мы впервые увидели заявку решённой.
+  claimResolvedAt      DateTime?
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
   chats                WbBuyerChat[]

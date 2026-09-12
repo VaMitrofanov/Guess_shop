@@ -29,6 +29,7 @@ import {
 import {
   deliveryWindow,
   safeDate,
+  wbClaimDate,
   wbBuyerName,
   wbChatClientName,
   wbClientOrderId,
@@ -64,6 +65,7 @@ import {
   WB_RECEIVE_RECHECK_AFTER_ATTEMPTS,
   WB_RECEIVE_RETRY_HORIZON_MS,
 } from "./wb-delivery-policy";
+import type { WbCancellationOutcome } from "./wb-delivery-admin-notify";
 import {
   notifyDbsBuyerMessage,
   notifyDbsCodeCaptured,
@@ -74,10 +76,12 @@ import {
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
   notifyWbBuyerClaim,
+  notifyWbClaimResolved,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
+import { revokeGateCode } from "./wb-code-revocation";
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 
 const WORKER_STREAM = "wb-dbs-worker";
@@ -99,10 +103,26 @@ const CLOSED_RECHECK_DAYS = 14;
 const STUCK_DELIVERY_ALERT_MS = 20 * 60_000;
 /** Э7: when a buyer who received a gate link still has not opened it. Two
  * nudges, then the order is the operator's problem rather than the bot's. */
+/* Напоминания по невскрытому гейту.
+ *
+ * Третье добавлено 12.09.2026. До него их было два — три часа и сутки, — и
+ * дальше заказ замолкал навсегда: 11 оплаченных заказов на 6900 R$ лежали в
+ * консоли как «покупатель идёт по воронке», хотя идти было некому. Оба возврата
+ * (`XKFFJUU`, `BJUM4MN`) пришли именно из этого хвоста, и оба с текстом «не
+ * знаю, как создать геймпасс» — то есть человек не ушёл, а застрял.
+ *
+ * Неделя, а не трое суток: раньше седьмого дня писать не о чем — те же слова
+ * уже сказаны дважды. */
 const GATE_REMINDERS = [
   { level: 1, afterMs: 3 * 60 * 60_000 },
   { level: 2, afterMs: 24 * 60 * 60_000 },
+  { level: 3, afterMs: 7 * 24 * 60 * 60_000 },
 ] as const;
+
+/** Дальше седьмого дня третье напоминание уже не отправляем: писать человеку
+ * через месяц «ваш заказ ждёт» — это не забота, а неожиданность. Порог сделан
+ * явным, чтобы владелец мог его сдвинуть одним числом. */
+const GATE_REMINDER_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 type Db = PrismaClient;
 
@@ -1393,6 +1413,13 @@ async function fetchAndApplyStatuses(db: Db, targets: StatusTarget[], out: WbDel
  * that order has to close too — otherwise the buyout queue keeps a job nobody
  * is paying for, which is exactly how cancelled orders became dead weight.
  *
+ * Four outcomes, because the old three lied about the most expensive one.
+ * `outcome` started as `no_internal_order` and was only overwritten when the
+ * internal status was neither `COMPLETED` nor `REJECTED` — so an order whose
+ * Robux we had already bought was announced as «гейт выдан, но не активирован»
+ * with a calm marker. The case that costs us a full denomination was described
+ * as the one that costs nothing.
+ *
  * Only orders that have cost us nothing yet are closed automatically; a
  * purchase in flight or already made is left alone and stays visible in the
  * console as `attention` for a human to settle. Either way the admins hear
@@ -1406,12 +1433,14 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
   const internal = code
     ? await db.wbOrder.findUnique({
       where: { wbCode: code },
-      select: { id: true, status: true, adminNote: true, robloxUsername: true },
+      select: { id: true, status: true, adminNote: true, robloxUsername: true, amount: true, completedAt: true },
     })
     : null;
 
-  let outcome: "rejected" | "needs_human" | "no_internal_order" = "no_internal_order";
-  if (internal && !["COMPLETED", "REJECTED"].includes(internal.status)) {
+  let outcome: WbCancellationOutcome = "no_internal_order";
+  if (internal?.status === "COMPLETED") {
+    outcome = "already_delivered";
+  } else if (internal && internal.status !== "REJECTED") {
     if (canAutoRejectInternalOrder(internal.status)) {
       const mark = `[WB ОТМЕНА ${new Date().toISOString().slice(0, 10)}] заказ WB #${wbOrderId} отменён (${wbStatus}) — выкуп закрыт автоматически`;
       await db.wbOrder.update({
@@ -1428,13 +1457,30 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
     }
   }
 
+  /* Деньги вернулись, а код остался бы рабочим: до 12.09.2026 ни одна точка
+     активации не смотрела на отмену, и `XKFFJUU` двое суток ждал предъявителя.
+     Аннулируем сразу же — руками этого сделать было нельзя вовсе (в консоли
+     для отменённого заказа не было ни одного подходящего действия). */
+  let revoked = false;
+  if (code && (outcome === "no_internal_order" || outcome === "rejected")) {
+    const result = await revokeGateCode(db, { marketplaceOrderId: orderId, wbOrderId, actor: "wb-sync" })
+      .catch(() => ({ ok: false as const, error: "REVOKE_FAILED" }));
+    revoked = result.ok;
+    if (!result.ok) console.error(`[WbDbsSync] код ${code} не аннулирован: ${result.error}`);
+  }
+
   await audit(db, orderId, "WB_ORDER_CANCELLED", `wb-cancelled:${orderId}`, {
     wbStatus,
     activationCode: code,
     internalStatus: internal?.status ?? null,
     outcome,
+    revoked,
   }).catch(() => {});
-  notifyDbsOrderCancelled(await dbsRef(db, orderId, wbOrderId), wbStatus, internal?.status ?? null, outcome);
+  notifyDbsOrderCancelled(await dbsRef(db, orderId, wbOrderId), wbStatus, internal?.status ?? null, outcome, {
+    revoked,
+    amount: internal?.amount ?? null,
+    completedAt: internal?.completedAt ?? null,
+  });
   await refreshDbsCard(db, orderId).catch(() => {});
 }
 
@@ -1555,8 +1601,14 @@ async function purgeExpiredDeliverySecrets(db: Db) {
  * заявки сохраняем: чаще всего это диагноз продукту, а не жалоба на доставку,
  * и читать его стоит целиком.
  */
+/** Стадия заявки у WB: 2 — решение принято, всё остальное — ещё идёт. */
+const CLAIM_RESOLVED = 2;
+/** `status_ex` решения в пользу покупателя: деньги возвращаются. */
+const CLAIM_REFUND_GRANTED = 5;
+
 async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
-  const seen = new Map<string, { dt: string | undefined; reason: string | undefined }>();
+  type SeenClaim = { dt: string | undefined; reason: string | undefined; status: number | undefined; statusEx: number | undefined };
+  const seen = new Map<string, SeenClaim>();
   for (const isArchive of [false, true]) {
     const page = await fetchBuyerClaims(isArchive);
     for (const claim of page.claims) {
@@ -1565,7 +1617,12 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
       // самую раннюю, потому что важен момент, когда спор начался.
       const prev = seen.get(claim.srid);
       if (!prev || (claim.dt && prev.dt && claim.dt < prev.dt)) {
-        seen.set(claim.srid, { dt: claim.dt, reason: claim.user_comment });
+        seen.set(claim.srid, {
+          dt: claim.dt,
+          reason: claim.user_comment,
+          status: claim.status,
+          statusEx: claim.status_ex,
+        });
       }
     }
   }
@@ -1574,7 +1631,7 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
   const orders = await db.wbMarketplaceOrder.findMany({
     where: { rid: { in: [...seen.keys()] } },
     select: {
-      id: true, rid: true, wbOrderId: true, claimOpenedAt: true,
+      id: true, rid: true, wbOrderId: true, claimOpenedAt: true, claimStatus: true,
       denominationSnapshot: true, buyerName: true,
       wbCode: { select: { code: true } },
     },
@@ -1582,24 +1639,55 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
 
   for (const order of orders) {
     const claim = order.rid ? seen.get(order.rid) : undefined;
-    if (!claim || order.claimOpenedAt) continue;
-    const openedAt = safeDate(claim.dt);
+    if (!claim) continue;
+    const resolved = claim.status === CLAIM_RESOLVED;
+
+    if (!order.claimOpenedAt) {
+      const openedAt = wbClaimDate(claim.dt);
+      await db.wbMarketplaceOrder.update({
+        where: { id: order.id },
+        data: {
+          claimOpenedAt: openedAt,
+          claimReason: claim.reason?.slice(0, 500) ?? null,
+          claimStatus: claim.status ?? null,
+          claimResolvedAt: resolved ? new Date() : null,
+        },
+      });
+      await audit(db, order.id, "BUYER_CLAIM_SEEN", `claim:${order.id}`, {
+        openedAt: openedAt.toISOString(),
+        reason: claim.reason ?? null,
+        status: claim.status ?? null,
+      });
+      out.newClaims += 1;
+      await notifyWbBuyerClaim({
+        wbOrderId: order.wbOrderId,
+        code: order.wbCode?.code ?? null,
+        denomination: order.denominationSnapshot,
+        buyerName: order.buyerName,
+        reason: claim.reason ?? null,
+      }).catch(() => undefined);
+      continue;
+    }
+
+    /* Заявку мы уже видели — осталось поймать её ИСХОД. Другого источника нет:
+       статус DBS-заказа меняется только в момент возврата денег, а это от
+       полутора суток (`XKFFJUU`) до восьми (`BJUM4MN`) после решения. */
+    if (!resolved || order.claimStatus === CLAIM_RESOLVED) continue;
     await db.wbMarketplaceOrder.update({
       where: { id: order.id },
-      data: { claimOpenedAt: openedAt, claimReason: claim.reason?.slice(0, 500) ?? null },
+      data: { claimStatus: claim.status ?? null, claimResolvedAt: new Date() },
     });
-    await audit(db, order.id, "BUYER_CLAIM_SEEN", `claim:${order.id}`, {
-      openedAt: openedAt.toISOString(),
-      reason: claim.reason ?? null,
-    });
-    out.newClaims += 1;
-    await notifyWbBuyerClaim({
+    await audit(db, order.id, "BUYER_CLAIM_RESOLVED", `claim-resolved:${order.id}`, {
+      status: claim.status ?? null,
+      statusEx: claim.statusEx ?? null,
+    }).catch(() => {});
+    notifyWbClaimResolved({
       wbOrderId: order.wbOrderId,
       code: order.wbCode?.code ?? null,
       denomination: order.denominationSnapshot,
       buyerName: order.buyerName,
-      reason: claim.reason ?? null,
-    }).catch(() => undefined);
+      refunded: claim.statusEx === CLAIM_REFUND_GRANTED,
+    });
   }
 }
 
@@ -1624,7 +1712,11 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
       claimOpenedAt: null,
       gateState: "SENT",
       gateReminderLevel: { lt: GATE_REMINDERS[GATE_REMINDERS.length - 1].level },
-      gateSentAt: { not: null, lt: new Date(Date.now() - oldest) },
+      gateSentAt: {
+        not: null,
+        lt: new Date(Date.now() - oldest),
+        gte: new Date(Date.now() - GATE_REMINDER_MAX_AGE_MS),
+      },
     },
     select: {
       id: true,
@@ -1681,7 +1773,11 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
         level: due.level,
       });
       out.gateReminders += 1;
-      if (due.level === GATE_REMINDERS[GATE_REMINDERS.length - 1].level) {
+      /* Админам говорим на СУТКАХ, а не на последнем уровне: третье
+         напоминание уходит через неделю, и привязка алерта к «последнему»
+         молча отодвинула бы его туда же. Оператору важно узнать про молчащего
+         покупателя тогда, когда с этим ещё можно что-то сделать. */
+      if (due.level === 2) {
         notifyDbsGateNotOpened(await dbsRef(db, order.id, order.wbOrderId));
       }
     } catch (error) {

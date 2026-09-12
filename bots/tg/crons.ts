@@ -200,14 +200,30 @@ async function checkWbCodeStock(): Promise<void> {
 
 /* ── AWAITING_GAMEPASS reminders ──────────────────────────────────────────────
    Users who activated a code but haven't created a gamepass yet. Progressive
-   nudges at 3h, 24h, 72h. No order deletion — just reminders.
+   nudges at 3h, 24h, 72h and — с 12.09.2026 — на седьмые сутки. No order
+   deletion — just reminders.
+
+   Четвёртое касание появилось потому, что после 72 часов бот замолкал
+   НАВСЕГДА: 119 оплаченных заказов на 96 000 R$ ждут геймпасс, 105 из них
+   старше недели. Это не брошенные корзины — деньги за них получены, и обе
+   заявки на возврат, которые мы видели, пришли из этого хвоста.
+
+   Два предохранителя. `AWAITING_MAX_AGE_DAYS`: писать человеку через месяц
+   «ваш заказ ждёт» — не забота, а неожиданность, поэтому седьмое напоминание
+   не догоняет то, что успело состариться. `AWAITING_BATCH`: в момент выкатки
+   под условие подпадает весь накопленный хвост разом, а сотня сообщений в
+   минуту — это не рассылка, это инцидент.
    ───────────────────────────────────────────────────────────────────────── */
 
 const AWAITING_SCHEDULE: Array<{ sent: number; hoursThreshold: number }> = [
   { sent: 0, hoursThreshold: 3 },
   { sent: 1, hoursThreshold: 24 },
   { sent: 2, hoursThreshold: 72 },
+  { sent: 3, hoursThreshold: 7 * 24 },
 ];
+
+const AWAITING_MAX_AGE_DAYS = 30;
+const AWAITING_BATCH = 10;
 
 function buildReminderMsg(level: number, guideUrl: string): string {
   if (level === 1) {
@@ -226,10 +242,21 @@ function buildReminderMsg(level: number, guideUrl: string): string {
       `📖 <a href="${guideUrl}">Открыть инструкцию</a>`
     );
   }
+  if (level === 3) {
+    return (
+      `Последнее напоминание: геймпасс всё ещё ждёт создания.\n` +
+      `Если нужна помощь — напиши, поможем разобраться 💬\n\n` +
+      `📖 <a href="${guideUrl}">Открыть инструкцию</a>`
+    );
+  }
+  /* Неделя. Инструкцию человек уже видел трижды — четвёртый раз она не
+     сработает. Единственное, что здесь ещё может помочь, — живой человек,
+     поэтому предложение написать стоит первым, а ссылка последней. */
   return (
-    `Последнее напоминание: геймпасс всё ещё ждёт создания.\n` +
-    `Если нужна помощь — напиши, поможем разобраться 💬\n\n` +
-    `📖 <a href="${guideUrl}">Открыть инструкцию</a>`
+    `Твои робуксы всё ещё за тобой — заказ открыт и не сгорает ⏳\n\n` +
+    `Обычно люди застревают на одном шаге: создать геймпасс в Roblox. ` +
+    `Если дело в нём — напиши сюда «помогите», проведу по шагам, это пара минут.\n\n` +
+    `📖 <a href="${guideUrl}">Или открыть инструкцию самому</a>`
   );
 }
 
@@ -250,10 +277,18 @@ function buildReminderMsgPlain(level: number, guideUrl: string): string {
       `📖 Инструкция: ${guideUrl}`
     );
   }
+  if (level === 3) {
+    return (
+      `Последнее напоминание: геймпасс всё ещё ждёт создания.\n` +
+      `Если нужна помощь — напиши, поможем разобраться 💬\n\n` +
+      `📖 Инструкция: ${guideUrl}`
+    );
+  }
   return (
-    `Последнее напоминание: геймпасс всё ещё ждёт создания.\n` +
-    `Если нужна помощь — напиши, поможем разобраться 💬\n\n` +
-    `📖 Инструкция: ${guideUrl}`
+    `Твои робуксы всё ещё за тобой — заказ открыт и не сгорает ⏳\n\n` +
+    `Обычно люди застревают на одном шаге: создать геймпасс в Roblox. ` +
+    `Если дело в нём — напиши сюда «помогите», проведу по шагам, это пара минут.\n\n` +
+    `📖 Или открыть инструкцию самому: ${guideUrl}`
   );
 }
 
@@ -263,12 +298,15 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
   const orders = await (db as any).wbOrder.findMany({
     where: {
       status: "AWAITING_GAMEPASS",
-      remindersSent: { lt: 3 },
+      remindersSent: { lt: AWAITING_SCHEDULE.length },
       isTest: false,
+      createdAt: { gte: new Date(now - AWAITING_MAX_AGE_DAYS * 86_400_000) },
     },
     include: {
       user: { select: { tgId: true, vkId: true } },
     },
+    orderBy: { createdAt: "asc" },
+    take: AWAITING_BATCH,
   });
 
   for (const order of orders) {
@@ -300,7 +338,7 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
           parse_mode: "HTML",
           disable_web_page_preview: true,
         };
-        if (newLevel === 3) {
+        if (newLevel >= 3) {
           extra.reply_markup = {
             inline_keyboard: [
               [{ text: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrl }],

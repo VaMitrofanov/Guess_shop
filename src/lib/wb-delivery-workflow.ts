@@ -30,6 +30,7 @@ import {
 import {
   canCreateInternalOrder,
   canIssueWbGate,
+  canRevokeGateCode,
   canReceiveWbOrder,
   canSendWbGate,
   WB_RECEIVE_MAX_ATTEMPTS,
@@ -44,7 +45,8 @@ import {
 import { BuyoutError, resolveGamepass } from "@/lib/roblox-buyout";
 import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
-import { dbsRef } from "../../bots/shared/wb-dbs-thread";
+import { dbsRef, refreshDbsCard } from "../../bots/shared/wb-dbs-thread";
+import { revokeGateCode } from "../../bots/shared/wb-code-revocation";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
@@ -148,6 +150,7 @@ export const WbDeliveryActionSchema = z.object({
     "receive",
     "preview_gamepass",
     "create_internal_order",
+    "revoke_gate",
   ]),
   orderId: z.string().min(1).max(80).optional(),
   code: z.string().trim().regex(/^\d{5,7}$/).optional(),
@@ -316,6 +319,14 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
         cancelledAt: order.cancelledAt,
         gateState: order.gateState,
         activationCode,
+        internalStatus: order.internalFulfillment?.status ?? null,
+      }),
+      // Отмена вернула деньги, а код остался бы рабочим. Это единственный
+      // способ закрыть такой заказ: до 12.09.2026 из «Нужна проверка» не вело
+      // ни одно действие — все три отказывали отменённому заказу.
+      revokeGate: canRevokeGateCode({
+        cancelledAt: order.cancelledAt,
+        gateState: order.gateState,
         internalStatus: order.internalFulfillment?.status ?? null,
       }),
       confirm: !terminal && !order.lastErrorCode && !/confirm|deliver|sold|receive/i.test(order.supplierStatus),
@@ -1428,6 +1439,20 @@ export async function performWbDeliveryAction(
       robloxUsername: input.robloxUsername,
       force: input.force,
     });
+  }
+  if (input.action === "revoke_gate") {
+    /* Единственный выход из «Нужна проверка» для отменённого заказа. До
+       12.09.2026 его не было вовсе: снятие требовало закрытого внутреннего
+       заказа, то есть код сначала нужно было дать активировать. */
+    const result = await revokeGateCode(db, {
+      marketplaceOrderId: order.id,
+      wbOrderId: order.wbOrderId,
+      actor,
+    });
+    if (!result.ok) throw new WbDeliveryWorkflowError(result.error, 409, "REVOKE_REFUSED");
+    await audit(order.id, "GATE_REVOKED", actor, { activationCode: result.code, isTest: order.isTest });
+    await refreshDbsCard(db, order.id).catch(() => {});
+    return { ok: true, message: `Код ${result.code} аннулирован — предъявить его больше нельзя`, orderId: order.id };
   }
   if (input.action === "send_message") {
     if (!input.message) throw new WbDeliveryWorkflowError("Введите сообщение", 400, "MESSAGE_REQUIRED");

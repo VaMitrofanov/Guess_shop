@@ -14,6 +14,7 @@ import { getSbpQrBuffer } from "../shared/sbp";
 import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { assertOrderNotHeld } from "../shared/order-hold";
+import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
@@ -663,6 +664,15 @@ export function registerStart(bot: Telegraf): void {
       await ctx.reply(
         "❌ Код не найден. Проверь правильность ввода.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
         { parse_mode: "HTML", ...withSupportKb(undefined, "code_not_found", ctx) }
+      );
+      return;
+    }
+
+    // Заказ на WB отменён, деньги вернулись покупателю: активировать нечего.
+    if (isRevokedCode(wbCode)) {
+      await ctx.reply(
+        `🚫 ${REVOKED_CODE_REFUSAL}`,
+        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "code_revoked", ctx) }
       );
       return;
     }

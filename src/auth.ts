@@ -13,6 +13,7 @@ import { clientIp } from "@/lib/rate-limit";
 import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
+import { isRevokedCode } from "../bots/shared/wb-code-revocation";
 import { noteDbsBuyerSignedIn } from "../bots/shared/wb-dbs-thread";
 import { recordOrderCardRoot } from "../bots/shared/order-thread";
 import { formatAdminNotice, orderRef, orderStatusWord } from "../bots/shared/notify-format";
@@ -244,7 +245,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           if (wbCode && wbCode.length === 7) {
             try {
               wbCodeRecord = await (prisma as any).wbCode.findUnique({ where: { code: wbCode } });
-              if (wbCodeRecord) {
+              if (wbCodeRecord && isRevokedCode(wbCodeRecord)) {
+                /* Заказ на WB отменён, деньги вернулись — код не открывает
+                   ничего. Привязать его к человеку значило бы завести заказ,
+                   который некому оплачивать (`XKFFJUU`, 12.09.2026). */
+                console.warn(`[auth] WbCode ${wbCode} аннулирован — вход по нему не связывает заказ`);
+                wbCodeRecord = null;
+              } else if (wbCodeRecord) {
                 if (wbCodeRecord.userId === user.id) {
                   // Код уже за этим человеком: повторный вход по своей же ссылке.
                   console.log(`[auth] WbCode ${wbCode} already owned by ${user.id} — повторный вход`);

@@ -9,6 +9,8 @@ import {
   WbDbsClientResponseSchema,
   WbDbsOrdersResponseSchema,
   WbStatusesResponseSchema,
+  safeDate,
+  wbClaimDate,
 } from "../../bots/shared/wb-delivery-contract";
 
 describe("WB DBS tolerant API contracts", () => {
@@ -125,5 +127,28 @@ describe("WB DBS tolerant API contracts", () => {
     expect(mutation.results[0].orderId).toBe("10");
     expect(window.from?.toISOString()).toBe("2026-08-12T07:00:00.000Z");
     expect(window.to?.toISOString()).toBe("2026-08-12T11:00:00.000Z");
+  });
+
+  /* `returns-api` отдаёт МОСКОВСКОЕ время без указания зоны, а `new Date()`
+     читает такую строку в зоне процесса. В контейнере (UTC) заявка XKFFJUU,
+     поданная в 17:48 МСК, легла в базу как 17:48Z — на три часа позже, чем
+     была, и сверить её с временем заказа стало нельзя. */
+  it("reads returns-api timestamps as Moscow time, not as the container's", () => {
+    expect(wbClaimDate("2026-09-10T17:48:02.176091").toISOString()).toBe("2026-09-10T14:48:02.176Z");
+    // Сверка с самим WB: `order_dt` той же заявки против `createdAt` заказа.
+    expect(wbClaimDate("2026-09-10T16:52:48").toISOString()).toBe("2026-09-10T13:52:48.000Z");
+  });
+
+  it("leaves an explicit zone alone if WB ever starts sending one", () => {
+    expect(wbClaimDate("2026-09-10T14:48:02Z").toISOString()).toBe("2026-09-10T14:48:02.000Z");
+    expect(wbClaimDate("2026-09-10T17:48:02+03:00").toISOString()).toBe("2026-09-10T14:48:02.000Z");
+  });
+
+  it("falls back instead of throwing on junk", () => {
+    const fallback = new Date("2026-01-01T00:00:00.000Z");
+    expect(wbClaimDate(undefined, fallback)).toBe(fallback);
+    expect(wbClaimDate("не дата", fallback)).toBe(fallback);
+    // `safeDate` остаётся для полей, где WB зону присылает.
+    expect(safeDate("2026-09-10T14:48:02Z").toISOString()).toBe("2026-09-10T14:48:02.000Z");
   });
 });

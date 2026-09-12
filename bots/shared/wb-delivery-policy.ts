@@ -10,6 +10,9 @@ export type WbDeliveryStage =
   /** Code delivered, buyer now working through our own bot: activating it,
    * reading the instruction, giving a Roblox nick, confirming a game pass. */
   | "in_bot"
+  /** Код выдан сутки назад и не открыт ни разу. Отдельно от `in_bot`, потому
+   * что «идёт по воронке» и «не начинал» — разные дела с разной ценой. */
+  | "stalled"
   | "complete"
   | "cancelled";
 
@@ -32,7 +35,15 @@ export type WbDeliveryPolicyOrder = {
    * automatic retry without permanently disabling it the way `lastErrorCode`
    * did. */
   secretFailedAttempts?: number | null;
+  /** Когда ссылка с кодом ушла покупателю. Отличает «только что выдали» от
+   * «выдали две недели назад и тишина». */
+  gateSentAt?: Date | string | null;
 };
+
+/** Сутки и два напоминания — после этого «покупатель идёт по воронке» перестаёт
+ * быть правдой. Ровно в этот момент оператору уходит «покупатель не открыл свой
+ * код», так что консоль и уведомление говорят об одном и том же. */
+export const GATE_STALLED_AFTER_MS = 24 * 60 * 60_000;
 
 /** Where the buyer actually stands inside our own funnel once the gate is out.
  * `in_bot` on its own is too coarse to act on: an order waiting for a nick and
@@ -110,15 +121,37 @@ export function wbFunnelStep(order: WbDeliveryPolicyOrder): WbFunnelStep {
 }
 
 /** A buyer who cancels on WB gets their money back, but a gate code we already
- * minted stays redeemable until an operator rejects the internal order. Filing
- * those away with the other cancellations would hand out free Robux, so they
- * stay in the queue. Once our own funnel is finished — bought or rejected —
- * there is nothing left to act on and the order goes quiet. */
+ * minted stays redeemable until it is revoked or the internal order is closed.
+ * Filing those away with the other cancellations would hand out free Robux, so
+ * they stay in the queue.
+ *
+ * `REVOKED` is the way out, and until 12.09.2026 there was none: the only exit
+ * was `internalStatus ∈ {COMPLETED, REJECTED}`, which requires the buyer to
+ * activate the very code we are trying to stop. Clearing the alert meant
+ * letting the ghost in. `GATE_MINTED` deliberately excludes `REVOKED`, so a
+ * revoked order leaves «Наш ход» on its own. */
 export function wbCancelledCodeAtRisk(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     order.cancelledAt &&
     GATE_MINTED.has(order.gateState) &&
     !FUNNEL_FINISHED.has(order.internalStatus ?? ""),
+  );
+}
+
+/** Может ли оператор аннулировать код по этому заказу.
+ *
+ * Зеркало `revokeGateCode` для консоли: кнопка не должна предлагать действие,
+ * которое ядро отвергнет. Заказ с живым выкупом сюда не попадает — потраченные
+ * робуксы разбирает человек во вкладке «Заказы», а не одна кнопка. */
+export function canRevokeGateCode(order: {
+  cancelledAt?: Date | string | null;
+  gateState: string;
+  internalStatus?: string | null;
+}): boolean {
+  return Boolean(
+    order.cancelledAt &&
+    GATE_MINTED.has(order.gateState) &&
+    (!order.internalStatus || order.internalStatus === "REJECTED"),
   );
 }
 
@@ -181,6 +214,16 @@ export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
     order.hasLiveSecret &&
     /deliver/i.test(order.supplierStatus)
   ) return "ready_receive";
+  /* Код выдан и не открыт ни разу, а напоминания кончились. Это не ход
+     воронки: 11 таких заказов на 6900 R$ лежали в «В нашем боте» рядом с
+     людьми, которые реально что-то делают, и отличить одно от другого было
+     нельзя. Оба возврата, которые мы получили, пришли отсюда. */
+  if (
+    order.gateState === "SENT" &&
+    !order.internalStatus &&
+    order.gateSentAt &&
+    Date.now() - new Date(order.gateSentAt).getTime() >= GATE_STALLED_AFTER_MS
+  ) return "stalled";
   // The code is out but the buyer still has our funnel to walk: activate it,
   // give a Roblox nick, confirm a game pass. Calling that "complete" hides real
   // work in progress, and calling it "attention" cries wolf on every order.

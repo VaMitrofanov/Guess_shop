@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
+  Ban,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -76,6 +77,9 @@ const STAGE_STEP: Record<WbDeliveryStage, number> = {
   link_sent: 4,
   ready_receive: 4,
   in_bot: 4,
+  // Тот же шаг, что и «в боте»: человек дошёл до гейта и встал на нём, а не
+  // откатился назад. Прогресс показывает путь заказа, а не нашу оценку шансов.
+  stalled: 4,
   complete: 5,
   cancelled: 5,
   // «Нужна проверка» — это не место в цепочке, а сход с неё. Показываем
@@ -434,6 +438,7 @@ export default function WbDeliveryClient({
                   <button title={statusHint(selected, "confirm")} disabled={!selected.permissions.confirm || Boolean(busy)} onClick={() => void act("confirm")}><Check /> Подтвердить сборку</button>
                   <button title={statusHint(selected, "deliver")} disabled={!selected.permissions.deliver || Boolean(busy)} onClick={() => void act("deliver")}><Truck /> Передать в доставку</button>
                   {selected.permissions.markServedExternally && <button title="Заказ был выдан покупателю другим способом или закрыт до появления этого раздела" disabled={Boolean(busy)} onClick={() => window.confirm("Покупатель по этому заказу уже получил свой товар вне этой системы?") && void act("mark_served_externally")}><Check /> Выдано вне системы</button>}
+                  {selected.permissions.revokeGate && <button title="Заказ отменён на WB — код перестанет активироваться на сайте и в ботах" disabled={Boolean(busy)} onClick={() => window.confirm(`Аннулировать код ${selected.activationCode ?? ""}? Деньги по заказу вернулись покупателю, активировать код больше будет нельзя.`) && void act("revoke_gate")}><Ban /> Аннулировать код</button>}
                   {selected.permissions.markGateSent
                     ? <button disabled={Boolean(busy)} onClick={() => window.confirm("Вы действительно отправили покупателю ссылку и код вручную в кабинете WB?") && void act("mark_gate_sent")}><Send /> Отметить отправленным</button>
                     : <a href={selected.gateUrl ?? "#"} target="_blank" aria-disabled={!selected.gateUrl}><Link2 /> Проверить гейт <ArrowUpRight /></a>}

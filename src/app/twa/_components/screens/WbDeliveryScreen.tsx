@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Ban,
   Check,
   CheckCircle2,
   ChevronLeft,
@@ -527,6 +528,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
       <button disabled={!order.permissions.deliver || Boolean(busy)} onClick={() => onConfirm({ action: "deliver", title: "Передать в доставку?", body: "WB переведёт заказ в статус «в доставке».", cta: "Передать", facts: [["Покупатель", order.buyerName ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Truck /> В доставку</button>
       {order.permissions.markServedExternally && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "mark_served_externally", title: "Выдано вне системы?", body: "Обязательство закроется без выпуска кода. Действие попадёт в аудит.", cta: "Закрыть заказ", facts: [["Покупатель", order.buyerName ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Check /> Выдано вне системы</button>}
       {order.permissions.markGateSent && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "mark_gate_sent", title: "Гейт отправлен вручную?", body: "Отметьте только если ссылка и код действительно ушли покупателю из кабинета WB.", cta: "Зафиксировать", facts: [["Код гейта", order.activationCode ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Send /> Гейт отправлен вручную</button>}
+      {order.permissions.revokeGate && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "revoke_gate", title: "Аннулировать код?", body: "Заказ отменён на WB, деньги вернулись покупателю. Код перестанет активироваться на сайте и в ботах, а заказ уйдёт из «Нужна проверка».", cta: "Аннулировать", facts: [["Код гейта", order.activationCode ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Ban /> Аннулировать код</button>}
     </section>
 
     {/* Заказ на выкуп заводится ТЕМ ЖЕ листом, что и везде: своя форма здесь

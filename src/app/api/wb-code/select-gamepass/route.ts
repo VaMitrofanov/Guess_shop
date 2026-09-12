@@ -8,6 +8,7 @@ import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
 import { PRICE_TOL, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "@/lib/order-audit";
 import { countPreviousOrders } from "../../../../../bots/shared/order-loyalty";
+import { REVOKED_CODE_REFUSAL, isRevokedCode } from "@/lib/wb-code-revocation";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -71,10 +72,15 @@ export async function POST(request: Request) {
     // ── 1. Lookup the code (need denomination for the price check + card) ──────
     const wbCode = await prisma.wbCode.findFirst({
       where: { code: { equals: rawCode, mode: "insensitive" } },
-      select: { id: true, isUsed: true, userId: true, denomination: true },
+      select: { id: true, isUsed: true, userId: true, denomination: true, status: true },
     });
     if (!wbCode) {
       return NextResponse.json({ error: "Код не найден" }, { status: 404 });
+    }
+    // Сюда аннулированный код дойти не должен — заказа у него нет, — но дверь
+    // на кассу закрывается своим замком, а не чужим.
+    if (isRevokedCode(wbCode)) {
+      return NextResponse.json({ error: REVOKED_CODE_REFUSAL, code: "CODE_REVOKED" }, { status: 409 });
     }
     // No bot activation yet → no provisional order to attach to. Tell the site to
     // route the user into the bot first.

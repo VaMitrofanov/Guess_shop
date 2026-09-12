@@ -48,7 +48,10 @@ export async function GET(_request: NextRequest) {
   if (wbCode && wbCode.length === 7) {
     try {
       await db.wbCode.update({
-        where: { code: wbCode, status: { not: "CLAIMED" } },
+        /* `not: CLAIMED` пропустил бы и аннулированный код: условие отсекает
+           только уже активированные, а не отменённые. Статус здесь называется
+           явно — список короткий и закрытый. */
+        where: { code: wbCode, status: { in: ["AVAILABLE", "RESERVED"] } },
         // isUsed: false puts the code into provisional CLAIMED state —
         // the bot's isUsed+userId guard will not block the user, and the
         // final transaction (gamepass submission) sets isUsed: true.

@@ -192,6 +192,24 @@ export function safeDate(value: string | undefined, fallback = new Date()): Date
   return Number.isNaN(date.getTime()) ? fallback : date;
 }
 
+/**
+ * Дата из `returns-api`: московское время без указания зоны.
+ *
+ * `2026-09-10T17:48:02.176091` — это МСК, и `new Date()` читает такую строку в
+ * зоне ПРОЦЕССА. В контейнере (UTC) заявка `XKFFJUU`, поданная в 17:48 МСК,
+ * легла в базу как 17:48Z, то есть на три часа позже, чем была: сверять её с
+ * временем заказа стало нельзя. Сверка: `order_dt` этой же заявки —
+ * `2026-09-10T16:52:48`, а `createdAt` заказа у WB — `13:52:49Z`, ровно +3.
+ *
+ * Зона дописывается только когда её нет: если WB однажды начнёт присылать `Z`
+ * или смещение, строка должна остаться нетронутой.
+ */
+export function wbClaimDate(value: string | undefined, fallback = new Date()): Date {
+  if (!value) return fallback;
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value.trim());
+  return safeDate(hasZone ? value : `${value.trim()}+03:00`, fallback);
+}
+
 export function deliveryWindow(
   row: z.infer<typeof WbDeliveryDatesResponseSchema>["orders"][number] | undefined,
 ): { from: Date | null; to: Date | null } {

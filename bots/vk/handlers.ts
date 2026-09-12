@@ -51,6 +51,7 @@ import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-creat
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
+import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
 import { countPreviousOrders } from "../shared/order-loyalty";
 import { corridorHoldText, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
@@ -2043,6 +2044,12 @@ async function handleRefActivation(
   });
   if (!wbCode) {
     await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+    return;
+  }
+
+  // Заказ на WB отменён, деньги вернулись покупателю: активировать нечего.
+  if (isRevokedCode(wbCode)) {
+    await ctx.reply(`🚫 ${REVOKED_CODE_REFUSAL}\n\nНапиши прямо сюда — разберёмся 👇`);
     return;
   }
   // Block only when code was truly completed (isUsed=true + userId set).

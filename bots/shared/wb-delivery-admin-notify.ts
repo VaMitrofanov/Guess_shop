@@ -1,6 +1,5 @@
 import { tgSend, tgEdit, tgDelete, tgMessageId, escapeHtml } from "./notify";
 import {
-  denomLine,
   formatAdminNotice,
   mskTime,
   orderRef,
@@ -112,29 +111,91 @@ export function notifyWbBuyerClaim(input: {
   return Promise.resolve();
 }
 
+/** Чем кончилась отмена для НАШЕЙ стороны заказа.
+ *
+ * `already_delivered` появился 12.09.2026: до него исход считался только когда
+ * внутренний статус не `COMPLETED` и не `REJECTED`, поэтому отмена уже
+ * выкупленного заказа приходила с текстом «гейт выдан, но не активирован» и
+ * спокойным значком. Самый дорогой случай выглядел как самый безобидный. */
+export type WbCancellationOutcome =
+  | "rejected"
+  | "needs_human"
+  | "already_delivered"
+  | "no_internal_order";
+
+/** Детали, которые меняют текст, но не исход. */
+export type WbCancellationFacts = {
+  /** Код аннулирован — предъявить его больше нельзя. */
+  revoked?: boolean;
+  /** Номинал выкупленного заказа: цена этой отмены в робуксах. */
+  amount?: number | null;
+  completedAt?: Date | null;
+};
+
 /** A WB cancellation is never routine: the buyer's money went back, and
  * whatever we opened on the back of that order has to stop. */
 export function notifyDbsOrderCancelled(
   ref: DbsRef,
   wbStatus: string,
   internalStatus: string | null,
-  outcome: "rejected" | "needs_human" | "no_internal_order",
+  outcome: WbCancellationOutcome,
+  facts: WbCancellationFacts = {},
 ) {
   const activationCode = ref.code ?? null;
   const code = activationCode ? `<code>${escapeHtml(activationCode)}</code>` : "—";
-  const next = outcome === "rejected"
-    ? `выкуп ${code} закрыт автоматически (был ${escapeHtml(internalStatus ?? "—")}) — делать ничего не нужно`
-    : outcome === "needs_human"
-      ? `<b>разобрать вручную во вкладке «Заказы»</b>: выкуп ${code} в статусе <b>${escapeHtml(internalStatus ?? "—")}</b>, робуксы могли уйти`
-      : activationCode
-        ? `гейт ${code} выдан, но не активирован — заказ остаётся в DBS как «Нужна проверка»`
-        : "гейт не выпускался — делать ничего не нужно";
+  /* Аннулирование — единственная часть отмены, которую человек мог бы забыть
+     сделать руками, поэтому оно названо прямо, а не спрятано в «ничего не
+     нужно». */
+  const revokedTail = facts.revoked ? ` Код ${code} аннулирован — предъявить его больше нельзя.` : "";
+  const next = outcome === "already_delivered"
+    ? `<b>робуксы уже выданы</b>${facts.amount ? ` (${facts.amount} R$` + (facts.completedAt ? `, выкуп ${mskTime(facts.completedAt)}` : "") + ")" : ""}` +
+      ` — деньги вернулись покупателю. Оспорить заявку в кабинете WB: выдача подтверждена`
+    : outcome === "rejected"
+      ? `выкуп ${code} закрыт автоматически (был ${escapeHtml(internalStatus ?? "—")}) — делать ничего не нужно.${revokedTail}`
+      : outcome === "needs_human"
+        ? `<b>разобрать вручную во вкладке «Заказы»</b>: выкуп ${code} в статусе <b>${escapeHtml(internalStatus ?? "—")}</b>, робуксы могли уйти`
+        : activationCode
+          ? `гейт ${code} выдан и не активирован.${revokedTail || " <b>Код остался рабочим — аннулируйте его в консоли DBS.</b>"}`
+          : "гейт не выпускался — делать ничего не нужно";
   broadcast({
-    marker: outcome === "needs_human" ? "urgent" : "cancelled",
+    marker: outcome === "needs_human" || outcome === "already_delivered" ? "urgent" : "cancelled",
     zone: "DBS",
     title: "заказ отменён на WB",
     lines: [refLine(ref, [`<i>${escapeHtml(wbStatus)}</i>`])],
     next,
+  }, ref);
+}
+
+/**
+ * Заявка на возврат решена.
+ *
+ * Про открытие заявки мы узнали в прошлой волне, а про исход — ниоткуда:
+ * статус DBS меняется только в момент возврата денег, и до него проходило от
+ * полутора суток (`XKFFJUU`) до восьми (`BJUM4MN`). Решение в пользу продавца
+ * при этом не меняет НИЧЕГО — и именно поэтому о нём надо сказать: иначе заказ
+ * так и лежит «со спором», хотя спора уже нет.
+ */
+export function notifyWbClaimResolved(input: {
+  wbOrderId: string;
+  code: string | null;
+  denomination: number | null;
+  buyerName: string | null;
+  refunded: boolean;
+}): void {
+  const ref: DbsRef = {
+    wbOrderId: input.wbOrderId,
+    code: input.code,
+    denomination: input.denomination,
+    buyerName: input.buyerName,
+  };
+  broadcast({
+    marker: input.refunded ? "urgent" : "progress",
+    zone: "DBS",
+    title: input.refunded ? "заявка решена в пользу покупателя" : "заявка на возврат закрыта",
+    lines: [refLine(ref)],
+    next: input.refunded
+      ? "деньги возвращаются — отмена заказа придёт следом, отдельно делать ничего не нужно"
+      : "деньги остаются у нас; заказ живой — покупателю всё ещё нужен его номинал",
   }, ref);
 }
 
