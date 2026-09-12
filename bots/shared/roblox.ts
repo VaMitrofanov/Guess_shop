@@ -269,7 +269,12 @@ async function checkGameAccess(
       }
     }
 
-    if (!universeId) return strict ? "age_restricted" : "ok";
+    // Универс не разрешился вовсе — игру нам просто НЕ ПОКАЗЫВАЮТ. Раньше это
+    // называлось «18+», и покупатель со скрытым плейсом получал ответ про
+    // возрастное ограничение, которого нет: в разборе 54 застрявших активаций
+    // (22.08) скрытых плейсов было 17, а настоящих 18+ — ни одного. Зовём вещи
+    // своими именами: это «private», а 18+ остаётся за явным ответом Roblox.
+    if (!universeId) return strict ? "private" : "ok";
 
     // games/v1 omits isPlayable/playabilityStatus — use the dedicated status endpoint
     const pRes = await rFetch(
@@ -494,6 +499,29 @@ export async function getGamepassDetailsDirect(
         const gameAccess = await checkGameAccess(gamepassId, parsed.creatorId, strict);
         if (gameAccess === "private")       parsed.isGamePrivate   = true;
         if (gameAccess === "age_restricted") parsed.isAgeRestricted = true;
+
+        // Скрытый плейс и пустой каталог — это про ВИДИМОСТЬ пасса, а не про то,
+        // продаётся ли он. Решение владельца 13.09.2026: выкуп у нас ручной, и
+        // если первоисточник Roblox подтверждает «в продаже» и цену — заказ
+        // оформляем. Раньше оба признака гасили `isActive`, и покупатель с
+        // приватным плейсом упирался в «геймпасс недоступен» на пассе, который
+        // существует и продаётся (K56B6EX, 13.09: пасс создан НАШИМ ключом и
+        // всё равно был отвергнут).
+        //
+        // Спрашиваем именно `apis.roblox.com`, а не зеркало roproxy: защита от
+        // УДАЛЁННОГО пасса держится на том, что первоисточник о нём не знает,
+        // а зеркало отдаёт кэш. Не ответил (RF-хост, сеть) — старое поведение.
+        if (parsed.isActive && !foundInPrimary && (parsed.isGamePrivate || catalogReturned200Empty)) {
+          const live = await confirmForSaleDirect(gamepassId);
+          if (live?.isForSale) {
+            if (live.price > 0) parsed.price = live.price;
+            console.log(
+              `[Roblox/bots] ${gamepassId}: первоисточник подтвердил «в продаже» за ${parsed.price} R$ — ` +
+              `скрытая игра не повод отказывать (выкуп ручной)`
+            );
+            return parsed;
+          }
+        }
 
         // Block gamepasses in PRIVATE games when no primary endpoint confirmed them.
         // Age-restricted (18+) games are allowed through — we can still purchase
@@ -1111,6 +1139,31 @@ export async function getGamepassProductInfo(
     return parseProductInfo(d);
   } catch (err: any) {
     console.error("[Roblox/bots] getGamepassProductInfo:", err?.message ?? err);
+    return null;
+  }
+}
+
+/**
+ * Первоисточник о продаже: пасс выставлен и почём.
+ *
+ * Только `apis.roblox.com` — зеркало roproxy отдаёт кэш и говорит «в продаже»
+ * про удалённый пасс, а на этом ответе мы решаем, оформлять ли заказ.
+ * `null` — Roblox не ответил (с RF-хоста он и не ответит); вызывающая сторона
+ * остаётся при своих эвристиках.
+ */
+async function confirmForSaleDirect(
+  gamepassId: string,
+): Promise<{ isForSale: boolean; price: number } | null> {
+  try {
+    const res = await rFetch(
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
+      {},
+    );
+    if (!res.ok) return null;
+    const d: any = await res.json();
+    if (!d?.ProductId) return null;
+    return { isForSale: Boolean(d.IsForSale), price: Number(d.PriceInRobux ?? 0) };
+  } catch {
     return null;
   }
 }

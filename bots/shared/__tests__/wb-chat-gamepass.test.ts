@@ -146,6 +146,20 @@ describe("tryAttachGamepassFromChat", () => {
     expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
   });
 
+  test("скрытый плейс не отказ: пасс в продаже и по цене — собираем заказ", async () => {
+    // Игру покупателя не видно миру (новый аккаунт получает приватный плейс),
+    // но Roblox подтверждает продажу и цену — выкуп у нас ручной, этого хватает.
+    mockDetails.mockResolvedValue({
+      id: "1967540063", name: "715", price: 715, creatorId: 1,
+      creatorName: "Alumette277", isActive: true, isGamePrivate: true,
+    });
+    const db = makeDb();
+    const out = await tryAttachGamepassFromChat(asDb(db), { ref, wbCode: "JS6NQB9", text: "1967540063" });
+    expect(out.kind).toBe("attached");
+    expect(db.wbOrder.updateMany).toHaveBeenCalled();
+    expect(mockRejected).not.toHaveBeenCalled();
+  });
+
   test("чужой владелец при подтверждённом нике — решает человек, не автоматика", async () => {
     const db = makeDb({
       wbOrder: {

@@ -185,10 +185,16 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
     return { kind: "rejected", gamepassId, reason };
   };
 
-  if (details.isNotInCatalog) return reject("пасса нет в каталоге — скорее всего игра закрыта");
-  if (details.isGamePrivate) return reject("игра закрыта (private) — выкупить нельзя");
   if (details.isAgeRestricted) return reject("игра 18+ — выкупать только вручную");
-  if (!details.isActive) return reject("пасс не выставлен на продажу");
+  // Закрытый плейс сам по себе больше не отказ: выкуп ручной, и если Roblox
+  // подтверждает продажу и цену, заказ собирается (решение владельца 13.09.2026,
+  // проверка первоисточника — в `getGamepassDetailsDirect`). Признаки остаются
+  // причиной отказа только когда пасс и правда не продаётся.
+  if (!details.isActive) {
+    if (details.isNotInCatalog) return reject("пасса нет в каталоге — скорее всего игра закрыта");
+    if (details.isGamePrivate) return reject("игра закрыта (private) — выкупить нельзя");
+    return reject("пасс не выставлен на продажу");
+  }
   if (Math.abs(details.price - expectedPrice) > PRICE_TOLERANCE) {
     return reject(`цена ${details.price} R$ вместо ${expectedPrice} R$`);
   }
