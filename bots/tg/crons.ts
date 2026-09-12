@@ -12,7 +12,7 @@ import { ROBUX_UNLOCK_DAYS, robuxUnlockDate, fmtDateRu } from "../shared/complet
 import { startAutoWorkers } from "./auto-workers";
 import { startPaymentOutboxWorker } from "../shared/payment-outbox";
 import { sweepStaleWebOrders } from "../shared/order-benefits";
-import { sweepPendingHolds } from "../shared/order-hold";
+import { NOT_HELD, sweepPendingHolds } from "../shared/order-hold";
 import { runRetention } from "../shared/retention";
 import { startWbDeliveryWorker } from "../shared/wb-delivery-sync";
 import { getGamepassDetails } from "../shared/roblox";
@@ -301,6 +301,9 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
       remindersSent: { lt: AWAITING_SCHEDULE.length },
       isTest: false,
       createdAt: { gte: new Date(now - AWAITING_MAX_AGE_DAYS * 86_400_000) },
+      // ❄️ Замороженный заказ мы решили НЕ выполнять: «создай геймпасс» ему —
+      // обещание того, чего не будет. Тот же предикат, что у всех очередей.
+      ...NOT_HELD,
     },
     include: {
       user: { select: { tgId: true, vkId: true } },

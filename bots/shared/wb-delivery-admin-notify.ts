@@ -119,6 +119,7 @@ export function notifyWbBuyerClaim(input: {
  * спокойным значком. Самый дорогой случай выглядел как самый безобидный. */
 export type WbCancellationOutcome =
   | "rejected"
+  | "already_rejected"
   | "needs_human"
   | "already_delivered"
   | "no_internal_order";
@@ -147,16 +148,24 @@ export function notifyDbsOrderCancelled(
      сделать руками, поэтому оно названо прямо, а не спрятано в «ничего не
      нужно». */
   const revokedTail = facts.revoked ? ` Код ${code} аннулирован — предъявить его больше нельзя.` : "";
-  const next = outcome === "already_delivered"
-    ? `<b>робуксы уже выданы</b>${facts.amount ? ` (${facts.amount} R$` + (facts.completedAt ? `, выкуп ${mskTime(facts.completedAt)}` : "") + ")" : ""}` +
-      ` — деньги вернулись покупателю. Оспорить заявку в кабинете WB: выдача подтверждена`
-    : outcome === "rejected"
-      ? `выкуп ${code} закрыт автоматически (был ${escapeHtml(internalStatus ?? "—")}) — делать ничего не нужно.${revokedTail}`
-      : outcome === "needs_human"
-        ? `<b>разобрать вручную во вкладке «Заказы»</b>: выкуп ${code} в статусе <b>${escapeHtml(internalStatus ?? "—")}</b>, робуксы могли уйти`
-        : activationCode
-          ? `гейт ${code} выдан и не активирован.${revokedTail || " <b>Код остался рабочим — аннулируйте его в консоли DBS.</b>"}`
-          : "гейт не выпускался — делать ничего не нужно";
+  const next = (() => {
+    switch (outcome) {
+      case "already_delivered": {
+        const spent = facts.amount ? ` (${facts.amount} R$` + (facts.completedAt ? `, выкуп ${mskTime(facts.completedAt)}` : "") + ")" : "";
+        return `<b>робуксы уже выданы</b>${spent} — деньги вернулись покупателю.`
+          + " Оспорить заявку в кабинете WB: выдача подтверждена";
+      }
+      case "rejected":
+        return `выкуп ${code} закрыт автоматически (был ${escapeHtml(internalStatus ?? "—")}) — делать ничего не нужно.${revokedTail}`;
+      case "already_rejected":
+        return `выкуп ${code} был закрыт и раньше — делать ничего не нужно.${revokedTail}`;
+      case "needs_human":
+        return `<b>разобрать вручную во вкладке «Заказы»</b>: выкуп ${code} в статусе <b>${escapeHtml(internalStatus ?? "—")}</b>, робуксы могли уйти`;
+      default:
+        if (!activationCode) return "гейт не выпускался — делать ничего не нужно";
+        return `гейт ${code} выдан и не активирован.${revokedTail || " <b>Код остался рабочим — аннулируйте его в консоли DBS.</b>"}`;
+    }
+  })();
   broadcast({
     marker: outcome === "needs_human" || outcome === "already_delivered" ? "urgent" : "cancelled",
     zone: "DBS",

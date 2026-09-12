@@ -41,51 +41,58 @@ if (!code) {
   process.exit(1);
 }
 
-const url = new URL(process.env.DATABASE_URL!);
-if (!url.hostname.includes("-pooler.")) {
-  url.hostname = url.hostname.replace(/^(ep-[^.]+)(\.)/, "$1-pooler$2");
-}
-url.searchParams.delete("channel_binding");
-const db = new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: url.toString() })) });
+async function main() {
+  const url = new URL(process.env.DATABASE_URL!);
+  if (!url.hostname.includes("-pooler.")) {
+    url.hostname = url.hostname.replace(/^(ep-[^.]+)(\.)/, "$1-pooler$2");
+  }
+  url.searchParams.delete("channel_binding");
+  const db = new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: url.toString() })) });
 
-const order = await db.wbMarketplaceOrder.findFirst({
-  where: { wbCode: { code } },
-  select: {
-    id: true, wbOrderId: true, cancelledAt: true, gateState: true,
-    denominationSnapshot: true, buyerName: true,
-    wbCode: { select: { code: true, status: true, isUsed: true } },
-  },
+  const order = await db.wbMarketplaceOrder.findFirst({
+    where: { wbCode: { code } },
+    select: {
+      id: true, wbOrderId: true, cancelledAt: true, gateState: true,
+      denominationSnapshot: true, buyerName: true,
+      wbCode: { select: { code: true, status: true, isUsed: true } },
+    },
+  });
+
+  if (!order) {
+    console.error(`Заказ WB по коду ${code} не найден (аннулирование живёт только у DBS-заказов).`);
+    process.exit(1);
+  }
+
+  const internal = await db.wbOrder.findUnique({ where: { wbCode: code }, select: { status: true } });
+
+  console.log(`\nКод:    ${code} · ${order.denominationSnapshot ?? "—"} R$ · статус ${order.wbCode?.status}`);
+  console.log(`Заказ:  WB #${order.wbOrderId} · ${order.buyerName ?? "покупатель неизвестен"}`);
+  console.log(`Отмена: ${order.cancelledAt ? order.cancelledAt.toISOString() : "НЕТ — заказ живой"}`);
+  console.log(`Гейт:   ${order.gateState}`);
+  console.log(`Выкуп:  ${internal?.status ?? "заказа по коду нет"}`);
+  console.log(`\nДействие: ${release ? "ВЕРНУТЬ код в оборот" : "АННУЛИРОВАТЬ код"} (${actor})`);
+
+  if (!apply) {
+    console.log("\n(dry-run; добавь --apply, чтобы записать)\n");
+    await db.$disconnect();
+    process.exit(0);
+  }
+
+  const input = { marketplaceOrderId: order.id, wbOrderId: order.wbOrderId, actor };
+  const result = release ? await restoreGateCode(db, input) : await revokeGateCode(db, input);
+
+  if (!result.ok) {
+    console.error(`\n❌ ${result.error}\n`);
+    await db.$disconnect();
+    process.exit(1);
+  }
+
+  const after = await db.wbCode.findUnique({ where: { code }, select: { status: true } });
+  console.log(`\n✅ Готово. Статус кода: ${after?.status}\n`);
+  await db.$disconnect();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
 });
-
-if (!order) {
-  console.error(`Заказ WB по коду ${code} не найден (аннулирование живёт только у DBS-заказов).`);
-  process.exit(1);
-}
-
-const internal = await db.wbOrder.findUnique({ where: { wbCode: code }, select: { status: true } });
-
-console.log(`\nКод:    ${code} · ${order.denominationSnapshot ?? "—"} R$ · статус ${order.wbCode?.status}`);
-console.log(`Заказ:  WB #${order.wbOrderId} · ${order.buyerName ?? "покупатель неизвестен"}`);
-console.log(`Отмена: ${order.cancelledAt ? order.cancelledAt.toISOString() : "НЕТ — заказ живой"}`);
-console.log(`Гейт:   ${order.gateState}`);
-console.log(`Выкуп:  ${internal?.status ?? "заказа по коду нет"}`);
-console.log(`\nДействие: ${release ? "ВЕРНУТЬ код в оборот" : "АННУЛИРОВАТЬ код"} (${actor})`);
-
-if (!apply) {
-  console.log("\n(dry-run; добавь --apply, чтобы записать)\n");
-  await db.$disconnect();
-  process.exit(0);
-}
-
-const input = { marketplaceOrderId: order.id, wbOrderId: order.wbOrderId, actor };
-const result = release ? await restoreGateCode(db, input) : await revokeGateCode(db, input);
-
-if (!result.ok) {
-  console.error(`\n❌ ${result.error}\n`);
-  await db.$disconnect();
-  process.exit(1);
-}
-
-const after = await db.wbCode.findUnique({ where: { code }, select: { status: true } });
-console.log(`\n✅ Готово. Статус кода: ${after?.status}\n`);
-await db.$disconnect();

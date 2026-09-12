@@ -138,6 +138,41 @@ describe("исход отмены назван честно", () => {
   it("аннулирование названо в уведомлении, а не спрятано", () => {
     expect(notify).toContain("аннулирован");
   });
+
+  it("уже отклонённый выкуп — тоже свой исход", () => {
+    // Ветка `internal.status === "REJECTED"` проваливалась в
+    // `no_internal_order` и приходила словами «гейт выдан и не активирован»,
+    // хотя код был активирован, а выкуп закрыт раньше нас.
+    expect(notify).toContain("already_rejected");
+    expect(sync).toContain('outcome = "already_rejected"');
+  });
+
+  it("аннулируем и когда выкуп уже был закрыт", () => {
+    const propagate = sync.slice(sync.indexOf("async function propagateCancellation"));
+    const revoke = propagate.slice(0, propagate.indexOf("await audit("));
+    expect(revoke).toContain('outcome === "already_rejected"');
+    // Выданные робуксы не трогаем: там решает человек.
+    expect(revoke).not.toContain('outcome === "already_delivered"');
+  });
+});
+
+describe("замороженный заказ не получает напоминаний", () => {
+  it("гейтовые напоминания спрашивают заморозку по коду", () => {
+    // Заморозка живёт на КОДЕ, а не на заказе маркетплейса, поэтому проверка
+    // пакетная — иначе это +1 заход в базу на каждый заказ пачки.
+    const sync = read("bots/shared/wb-delivery-sync.ts");
+    const remind = sync.slice(sync.indexOf("async function remindUnopenedGates"));
+    expect(remind).toContain("activeHoldCodes");
+    expect(remind).toContain("heldCodes.has(activationCode)");
+  });
+
+  it("напоминания «нет геймпасса» тоже", () => {
+    // 84CR7UZ («1 звезда на WB — не выкупать») попал бы в новое недельное
+    // напоминание словами «твои 1000 R$ ждут» — обещание того, чего не будет.
+    const crons = read("bots/tg/crons.ts");
+    const awaiting = crons.slice(crons.indexOf("async function processAwaitingReminders"));
+    expect(awaiting.slice(0, 900)).toContain("NOT_HELD");
+  });
 });
 
 describe("хвост «код не открыт» отделён от воронки", () => {

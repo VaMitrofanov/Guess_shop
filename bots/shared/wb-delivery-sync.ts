@@ -79,9 +79,10 @@ import {
   notifyWbClaimResolved,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
+import { activeHoldCodes } from "./order-hold";
+import { revokeGateCode } from "./wb-code-revocation";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
-import { revokeGateCode } from "./wb-code-revocation";
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 
 const WORKER_STREAM = "wb-dbs-worker";
@@ -1440,7 +1441,11 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
   let outcome: WbCancellationOutcome = "no_internal_order";
   if (internal?.status === "COMPLETED") {
     outcome = "already_delivered";
-  } else if (internal && internal.status !== "REJECTED") {
+  } else if (internal?.status === "REJECTED") {
+    // Выкуп закрыли раньше нас — не «код не активирован», хотя раньше отмена
+    // такого заказа приходила именно этими словами.
+    outcome = "already_rejected";
+  } else if (internal) {
     if (canAutoRejectInternalOrder(internal.status)) {
       const mark = `[WB ОТМЕНА ${new Date().toISOString().slice(0, 10)}] заказ WB #${wbOrderId} отменён (${wbStatus}) — выкуп закрыт автоматически`;
       await db.wbOrder.update({
@@ -1462,7 +1467,7 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
      Аннулируем сразу же — руками этого сделать было нельзя вовсе (в консоли
      для отменённого заказа не было ни одного подходящего действия). */
   let revoked = false;
-  if (code && (outcome === "no_internal_order" || outcome === "rejected")) {
+  if (code && (outcome === "no_internal_order" || outcome === "rejected" || outcome === "already_rejected")) {
     const result = await revokeGateCode(db, { marketplaceOrderId: orderId, wbOrderId, actor: "wb-sync" })
       .catch(() => ({ ok: false as const, error: "REVOKE_FAILED" }));
     revoked = result.ok;
@@ -1731,9 +1736,19 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
     take: 20,
   });
 
+  /* ❄️ Замороженный код — это заказ, который мы решили НЕ выполнять (фрод,
+     одна звезда, спор). «Ваши 1000 R$ ждут получения» такому человеку — не
+     напоминание, а обещание того, чего не будет. Проверка пакетная: заморозка
+     живёт на коде, а не на заказе маркетплейса. */
+  const heldCodes = await activeHoldCodes(
+    db,
+    candidates.flatMap((order) => (order.wbCode?.code ? [order.wbCode.code] : [])),
+  ).catch(() => new Set<string>());
+
   for (const order of candidates) {
     const activationCode = order.wbCode?.code;
     if (!activationCode || !order.gateSentAt) continue;
+    if (heldCodes.has(activationCode)) continue;
     // Опоздавших не будим: заказ, который покупатель уже открыл, из выборки
     // убирает наличие внутреннего заказа по этому коду.
     const internal = await db.wbOrder.findUnique({ where: { wbCode: activationCode }, select: { id: true } });
