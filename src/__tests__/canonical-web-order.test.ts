@@ -1,8 +1,10 @@
 import { PaymentAttemptStatus, PriceQuoteStatus } from "@prisma/client";
 import {
   expectedGamepassPrice,
+  expectedPartPrice,
   hashStatusToken,
   validateCheckoutGamepass,
+  validateCheckoutParts,
   validateCheckoutQuote,
   WebOrderError,
 } from "@/lib/canonical-web-order";
@@ -31,6 +33,48 @@ describe("canonical web order invariants", () => {
       .toThrow(expect.objectContaining({ code: "QUOTE_UNAVAILABLE" }));
     expect(() => validateCheckoutQuote({ ...quote, expiresAt: now }, "user-1", now))
       .toThrow(expect.objectContaining({ code: "QUOTE_EXPIRED" }));
+  });
+
+  it("принимает набор пассов, если он закрывает сумму заказа ровно", () => {
+    // Заказ на 2000 нельзя закрыть одним пассом: он стоил бы 2858 R$, а у
+    // доноров 1500 «чистых» (2143 грязных). Коридор ВБ давно собирает такой
+    // заказ парой 1500 + 500 — теперь так же умеет и сайт.
+    const big = { requestedRobux: 2000, bonusRobux: 0 };
+    expect(validateCheckoutParts(big, [
+      { gamepassId: "1", amount: 1500 },
+      { gamepassId: "2", amount: 500 },
+    ])).toBe(2000);
+    expect(expectedPartPrice(1500)).toBe(2143);
+    expect(expectedPartPrice(500)).toBe(715);
+  });
+
+  it("бонус входит в сумму заказа: части считаются от того, что получит человек", () => {
+    expect(validateCheckoutParts({ requestedRobux: 1500, bonusRobux: 500 }, [
+      { gamepassId: "1", amount: 1500 },
+      { gamepassId: "2", amount: 500 },
+    ])).toBe(2000);
+  });
+
+  it("не пропускает набор, который расходится с заказом или состоит из огрызков", () => {
+    const big = { requestedRobux: 2000, bonusRobux: 0 };
+    // Сумма не сошлась — покупатель получил бы не то, за что заплатил.
+    expect(() => validateCheckoutParts(big, [
+      { gamepassId: "1", amount: 1500 },
+      { gamepassId: "2", amount: 400 },
+    ])).toThrow(expect.objectContaining({ code: "PARTS_INVALID" }));
+    // Часть не кратна 500 — донор после такой покупки остаётся с огрызком.
+    expect(() => validateCheckoutParts(big, [
+      { gamepassId: "1", amount: 1300 },
+      { gamepassId: "2", amount: 700 },
+    ])).toThrow(expect.objectContaining({ code: "PARTS_INVALID" }));
+    // Часть больше донора — её не купит никто.
+    expect(() => validateCheckoutParts({ requestedRobux: 3000, bonusRobux: 0 }, [
+      { gamepassId: "1", amount: 2000 },
+      { gamepassId: "2", amount: 1000 },
+    ])).toThrow(expect.objectContaining({ code: "PARTS_INVALID" }));
+    // Одна часть — это не набор, а обычный заказ.
+    expect(() => validateCheckoutParts(big, [{ gamepassId: "1", amount: 2000 }]))
+      .toThrow(expect.objectContaining({ code: "PARTS_INVALID" }));
   });
 
   it("rejects a policy mismatch and an amount below the provider minimum", () => {

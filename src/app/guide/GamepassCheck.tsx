@@ -85,8 +85,11 @@ export default function GamepassCheck({
   const isSite = mode === "SITE";
   /** На сайте заказ несёт ОДИН `gamepassId` — набор из нескольких там был бы тупиком. */
   const planOptions = useMemo(
-    () => (isSite ? { maxParts: 1, splitPlan: false } : {}),
-    [isSite],
+    // Сайт больше не «один пасс на заказ»: с 13.09.2026 оформление умеет набор,
+    // и логика разбивки у сайта та же, что у коридора ВБ — иначе заказ на 2000
+    // требовал бы пасс за 2858 R$, который не может выкупить ни один донор.
+    () => ({}),
+    [],
   );
 
   const [phase, setPhase] = useState<Phase>("entry");
@@ -344,7 +347,7 @@ export default function GamepassCheck({
   const runStoredKey = useCallback(async () => {
     if (!code || storedBusy) return;
     const value = (account?.username ?? nick).trim();
-    const targets = createTargetsFor(amount, !isSite);
+    const targets = createTargetsFor(amount);
     if (targets.length === 0) return;
     setStoredBusy(true);
     setStoredErr(null);
@@ -397,6 +400,11 @@ export default function GamepassCheck({
         username: recipient,
         gamepassId: parts[0].gamepassId,
       });
+      // Набор едет на оформление целиком: `ID:НОМИНАЛ` через запятую. Сумма
+      // частей равна сумме заказа, и сервер сверяет каждую часть по её цене.
+      if (parts.length > 1) {
+        params.set("parts", parts.map((part) => `${part.gamepassId}:${part.amount}`).join(","));
+      }
       router.push(`/checkout?${params.toString()}`);
       return;
     }
@@ -431,8 +439,8 @@ export default function GamepassCheck({
 
   const toCreate = plan ? targetsToCreate(plan) : [];
   const peekTargets: CreateTarget[] = useMemo(
-    () => idealTargetsFor(amount, !isSite).map((net) => ({ amount: net, price: Math.ceil(net / 0.7) })),
-    [amount, isSite],
+    () => idealTargetsFor(amount).map((net) => ({ amount: net, price: Math.ceil(net / 0.7) })),
+    [amount],
   );
   const stepTargets = toCreate.length > 0 ? toCreate : peekTargets;
   /** Справочный показ инструкции: создавать нечего, человек просто смотрит. */

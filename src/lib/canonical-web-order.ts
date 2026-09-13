@@ -2,6 +2,12 @@ import crypto from "crypto";
 import { PriceQuoteStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PRICE_TOL } from "@/lib/purchase-guard";
+import {
+  DONOR_NET_CAPACITY,
+  MAX_AUTO_PARTS,
+  SPLIT_STEP,
+  isAllowedPartAmount,
+} from "@/lib/gamepass-plan";
 import { BONUS_REASONS, webOrderBonusKey } from "@/lib/bonus-ledger";
 
 export const WEB_ORDER_TERMS_VERSION = "2026-04-28";
@@ -18,6 +24,7 @@ export class WebOrderError extends Error {
       | "GAMEPASS_NOT_FOR_SALE"
       | "GAMEPASS_OWNER_MISMATCH"
       | "GAMEPASS_PRICE_MISMATCH"
+      | "PARTS_INVALID"
       | "PAYMENT_TOO_SMALL",
     message: string,
   ) {
@@ -93,6 +100,53 @@ export function validateCheckoutGamepass(
   return expected;
 }
 
+/** Часть заказа: пасс и номинал, который он закрывает. */
+export type CheckoutPart = { gamepassId: string; amount: number };
+
+/**
+ * Проверка НАБОРА пассов под заказ сайта — то же, что коридор ВБ делает в
+ * `select-gamepass`.
+ *
+ * Зачем набор вообще: аккаунты выкупа держат 1500 «чистых», и один пасс на
+ * 2858 R$ (заказ на 2000) не может купить никто. Коридор давно закрывает такой
+ * заказ парой 1500 + 500, а сайт до 13.09.2026 умел только один пасс — и
+ * заказы на 2000 с сайта были невыкупаемыми по построению.
+ *
+ * Инвариант тот же и такой же жёсткий: **сумма номиналов частей равна сумме
+ * заказа ровно**, без допуска. Цену каждой части сверяет вызывающая сторона
+ * через `expectedPartPrice` — по номиналу ЧАСТИ, а не заказа.
+ */
+export function validateCheckoutParts(
+  quote: Pick<CheckoutQuote, "requestedRobux" | "bonusRobux">,
+  parts: readonly CheckoutPart[],
+): number {
+  const total = quote.requestedRobux + quote.bonusRobux;
+  if (parts.length < 2) {
+    throw new WebOrderError("PARTS_INVALID", "Набор должен состоять минимум из двух геймпассов");
+  }
+  if (parts.length > MAX_AUTO_PARTS) {
+    throw new WebOrderError("PARTS_INVALID", `Заказ можно закрыть максимум ${MAX_AUTO_PARTS} геймпассами`);
+  }
+  for (const part of parts) {
+    if (!isAllowedPartAmount(part.amount, total)) {
+      throw new WebOrderError(
+        "PARTS_INVALID",
+        `Часть на ${part.amount} R$ не годится: части кратны ${SPLIT_STEP} R$ и не больше ${DONOR_NET_CAPACITY} R$`,
+      );
+    }
+  }
+  const sum = parts.reduce((acc, part) => acc + part.amount, 0);
+  if (sum !== total) {
+    throw new WebOrderError("PARTS_INVALID", `Сумма частей ${sum} R$ ≠ сумме заказа ${total} R$`);
+  }
+  return total;
+}
+
+/** Цена, которую обязан показывать пасс этой части. */
+export function expectedPartPrice(amount: number): number {
+  return Math.ceil(amount / 0.7);
+}
+
 function publicOrderId() {
   return `WEB-${crypto.randomBytes(10).toString("hex").toUpperCase()}`;
 }
@@ -110,6 +164,8 @@ type CreateCanonicalWebOrderInput = {
   userId: string;
   username: string;
   gamepassId: string;
+  /** Набор из нескольких пассов; один пасс приходит без него. */
+  parts?: readonly CheckoutPart[];
   receiptEmail: string;
   idempotencyKey: string;
   termsIpAddress: string | null;
@@ -217,6 +273,20 @@ export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInpu
         probableNickAt: now,
       },
     });
+
+    // Набор частей — та же таблица, что у коридора ВБ: админка, прайс-гард и
+    // «первым делом» читают разбиение из одного места независимо от площадки.
+    if (input.parts && input.parts.length > 1) {
+      await tx.wbOrderGamepass.createMany({
+        data: input.parts.map((part, index) => ({
+          orderId: order.id,
+          gamepassId: part.gamepassId,
+          gamepassUrl: `https://www.roblox.com/game-pass/${part.gamepassId}`,
+          amount: part.amount,
+          position: index,
+        })),
+      });
+    }
 
     const attempt = await tx.paymentAttempt.create({
       data: {

@@ -130,6 +130,8 @@ describe("квест на сайте показывает эту дверь", ()
   });
 
   test("набор берётся эталонный под номинал, а не «чего не хватает»", () => {
-    expect(source).toMatch(/runStoredKey[\s\S]{0,900}createTargetsFor\(amount, !isSite\)/);
+    // Разбивка у сайта и у коридора ВБ теперь одна (13.09.2026), поэтому и
+    // эталонный набор считается без оглядки на площадку.
+    expect(source).toMatch(/runStoredKey[\s\S]{0,900}createTargetsFor\(amount\)/);
   });
 });

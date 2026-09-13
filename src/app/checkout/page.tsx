@@ -38,6 +38,7 @@ import {
   robuxForGamepassPrice,
 } from "@/lib/gamepass-search-view";
 import { parseGamepassRef } from "@/lib/gamepass-id";
+import { MAX_AUTO_PARTS, planFromOwned } from "@/lib/gamepass-plan";
 import styles from "./checkout.module.css";
 
 const MIN_ROBUX = 100;
@@ -87,6 +88,22 @@ type CustomerRobloxProfileLike = KnownRobloxAccount;
 
 const normalizeAmount = (value: string) => Math.min(MAX_ROBUX, Math.max(MIN_ROBUX, Number.parseInt(value, 10) || 1000));
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
+
+/** Часть заказа на стороне страницы: пасс, его номинал и что показать человеку. */
+type CheckoutPlanPart = { gamepassId: string; amount: number; name?: string; price?: number };
+
+/** `1976715318:1500,1980050799:500` → части. Мусор молча игнорируем. */
+function parsePartsParam(raw: string | null): CheckoutPlanPart[] | null {
+  if (!raw) return null;
+  const parts: CheckoutPlanPart[] = [];
+  for (const chunk of raw.split(",")) {
+    const [id, amount] = chunk.split(":");
+    const parsedAmount = Number.parseInt(amount ?? "", 10);
+    if (!/^\d{3,20}$/.test(id ?? "") || !Number.isSafeInteger(parsedAmount) || parsedAmount <= 0) return null;
+    parts.push({ gamepassId: id, amount: parsedAmount });
+  }
+  return parts.length >= 2 && parts.length <= MAX_AUTO_PARTS ? parts : null;
+}
 const formatCustomerRate = (rate: number) => rate.toLocaleString("ru-RU", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 3,
@@ -98,6 +115,14 @@ function CheckoutContent() {
   const rememberedUsername = searchParams.get("username")?.trim() ?? "";
   const rememberedAccountId = searchParams.get("accountId")?.trim() ?? "";
   const rememberedGamepassId = searchParams.get("gamepassId")?.trim() ?? "";
+  /**
+   * Набор пассов, посчитанный инструкцией: `parts=ID:НОМИНАЛ,ID:НОМИНАЛ`.
+   *
+   * Так на сайт приезжает та же разбивка, что коридор ВБ давно шлёт в
+   * `select-gamepass`: заказ на 2000 закрывается парой 1500 + 500, потому что
+   * один пасс на 2858 R$ не может выкупить ни один донор (у них 1500 «чистых»).
+   */
+  const rememberedParts = parsePartsParam(searchParams.get("parts"));
   const { loading: priceLoading, getPrice, getBreakdown } = usePricing();
 
   const [stage, setStage] = useState<"select" | "confirm">("select");
@@ -108,6 +133,9 @@ function CheckoutContent() {
   const [gamepasses, setGamepasses] = useState<RobloxPass[]>([]);
   const [account, setAccount] = useState<RobloxAccount | null>(null);
   const [selectedPass, setSelectedPass] = useState<RobloxPass | null>(null);
+  const [planParts, setPlanParts] = useState<CheckoutPlanPart[] | null>(rememberedParts);
+  /** Откуда набор: посчитан инструкцией (её решение не перебиваем) или здесь. */
+  const [planFromGuide, setPlanFromGuide] = useState<boolean>(rememberedParts !== null);
   const [searching, setSearching] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quote, setQuote] = useState<PriceQuote | null>(null);
@@ -180,6 +208,8 @@ function CheckoutContent() {
     const normalized = normalizeAmount(String(nextAmount));
     setRobux(normalized);
     if (syncInput) setAmountInput(String(normalized));
+    setPlanParts(null); // набор посчитан под прежнюю сумму — он больше не про этот заказ
+    setPlanFromGuide(false);
     setQuote(null);
     setError("");
     const nextPassPrice = grossPassPrice(normalized);
@@ -207,6 +237,12 @@ function CheckoutContent() {
   const price = getPrice(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(robux), [robux]);
   const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
+  /** Набор закрывает ровно сумму заказа — тот же инвариант, что у коридора ВБ. */
+  const planCoversAmount = !!planParts && planParts.reduce((sum, part) => sum + part.amount, 0) === robux;
+  /** Чем платим: одним пассом нужной цены или набором из нескольких. */
+  const passReady = planCoversAmount || selectedPriceMatches;
+  /** «1500 + 500» — как заказ будет собран. */
+  const planSummary = planParts ? planParts.map((part) => part.amount.toLocaleString("ru-RU")).join(" + ") : "";
   const repeatBuyerFlow = authenticated === true && knownAccounts.length > 0;
   const quickQuoteLoading = repeatBuyerFlow && quoteLoading;
   const selectedKnownAccount = knownAccounts.find((item) => item.accountId === selectedKnownAccountId)
@@ -341,7 +377,7 @@ function CheckoutContent() {
   }, []);
 
   useEffect(() => {
-    if (!repeatBuyerFlow || !selectedPass || !selectedPriceMatches) return;
+    if (!repeatBuyerFlow || !passReady) return;
     const controller = new AbortController();
     fetch("/api/pricing/quote", {
       method: "POST",
@@ -352,7 +388,9 @@ function CheckoutContent() {
       .then(async (response) => ({ response, body: await response.json().catch(() => ({})) }))
       .then(({ response, body }) => {
         if (!response.ok) throw new Error(body.error || "quote failed");
-        if (!gamepassPriceMatches(Number(selectedPass.price), body.gamepassPriceRobux)) {
+        // У набора цена сверяется по КАЖДОЙ части (на сервере, при создании
+        // заказа) — общая цена «одного пасса» к нему неприменима.
+        if (!planCoversAmount && selectedPass && !gamepassPriceMatches(Number(selectedPass.price), body.gamepassPriceRobux)) {
           throw new Error("Цена геймпасса больше не совпадает с заказом.");
         }
         setQuote(body);
@@ -367,7 +405,42 @@ function CheckoutContent() {
         if (!controller.signal.aborted) setQuoteLoading(false);
       });
     return () => controller.abort();
-  }, [repeatBuyerFlow, robux, selectedPass, selectedPriceMatches]);
+  }, [repeatBuyerFlow, robux, selectedPass, planCoversAmount, passReady]);
+
+  /**
+   * Набор из уже выставленных пассов — то же, что делает коридор ВБ.
+   *
+   * Пасса ровно на всю сумму может не быть, а два (1500 + 500) — быть. Раньше
+   * страница в такой ситуации говорила «подходящий геймпасс не найден» и
+   * отправляла человека создавать ещё один; теперь она собирает заказ из того,
+   * что уже есть. Решение инструкции (`?parts=`) здесь не перебиваем.
+   */
+  useEffect(() => {
+    if (planFromGuide) return;
+    if (selectedPriceMatches) {
+      setPlanParts((prev) => (prev === null ? prev : null));
+      return;
+    }
+    const owned = gamepasses.map((pass) => ({
+      gamepassId: String(pass.id),
+      name: pass.name,
+      price: Number(pass.price),
+      isForSale: pass.isForSale,
+    }));
+    const plan = planFromOwned(robux, owned);
+    const next = plan.kind === "ready" || plan.kind === "assembled"
+      ? plan.parts.map((part) => ({
+          gamepassId: part.gamepassId,
+          amount: part.amount,
+          name: part.name,
+          price: part.price,
+        }))
+      : null;
+    setPlanParts((prev) => {
+      const same = JSON.stringify(prev) === JSON.stringify(next);
+      return same ? prev : next;
+    });
+  }, [gamepasses, robux, selectedPriceMatches, planFromGuide]);
 
   /**
    * Проверка одной конкретной ссылки/ID. В отличие от поиска по нику ответ
@@ -518,11 +591,11 @@ function CheckoutContent() {
   };
 
   const prepareConfirmation = async () => {
-    if (!username || !selectedPass) {
+    if (!username || (!selectedPass && !planCoversAmount)) {
       setError("Сначала найди аккаунт и выбери геймпасс.");
       return;
     }
-    if (!selectedPriceMatches) {
+    if (!passReady) {
       setError(`У выбранного пасса должна стоять цена ${expectedPassPrice.toLocaleString("ru-RU")} R$.`);
       return;
     }
@@ -545,7 +618,9 @@ function CheckoutContent() {
         setError(data.error || "Не удалось зафиксировать цену.");
         return;
       }
-      if (!gamepassPriceMatches(Number(selectedPass.price), data.gamepassPriceRobux)) {
+      // Набор проверяется по частям (сервер сверяет каждую при создании
+      // заказа), поэтому общая цена «одного пасса» тут не применима.
+      if (!planCoversAmount && selectedPass && !gamepassPriceMatches(Number(selectedPass.price), data.gamepassPriceRobux)) {
         setError(`Поставь цену ${data.gamepassPriceRobux.toLocaleString("ru-RU")} R$ и найди пасс снова.`);
         return;
       }
@@ -585,7 +660,10 @@ function CheckoutContent() {
         body: JSON.stringify({
           quoteId: quote.quoteId,
           username,
-          gamepassId: String(selectedPass?.id ?? ""),
+          gamepassId: planCoversAmount && planParts ? planParts[0].gamepassId : String(selectedPass?.id ?? ""),
+          parts: planCoversAmount && planParts
+            ? planParts.map((part) => ({ gamepassId: part.gamepassId, amount: part.amount }))
+            : undefined,
           receiptEmail,
           agreedToTerms,
           idempotencyKey: idempotencyKey.current,
@@ -742,13 +820,27 @@ function CheckoutContent() {
               <p id="checkout-amount-note" className={styles.helper}>Можно указать любое количество от {MIN_ROBUX.toLocaleString("ru-RU")} до {MAX_ROBUX.toLocaleString("ru-RU")} R$.</p>
             </div>
 
-            <div className={selectedPass && selectedPriceMatches ? styles.quickReady : styles.quickWaiting} role="status">
-              {searching ? <Loader2 size={21} className={styles.spin} /> : selectedPass && selectedPriceMatches ? <Check size={21} /> : <Gamepad2 size={21} />}
+            <div className={passReady ? styles.quickReady : styles.quickWaiting} role="status">
+              {searching ? <Loader2 size={21} className={styles.spin} /> : passReady ? <Check size={21} /> : <Gamepad2 size={21} />}
               <span>
-                <strong>{searching ? "Ищем подходящий геймпасс…" : selectedPass && selectedPriceMatches ? "Геймпасс выбран автоматически" : "Подходящий геймпасс пока не найден"}</strong>
-                <small>{selectedPass && selectedPriceMatches ? `${selectedPass.name} · ${Number(selectedPass.price).toLocaleString("ru-RU")} R$` : "Создай геймпасс по инструкции — повторно вводить ник не потребуется."}</small>
+                <strong>
+                  {searching
+                    ? "Ищем подходящий геймпасс…"
+                    : planCoversAmount
+                      ? `Соберём из ${planParts?.length} геймпассов`
+                      : selectedPriceMatches
+                        ? "Геймпасс выбран автоматически"
+                        : "Подходящий геймпасс пока не найден"}
+                </strong>
+                <small>
+                  {planCoversAmount
+                    ? `${planSummary} R$ — каждую часть выкупаем отдельно`
+                    : selectedPass && selectedPriceMatches
+                      ? `${selectedPass.name} · ${Number(selectedPass.price).toLocaleString("ru-RU")} R$`
+                      : "Создай геймпасс по инструкции — повторно вводить ник не потребуется."}
+                </small>
               </span>
-              {!searching && (!selectedPass || !selectedPriceMatches) && <Link href={`/guide?source=site&flow=order&amount=${robux}&username=${encodeURIComponent(username)}`}>Инструкция</Link>}
+              {!searching && !passReady && <Link href={`/guide?source=site&flow=order&amount=${robux}&username=${encodeURIComponent(username)}`}>Инструкция</Link>}
             </div>
 
             <div className={styles.quickReceipt}>
@@ -782,7 +874,7 @@ function CheckoutContent() {
             <button
               type="button"
               className={styles.primaryButton}
-              disabled={paying || quickQuoteLoading || !quote || !selectedPass || !selectedPriceMatches || !agreedToTerms || !receiptEmail || !acquiringEnabled}
+              disabled={paying || quickQuoteLoading || !quote || !passReady || !agreedToTerms || !receiptEmail || !acquiringEnabled}
               onClick={() => void handlePay()}
             >
               {paying || quickQuoteLoading ? <Loader2 size={19} className={styles.spin} /> : acquiringEnabled ? <>Перейти к оплате <ArrowRight size={18} /></> : <>Оплата пока недоступна</>}
@@ -973,10 +1065,13 @@ function CheckoutContent() {
               <div><span>Стоимость</span><strong>{priceLoading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</strong></div>
               <div><span>Цена геймпасса</span><strong>{expectedPassPrice.toLocaleString("ru-RU")} R$</strong></div>
               <div><span>Аккаунт</span><strong>{username || "Не выбран"}</strong></div>
-              <div><span>Геймпасс</span><strong>{selectedPass?.name || "Не выбран"}</strong></div>
+              <div>
+                <span>{planCoversAmount ? "Геймпассы" : "Геймпасс"}</span>
+                <strong>{planCoversAmount ? `${planParts?.length} шт · ${planSummary} R$` : selectedPass?.name || "Не выбран"}</strong>
+              </div>
             </div>
             <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>Пароль не нужен</strong><small>Покупаем только выбранный геймпасс.</small></span></div>
-            <button type="button" className={styles.primaryButton} disabled={!selectedPass || !selectedPriceMatches || quoteLoading} onClick={() => void prepareConfirmation()}>{quoteLoading ? <Loader2 size={19} className={styles.spin} /> : <>Продолжить <ArrowRight size={18} /></>}</button>
+            <button type="button" className={styles.primaryButton} disabled={!passReady || quoteLoading} onClick={() => void prepareConfirmation()}>{quoteLoading ? <Loader2 size={19} className={styles.spin} /> : <>Продолжить <ArrowRight size={18} /></>}</button>
             <Link href={`/guide?source=site&flow=order&amount=${robux}&username=${encodeURIComponent(username || searchQuery.trim())}`} className={styles.guideLink}>Нужна инструкция по геймпассу?</Link>
           </aside>
         </div>
@@ -993,7 +1088,15 @@ function CheckoutContent() {
               <ArrowRight className={styles.confirmArrow} size={22} aria-hidden="true" />
               <div className={styles.confirmIdentity}>
                 <span className={styles.passImage}>{selectedPass?.image ? <Image src={selectedPass.image} width={150} height={150} alt={`Геймпасс ${selectedPass.name}`} unoptimized /> : <WalletCards size={22} />}</span>
-                <div><small>Геймпасс для покупки</small><strong>{selectedPass?.name}</strong><span>{selectedPass?.price.toLocaleString("ru-RU")} R$ · ID {selectedPass?.id}</span></div>
+                {planCoversAmount && planParts ? (
+                  <div>
+                    <small>Геймпассы для покупки</small>
+                    <strong>{planParts.length} шт · {planSummary} R$</strong>
+                    <span>{planParts.map((part) => `#${part.gamepassId}`).join(", ")}</span>
+                  </div>
+                ) : (
+                  <div><small>Геймпасс для покупки</small><strong>{selectedPass?.name}</strong><span>{selectedPass?.price.toLocaleString("ru-RU")} R$ · ID {selectedPass?.id}</span></div>
+                )}
               </div>
             </div>
             {!authenticated ? (

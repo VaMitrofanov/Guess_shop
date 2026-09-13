@@ -5,10 +5,15 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import {
   createCanonicalWebOrder,
+  expectedPartPrice,
   validateCheckoutGamepass,
+  validateCheckoutParts,
   validateCheckoutQuote,
   WebOrderError,
+  type CheckoutPart,
 } from "@/lib/canonical-web-order";
+import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
+import { PRICE_TOL } from "@/lib/purchase-guard";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
@@ -28,6 +33,16 @@ const CreateOrderSchema = z.object({
   quoteId: z.string().cuid(),
   username: z.string().trim().min(3).max(20),
   gamepassId: z.string().regex(/^\d+$/),
+  /**
+   * Набор из нескольких пассов — то же, что коридор ВБ шлёт в `select-gamepass`.
+   * Первая часть обязана совпадать с `gamepassId`: он остаётся «головой» заказа
+   * (по нему заказ ищется и он же едет в карточку админа).
+   */
+  parts: z
+    .array(z.object({ gamepassId: z.string().regex(/^\d+$/), amount: z.number().int().positive() }))
+    .min(2)
+    .max(MAX_AUTO_PARTS)
+    .optional(),
   receiptEmail: z.email().max(254),
   agreedToTerms: z.literal(true),
   idempotencyKey: z.uuid(),
@@ -285,18 +300,57 @@ export async function POST(req: NextRequest) {
 
     const robloxUser = await getRobloxUser(input.username);
     if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
-    const gamepass = await getCheckoutGamepassDetails(input.gamepassId, {
-      id: robloxUser.id,
-      username: String(robloxUser.name ?? input.username),
-    });
-    if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
-    validateCheckoutGamepass(checkedQuote, gamepass, Number(robloxUser.id));
+    const robloxAccount = { id: robloxUser.id, username: String(robloxUser.name ?? input.username) };
+    const parts: CheckoutPart[] | undefined = input.parts;
+
+    if (parts) {
+      // Набор: сумма частей = сумме заказа, каждая часть кратна шагу и влезает
+      // в донора, и КАЖДЫЙ пасс проверяется по номиналу СВОЕЙ части.
+      validateCheckoutParts(checkedQuote, parts);
+      if (parts[0].gamepassId !== input.gamepassId) {
+        return NextResponse.json(
+          { error: "Первая часть должна совпадать с выбранным геймпассом", code: "PARTS_INVALID" },
+          { status: 400 },
+        );
+      }
+      // Один и тот же пасс законно стоит в нескольких частях (его выкупают
+      // РАЗНЫЕ доноры), поэтому Roblox спрашиваем один раз на пасс.
+      const seen = new Map<string, Awaited<ReturnType<typeof getCheckoutGamepassDetails>>>();
+      for (const part of parts) {
+        let details = seen.get(part.gamepassId);
+        if (details === undefined) {
+          details = await getCheckoutGamepassDetails(part.gamepassId, robloxAccount);
+          seen.set(part.gamepassId, details);
+        }
+        if (!details) {
+          return NextResponse.json({ error: `Геймпасс ${part.gamepassId} не найден` }, { status: 404 });
+        }
+        if (!details.isActive) {
+          throw new WebOrderError("GAMEPASS_NOT_FOR_SALE", `Геймпасс ${part.gamepassId} снят с продажи`);
+        }
+        if (details.creatorId !== Number(robloxUser.id)) {
+          throw new WebOrderError("GAMEPASS_OWNER_MISMATCH", `Геймпасс ${part.gamepassId} принадлежит другому аккаунту`);
+        }
+        const expected = expectedPartPrice(part.amount);
+        if (Math.abs(details.price - expected) > PRICE_TOL) {
+          throw new WebOrderError(
+            "GAMEPASS_PRICE_MISMATCH",
+            `Цена геймпасса ${part.gamepassId} должна быть ${expected} R$`,
+          );
+        }
+      }
+    } else {
+      const gamepass = await getCheckoutGamepassDetails(input.gamepassId, robloxAccount);
+      if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
+      validateCheckoutGamepass(checkedQuote, gamepass, Number(robloxUser.id));
+    }
 
     const created = await createCanonicalWebOrder({
       quote: checkedQuote,
       userId,
       username: String(robloxUser.name ?? input.username),
       gamepassId: input.gamepassId,
+      parts,
       receiptEmail: input.receiptEmail.toLowerCase(),
       idempotencyKey: input.idempotencyKey,
       termsIpAddress: consentIp(req),
