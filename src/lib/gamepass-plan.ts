@@ -9,15 +9,19 @@
  */
 
 export {
+  DONOR_NET_CAPACITY,
   MAX_AUTO_PARTS,
+  MIN_AUTO_PART_ROBUX,
   MIN_SPLIT_PART_ROBUX,
-  SPLIT_PLANS,
+  SPLIT_STEP,
   coveredRobux,
   createTargetsFor,
   expectedGamepassPrice,
   idealTargetsFor,
+  isAllowedPartAmount,
   netFromPrice,
   planFromOwned,
+  splitIntoDonorChunks,
   targetsToCreate,
 } from "../../bots/shared/gamepass-plan";
 

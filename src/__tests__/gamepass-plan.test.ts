@@ -1,7 +1,9 @@
 import {
+  DONOR_NET_CAPACITY,
   MAX_AUTO_PARTS,
-  SPLIT_PLANS,
   coveredRobux,
+  isAllowedPartAmount,
+  splitIntoDonorChunks,
   idealTargetsFor,
   netFromPrice,
   planFromOwned,
@@ -17,23 +19,51 @@ const pass = (id: string, price: number, extra: Partial<OwnedPass> = {}): OwnedP
   ...extra,
 });
 
-describe("SPLIT_PLANS", () => {
-  it("каждая раскладка складывается ровно в свой номинал", () => {
-    for (const [amount, parts] of Object.entries(SPLIT_PLANS)) {
-      expect(parts.reduce((sum, part) => sum + part, 0)).toBe(Number(amount));
+describe("разбивка под донора (1500 чистых на аккаунт)", () => {
+  it("номинал, который влезает в донора, не дробится вовсе", () => {
+    for (const amount of [300, 500, 800, 1000, 1200, 1500]) {
+      expect(idealTargetsFor(amount)).toEqual([amount]);
     }
   });
 
-  it("2000 просится двумя пассами, и вместе они стоят столько же, сколько один", () => {
-    expect(idealTargetsFor(2000)).toEqual([1500, 500]);
+  it("выше донора — куски по 1500, остаток последней частью", () => {
+    expect(splitIntoDonorChunks(2000)).toEqual([1500, 500]);
+    expect(splitIntoDonorChunks(2500)).toEqual([1500, 1000]);
+    expect(splitIntoDonorChunks(3000)).toEqual([1500, 1500]);
+    expect(splitIntoDonorChunks(5000)).toEqual([1500, 1500, 1500, 500]);
+  });
+
+  it("огрызка мельче шага не бывает: 1700 — это 850 + 850, а не 1500 + 200", () => {
+    expect(splitIntoDonorChunks(1700)).toEqual([850, 850]);
+    expect(splitIntoDonorChunks(1501)).toEqual([751, 750]);
+    for (const amount of [1501, 1700, 2000, 2500, 3000, 5000]) {
+      const parts = splitIntoDonorChunks(amount);
+      expect(parts.reduce((sum, part) => sum + part, 0)).toBe(amount);
+      for (const part of parts) expect(part).toBeLessThanOrEqual(DONOR_NET_CAPACITY);
+    }
+  });
+
+  it("разбивка не крадёт у покупателя: сумма цен частей равна цене целого", () => {
     const split = idealTargetsFor(2000).reduce((sum, part) => sum + expectedGamepassPrice(part), 0);
     expect(split).toBe(expectedGamepassPrice(2000));
     expect(split).toBe(2858);
   });
 
-  it("остальные номиналы остаются одним пассом", () => {
-    expect(idealTargetsFor(1000)).toEqual([1000]);
-    expect(idealTargetsFor(1200)).toEqual([1200]);
+  it("1500 одним пассом — единственное, что влезает в донора целиком", () => {
+    // Округление цены вверх съедает баланс: 715 × 3 = 2145 и 1429 + 715 = 2144
+    // не помещаются в 2143, которые стоит один пасс на 1500.
+    expect(expectedGamepassPrice(1500)).toBe(2143);
+    expect(expectedGamepassPrice(500) * 3).toBeGreaterThan(expectedGamepassPrice(1500));
+    expect(expectedGamepassPrice(1000) + expectedGamepassPrice(500)).toBeGreaterThan(expectedGamepassPrice(1500));
+  });
+
+  it("часть — либо кратная 500 в пределах донора, либо весь заказ целиком", () => {
+    expect(isAllowedPartAmount(500, 2000)).toBe(true);
+    expect(isAllowedPartAmount(1500, 2000)).toBe(true);
+    expect(isAllowedPartAmount(800, 800)).toBe(true);   // номинал ВБ, дробить нечем
+    expect(isAllowedPartAmount(800, 2000)).toBe(false); // а как ЧАСТЬ — уже огрызок
+    expect(isAllowedPartAmount(430, 2000)).toBe(false);
+    expect(isAllowedPartAmount(2000, 2000)).toBe(false); // больше донора
   });
 
   it("цена пасса и номинал — обратные друг другу", () => {
@@ -82,25 +112,27 @@ describe("planFromOwned", () => {
     expect(coveredRobux(plan)).toBe(2000);
   });
 
-  it("когда точной суммы не собрать — просит создать ровно один пасс", () => {
-    // 800 + 800 = 1600, 800 * 3 = 2400 — мимо 2000.
+  it("некратная часть в разбивку не берётся, даже когда сумма сошлась бы", () => {
+    // Пасс на 1143 R$ = 800 на руки. Раньше он засчитывался, и заказ на 2000
+    // закрывался парой «800 + 1200»: два донора, и у обоих остаётся огрызок,
+    // которым не закрыть следующую часть. Теперь просим эталонный набор.
     const plan = planFromOwned(2000, [pass("1", 1143)]);
-    expect(plan.kind).toBe("build");
-    if (plan.kind !== "build") throw new Error("unreachable");
-    expect(targetsToCreate(plan)).toHaveLength(1);
-    expect(coveredRobux(plan) + plan.create.amount).toBe(2000);
-    expect(plan.create.price).toBe(expectedGamepassPrice(plan.create.amount));
-    // Меньше частей лучше: одна восьмисотка плюс новый пасс на 1200.
-    expect(plan.parts).toHaveLength(1);
-    expect(plan.create.amount).toBe(1200);
+    expect(plan.kind).toBe("empty");
+    expect(targetsToCreate(plan).map((t) => t.amount)).toEqual([1500, 500]);
   });
 
-  it("пасс на 1000 R$ даёт 700 на руки — под тысячу просит достроить 300", () => {
+  it("пасс на 700 на руки под тысячу не годится — просим один пасс на 1000", () => {
     const plan = planFromOwned(1000, [pass("1", 1000)]);
+    expect(plan.kind).toBe("empty");
+    expect(targetsToCreate(plan)).toEqual([{ amount: 1000, price: expectedGamepassPrice(1000) }]);
+  });
+
+  it("достраиваем только рабочей частью: 2000 при пассе на 1500 — плюс 500", () => {
+    const plan = planFromOwned(2000, [pass("1", 2143)]);
     expect(plan.kind).toBe("build");
     if (plan.kind !== "build") throw new Error("unreachable");
-    expect(coveredRobux(plan)).toBe(700);
-    expect(plan.create).toEqual({ amount: 300, price: expectedGamepassPrice(300) });
+    expect(coveredRobux(plan)).toBe(1500);
+    expect(plan.create).toEqual({ amount: 500, price: expectedGamepassPrice(500) });
   });
 
   it("пустой аккаунт получает набор с нуля по таблице", () => {

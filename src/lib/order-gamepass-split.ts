@@ -25,7 +25,7 @@
 import { expectedGamepassPrice, PRICE_TOL } from "./purchase-guard";
 
 /** Ниже этого номинала часть не имеет смысла: пасс дешевле 2 R$ не выставить. */
-import { MIN_SPLIT_PART_ROBUX } from "../../bots/shared/gamepass-plan";
+import { MIN_SPLIT_PART_ROBUX, isAllowedPartAmount } from "../../bots/shared/gamepass-plan";
 
 /** Порог части — общий с разбором плана (ядро в `bots/shared/gamepass-plan.ts`). */
 export { MIN_SPLIT_PART_ROBUX } from "../../bots/shared/gamepass-plan";
@@ -172,7 +172,12 @@ export function planSplitFor(
   const idsByAmount = new Map<number, string[]>();
   for (const c of candidates) {
     const amount = Math.trunc(Number(c.amount));
-    if (!Number.isFinite(amount) || amount < MIN_SPLIT_PART_ROBUX || amount > orderAmount) continue;
+    // Подбор предлагает только «рабочие» части: кратные 500 в пределах донора
+    // (или весь номинал целиком). Огрызок на 70 или 430 робуксов сумму сойтись
+    // заставит, а донора после выкупа оставит непригодным для следующей части.
+    // Руками админ по-прежнему может ввести любой номинал — это проверяет
+    // `buildSplitParts`, и там порог прежний.
+    if (!Number.isFinite(amount) || !isAllowedPartAmount(amount, orderAmount)) continue;
     const bucket = idsByAmount.get(amount);
     if (bucket) bucket.push(String(c.gamepassId));
     else idsByAmount.set(amount, [String(c.gamepassId)]);
@@ -240,7 +245,7 @@ export function splitUsableAmounts(
   const amounts = [...new Set(
     candidates
       .map((c) => Math.trunc(Number(c.amount)))
-      .filter((a) => Number.isFinite(a) && a >= MIN_SPLIT_PART_ROBUX && a <= orderAmount),
+      .filter((a) => Number.isFinite(a) && isAllowedPartAmount(a, orderAmount)),
   )];
   if (amounts.length === 0) return usable;
 

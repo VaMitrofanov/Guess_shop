@@ -106,12 +106,22 @@ describe("разбиение выкупа на несколько геймпас
     });
 
     it("складывает разные номиналы, когда одним не набрать", () => {
-      const plan = planSplitFor(1301, kirka);
-      // 802 + 499 — единственная точная комбинация; крупная часть первой.
-      expect(plan).toEqual([
-        { gamepassId: "1806254971", amount: 802 },
-        { gamepassId: "1769521354", amount: 499 },
+      const plan = planSplitFor(2000, [
+        { gamepassId: "111111111", amount: 1500 },
+        { gamepassId: "222222222", amount: 500 },
       ]);
+      // Крупная часть первой: на ней дороже сорваться.
+      expect(plan).toEqual([
+        { gamepassId: "111111111", amount: 1500 },
+        { gamepassId: "222222222", amount: 500 },
+      ]);
+    });
+
+    it("огрызки в подбор не идут: 802 + 499 больше не предлагается", () => {
+      // Оба номинала «сходятся» в 1301, но каждый оставляет донору остаток,
+      // которым не закрыть следующую часть. С 13.09.2026 подбор берёт только
+      // кратные 500 в пределах донора — здесь честнее ответить «не собрать».
+      expect(planSplitFor(1301, kirka)).toBeNull();
     });
 
     it("подобранное разбиение проходит buildSplitParts как есть", () => {
@@ -120,10 +130,10 @@ describe("разбиение выкупа на несколько геймпас
     });
 
     it("не собирает разбивку длиннее лимита частей", () => {
-      // 10 частей по 100 — ровно предел; 11 уже нет.
-      const only100 = [{ gamepassId: "111111111", amount: 100 }];
-      expect(planSplitFor(1000, only100)).toHaveLength(MAX_SPLIT_PARTS);
-      expect(planSplitFor(1100, only100)).toBeNull();
+      // 10 частей по 500 — ровно предел; 11 уже нет.
+      const only500 = [{ gamepassId: "111111111", amount: 500 }];
+      expect(planSplitFor(5000, only500)).toHaveLength(MAX_SPLIT_PARTS);
+      expect(planSplitFor(5500, only500)).toBeNull();
     });
   });
 

@@ -48,12 +48,66 @@ export const MIN_SPLIT_PART_ROBUX = 10;
 export const expectedGamepassPrice = (amount: number): number => Math.ceil(amount / 0.7);
 
 /**
- * Номиналы, которые выдаются НЕСКОЛЬКИМИ пассами, и на какие части.
- * Сумма частей обязана равняться ключу — это проверяет тест.
+ * Ёмкость ОДНОГО донора в робуксах «на руки».
+ *
+ * Аккаунты выкупа держат 1500 чистых (≈2143 грязных: `ceil(1500 / 0.7)`), и это
+ * не круглая цифра «для удобства», а физический потолок части: пасс дороже
+ * донор не купит вовсе. Отсюда же следует, почему 1500 лучше отдавать ОДНИМ
+ * пассом: три пасса по 500 стоят 715 × 3 = 2145, пара 1000 + 500 — 2144, и в
+ * 2143 не влезает ни та, ни другая (округление цены вверх съедает баланс).
  */
-export const SPLIT_PLANS: Record<number, number[]> = {
-  2000: [1500, 500],
-};
+export const DONOR_NET_CAPACITY = 1500;
+
+/**
+ * Шаг номинала части. Кратность 500 держит остатки на донорах пригодными:
+ * часть на 70 или 430 робуксов оставляет на аккаунте огрызок, которым уже не
+ * закрыть ни одну следующую часть.
+ */
+export const SPLIT_STEP = 500;
+
+/** Мельче этого автоматика части не делает (руками админ по-прежнему может всё). */
+export const MIN_AUTO_PART_ROBUX = SPLIT_STEP;
+
+/**
+ * Разрешён ли такой номинал части.
+ *
+ * Весь заказ одной частью законен всегда: номиналы 300, 800 и 1200 существуют
+ * в каталоге ВБ (и их там больше тысячи), на 500 не делятся, но целиком
+ * помещаются в одного донора — дробить их не нужно и нечем.
+ */
+export function isAllowedPartAmount(amount: number, orderAmount: number): boolean {
+  if (!Number.isInteger(amount) || amount <= 0) return false;
+  if (amount > Math.min(orderAmount, DONOR_NET_CAPACITY)) return false;
+  if (amount === orderAmount) return true;
+  return amount % SPLIT_STEP === 0 && amount >= MIN_AUTO_PART_ROBUX;
+}
+
+/**
+ * Разложить номинал на части, каждую из которых покупает один донор.
+ *
+ * Правило: пока номинал влезает в донора — не дробим вовсе; выше — куски по
+ * 1500, остаток последней частью. Огрызок мельче шага (1700 → 1500 + 200) не
+ * выпускаем: вместо него делим последний кусок пополам (850 + 850) — две
+ * рабочие части вместо одной рабочей и одного похода к донору ради двухсот.
+ */
+export function splitIntoDonorChunks(amount: number): number[] {
+  if (!Number.isInteger(amount) || amount <= 0) return [];
+  if (amount <= DONOR_NET_CAPACITY) return [amount];
+  const chunks: number[] = [];
+  let rest = amount;
+  while (rest > DONOR_NET_CAPACITY) {
+    chunks.push(DONOR_NET_CAPACITY);
+    rest -= DONOR_NET_CAPACITY;
+  }
+  if (rest === 0) return chunks;
+  if (rest >= MIN_AUTO_PART_ROBUX) {
+    chunks.push(rest);
+    return chunks;
+  }
+  const last = chunks.pop()! + rest;
+  const half = Math.ceil(last / 2);
+  return [...chunks, half, last - half];
+}
 
 /**
  * Сколько частей заказ может получить без участия админа.
@@ -77,9 +131,9 @@ export interface PlanOptions {
 
 /** Пассы, которые мы просим создать под этот номинал (в робуксах НА РУКИ). */
 export function idealTargetsFor(amount: number, splitPlan = true): number[] {
-  const plan = splitPlan ? SPLIT_PLANS[amount] : undefined;
-  if (plan && plan.reduce((sum, part) => sum + part, 0) === amount) return [...plan];
-  return [amount];
+  if (!splitPlan) return [amount];
+  const chunks = splitIntoDonorChunks(amount);
+  return chunks.length > 0 ? chunks : [amount];
 }
 
 export interface OwnedPass {
@@ -127,8 +181,10 @@ function usableCandidates(owned: readonly OwnedPass[], orderAmount: number): Own
   return owned.filter((pass) => {
     if (pass.isForSale === false) return false;
     if (pass.busyWith) return false;
-    const amount = netFromPrice(pass.price);
-    return amount >= MIN_SPLIT_PART_ROBUX && amount <= orderAmount;
+    // Кратность 500 и потолок донора — те же, что у создаваемых частей: пасс на
+    // 430 робуксов «подходит» только на бумаге, а выкупать его придётся с
+    // отдельного донора, у которого после этого останется непригодный огрызок.
+    return isAllowedPartAmount(netFromPrice(pass.price), orderAmount);
   });
 }
 
@@ -242,7 +298,9 @@ export function planFromOwned(
   // это уже не «достроить», а сделать заново.
   let bestRest = 0;
   let bestParts = Infinity;
-  for (let rest = MIN_SPLIT_PART_ROBUX; rest <= orderAmount - MIN_SPLIT_PART_ROBUX; rest++) {
+  for (let rest = MIN_AUTO_PART_ROBUX; rest <= orderAmount - MIN_AUTO_PART_ROBUX; rest += SPLIT_STEP) {
+    // Достраиваем только «рабочей» частью: кратной 500 и в пределах донора.
+    if (!isAllowedPartAmount(rest, orderAmount)) continue;
     const covered = table.best[orderAmount - rest];
     if (!Number.isFinite(covered) || covered > maxParts - 1) continue;
     // При равном числе частей берём БОЛЬШИЙ остаток: покупателю в любом случае
