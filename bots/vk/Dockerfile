@@ -107,9 +107,16 @@ COPY --from=deps /app/package.json ./package.json
 # Bot source, preserving the on-disk repo layout. Order: shared first
 # (most stable), bot-specific last (changes most often).
 COPY bots/shared            ./bots/shared
-COPY bots/vk/bot.ts         ./bots/vk/bot.ts
-COPY bots/vk/handlers.ts    ./bots/vk/handlers.ts
-COPY bots/vk/session.ts     ./bots/vk/session.ts
+# Весь верхний уровень `bots/vk`, а не три файла поимённо.
+#
+# 15.09.2026: `support-pause.ts` появился 13.09 и в образ не попал — контейнер
+# падал на старте `Cannot find module './support-pause'`, Coolify откатывался на
+# прошлый образ, и «деплой прошёл» означал «VK-бот остался на старом коде».
+# Молча, потому что сборка-то зелёная: ломается запуск, а не build.
+#
+# `*.ts` берёт только верхний уровень: `__tests__` и `*.test.ts` и так отрезаны
+# в `.dockerignore`, `package.json`/`Dockerfile` под маску не попадают.
+COPY bots/vk/*.ts           ./bots/vk/
 COPY bots/tsconfig.json     ./bots/tsconfig.json
 
 # Explicit ownership transfer for the entire app tree AFTER all COPYs.
