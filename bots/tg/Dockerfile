@@ -93,11 +93,18 @@ COPY --from=deps /app/package.json ./package.json
 # here, or the container crash-loops at startup with MODULE_NOT_FOUND while the
 # image still builds green (tsx resolves imports only at runtime).
 COPY bots/shared              ./bots/shared
-COPY bots/tg/bot.ts           ./bots/tg/bot.ts
-COPY bots/tg/handlers.ts      ./bots/tg/handlers.ts
-COPY bots/tg/session.ts       ./bots/tg/session.ts
-COPY bots/tg/crons.ts         ./bots/tg/crons.ts
-COPY bots/tg/auto-workers.ts  ./bots/tg/auto-workers.ts
+# Весь верхний уровень `bots/tg`, а не файлы поимённо.
+#
+# 15.09.2026 у VK-бота этот список разошёлся с репозиторием: новый
+# `support-pause.ts` в образ не попал, контейнер падал на старте
+# `Cannot find module`, Coolify откатывался на прошлый образ — и «деплой
+# прошёл» две недели означало «бот остался на старом коде». Сборка при этом
+# зелёная: ломается запуск, а не build. Здесь список пока полон, но следующий
+# новый файл повторил бы историю.
+#
+# `*.ts` берёт только верхний уровень: `__tests__` и `*.test.ts` отрезаны в
+# `.dockerignore`, манифесты под маску не попадают, `admin/` идёт отдельно.
+COPY bots/tg/*.ts             ./bots/tg/
 COPY bots/tg/admin            ./bots/tg/admin
 COPY bots/tsconfig.json       ./bots/tsconfig.json
 
