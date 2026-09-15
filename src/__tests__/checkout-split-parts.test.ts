@@ -34,8 +34,11 @@ describe("набор пассов на сайте", () => {
     // Готовность к оплате — либо один пасс нужной цены, либо набор на всю сумму.
     expect(source).toContain("planCoversAmount");
     expect(source).toMatch(/parts: planCoversAmount && planParts/);
-    // Смена суммы обнуляет набор: он был посчитан под другой заказ.
-    expect(source).toMatch(/setPlanParts\(null\)/);
+    // Смена суммы обнуляет набор ИНСТРУКЦИИ: он был посчитан под другой заказ.
+    // Собственный подбор страницы сбрасывать нечем и незачем — он производная
+    // (`ownedPlanParts`) и пересчитывается от новой суммы сам.
+    expect(source).toMatch(/setGuidePlanParts\(null\)/);
+    expect(source).toMatch(/const planParts = guidePlanParts \?\? ownedPlanParts/);
   });
 
   test("сервер проверяет каждую часть отдельно и пишет разбивку в заказ", () => {
