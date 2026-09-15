@@ -66,7 +66,7 @@ import { noteProbableNick } from "../shared/nick";
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
 import { countPreviousOrders } from "../shared/order-loyalty";
-import { corridorHoldText, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
+import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
 import { VK_HELP_REF } from "../shared/bot-links";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
@@ -1299,12 +1299,18 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
   // «Всё равно куплю» — обход экрана «сначала закончим оплаченный заказ».
   if (msgPayload?.command === "start_direct_any") {
+    // Согласие помним: иначе тап по паку вернёт человека на рельсу, и выйти
+    // из неё будет нельзя вовсе.
+    corridorOverride.allow(vkUserId);
     await handleStartDirect(ctx, vkUserId, { force: true });
     return;
   }
   if (msgPayload?.command === "direct_pack") {
     const packAmt = typeof msgPayload.amount === "number" ? msgPayload.amount : NaN;
     if (!isNaN(packAmt) && DIRECT_PACKS.includes(packAmt)) {
+      // Клавиатура с паками живёт в диалоге вечно: тап по старому сообщению —
+      // это вход в платную воронку мимо `handleStartDirect`. Рельса стоит и тут.
+      if (await corridorHoldShown(ctx, vkUserId)) return;
       await handleDirectPackSelect(ctx, vkUserId, packAmt);
     }
     return;
@@ -3535,6 +3541,35 @@ async function handleOrderPick(ctx: MessageContext, vkUserId: number, code: stri
 // B3 — Direct order flow (no WB card needed)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const corridorOverride = createCorridorOverride();
+
+/**
+ * Рельса «сначала закончим оплаченное» — зеркало телеграмной.
+ *
+ * `true` = экран показан, дальше идти не надо. Отдельной функцией, потому что
+ * дверей в платную воронку две: `handleStartDirect` и payload `direct_pack` —
+ * тап по паку в СТАРОМ сообщении, который до 15.09.2026 обходил рельсу целиком.
+ */
+async function corridorHoldShown(
+  ctx: MessageContext,
+  vkUserId: number,
+  opts?: { force?: boolean },
+): Promise<boolean> {
+  if (opts?.force || corridorOverride.taken(vkUserId)) return false;
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+  if (!user?.id) return false;
+  const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, user.id);
+  if (!held) return false;
+  const kb = Keyboard.builder()
+    .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrlFor(held.wbCode, held.nick ?? undefined) })
+    .row()
+    .textButton({ label: "🔎 Продолжить заказ", payload: { command: "find_gp_start" }, color: "primary" })
+    .row()
+    .textButton({ label: "💎 Всё равно купить напрямую", payload: { command: "start_direct_any" }, color: "secondary" });
+  await ctx.reply({ message: plainText(corridorHoldText(held)), keyboard: kb.inline() });
+  return true;
+}
+
 async function handleStartDirect(
   ctx: MessageContext,
   vkUserId: number,
@@ -3575,19 +3610,7 @@ async function handleStartDirect(
 
   // Сначала — оплаченное. Тот же экран, что и в Telegram: не запрет, а выбор,
   // где «продолжить заказ» стоит первым.
-  if (!opts?.force && user?.id) {
-    const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, user.id);
-    if (held) {
-      const kb = Keyboard.builder()
-        .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrlFor(held.wbCode, held.nick ?? undefined) })
-        .row()
-        .textButton({ label: "🔎 Продолжить заказ", payload: { command: "find_gp_start" }, color: "primary" })
-        .row()
-        .textButton({ label: "💎 Всё равно купить напрямую", payload: { command: "start_direct_any" }, color: "secondary" });
-      await ctx.reply({ message: plainText(corridorHoldText(held)), keyboard: kb.inline() });
-      return;
-    }
-  }
+  if (await corridorHoldShown(ctx, vkUserId, opts)) return;
 
   const notes: string[] = [];
   if (bonus > 0) notes.push(`🎁 Бонус ${bonus} R$ — добавится автоматически.`);

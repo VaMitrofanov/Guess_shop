@@ -99,6 +99,12 @@ a.codeTeaser:hover { border-color:#7556e8; transform:translateY(-1px); }
 .priceSummary .total { margin-top: 12px; padding-top: 12px; border-top: 1px solid #dcd5ec; color: #251b3f; font-size: 15px; font-weight: 800; }
 .priceSummary .total strong { color: #7556e8; font-size: 18px; }
 .tierNote { margin: 10px 0 0; color: #8b8499; text-align: center; font-size: 15px; }
+/* Коридор ВБ: у цены обязана быть видимая дверь обратно к оплаченному заказу.
+   Разметка и правило — src/components/corridor-notice.tsx. */
+.corridorNotice { margin-top:14px; padding:13px 15px; border:1px solid #cfc6e9; border-radius:14px; background:#f8f6fd; color:#655b79; }
+.corridorNotice strong { display:block; color:#302746; font-size:15px; font-weight:900; line-height:1.35; }
+.corridorNotice small { display:block; margin-top:4px; font-size:14px; line-height:1.45; }
+.corridorNoticeLink { display:inline-block; margin-top:9px; color:#7556e8; font-size:14px; font-weight:850; text-decoration:underline; text-underline-offset:3px; }
 .nicknameLabel { display:block; margin:18px 0 8px; color:#655b79; font-size:16px; font-weight:900; }
 .nicknameField { min-height:60px; display:flex; align-items:center; gap:11px; padding:0 15px; border:2px solid #cfc6e9; border-radius:14px; background:#fff; color:#7556e8; transition:border-color .2s,box-shadow .2s; }
 .nicknameField:focus-within { border-color:#7556e8; box-shadow:0 0 0 4px rgba(117,86,232,.12); }

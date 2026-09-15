@@ -54,7 +54,7 @@ import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
 import { countPreviousOrders } from "../shared/order-loyalty";
-import { corridorHoldText, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
+import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -1414,36 +1414,54 @@ async function handleDirectGamepassLink(ctx: DirectLinkCtx, passId: string): Pro
  * Open the direct-order flow (predefined Robux packs). Shared by the
  * `💎 Купить напрямую` callback and the `/direct` command.
  */
+const corridorOverride = createCorridorOverride();
+
+/**
+ * Рельса «сначала закончим оплаченное» — один экран перед платной воронкой.
+ *
+ * Возвращает `true`, если экран показан и дальше идти НЕ надо. Отдельной
+ * функцией, потому что дверей в воронку две: `startDirectFlow` (кнопка «Купить
+ * напрямую») и callback `dp:` — тап по паку в СТАРОМ сообщении, который до
+ * 15.09.2026 обходил рельсу целиком.
+ */
+async function corridorHoldShown(ctx: any, opts?: { force?: boolean }): Promise<boolean> {
+  if (opts?.force || corridorOverride.taken(ctx.from.id)) return false;
+  const tgId = String(ctx.from.id);
+  const dirUser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true, robloxUsername: true } });
+  if (!dirUser?.id) return false;
+  const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, dirUser.id);
+  if (!held) return false;
+  pendingLink.set(ctx.from.id, { wbCode: held.wbCode, denomination: held.amount });
+  await ctx.reply(corridorHoldText(held), {
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+    ...Markup.inlineKeyboard([
+      // «Найти у сохранённого ника» умеет только тот случай, когда ник лежит
+      // у ПОЛЬЗОВАТЕЛЯ: вероятный ник заказа этой кнопке не подойдёт.
+      [Markup.button.callback(
+        dirUser.robloxUsername ? `🔎 Найти геймпассы у ${dirUser.robloxUsername}` : "🔎 Продолжить заказ",
+        dirUser.robloxUsername ? CB.findGpSaved : CB.findGpStart,
+      )],
+      [Markup.button.url("📖 Открыть инструкцию", guideUrlFor(held.wbCode, held.nick ?? undefined))],
+      [Markup.button.callback("💎 Всё равно купить напрямую", CB.startDirectAnyway)],
+    ]),
+  });
+  return true;
+}
+
 async function startDirectFlow(ctx: any, opts?: { force?: boolean }): Promise<void> {
   const tgId = String(ctx.from.id);
+  // «Всё равно куплю» запоминаем: иначе тап по паку вернёт человека на рельсу,
+  // и выйти из неё будет нельзя вовсе.
+  if (opts?.force) corridorOverride.allow(ctx.from.id);
+  // Сначала — оплаченное. Заказ коридора, ждущий геймпасс, стоит на пути к
+  // прямой покупке ОДНИМ экраном: продолжить его или всё-таки купить ещё.
+  if (await corridorHoldShown(ctx, opts)) return;
+
   const dirUser = await (db as any).user.findUnique({
     where: { tgId },
     select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true, promoExpiresAt: true, robloxUsername: true },
   });
-
-  // Сначала — оплаченное. Заказ коридора, ждущий геймпасс, стоит на пути к
-  // прямой покупке ОДНИМ экраном: продолжить его или всё-таки купить ещё.
-  if (!opts?.force && dirUser?.id) {
-    const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, dirUser.id);
-    if (held) {
-      pendingLink.set(ctx.from.id, { wbCode: held.wbCode, denomination: held.amount });
-      await ctx.reply(corridorHoldText(held), {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        ...Markup.inlineKeyboard([
-          // «Найти у сохранённого ника» умеет только тот случай, когда ник лежит
-          // у ПОЛЬЗОВАТЕЛЯ: вероятный ник заказа этой кнопке не подойдёт.
-          [Markup.button.callback(
-            dirUser.robloxUsername ? `🔎 Найти геймпассы у ${dirUser.robloxUsername}` : "🔎 Продолжить заказ",
-            dirUser.robloxUsername ? CB.findGpSaved : CB.findGpStart,
-          )],
-          [Markup.button.url("📖 Открыть инструкцию", guideUrlFor(held.wbCode, held.nick ?? undefined))],
-          [Markup.button.callback("💎 Всё равно купить напрямую", CB.startDirectAnyway)],
-        ]),
-      });
-      return;
-    }
-  }
   const now = new Date();
   const rawBonus = dirUser?.balance ?? 0;
   const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= now : false;
@@ -5718,6 +5736,12 @@ export function registerCallbacks(bot: Telegraf): void {
       const amt = parseInt(data.slice(3), 10);
       if (isNaN(amt) || !DIRECT_PACKS.includes(amt)) {
         await ctx.answerCbQuery("Неверный пак").catch(() => {});
+        return;
+      }
+      // Клавиатура с паками живёт в чате вечно: тап по старому сообщению — это
+      // вход в платную воронку мимо `startDirectFlow`. Рельса стоит и здесь.
+      if (await corridorHoldShown(ctx)) {
+        await ctx.answerCbQuery().catch(() => {});
         return;
       }
       await handleDirectPackChosen(bot, ctx, amt);

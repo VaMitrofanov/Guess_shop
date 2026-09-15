@@ -141,3 +141,47 @@ describe("касса", () => {
     expect(source).toContain("corridorOrder");
   });
 });
+
+/**
+ * Отказ 409 — последний рубеж, и он срабатывает только у ВОШЕДШЕГО: все три
+ * рельсы (`findBlockingCorridorOrder`, боты, `ActiveOrderBar`) ключуются на
+ * `userId`. Покупатель карты ВБ приходит к цене анонимно — он набрал домен
+ * руками, потому что в сообщении чата ВБ вторая строка зовёт на сам домен.
+ * Живой случай `BGPZUH2` (15.09.2026): «Предлагает оплатить», «Нажать войти?».
+ *
+ * Поэтому у цены стоит подсказка, которая от сессии НЕ зависит.
+ */
+describe("аноним у цены", () => {
+  const read = (file: string) => fs.readFileSync(path.join(process.cwd(), file), "utf8");
+
+  test("подсказка не требует ни входа, ни cookie: общий текст есть всегда", () => {
+    const source = read("src/components/corridor-notice.tsx");
+    expect(source).toContain("Wildberries");
+    expect(source).toContain("/guide?source=wb");
+    // Cookie только УТОЧНЯЕТ текст. Если бы блок рисовался лишь при её наличии,
+    // покупатель из WebView Telegram в обычном браузере не увидел бы ничего.
+    const cookieUse = source.indexOf("document.cookie");
+    const cookieGuard = source.indexOf("if (code)");
+    expect(cookieUse).toBeGreaterThan(-1);
+    expect(cookieGuard).toBe(-1);
+  });
+
+  test("код из cookie ведёт в личный заказ, а не в общий гейт", () => {
+    const source = read("src/components/corridor-notice.tsx");
+    expect(source).toContain("skip=1&code=");
+    // Мусор из cookie в ссылку не попадает.
+    expect(source).toContain("WB_CODE_RE.test");
+  });
+
+  test.each([
+    ["витрина с калькулятором", "src/components/calculator.tsx"],
+    ["экран кассы", "src/app/checkout/page.tsx"],
+  ])("%s несёт подсказку", (_label, file) => {
+    expect(read(file)).toContain("<CorridorNotice");
+  });
+
+  test("на кассе подсказка стоит выше кнопки оплаты", () => {
+    const source = read("src/app/checkout/page.tsx");
+    expect(source.indexOf("<CorridorNotice")).toBeLessThan(source.indexOf("primaryButton"));
+  });
+});

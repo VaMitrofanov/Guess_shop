@@ -73,3 +73,47 @@ export function corridorHoldText(order: UnfinishedCorridorOrder): string {
     `Давай закончим его — это пара минут, я всё покажу.`
   );
 }
+
+/**
+ * «Всё равно куплю» — согласие, которое надо запомнить.
+ *
+ * Экран-рельса живёт в `startDirectFlow`/`handleStartDirect`, а дальше поток
+ * идёт своими callback-ами (`dp:` в Telegram, `direct_pack` во ВКонтакте), и
+ * они гарда не спрашивали вовсе. Инлайн-клавиатуры в обоих мессенджерах живут
+ * вечно: нажатие на СТАРОЕ сообщение с паками — законный вход мимо рельсы, и
+ * человек с оплаченным заказом коридора уезжал сразу в оплату.
+ *
+ * Гард на самом `dp:` без памяти о согласии зациклил бы «Всё равно куплю»:
+ * рельса → паки → тап по паку → снова рельса. Поэтому согласие держится
+ * отдельно и живёт полчаса — дольше любого живого прохода по паку и заметно
+ * короче, чем сам заказ коридора.
+ *
+ * Память процессная: у TG и VK это разные контейнеры, и общий тут — код, а не
+ * состояние. Перезапуск бота согласие теряет — покупатель увидит рельсу ещё
+ * раз, это дешевле, чем незамеченная вторая оплата.
+ */
+export const CORRIDOR_OVERRIDE_TTL_MS = 30 * 60 * 1000;
+
+export interface CorridorOverride {
+  /** Человек нажал «Всё равно купить напрямую» — рельсу ему больше не показываем. */
+  allow(id: string | number): void;
+  /** Согласие ещё действует? Протухшее удаляется на месте. */
+  taken(id: string | number): boolean;
+  /** Проход завершён (заказ создан или отменён) — согласие больше не нужно. */
+  clear(id: string | number): void;
+}
+
+export function createCorridorOverride(ttlMs = CORRIDOR_OVERRIDE_TTL_MS): CorridorOverride {
+  const until = new Map<string, number>();
+  const key = (id: string | number) => String(id);
+  return {
+    allow(id) { until.set(key(id), Date.now() + ttlMs); },
+    taken(id) {
+      const expires = until.get(key(id));
+      if (expires === undefined) return false;
+      if (expires <= Date.now()) { until.delete(key(id)); return false; }
+      return true;
+    },
+    clear(id) { until.delete(key(id)); },
+  };
+}

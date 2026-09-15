@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, Gamepad2, Loader2, LockKeyhole, WalletCards } from "lucide-react";
 import { usePricing } from "@/hooks/usePricing";
+import CorridorNotice from "@/components/corridor-notice";
 import { gamepassPriceMatches } from "@/lib/gamepass-search-view";
 import styles from "@/app/storefront.module.css";
 
@@ -136,6 +137,7 @@ export default function Calculator() {
       {!loading && amount > 0 && (
         <p className={styles.tierNote}>Твой курс: {formatCustomerRate(breakdown.rubPerRobux)} ₽/R$</p>
       )}
+      <CorridorNotice className={styles.corridorNotice} linkClassName={styles.corridorNoticeLink} />
       <label className={styles.nicknameLabel} htmlFor="calculator-username">Куда зачислить Robux</label>
       <div className={`${styles.nicknameField} ${validUsername ? styles.nicknameFieldReady : ""}`}>
         <Gamepad2 size={20} />

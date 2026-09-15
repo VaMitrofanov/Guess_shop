@@ -31,6 +31,7 @@ import {
 import Navbar from "@/components/navbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import PaymentMethods from "@/components/payment-methods";
+import CorridorNotice from "@/components/corridor-notice";
 import { usePricing } from "@/hooks/usePricing";
 import {
   gamepassPriceMatches,
@@ -133,9 +134,14 @@ function CheckoutContent() {
   const [gamepasses, setGamepasses] = useState<RobloxPass[]>([]);
   const [account, setAccount] = useState<RobloxAccount | null>(null);
   const [selectedPass, setSelectedPass] = useState<RobloxPass | null>(null);
-  const [planParts, setPlanParts] = useState<CheckoutPlanPart[] | null>(rememberedParts);
-  /** Откуда набор: посчитан инструкцией (её решение не перебиваем) или здесь. */
-  const [planFromGuide, setPlanFromGuide] = useState<boolean>(rememberedParts !== null);
+  /**
+   * Набор, посчитанный ИНСТРУКЦИЕЙ (`?parts=`). Только он и есть состояние:
+   * всё остальное про набор — производная от ника, суммы и найденных пассов,
+   * и живёт в `useMemo` ниже. Раньше здесь лежал общий `planParts`, который
+   * эффект пересчитывал вслед за пассами, — лишний каскад рендеров и
+   * предупреждение `react-hooks/set-state-in-effect` в критическом линте.
+   */
+  const [guidePlanParts, setGuidePlanParts] = useState<CheckoutPlanPart[] | null>(rememberedParts);
   const [searching, setSearching] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quote, setQuote] = useState<PriceQuote | null>(null);
@@ -208,8 +214,7 @@ function CheckoutContent() {
     const normalized = normalizeAmount(String(nextAmount));
     setRobux(normalized);
     if (syncInput) setAmountInput(String(normalized));
-    setPlanParts(null); // набор посчитан под прежнюю сумму — он больше не про этот заказ
-    setPlanFromGuide(false);
+    setGuidePlanParts(null); // набор посчитан под прежнюю сумму — он больше не про этот заказ
     setQuote(null);
     setError("");
     const nextPassPrice = grossPassPrice(normalized);
@@ -237,6 +242,34 @@ function CheckoutContent() {
   const price = getPrice(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(robux), [robux]);
   const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
+  /**
+   * Набор из уже выставленных пассов — то же, что делает коридор ВБ.
+   *
+   * Пасса ровно на всю сумму может не быть, а два (1500 + 500) — быть. Раньше
+   * страница в такой ситуации говорила «подходящий геймпасс не найден» и
+   * отправляла человека создавать ещё один; теперь она собирает заказ из того,
+   * что уже есть.
+   */
+  const ownedPlanParts = useMemo<CheckoutPlanPart[] | null>(() => {
+    if (selectedPriceMatches) return null;
+    const owned = gamepasses.map((pass) => ({
+      gamepassId: String(pass.id),
+      name: pass.name,
+      price: Number(pass.price),
+      isForSale: pass.isForSale,
+    }));
+    const plan = planFromOwned(robux, owned);
+    return plan.kind === "ready" || plan.kind === "assembled"
+      ? plan.parts.map((part) => ({
+          gamepassId: part.gamepassId,
+          amount: part.amount,
+          name: part.name,
+          price: part.price,
+        }))
+      : null;
+  }, [gamepasses, robux, selectedPriceMatches]);
+  /** Решение инструкции старше собственного подбора и не перебивается им. */
+  const planParts = guidePlanParts ?? ownedPlanParts;
   /** Набор закрывает ровно сумму заказа — тот же инвариант, что у коридора ВБ. */
   const planCoversAmount = !!planParts && planParts.reduce((sum, part) => sum + part.amount, 0) === robux;
   /** Чем платим: одним пассом нужной цены или набором из нескольких. */
@@ -406,41 +439,6 @@ function CheckoutContent() {
       });
     return () => controller.abort();
   }, [repeatBuyerFlow, robux, selectedPass, planCoversAmount, passReady]);
-
-  /**
-   * Набор из уже выставленных пассов — то же, что делает коридор ВБ.
-   *
-   * Пасса ровно на всю сумму может не быть, а два (1500 + 500) — быть. Раньше
-   * страница в такой ситуации говорила «подходящий геймпасс не найден» и
-   * отправляла человека создавать ещё один; теперь она собирает заказ из того,
-   * что уже есть. Решение инструкции (`?parts=`) здесь не перебиваем.
-   */
-  useEffect(() => {
-    if (planFromGuide) return;
-    if (selectedPriceMatches) {
-      setPlanParts((prev) => (prev === null ? prev : null));
-      return;
-    }
-    const owned = gamepasses.map((pass) => ({
-      gamepassId: String(pass.id),
-      name: pass.name,
-      price: Number(pass.price),
-      isForSale: pass.isForSale,
-    }));
-    const plan = planFromOwned(robux, owned);
-    const next = plan.kind === "ready" || plan.kind === "assembled"
-      ? plan.parts.map((part) => ({
-          gamepassId: part.gamepassId,
-          amount: part.amount,
-          name: part.name,
-          price: part.price,
-        }))
-      : null;
-    setPlanParts((prev) => {
-      const same = JSON.stringify(prev) === JSON.stringify(next);
-      return same ? prev : next;
-    });
-  }, [gamepasses, robux, selectedPriceMatches, planFromGuide]);
 
   /**
    * Проверка одной конкретной ссылки/ID. В отличие от поиска по нику ответ
@@ -861,6 +859,7 @@ function CheckoutContent() {
           </section>
 
           <aside className={styles.summaryCard}>
+            <CorridorNotice className={styles.corridorNotice} linkClassName={styles.corridorNoticeLink} />
             <span className={styles.kicker}>К оплате</span>
             <h2>{quote ? `${(quote.finalAmountKopecks / 100).toLocaleString("ru-RU")} ₽` : priceLoading || quickQuoteLoading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</h2>
             <div className={styles.summaryRows}>
@@ -1125,6 +1124,7 @@ function CheckoutContent() {
             {error && <div className={styles.errorBox} role="alert"><CircleAlert size={20} /><span>{error}</span></div>}
           </section>
           <aside className={styles.summaryCard}>
+            <CorridorNotice className={styles.corridorNotice} linkClassName={styles.corridorNoticeLink} />
             <span className={styles.kicker}>К оплате</span>
             <h2>{quote ? `${(quote.finalAmountKopecks / 100).toLocaleString("ru-RU")} ₽` : "…"}</h2>
             <div className={styles.summaryRows}>
