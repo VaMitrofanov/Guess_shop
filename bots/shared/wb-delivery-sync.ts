@@ -25,6 +25,7 @@ import {
   receiveDbsOrder,
   sendBuyerChatMessage,
   WbDeliveryApiError,
+  fetchNegativeFeedbacks,
 } from "./wb-delivery-api";
 import {
   deliveryWindow,
@@ -79,7 +80,8 @@ import {
   notifyWbClaimResolved,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
-import { activeHoldCodes } from "./order-hold";
+import { activeHoldCodes, holdByCode } from "./order-hold";
+import { runBuyoutGate, type GateOrder } from "./buyout-gate";
 import { revokeGateCode } from "./wb-code-revocation";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
@@ -94,6 +96,7 @@ const COMPLETED_STREAM = "wb-dbs-completed";
 const CLIENTS_STREAM = "wb-dbs-clients";
 const REMINDERS_STREAM = "wb-dbs-gate-reminders";
 const CLAIMS_STREAM = "wb-dbs-claims";
+const BUYOUT_GATE_STREAM = "wb-dbs-buyout-gate";
 const HEARTBEAT_KEY = "wb-dbs-sync";
 const LEASE_MS = 45_000;
 /** How far back a closed order is still re-checked for a late cancellation or
@@ -146,6 +149,8 @@ export type WbDeliverySyncResult = {
   gateReminders: number;
   /** Заявки на возврат, впервые увиденные в этом цикле. */
   newClaims: number;
+  /** Заказы, замороженные гейтом выкупа (плохой отзыв / старый висяк). */
+  gateFrozen: number;
   errorCode: string | null;
 };
 
@@ -164,6 +169,7 @@ function result(acquired = false): WbDeliverySyncResult {
     shipped: 0,
     gateReminders: 0,
     newClaims: 0,
+    gateFrozen: 0,
     errorCode: null,
   };
 }
@@ -1611,6 +1617,66 @@ const CLAIM_RESOLVED = 2;
 /** `status_ex` решения в пользу покупателя: деньги возвращаются. */
 const CLAIM_REFUND_GRANTED = 5;
 
+/**
+ * Гейт выкупа: заморозить заказы с плохим отзывом покупателя и старые висяки.
+ *
+ * Выкупаемый заказ здесь — `PENDING` с пассом, не замороженный и НИКОГДА не
+ * морозившийся (`OrderHold` отсутствует): снятая руками заморозка не должна
+ * возвращаться на следующем прогоне. DBS-данные (`nmId`, имя покупателя) нужны
+ * только правилу отзыва; у обычного WB-заказа их нет — тогда работает лишь
+ * правило висяка. Заморозка — тот же `holdByCode`, что и у ручной.
+ */
+async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
+  const candidates = await db.wbOrder.findMany({
+    where: {
+      status: "PENDING",
+      isTest: false,
+      heldAt: null,
+      gamepassUrl: { not: null },
+    },
+    select: { wbCode: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+    take: 200,
+  });
+  if (candidates.length === 0) return;
+
+  // «Никогда не морозившийся» = нет строки `OrderHold` (у OrderHold нет
+  // Prisma-связи с WbOrder, ключ общий — `wbCode`). Снятую руками заморозку
+  // (releasedAt) не воскрешаем: строка осталась, и заказ мы пропускаем.
+  const everHeld = new Set(
+    (await db.orderHold.findMany({
+      where: { wbCode: { in: candidates.map((o) => o.wbCode) } },
+      select: { wbCode: true },
+    })).map((h) => h.wbCode),
+  );
+  const orders = candidates.filter((o) => !everHeld.has(o.wbCode));
+  if (orders.length === 0) return;
+
+  const codes = orders.map((o) => o.wbCode);
+  const dbs = await db.wbMarketplaceOrder.findMany({
+    where: { wbCode: { code: { in: codes } } },
+    select: { nmId: true, buyerName: true, wbCode: { select: { code: true } } },
+  });
+  const dbsByCode = new Map(dbs.map((d) => [d.wbCode?.code ?? "", d]));
+
+  const gateOrders: GateOrder[] = orders.map((o) => {
+    const meta = dbsByCode.get(o.wbCode);
+    return { wbCode: o.wbCode, createdAt: o.createdAt, nmId: meta?.nmId ?? null, buyerName: meta?.buyerName ?? null };
+  });
+
+  const res = await runBuyoutGate({
+    loadBuyableOrders: async () => gateOrders,
+    loadNegativeFeedbacks: fetchNegativeFeedbacks,
+    freeze: async (wbCode, reason) => {
+      await holdByCode(db, { wbCode, reason, actor: "гейт выкупа" });
+    },
+  });
+  out.gateFrozen += res.frozen.length;
+  for (const d of res.frozen) {
+    console.log(`[WbDbsSync] гейт заморозил ${d.wbCode} (${d.rule}): ${d.reason}`);
+  }
+}
+
 async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
   type SeenClaim = { dt: string | undefined; reason: string | undefined; status: number | undefined; statusEx: number | undefined };
   const seen = new Map<string, SeenClaim>();
@@ -1913,6 +1979,17 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
         console.error(`[WbDbsSync] claims skipped: ${safeErrorCode(error)}`);
       });
       await touchCursor(db, CLAIMS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
+    }
+    /* Гейт выкупа (21.09.2026): морозим заказы с плохим отзывом покупателя и
+       старые висяки, чтобы их не выкупили без подтверждения. Раз в 15 минут —
+       правила не срочные, а лишний поход в feedbacks-api того не стоит. Свой
+       флаг: гейт можно выключить, не гася остальную синхронизацию. */
+    if (process.env.WB_BUYOUT_GATE_ENABLED !== "false"
+        && await streamDue(db, BUYOUT_GATE_STREAM, 15 * 60_000, force)) {
+      await syncBuyoutGate(db, out).catch((error) => {
+        console.error(`[WbDbsSync] buyout gate skipped: ${safeErrorCode(error)}`);
+      });
+      await touchCursor(db, BUYOUT_GATE_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }
 
     // «Здоров» — только когда действительно всё прошло. Частичный отказ виден

@@ -97,6 +97,43 @@ export function wbDeliveryApiReadiness() {
   };
 }
 
+/** Отзыв WB в сыром виде — берём только то, что нужно гейту выкупа. */
+const FeedbackSchema = z.object({
+  productValuation: z.number().optional(),
+  userName: z.string().optional(),
+  nmId: z.number().optional(),
+  productDetails: z.object({ nmId: z.number().optional() }).partial().optional(),
+  createdDate: z.string().optional(),
+  text: z.string().optional(),
+}).passthrough();
+const FeedbacksListSchema = z.object({
+  data: z.object({ feedbacks: z.array(FeedbackSchema).optional().default([]) }).partial().optional(),
+}).passthrough();
+
+/**
+ * Плохие отзывы (оценка ≤ 3) со всего кабинета — для гейта выкупа.
+ *
+ * Тянем обе половины (отвеченные и нет) одним широким `take`: у магазина этого
+ * размера отзывов сотни, не тысячи. Сеть молчит — отдаём пусто, гейт тогда
+ * просто ничего не блокирует по отзыву (fail-open: лучше не заморозить, чем
+ * заморозить вслепую).
+ */
+export async function fetchNegativeFeedbacks(): Promise<Array<z.infer<typeof FeedbackSchema>>> {
+  const base = "https://feedbacks-api.wildberries.ru/api/v1/feedbacks";
+  const out: Array<z.infer<typeof FeedbackSchema>> = [];
+  for (const isAnswered of ["true", "false"]) {
+    const page = await requestJson(
+      "marketplace",
+      `${base}?isAnswered=${isAnswered}&take=5000&skip=0&order=dateDesc`,
+      FeedbacksListSchema,
+    ).catch(() => null);
+    for (const f of page?.data?.feedbacks ?? []) {
+      if (Number(f.productValuation ?? 5) <= 3) out.push(f);
+    }
+  }
+  return out;
+}
+
 export async function fetchNewDbsOrders() {
   return requestJson("marketplace", `${MARKETPLACE_BASE}/api/v3/dbs/orders/new`, WbDbsOrdersResponseSchema);
 }
