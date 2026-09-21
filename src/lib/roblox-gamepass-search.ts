@@ -11,6 +11,12 @@
  */
 
 import { bridgeConfigured, bridgeSearchGamepasses } from "./roblox-bridge";
+import {
+  isSellablePass,
+  listOwnedUniverses,
+  listUniversePasses,
+  type JsonGet,
+} from "../../bots/shared/roblox-owned-games";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -61,50 +67,19 @@ async function searchForSalePassesByNickDirect(nick: string): Promise<NickSearch
   if (!userId) return { status: "user_not_found" };
   const resolvedName: string = uData.data[0].name ?? nick;
 
-  // Roblox paginates creations. A replacement search must not stop at the
-  // first ten experiences: scan every page we can safely reach (150 max),
-  // matching the bot-side implementation.
-  const universes: any[] = [];
-  let cursor: string | null = null;
-  for (let page = 0; page < 3; page++) {
-    const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
-    const gRes = await fetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50${suffix}`,
-      { headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000) },
-    ).catch(() => null);
-    if (!gRes?.ok) return { status: "error" };
-    const gData: any = await gRes.json().catch(() => null);
-    universes.push(...(gData?.data ?? []));
-    cursor = gData?.nextPageCursor ?? null;
-    if (!cursor) break;
-  }
+  // Все игры аккаунта — публичные И закрытые (`roblox-owned-games.ts`): пасс
+  // в закрытой игре продаётся так же, а автозамена его раньше не видела.
+  const getJson: JsonGet = async (url) => {
+    const res = await fetch(url, { headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    if (!res) return null;
+    return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+  };
+  const owned = await listOwnedUniverses(userId, getJson);
+  if (owned.visibility === "error") return { status: "error" };
 
-  const batches = await Promise.all(universes.map(async (game: any) => {
-    const pRes = await fetch(
-      `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`,
-      { headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000) },
-    ).catch(() => null);
-    if (!pRes?.ok) return [];
-    const pData: any = await pRes.json().catch(() => null);
-    return (pData?.gamePasses ?? []) as any[];
-  }));
-
-  const seen = new Set<number>();
-  const passes: ForSalePass[] = batches
-    .flat()
-    // Some Roblox responses omit isForSale for otherwise purchasable passes.
-    .filter((gp: any) => gp.isForSale !== false && (gp.price ?? 0) > 0)
-    .filter((gp: any) => {
-      const id = Number(gp.id);
-      if (!Number.isFinite(id) || seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    })
-    .map((gp: any) => ({
-      gamepassId: gp.id,
-      name: gp.name ?? gp.displayName ?? "Gamepass",
-      price: gp.price ?? 0,
-    }));
+  const passes: ForSalePass[] = (await listUniversePasses(owned.universes, getJson))
+    .filter(isSellablePass)
+    .map((gp) => ({ gamepassId: gp.id, name: gp.name, price: gp.price ?? 0 }));
 
   return { status: "ok", userId, resolvedName, passes };
 }

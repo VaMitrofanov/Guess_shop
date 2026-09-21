@@ -48,7 +48,7 @@ import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { dbsRef, refreshDbsCard } from "../../bots/shared/wb-dbs-thread";
 import { revokeGateCode } from "../../bots/shared/wb-code-revocation";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
-import { wbCodeRequestMessage, wbGateMessage, wbGateUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
+import { wbChatSafeText, wbCodeRequestMessage, wbGateMessage, wbGateShortUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
 import { notifyDbsBuyerUnlinked } from "../../bots/shared/wb-delivery-admin-notify";
 import { WB_QUEUE_SECTIONS, WB_STAGE_LABEL, WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
@@ -189,8 +189,9 @@ function liveSecret(secret: ActionOrder["deliverySecret"]) {
   return wbDeliverySecretIsLive(secret);
 }
 
+/** Короткая ссылка: её копируют в чат WB руками, а там `&` ломается (16.09). */
 function gateUrl(code: string | null | undefined) {
-  return code ? wbGateUrl(code, GUIDE_ORIGIN) : null;
+  return code ? wbGateShortUrl(code, GUIDE_ORIGIN) : null;
 }
 
 function direction(sender: string): "buyer" | "seller" | "system" {
@@ -909,8 +910,10 @@ async function replySignFor(order: ActionOrder) {
   return decryptWbSecret(chat.replySignEncrypted, "reply-sign");
 }
 
-async function sendText(order: ActionOrder, text: string, actor: string, kind: "request" | "gate" | "message") {
+async function sendText(order: ActionOrder, rawText: string, actor: string, kind: "request" | "gate" | "message") {
   requireLiveFlag("WB_CHAT_SEND_ENABLED", order);
+  // Тот же вид текста, что уйдёт в WB: иначе зеркало не сойдётся с эхом WB.
+  const text = wbChatSafeText(rawText);
   if (order.isTest) {
     await appendDemoChat(order, "seller", text);
     return;

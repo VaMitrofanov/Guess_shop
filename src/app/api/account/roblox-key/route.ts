@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
 import { verifyGamePassKeyViaBridge } from "@/lib/roblox-gamepass-create";
+import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
 import { forgetRobloxApiKey, listRobloxApiKeys, rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { createPassesWithKey } from "@/lib/gamepass-key-create";
 import { createTargetsFor } from "@/lib/gamepass-plan";
@@ -81,15 +82,22 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const key = typeof body.key === "string" ? body.key.trim() : "";
   const nick = typeof body.username === "string" ? body.username.trim().replace(/^@/, "") : "";
+  // Ссылка на игру — когда по нику игры не видны (закрытый инвентарь).
+  const rawGameRef = typeof body.gameRef === "string" ? body.gameRef.slice(0, 500) : "";
+  const game = rawGameRef ? parseExperienceRef(rawGameRef) : null;
 
   if (!key || key.length > MAX_KEY_LEN || !looksLikeApiKey(key)) {
     return NextResponse.json({ ok: false, error: "bad_key" }, { headers: PRIVATE });
   }
+  // Кривой ник — про ник, а не про игру.
   if (!NICK_RE.test(nick)) {
-    return NextResponse.json({ ok: false, error: "no_universe" }, { headers: PRIVATE });
+    return NextResponse.json({ ok: false, error: "nick_not_found" }, { headers: PRIVATE });
+  }
+  if (rawGameRef && !game) {
+    return NextResponse.json({ ok: false, error: "bad_game_link" }, { headers: PRIVATE });
   }
 
-  const verdict = await verifyGamePassKeyViaBridge({ apiKey: key, username: nick });
+  const verdict = await verifyGamePassKeyViaBridge({ apiKey: key, username: nick, ...(game ?? {}) });
 
   if (!verdict.ok) {
     // Неудачную попытку не храним: строка с чужим/протухшим ключом в базе
@@ -123,7 +131,7 @@ export async function POST(req: NextRequest) {
   // висел прямо сейчас. Теперь ключ, принятый при живом заказе, тут же и
   // отрабатывает — пассы создаются, ник ложится в заказ, покупателю остаётся
   // подтвердить (последнее слово за ним: заказ оформляет он, а не мы).
-  const applied = await applyToLiveOrder({ userId, nick: confirmed, key }).catch((err) => {
+  const applied = await applyToLiveOrder({ userId, nick: confirmed, key, game }).catch((err) => {
     console.warn("[account-key] заказ не доделали:", err instanceof Error ? err.message : err);
     return null;
   });
@@ -163,6 +171,7 @@ async function applyToLiveOrder(opts: {
   userId: string;
   nick: string;
   key: string;
+  game?: { universeId: string } | { placeId: string } | null;
 }): Promise<AppliedToOrder | null> {
   const order = await prisma.wbOrder.findFirst({
     where: { userId: opts.userId, status: "AWAITING_GAMEPASS" },
@@ -180,6 +189,7 @@ async function applyToLiveOrder(opts: {
     nick: opts.nick,
     code: order.wbCode,
     targets,
+    game: opts.game,
   });
 
   // Ник — то, чего у заказа чаще всего нет, и без него менеджер не понимает,

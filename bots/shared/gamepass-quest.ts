@@ -22,6 +22,7 @@ import {
   type CheckPlan,
   type CreateTarget,
 } from "./gamepass-plan";
+import type { GamesVisibility } from "./roblox-owned-games";
 
 /**
  * Идентификаторы действий. Часть из них — уже живущие в ботах callback'и
@@ -119,8 +120,10 @@ export function questResultScreen(opts: {
   /** Метод «по ключу» включён флагом. */
   keyEnabled: boolean;
   wbCode: string;
+  /** Видны ли игры аккаунта: пустой список при «hidden» — «не видим», а не «нет». */
+  gamesVisibility?: GamesVisibility | null;
 }): QuestScreen {
-  const { amount, nick, plan, keyEnabled, wbCode } = opts;
+  const { amount, nick, plan, keyEnabled, wbCode, gamesVisibility } = opts;
   const covered = coveredRobux(plan);
   const create = targetsToCreate(plan);
   const parts = plan.kind === "empty" ? [] : plan.parts;
@@ -142,11 +145,7 @@ export function questResultScreen(opts: {
       h: "Твой геймпасс подходит — нужен ещё один",
       s: `Твой закрывает <b>${nf(covered)} R$</b> из ${nf(amount)}. Ровно этим не добрать, поэтому под остаток нужен ещё один геймпасс.`,
     },
-    empty: {
-      k: "🔍 ПОДХОДЯЩЕГО НЕ НАШЛИ",
-      h: "На аккаунте нет геймпасса, который мы можем купить",
-      s: "<b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Такой вещи у тебя пока нет.",
-    },
+    empty: emptyQuestHead(gamesVisibility),
   };
   const h = head[plan.kind];
 
@@ -203,6 +202,33 @@ export function questResultScreen(opts: {
   }
 
   return { text: lines.join("\n"), rows };
+}
+
+/**
+ * Пустой результат — три разных положения. Закрытая игра — не «пасса нет»:
+ * по нику мы её не видим, а по Pass ID находим любой пасс. Те же слова, что
+ * на сайте (`GamepassCheck.tsx`, `emptyHead`).
+ */
+function emptyQuestHead(visibility?: GamesVisibility | null): { k: string; h: string; s: string } {
+  if (visibility === "hidden") {
+    return {
+      k: "🙈 ИГРЫ СКРЫТЫ",
+      h: "Не видим игры этого аккаунта",
+      s: "<b>Они скрыты настройками приватности Roblox</b>, поэтому по нику их не видно. Если геймпасс уже создан — пришли его Pass ID или ссылку, найдём его в любой игре. Если ещё нет — создай, это пара минут.",
+    };
+  }
+  if (visibility === "none") {
+    return {
+      k: "🔍 ИГРЫ НЕТ",
+      h: "У аккаунта нет ни одной игры",
+      s: "<b>Геймпасс — это платная вещь внутри игры в Roblox</b>, а игр у этого аккаунта Roblox не показывает, ни открытых, ни закрытых. Проверь ник или напиши нам — поможем.",
+    };
+  }
+  return {
+    k: "🔍 ПОДХОДЯЩЕГО НЕ НАШЛИ",
+    h: "На аккаунте нет геймпасса, который мы можем купить",
+    s: "<b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Выставленного пасса у тебя пока нет.",
+  };
 }
 
 /* ── 2. Экран выбора способа ───────────────────────────────────────────── */
@@ -362,24 +388,27 @@ export function questKeyWorkingText(prices: number[]): string {
  * (`gamepass-create-messages.ts`), здесь только кнопки под чат.
  */
 export function questKeyFailScreen(opts: {
-  verdict: { title: string; text: string; retry: boolean };
+  verdict: { title: string; text: string; retry: boolean; needsGameLink?: boolean };
   wbCode: string;
   nick?: string;
 }): QuestScreen {
   const { verdict, wbCode, nick } = opts;
   const rows: QuestButton[][] = [];
-  if (verdict.retry) {
-    rows.push([{ id: QUEST.keyRetry, label: "🔁 Попробовать ещё раз", tone: "positive" }]);
-  } else {
-    rows.push([{ id: QUEST.keyRetry, label: "🔑 Прислать другой ключ", tone: "positive" }]);
+  // Ключ годный, нужна только ссылка на игру: кнопка «другой ключ» спорила бы
+  // с текстом, который прямо говорит «ключ вводить заново не нужно».
+  if (!verdict.needsGameLink) {
+    if (verdict.retry) {
+      rows.push([{ id: QUEST.keyRetry, label: "🔁 Попробовать ещё раз", tone: "positive" }]);
+    } else {
+      rows.push([{ id: QUEST.keyRetry, label: "🔑 Прислать другой ключ", tone: "positive" }]);
+    }
   }
   rows.push([{ id: "url", label: "📖 Создам сам (инструкция)", url: guideUrlFor(wbCode, nick) }]);
   rows.push([{ id: QUEST.fork, label: "↩️ Другой способ", tone: "secondary" }]);
 
-  return {
-    text: [`❌ <b>${verdict.title}</b>`, "", verdict.text].join("\n"),
-    rows,
-  };
+  const text = [`❌ <b>${verdict.title}</b>`, "", verdict.text];
+  if (verdict.needsGameLink) text.push("", "👇 Пришли ссылку на игру следующим сообщением — ключ мы помним 15 минут.");
+  return { text: text.join("\n"), rows };
 }
 
 /* ── 4. Ник не сработал ────────────────────────────────────────────────── */

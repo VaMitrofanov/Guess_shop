@@ -86,9 +86,27 @@ describe("POST /api/roblox/gamepass-create", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  test("нет ника → no_universe (мосту не на чем резолвить опыт)", async () => {
+  test("нет ника → nick_not_found: это про ник, а не «не нашли игру»", async () => {
     const res = await POST(req({ key: KEY, nick: "", targets: [143] }, "10.0.1.4"));
-    expect(await res.json()).toEqual({ ok: false, error: "no_universe" });
+    expect(await res.json()).toEqual({ ok: false, error: "nick_not_found" });
+  });
+
+  test("ссылка на игру из Creator Hub уходит мосту номером опыта", async () => {
+    mockCreate.mockResolvedValueOnce({ ok: true, gamePassId: 1990000001, priceInRobux: 715, name: "RobloxBank" });
+    const res = await POST(req({
+      key: KEY,
+      nick: "hidden_inv_buyer",
+      targets: [715],
+      gameRef: "https://create.roblox.com/dashboard/creations/experiences/10457317927/overview",
+    }, "10.0.1.40"));
+    expect((await res.json()).ok).toBe(true);
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ universeId: "10457317927", username: "hidden_inv_buyer" }));
+  });
+
+  test("кривая ссылка на игру → bad_game_link без похода в Roblox", async () => {
+    const res = await POST(req({ key: KEY, nick: "hidden_inv_buyer", targets: [715], gameRef: "моя игра" }, "10.0.1.41"));
+    expect(await res.json()).toEqual({ ok: false, error: "bad_game_link" });
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   test("успех: пасс на каждую цену, ключ уходит мосту и не возвращается", async () => {
@@ -169,12 +187,24 @@ describe("вердикты покупателю", () => {
   });
 
   test("ни один вердикт не говорит «скоуп» и не сыплет кодами", () => {
-    for (const code of ["bad_key", "bad_scope", "bad_scope_write", "not_authorized", "no_universe", "network", "rate_limited"]) {
+    for (const code of ["bad_key", "bad_scope", "bad_scope_write", "not_authorized", "no_universe", "games_hidden", "bad_game_link", "nick_not_found", "network", "rate_limited"]) {
       const v = keyCreateVerdict(code);
       expect(v.text.toLowerCase()).not.toContain("скоуп");
       expect(v.text).not.toContain(code);
       expect(v.title.length).toBeLessThan(40);
     }
+  });
+
+  test("закрытая игра — не тупик: просим ссылку на игру, ключ не заново", () => {
+    const hidden = keyCreateVerdict("games_hidden");
+    expect(hidden.needsGameLink).toBe(true);
+    expect(hidden.title).not.toMatch(/не нашли/i);
+    expect(hidden.text).toMatch(/ссылк/i);
+    expect(hidden.text).toMatch(/заново не нужно/i);
+    expect(keyCreateVerdict("bad_game_link").needsGameLink).toBe(true);
+    // «Нет игры» звучит только когда Roblox показал все плейсы, и их ноль.
+    expect(keyCreateVerdict("no_universe").title).toBe("У аккаунта нет ни одной игры");
+    expect(keyCreateVerdict("nick_not_found").retry).toBe(true);
   });
 
   test("успех называет цены созданных пассов", () => {

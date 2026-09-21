@@ -17,6 +17,12 @@ import {
   type BridgeAccount,
   type BridgePass,
 } from "./roblox-bridge";
+import {
+  listOwnedUniverses,
+  listUniversePasses,
+  type GamesVisibility,
+  type JsonGet,
+} from "../../bots/shared/roblox-owned-games";
 
 const UA = "Mozilla/5.0 (compatible; RobloxBank/1.0; +https://robloxbank.ru)";
 const TIMEOUT_MS = 8_000;
@@ -44,6 +50,16 @@ async function rFetch(url: string, init: RequestInit = {}) {
   }
   throw lastError instanceof Error ? lastError : new Error("Roblox request failed");
 }
+
+/** JSON через `rFetch` для общего поиска игр; `null` — сеть не ответила. */
+const getJson: JsonGet = async (url) => {
+  try {
+    const res = await rFetch(url);
+    return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Мост отдаёт нормализованный профиль, а вызывающий код здесь исторически
@@ -418,64 +434,65 @@ export async function getUserGamepasses(username: string, resolvedUserId?: strin
 }
 
 async function getUserGamepassesDirect(username: string, resolvedUserId?: string | number) {
+  return (await getUserGamepassesWithGamesDirect(username, resolvedUserId)).gamepasses;
+}
+
+/**
+ * Пассы всех игр аккаунта — публичных и закрытых (`roblox-owned-games.ts`).
+ * Тот же путь, что у моста: правило «где искать игры» живёт в одном месте.
+ */
+async function getUserGamepassesWithGamesDirect(username: string, resolvedUserId?: string | number) {
+  const empty = { gamepasses: [] as SitePass[], games: null as NickGames | null };
   try {
     const userId = resolvedUserId ?? (await getRobloxUser(username))?.id;
-    if (!userId) return [];
+    if (!userId) return empty;
 
-    // 1. Fetch user's public games
-    const gamesRes = await rFetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`
-    );
-    if (!gamesRes.ok) return [];
+    const owned = await listOwnedUniverses(userId, getJson);
+    const games: NickGames = { visibility: owned.visibility, count: owned.universes.length };
+    if (owned.universes.length === 0) return { gamepasses: [] as SitePass[], games };
 
-    const gamesData = await gamesRes.json();
-    const universes: any[] = gamesData.data ?? [];
-    if (universes.length === 0) return [];
+    const allGamepasses = await listUniversePasses(owned.universes, getJson);
+    if (allGamepasses.length === 0) return { gamepasses: [] as SitePass[], games };
 
-    // 2. Fetch gamepasses for each universe in parallel, carrying placeId along
-    const passPromises = universes.map(async (game: any) => {
-      const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
-      try {
-        const res = await rFetch(
-          `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`
-        );
-        if (!res.ok) return [];
-        const data = await res.json();
-        return (data.gamePasses ?? []).map((gp: any) => ({ ...gp, _placeId: placeId }));
-      } catch {
-        return [];
-      }
-    });
-
-    const allGamepasses: any[] = (await Promise.all(passPromises)).flat();
-    if (allGamepasses.length === 0) return [];
-
-    // 3. Batch-fetch thumbnails
-    const ids = allGamepasses.map((gp: any) => gp.id).join(",");
+    const ids = allGamepasses.map((gp) => gp.id).join(",");
     const thumbRes = await rFetch(
       `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${ids}&size=150x150&format=Png&isCircular=false`
-    );
-    const thumbData = thumbRes.ok ? await thumbRes.json() : { data: [] };
+    ).catch(() => null);
+    const thumbData = thumbRes?.ok ? await thumbRes.json() : { data: [] };
     const thumbMap  = Object.fromEntries(
       (thumbData.data ?? []).map((t: any) => [t.targetId, t.imageUrl])
     );
 
-    return allGamepasses.map((gp: any) => ({
+    const gamepasses: SitePass[] = allGamepasses.map((gp) => ({
       id:         gp.id,
-      name:       gp.name ?? gp.displayName,
+      name:       gp.name,
       price:      gp.price ?? 0,
-      productId:  gp.productId ?? 0,
-      placeId:    gp._placeId ?? 0,
-      sellerName: gp.creator?.name ?? username,
-      isForSale:  gp.isForSale ?? false,
+      productId:  gp.productId,
+      placeId:    gp.placeId,
+      sellerName: gp.creatorName ?? username,
+      isForSale:  gp.isForSale,
       image:      thumbMap[gp.id]
         ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
     }));
+    return { gamepasses, games };
   } catch (error) {
     console.error("[Roblox] getUserGamepasses:", error);
-    return [];
+    return empty;
   }
 }
+
+type SitePass = {
+  id: number;
+  name: string;
+  price: number;
+  productId: number;
+  placeId: number;
+  sellerName: string;
+  isForSale: boolean;
+  image: string;
+};
+
+type NickGames = { visibility: GamesVisibility; count: number };
 
 /**
  * Мост отдаёт пасс в терминах бота (`gamepassId`/`robux`), витрина читает свои
@@ -503,6 +520,12 @@ export type NickSearchResult = {
   userExists: boolean;
   account: { id: string; username: string; displayName: string; avatarUrl: string | null } | null;
   gamepasses: Awaited<ReturnType<typeof getUserGamepasses>>;
+  /**
+   * Видны ли игры аккаунта. Пустой список пассов при `hidden` — «не видим»
+   * (инвентарь закрыт), при `none` — «игр нет», при `ok` — «игры есть, пасса
+   * в продаже нет». `null` — старый мост, различить нельзя.
+   */
+  games: NickGames | null;
 };
 
 /**
@@ -533,6 +556,7 @@ export async function searchGamepassesByNick(nick: string): Promise<NickSearchRe
           ? { id: account.id, username: account.name, displayName: account.displayName, avatarUrl: account.avatarUrl }
           : null,
         gamepasses: viaBridge.gamepasses.map((pass) => toSitePassShape(pass, username)),
+        games: viaBridge.games,
       };
     }
   }
@@ -541,10 +565,10 @@ export async function searchGamepassesByNick(nick: string): Promise<NickSearchRe
   // стучаться в него на каждом из трёх вызовов значит утроить ожидание ровно
   // в тот момент, когда покупатель и так ждёт дольше всего.
   const user = await getRobloxUserDirect(username);
-  if (!user?.id) return { userExists: false, account: null, gamepasses: [] };
+  if (!user?.id) return { userExists: false, account: null, gamepasses: [], games: null };
   const resolvedName = String(user.name ?? username);
-  const [gamepasses, avatarUrl] = await Promise.all([
-    getUserGamepassesDirect(resolvedName, user.id),
+  const [{ gamepasses, games }, avatarUrl] = await Promise.all([
+    getUserGamepassesWithGamesDirect(resolvedName, user.id),
     getRobloxAvatarDirect(user.id),
   ]);
   return {
@@ -556,6 +580,7 @@ export async function searchGamepassesByNick(nick: string): Promise<NickSearchRe
       avatarUrl,
     },
     gamepasses,
+    games,
   };
 }
 

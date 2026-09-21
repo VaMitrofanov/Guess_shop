@@ -64,6 +64,8 @@ interface ManualValidation {
     error?: string;
     gamepassId?: string;
     livePrice?: number | null;
+    /** `mirror` — цена из кэширующего зеркала: первоисточник Roblox не ответил. */
+    priceSource?: "live" | "mirror" | null;
     isForSale?: boolean | null;
     expected?: number | null;
     priceMismatch?: boolean;
@@ -973,6 +975,7 @@ export default function OrderSheet({
                       : `✓ Цена ГП ${gpState.livePrice} R$${gpState.expected ? ` (ожидается ${gpState.expected})` : ""}`}
                   </div>
                 )}
+                {gpState.priceSource === "mirror" && warn("⚠️ Цена из зеркала Roblox — может быть устаревшей")}
                 {gpState.isForSale === false && warn("⚠️ Геймпасс сейчас не в продаже")}
                 {gpState.sellerMatch === false && warn("⚠️ Пасс не найден среди for-sale пассов этого ника")}
               </div>

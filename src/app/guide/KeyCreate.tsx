@@ -6,7 +6,8 @@
  * Зачем: половина застрявших заказов — это «пасса нет» (28 из 54 в живой
  * диагностике). Ключ решает ровно этот случай: покупатель выпускает его в
  * Creator Hub, вставляет сюда, а пасс нужной цены создаётся сам и сразу встаёт
- * в продажу. Скрытый плейс этим НЕ лечится — там нужна публикация игры.
+ * в продажу. С 21.09.2026 закрытая игра тоже не помеха: опыт ищется и среди
+ * закрытых (инвентарь плейсов), а если инвентарь спрятан — просим ссылку на игру.
  *
  * Кадры сняты с экрана владельца 06.09.2026 (`public/guide/wb-key-*`), рамки
  * расставлены по замерам, а не на глаз. Ползунок Experience Restrictions
@@ -72,12 +73,14 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
   const [scanStep, setScanStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedPass[]>([]);
+  /** Ссылка на игру — когда по нику игры не видны (закрытый инвентарь). */
+  const [gameRef, setGameRef] = useState("");
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
 
   const prices = targets.map((t) => t.price);
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (withGame?: string) => {
     const key = apiKey.trim();
     if (!key) {
       setError("bad_key");
@@ -99,7 +102,10 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
       const res = await fetch("/api/roblox/gamepass-create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, nick, code, targets: prices }),
+        body: JSON.stringify({
+          key, nick, code, targets: prices,
+          ...(withGame?.trim() ? { gameRef: withGame.trim() } : {}),
+        }),
       });
       const data = (await res.json().catch(() => null)) as
         | { ok?: boolean; error?: string; created?: CreatedPass[] }
@@ -426,7 +432,7 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
           autoCorrect="off"
           rows={3}
         />
-        <button className="wbi-bigcheck" onClick={run} disabled={phase === "scanning"}>
+        <button className="wbi-bigcheck" onClick={() => void run()} disabled={phase === "scanning"}>
           {phase === "scanning" ? "Создаём…" : `🔑 Создать ${prices.length > 1 ? "пассы" : "пасс"} по ключу`}
         </button>
         <button type="button" className="wbi-peek" onClick={() => { setAtField(false); setKstep(0); }}>
@@ -468,6 +474,31 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
           <div className="wbi-warn">
             <b>{verdict.title}.</b> {verdict.text}
           </div>
+          {/* Игры по нику не видны, а ключ годный: просим только ссылку на игру.
+              Ключ остаётся в поле выше — вводить его заново не нужно. */}
+          {verdict.needsGameLink && apiKey.trim() && (
+            <div className="wbi-keyfield" style={{ marginTop: 12 }}>
+              <label htmlFor="rb-gameref">Ссылка на твою игру</label>
+              <input
+                id="rb-gameref"
+                className="wbi-sinput"
+                value={gameRef}
+                onChange={(e) => setGameRef(e.target.value)}
+                placeholder="https://create.roblox.com/dashboard/creations/experiences/…"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                inputMode="url"
+              />
+              <button
+                className="wbi-bigcheck"
+                onClick={() => void run(gameRef)}
+                disabled={!gameRef.trim()}
+              >
+                {`🔑 Создать ${prices.length > 1 ? "пассы" : "пасс"} в этой игре`}
+              </button>
+            </div>
+          )}
           {/* Ошибка называет шаг — кнопка ведёт ровно на него, а не в начало. */}
           {verdict.step !== undefined && (
             <button

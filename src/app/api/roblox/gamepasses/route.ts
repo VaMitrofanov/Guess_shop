@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     // Один поход наружу отдаёт и аккаунт, и пассы. `userExists` отделяет
     // опечатку в нике от «аккаунт есть, но пассов не видно» — вторую страница
     // лечит ручным вводом ссылки, первую нет.
-    const { userExists, account, gamepasses } = await searchGamepassesByNick(q);
+    const { userExists, account, gamepasses, games } = await searchGamepassesByNick(q);
     if (!userExists) {
       return NextResponse.json({
         success: true,
@@ -73,6 +73,10 @@ export async function GET(req: NextRequest) {
       detectedUsername: account?.username ?? q,
       userExists: true,
       account: account ?? null,
+      // Пустой список значит разное: «ok» — игры есть, пасса в продаже нет;
+      // «hidden» — игры спрятаны настройками приватности, по нику их не видно;
+      // «none» — игр у аккаунта нет. Страница говорит по-разному.
+      gamesVisibility: games?.visibility ?? null,
     });
   } catch (error) {
     console.error("[Gamepasses API] Error:", error);

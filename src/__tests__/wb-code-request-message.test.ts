@@ -6,14 +6,23 @@ function read(relative: string) {
   return readFileSync(resolve(__dirname, "../..", relative), "utf8");
 }
 
-/** Owner-approved text, 16.08.2026; формат кода добавлен 10.09.2026. Kept
- * verbatim so the auto-reply, the console button and anything sent by hand from
- * the WB cabinet read the same. */
-const APPROVED = `Здравствуйте! Для успешного получения заказа просим прислать код доставки — это 5-7 цифр в разделе "Доставки" приложения Wildberries, рядом с QR-кодом.
+/** Owner-approved text, 16.08.2026; формат кода добавлен 10.09.2026; прямые
+ * кавычки заменены «ёлочками» 21.09.2026 — WB с 16.09 показывает `"` как
+ * `&#34;`. Kept verbatim so the auto-reply, the console button and anything
+ * sent by hand from the WB cabinet read the same. */
+const APPROVED = `Здравствуйте! Для успешного получения заказа просим прислать код доставки — это 5-7 цифр в разделе «Доставки» приложения Wildberries, рядом с QR-кодом.
 Код необходимо направить в этот чат ТЕКСТОМ, ровно так, как он показан в приложении: 111 111 или 111111. Скриншот или фото кода мы прочитать не сможем.
 Доставка заказов осуществляется Онлайн через этот чат, без необходимости физической доставки, курьера Вам ждать не нужно`;
 
 describe("WB delivery-code request message", () => {
+  /** WB экранирует `"`, `&`, `'`, `<`, `>` (с 16.09.2026) — ни одного такого
+   * символа в текстах для чата WB быть не должно. */
+  it("carries no character WB would escape", () => {
+    for (const msg of [wbCodeRequestMessage(), wbCodeRetryMessage(), wbCodeRecheckMessage()]) {
+      expect(msg).not.toMatch(/["&'<>]/);
+    }
+  });
+
   it("matches the owner-approved wording exactly", () => {
     expect(wbCodeRequestMessage()).toBe(APPROVED);
   });

@@ -59,12 +59,19 @@ export async function createPassesWithKey(opts: {
   /** Код ВБ, если заказ известен: по нему находится заказ для следа. */
   code: string;
   targets: number[];
+  /** Игра из присланной ссылки — ответ на «не видим твою игру». */
+  game?: { universeId: string } | { placeId: string } | null;
 }): Promise<KeyCreateOutcome> {
   const created: CreatedPass[] = [];
   let failure: string | undefined;
 
   for (const priceInRobux of opts.targets) {
-    const res = await createGamePassViaBridge({ apiKey: opts.key, priceInRobux, username: opts.nick });
+    const res = await createGamePassViaBridge({
+      apiKey: opts.key,
+      priceInRobux,
+      username: opts.nick,
+      ...(opts.game ?? {}),
+    });
     if (!res.ok || !res.gamePassId) {
       failure = res.error ?? "roblox_error";
       console.warn(`[gamepass-create] отказ: ${failure} (создано ${created.length})`);

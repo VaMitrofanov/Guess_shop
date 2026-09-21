@@ -4,6 +4,8 @@ import {
   wbCodeRetryMessage,
   wbGateMessage,
   wbGateReminderMessage,
+  wbChatSafeText,
+  wbGateShortUrl,
   wbGateUrl,
   wbGuideFallbackUrl,
   wbSiblingPosition,
@@ -35,7 +37,7 @@ describe("WB gate link handed to the buyer", () => {
     const message = wbGateMessage("QUN5YFZ", 1000);
     // ru-RU groups thousands with a non-breaking space, so match loosely.
     expect(message).toMatch(/1\s000 R\$/);
-    expect(message).toContain("https://robloxbank.ru/guide?source=wb&skip=1&code=QUN5YFZ");
+    expect(message).toContain("https://robloxbank.ru/wb/QUN5YFZ");
     expect(message).toContain("введите код: QUN5YFZ");
     expect(wbGateMessage("QUN5YFZ", null)).toContain("ваш номинал");
   });
@@ -74,7 +76,7 @@ describe("WB gate link handed to the buyer", () => {
     expect(third).toMatch(/напишите в этот чат/i);
     expect(third).toMatch(/живой человек/i);
     // Ссылка остаётся, но уже не как единственный ответ.
-    expect(third).toContain(wbGateUrl("QUN5YFZ"));
+    expect(third).toContain(wbGateShortUrl("QUN5YFZ"));
     expect(third).not.toMatch(/вся инструкция/i);
   });
 
@@ -100,7 +102,7 @@ describe("WB gate link handed to the buyer", () => {
     expect(message).toMatch(/независим/i);
     expect(message).toMatch(/свой ник Roblox/);
     // Подсказка не отменяет остального: ссылка и ручной фолбэк на месте.
-    expect(message).toContain("https://robloxbank.ru/guide?source=wb&skip=1&code=QUN5YFZ");
+    expect(message).toContain("https://robloxbank.ru/wb/QUN5YFZ");
     expect(message).toContain("введите код: QUN5YFZ");
     // И по-прежнему не уводит с площадки.
     expect(message).not.toMatch(/telegram|телеграм|вконтакте|\bvk\b/i);
@@ -146,7 +148,39 @@ describe("WB gate link handed to the buyer", () => {
   it("is fully redacted before it reaches the chat history", () => {
     const stored = redactWbChatText(wbGateMessage("QUN5YFZ", 1000));
     expect(stored).not.toContain("QUN5YFZ");
-    expect(stored).toContain("code=•••••••");
+    expect(stored).toContain("/wb/•••••••");
     expect(stored).toContain("введите код: •••••••");
+    // Старая длинная ссылка в уже сохранённых сообщениях тоже маскируется.
+    expect(redactWbChatText(wbGateUrl("QUN5YFZ"))).toContain("code=•••••••");
+  });
+
+  /* С 16.09.2026 WB экранирует текст чата: `&` доходит как `&amp;`, и ссылка
+     `…&skip=1&code=…` открывалась с параметрами `amp;skip`/`amp;code` — код
+     не подставлялся (21.09: 14 из 42 гейтов DBS). Ссылки для чата WB — без `&`. */
+  describe("chat-safe text for Wildberries", () => {
+    it("builds a short gate link without a single ampersand", () => {
+      expect(wbGateShortUrl("QUN5YFZ")).toBe("https://robloxbank.ru/wb/QUN5YFZ");
+      expect(wbGateShortUrl("QUN5YFZ", "https://robloxbank.ru/", { nick: "hidden_inv_buyer", stage: "key" }))
+        .toBe("https://robloxbank.ru/wb/QUN5YFZ/key?u=hidden_inv_buyer");
+    });
+
+    it("every message for the WB chat is free of characters WB escapes", () => {
+      const messages = [
+        wbGateMessage("QUN5YFZ", 1000),
+        wbGateMessage("QUN5YFZ", 500, undefined, { index: 1, total: 2 }),
+        wbGateReminderMessage("QUN5YFZ", 1000, 1),
+        wbGateReminderMessage("QUN5YFZ", 1000, 2),
+        wbGateReminderMessage("QUN5YFZ", 1000, 3),
+        wbCodeRetryMessage(),
+      ];
+      for (const message of messages) expect(wbChatSafeText(message)).not.toMatch(/["&'<>]/);
+    });
+
+    it("rewrites long guide links, quotes and apostrophes, and is idempotent", () => {
+      const raw = `Раздел "Доставки", I'd pass: https://robloxbank.ru/guide?source=wb&skip=1&code=QUN5YFZ&username=hidden_inv_buyer&stage=key`;
+      const safe = wbChatSafeText(raw);
+      expect(safe).toBe("Раздел «Доставки», I’d pass: https://robloxbank.ru/wb/QUN5YFZ/key?u=hidden_inv_buyer");
+      expect(wbChatSafeText(safe)).toBe(safe);
+    });
   });
 });

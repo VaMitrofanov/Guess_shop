@@ -247,16 +247,20 @@ export function startBridgeServer(): http.Server {
 
       console.log(`[Bridge] → Searching gamepasses for username="${username}"`);
       try {
-        const { account, gamepasses } = await searchGamepassesByNickDirect(username);
+        const { account, gamepasses, games } = await searchGamepassesByNickDirect(username);
         console.log(
           `[Bridge] ← "${username}": ` +
-          (account ? `id=${account.id}, ${gamepasses.length} gamepass(es)` : "no such Roblox account")
+          (account
+            ? `id=${account.id}, ${gamepasses.length} gamepass(es), games=${games?.visibility ?? "?"}/${games?.count ?? 0}`
+            : "no such Roblox account")
         );
         // `gamepasses` stays the first field older callers read. `account` and
         // `userExists` are additive: a caller on the RF side needs them to tell
         // a mistyped nick from a real account whose place is hidden, and to draw
         // the account card without a second Roblox round trip it cannot make.
-        respond(200, { ok: true, gamepasses, userExists: account !== null, account });
+        // `games` — видны ли игры аккаунта (закрытые ищем через инвентарь):
+        // пустой список при `hidden` значит «не видим», а не «нет».
+        respond(200, { ok: true, gamepasses, userExists: account !== null, account, games: games ?? null });
       } catch (err: any) {
         console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
         respond(500, { ok: false, error: "server_error" });

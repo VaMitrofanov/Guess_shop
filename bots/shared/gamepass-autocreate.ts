@@ -77,6 +77,11 @@ export async function createPassesByKey(opts: {
   nick: string;
   /** Цены пассов в робуксах, по порядку. */
   targets: number[];
+  /**
+   * Игра, присланная ссылкой (ответ на «не видим твою игру»). Без неё опыт
+   * ищется по нику — среди публичных и закрытых игр аккаунта.
+   */
+  game?: { universeId: string } | { placeId: string } | null;
 }): Promise<AutocreateOutcome> {
   const created: AutocreatedPass[] = [];
   const targets = opts.targets
@@ -91,6 +96,7 @@ export async function createPassesByKey(opts: {
       apiKey: opts.apiKey,
       priceInRobux,
       username: opts.nick,
+      ...(opts.game ?? {}),
     });
     if (!res.ok || !res.gamePassId) {
       const error = res.error ?? "roblox_error";

@@ -178,6 +178,8 @@ export async function POST(request: Request) {
     // может не быть вовсе — тогда это единственный источник. Если и Roblox молчит
     // (details === null), остаётся напечатанный ник; без обоих оформлять нечего.
     let nick = rawNick;
+    /** Покупатель назвал другой ник, а пасс — чужого аккаунта: кто был назван. */
+    let ownerSwitchedFrom: string | null = null;
     if (details) {
       // product-info отдаёт имя владельца вместе с пассом; отдельный запрос
       // нужен только фолбэк-веткам getGamepassDetails, где имени нет.
@@ -186,20 +188,13 @@ export async function POST(request: Request) {
         creatorName = ((await getRobloxUserById(String(details.creatorId)))?.name ?? "").trim();
       }
       if (NICK_RE.test(creatorName)) {
-        // Имя владельца ПЕРЕБИВАЛО названный ник молча. При ручном вводе Pass ID
-        // это значило: вставил чужой номер — заказ тихо уехал постороннему
-        // человеку, а покупатель остался без робуксов и без объяснения.
-        // Перебиваем только когда своего ника нет (вход по одной ссылке);
-        // расхождение — отказ, потому что расходятся ПОЛУЧАТЕЛИ робуксов.
+        // Робуксы уходят владельцу пасса. Решение владельца 21.09.2026: для
+        // выкупа нужен только Pass ID — пасс есть, выставлен и цена сошлась,
+        // значит заказ принимаем. Раньше расхождение с названным ником было
+        // отказом; теперь получателем становится владелец пасса, но НЕ молча:
+        // страница показывает это покупателю, а заметка заказа — админу.
         if (NICK_RE.test(rawNick) && rawNick.toLowerCase() !== creatorName.toLowerCase()) {
-          return NextResponse.json(
-            {
-              error: `Этот геймпасс принадлежит аккаунту ${creatorName}, а робуксы заказаны на ${rawNick}. Робуксы придут владельцу пасса — проверь номер пасса или ник.`,
-              code: "OWNER_MISMATCH",
-              owner: creatorName,
-            },
-            { status: 422 },
-          );
+          ownerSwitchedFrom = rawNick;
         }
         nick = creatorName;
       }
@@ -246,6 +241,14 @@ export async function POST(request: Request) {
           rejectionReason: null,
           adminId: null,
           robloxUsername: nick,
+          ...(ownerSwitchedFrom
+            ? {
+              adminNote: [
+                order.adminNote?.trim(),
+                `[ПАСС ДРУГОГО НИКА ${new Date().toISOString().slice(0, 10)}] назван ${ownerSwitchedFrom}, пасс ${gamepassId} принадлежит ${nick} — робуксы владельцу пасса`,
+              ].filter(Boolean).join("\n").slice(-2000),
+            }
+            : {}),
         },
       });
       if (promoted.count === 0) {

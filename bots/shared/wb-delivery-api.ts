@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   WbBulkMutationResponseSchema,
+  decodeWbEntities,
   WbChatEventsResponseSchema,
   WbChatsResponseSchema,
   WbDbsClientResponseSchema,
@@ -10,6 +11,7 @@ import {
   WbClaimsResponseSchema,
   type WbBulkMutationResponse,
 } from "./wb-delivery-contract";
+import { wbChatSafeText } from "./wb-gate-link";
 
 const MARKETPLACE_BASE = "https://marketplace-api.wildberries.ru";
 const CHAT_BASE = "https://buyer-chat-api.wildberries.ru";
@@ -159,18 +161,33 @@ export async function fetchBuyerClaims(isArchive: boolean) {
 }
 
 export async function fetchBuyerChats() {
-  return requestJson("chat", `${CHAT_BASE}/api/v1/seller/chats`, WbChatsResponseSchema);
+  const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/chats`, WbChatsResponseSchema);
+  // Имя покупателя приходит экранированным так же, как текст (см. ниже).
+  for (const chat of response.result ?? []) {
+    if (chat.clientName) chat.clientName = decodeWbEntities(chat.clientName);
+    if (chat.lastMessage?.text) chat.lastMessage.text = decodeWbEntities(chat.lastMessage.text);
+  }
+  return response;
 }
 
 export async function fetchBuyerChatEvents(next?: string | null) {
   const suffix = next ? `?next=${encodeURIComponent(next)}` : "";
-  return requestJson("chat", `${CHAT_BASE}/api/v1/seller/events${suffix}`, WbChatEventsResponseSchema);
+  const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/events${suffix}`, WbChatEventsResponseSchema);
+  // WB отдаёт текст экранированным (с 16.09.2026) — всё, что ниже по течению
+  // (коды, пассы, уведомления, лента консоли), видит его уже нормальным.
+  for (const event of response.result.events) {
+    if (event.message?.text) event.message.text = decodeWbEntities(event.message.text);
+    if (event.clientName) event.clientName = decodeWbEntities(event.clientName);
+  }
+  return response;
 }
 
 export async function sendBuyerChatMessage(replySign: string, message: string): Promise<void> {
   const form = new FormData();
   form.set("replySign", replySign);
-  form.set("message", message);
+  // Единственная дверь в чат WB: здесь текст приводится к виду, который WB
+  // доставит без `&#34;`/`&amp;` (см. `wbChatSafeText`).
+  form.set("message", wbChatSafeText(message));
   await requestJson("chat", `${CHAT_BASE}/api/v1/seller/message`, z.unknown(), { method: "POST", body: form });
 }
 

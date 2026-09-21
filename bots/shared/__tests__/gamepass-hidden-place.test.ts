@@ -66,8 +66,10 @@ describe("пасс в скрытой игре", () => {
     const details = await getGamepassDetailsDirect(GP);
 
     expect(details).toMatchObject({ isActive: true, price: 1429, creatorName: "Margoritka3616" });
-    // Признак остаётся — он нужен карточке админа и разбору, но отказом больше не служит.
-    expect(details?.isGamePrivate).toBe(true);
+    // С 21.09.2026 первоисточник спрашивается ПЕРВЫМ и отвечает сам: эвристики
+    // видимости игры (каталог, универс по ассету) больше не гоняются вовсе —
+    // решают продажа и цена, а закрытая игра не повод ни для отказа, ни для флага.
+    expect(details?.isGamePrivate).toBeFalsy();
     expect(details?.isNotInCatalog).toBeFalsy();
     // Скрытую игру нельзя называть возрастным ограничением: 18+ — это отдельный
     // ответ Roblox, а не «мы её не увидели».
@@ -83,6 +85,20 @@ describe("пасс в скрытой игре", () => {
 
     expect(details?.isActive).toBe(false);
     expect(details?.isNotInCatalog || details?.isGamePrivate).toBe(true);
+  });
+
+  it("спрашивает первоисточник раньше каталога и зеркала", async () => {
+    const world = mockRobloxWorld(true);
+    global.fetch = world as unknown as typeof fetch;
+    jest.resetModules();
+    const { getGamepassDetailsDirect } = await import("../roblox");
+
+    await getGamepassDetailsDirect(GP);
+
+    const urls = world.mock.calls.map(([input]) => String(input));
+    expect(urls[0]).toContain("apis.roblox.com/game-passes/v1/game-passes/");
+    expect(urls.some((url) => url.includes("roproxy"))).toBe(false);
+    expect(urls.some((url) => url.includes("catalog.roblox.com"))).toBe(false);
   });
 
   it("не верит зеркалу: продажу подтверждает только apis.roblox.com", async () => {

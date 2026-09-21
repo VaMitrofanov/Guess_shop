@@ -6,6 +6,7 @@
  * replace this with a Redis-backed store.
  */
 
+import { createHeldApiKeyStore } from "../shared/held-api-key";
 import type { DirectRequote } from "../shared/direct-requote";
 
 export interface LinkState {
@@ -188,3 +189,6 @@ export const pendingApiKey = new Map<number, { wbCode: string; denomination: num
  * возврат после создания идёт не в квест WB, а в итог прямого заказа.
  */
 export const pendingDirectKey = new Map<number, { nick: string; passPrice: number }>();
+
+/** Ключ, ждущий ссылку на игру (игры по нику не видны). Только память, 15 минут. */
+export const heldGameKeys = createHeldApiKeyStore();

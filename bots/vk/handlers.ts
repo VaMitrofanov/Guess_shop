@@ -13,7 +13,7 @@ import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
 import { vkGetName, vkSend, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
-import { getState, setState, clearState, getQuestPlan, setQuestPlan, clearQuestPlan } from "./session";
+import { getState, setState, clearState, getQuestPlan, setQuestPlan, clearQuestPlan, heldGameKeys } from "./session";
 import {
   MAX_KEY_MISSES,
   RESUME_KEYWORDS,
@@ -29,6 +29,7 @@ import {
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { parseExperienceRef, type GamesVisibility } from "../shared/roblox-owned-games";
 import {
   createTargetsFor,
   planFromOwned,
@@ -59,7 +60,7 @@ import {
   looksLikeApiKey,
   recordAutocreateTrace,
 } from "../shared/gamepass-autocreate";
-import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
+import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
@@ -74,7 +75,7 @@ import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { requoteForPass } from "../shared/direct-requote";
 import { keyPitchText, noGamepassText, priceMismatchText } from "../shared/direct-gamepass-copy";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
-import { rememberRobloxApiKey } from "../shared/roblox-api-key-store";
+import { loadRobloxApiKeyForUser, rememberRobloxApiKey } from "../shared/roblox-api-key-store";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { assertOwnsIntent, vkActor } from "../shared/ownership";
 import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
@@ -3071,7 +3072,14 @@ function vkOwnedFromSearch(all: { gamepassId: number | string; name: string; rob
 async function showVkQuestPlan(
   ctx: MessageContext,
   vkUserId: number,
-  opts: { wbCode: string; denomination: number; nick: string; owned: OwnedPass[] },
+  opts: {
+    wbCode: string;
+    denomination: number;
+    nick: string;
+    owned: OwnedPass[];
+    /** Видны ли игры аккаунта — чтобы пустой результат не звучал как «игры нет». */
+    gamesVisibility?: GamesVisibility | null;
+  },
   edit?: (payload: { message: string; keyboard?: unknown }) => Promise<void>,
 ): Promise<CheckPlan> {
   const plan = planFromOwned(opts.denomination, opts.owned);
@@ -3090,6 +3098,7 @@ async function showVkQuestPlan(
       plan,
       keyEnabled: gamepassAutocreateEnabled(),
       wbCode: opts.wbCode,
+      gamesVisibility: opts.gamesVisibility,
     }),
     "VK/quest-result",
     edit,
@@ -3180,7 +3189,12 @@ async function handleRobloxNickInput(
   // просит создать только недостающее; здесь тот же модуль (`gamepass-plan`),
   // поэтому на один и тот же аккаунт бот и сайт отвечают одинаково.
   const owned = outcome.status === "no_gamepasses" ? [] : vkOwnedFromSearch(outcome.all);
-  await showVkQuestPlan(ctx, vkUserId, { wbCode, denomination, nick, owned }, showResult);
+  await showVkQuestPlan(
+    ctx,
+    vkUserId,
+    { wbCode, denomination, nick, owned, gamesVisibility: outcome.games?.visibility },
+    showResult,
+  );
 }
 
 /**
@@ -3296,6 +3310,15 @@ async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Prom
   }
   if (outcome.error && outcome.created.length === 0) {
     const verdict = keyCreateVerdict(outcome.error);
+    // Игры по нику не видны: сохранённый ключ годный, ждём ссылку на игру
+    // следующим сообщением — тем же путём, что и присланный ключ.
+    if (verdict.needsGameLink) {
+      const stored = await loadRobloxApiKeyForUser(db as any, userId, quest.nick).catch(() => null);
+      if (stored) {
+        heldGameKeys.hold(vkUserId, stored.key);
+        setState(vkUserId, { type: "AWAITING_API_KEY", wbCode: quest.wbCode, denomination: quest.denomination, nick: quest.nick });
+      }
+    }
     await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), "VK/quest-keyfail", showResult);
     return;
   }
@@ -3369,9 +3392,17 @@ async function handleVkApiKeyInput(
   pending: { wbCode: string; denomination: number; nick: string },
 ): Promise<void> {
   const quest = getQuestPlan(vkUserId);
-  const key = raw.trim();
+  // Ключ уже у нас и ждёт ссылку на игру (по нику игры не видны).
+  const heldKey = heldGameKeys.get(vkUserId);
+  const game = heldKey ? parseExperienceRef(raw) : null;
+  const key = game && heldKey ? heldKey : raw.trim();
 
-  if (!looksLikeApiKey(key)) {
+  if (!game && heldKey && !looksLikeApiKey(key)) {
+    await ctx.reply(`Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`);
+    return;
+  }
+
+  if (!game && !looksLikeApiKey(key)) {
     // Ожидание ключа НЕ бесконечно. Раньше любой текст получал «это не похоже
     // на ключ» — человек писал менеджеру, а бот отвечал ему этой фразой снова и
     // снова (11.09 — четыре раза подряд, в том числе на «спасибо, чуть позже
@@ -3414,9 +3445,10 @@ async function handleVkApiKeyInput(
   const workingMsg: any = await ctx.reply(plainText(questKeyWorkingText(prices)));
   const showResult = buildVkEditInPlace(ctx, vkUserId, workingMsg);
 
-  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: prices });
+  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: prices, game });
 
   if (outcome.created.length > 0) {
+    heldGameKeys.drop(vkUserId);
     // След пишем ДО ответа покупателю: пасс уже создан на чужом аккаунте, и
     // админ должен видеть, что именно он выкупает.
     await recordAutocreateTrace(db as any, {
@@ -3452,6 +3484,9 @@ async function handleVkApiKeyInput(
   }
 
   const verdict = keyCreateVerdict(outcome.error);
+  // Ключ годный, не хватает ссылки на игру — держим его до следующего сообщения.
+  if (verdict.needsGameLink && outcome.created.length === 0) heldGameKeys.hold(vkUserId, key);
+  else heldGameKeys.drop(vkUserId);
   await showVkQuest(
     ctx,
     questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }),
@@ -4074,9 +4109,17 @@ async function startVkDirectKey(ctx: MessageContext, vkUserId: number, nickFromP
 async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: string): Promise<void> {
   const st = getState(vkUserId);
   if (!st || st.type !== "AWAITING_DIRECT_API_KEY") return;
-  const key = raw.trim();
+  // Ключ ждёт ссылку на игру — см. ту же развилку в `handleVkApiKeyInput`.
+  const heldKey = heldGameKeys.get(vkUserId);
+  const game = heldKey ? parseExperienceRef(raw) : null;
+  const key = game && heldKey ? heldKey : raw.trim();
 
-  if (!looksLikeApiKey(key)) {
+  if (!game && heldKey && !looksLikeApiKey(key)) {
+    await ctx.reply(`Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`);
+    return;
+  }
+
+  if (!game && !looksLikeApiKey(key)) {
     // Тот же предел, что и в ветке заказа по коду: два промаха — и разговор
     // уходит человеку, а не крутится на одной фразе.
     if (noteKeyMiss(vkUserId) >= MAX_KEY_MISSES) {
@@ -4092,14 +4135,17 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
   resetKeyMisses(vkUserId);
 
   await ctx.reply(questKeyWorkingText([st.passPrice]).replace(/<\/?b>/g, ""));
-  const outcome = await createPassesByKey({ apiKey: key, nick: st.robloxUsername, targets: [st.passPrice] });
+  const outcome = await createPassesByKey({ apiKey: key, nick: st.robloxUsername, targets: [st.passPrice], game });
   const created = outcome.created[0];
 
   if (!created) {
     const verdict = keyCreateVerdict(outcome.error);
+    if (verdict.needsGameLink) heldGameKeys.hold(vkUserId, key);
+    else heldGameKeys.drop(vkUserId);
     await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: st.robloxUsername }), "VK/direct-key-fail");
     return;
   }
+  heldGameKeys.drop(vkUserId);
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
   await rememberRobloxApiKey(db as any, {

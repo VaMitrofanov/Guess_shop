@@ -236,9 +236,15 @@ describe("POST /api/account/roblox-key", () => {
     expect(mockVerify).not.toHaveBeenCalled();
   });
 
-  test("без ника проверять нечего — опыт не найти", async () => {
+  test("без ника проверять нечего — это про ник, а не про игру", async () => {
     const res = await POST(req({ key: KEY, username: "!!" }, "10.0.0.11"));
-    expect(await res.json()).toEqual({ ok: false, error: "no_universe" });
+    expect(await res.json()).toEqual({ ok: false, error: "nick_not_found" });
+    expect(mockVerify).not.toHaveBeenCalled();
+  });
+
+  test("кривая ссылка на игру отсекается без похода в Roblox", async () => {
+    const res = await POST(req({ key: KEY, username: "lokomotiv_2018", gameRef: "не ссылка" }, "10.0.0.12"));
+    expect(await res.json()).toEqual({ ok: false, error: "bad_game_link" });
     expect(mockVerify).not.toHaveBeenCalled();
   });
 });

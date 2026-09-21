@@ -112,6 +112,33 @@ export function wbBuyerName(row: WbDbsClient): string | undefined {
  * directory and every chat event carry `clientName`, which is what makes an
  * order recognisable next to a WB conversation — the marketplace order number
  * never was. */
+const NAMED_ENTITIES: Record<string, string> = {
+  quot: '"', amp: "&", apos: "'", lt: "<", gt: ">", nbsp: "\u00a0",
+};
+
+/**
+ * Раскодировать HTML-сущности в тексте чата WB.
+ *
+ * С 16.09.2026 ~14:39 UTC лента событий отдаёт текст экранированным: `"` как
+ * `&#34;`, `&` как `&amp;`, `'` как `&#39;` — и в наших сообщениях, и в
+ * сообщениях покупателей. Мы храним и показываем текст как текст, поэтому
+ * возвращаем исходный вид сразу при приёме: иначе админ видел буквальное
+ * `&#34;` в уведомлении, а сверка нашего сообщения с эхом WB не сходилась.
+ * Один проход — `&amp;#34;` честно становится `&#34;`, а не кавычкой.
+ */
+export function decodeWbEntities(text: string): string;
+export function decodeWbEntities(text: string | undefined): string | undefined;
+export function decodeWbEntities(text: string | undefined): string | undefined {
+  if (!text || !text.includes("&")) return text;
+  return text.replace(/&(#\d{1,7}|#x[0-9a-f]{1,6}|[a-z]{2,6});/gi, (whole, body: string) => {
+    if (body[0] === "#") {
+      const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+  });
+}
+
 export function wbChatClientName(row: { clientName?: string | undefined }): string | undefined {
   return wbNormalizeBuyerName(row.clientName);
 }

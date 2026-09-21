@@ -6,8 +6,8 @@ const guide = readFileSync(path.join(ROOT, "src/app/guide/GamepassCheck.tsx"), "
 const route = readFileSync(path.join(ROOT, "src/app/api/wb-code/select-gamepass/route.ts"), "utf8");
 
 /**
- * Ручной ввод Pass ID: найденный пасс обязан принадлежать тому аккаунту, на
- * который покупатель просит робуксы.
+ * Ручной ввод Pass ID: робуксы уходят владельцу найденного пасса, и покупатель
+ * обязан это увидеть.
  *
  * Робуксы уходят ВЛАДЕЛЬЦУ геймпасса — это физика Roblox, а не наше решение.
  * До 06.09.2026 расхождение проходило молча в обе стороны: страница просто
@@ -22,28 +22,37 @@ const route = readFileSync(path.join(ROOT, "src/app/api/wb-code/select-gamepass/
  * гарда.
  */
 describe("ручной Pass ID — владелец против названного ника", () => {
-  it("страница отказывает, когда владелец пасса не тот, кого назвал покупатель", () => {
+  /* Решение владельца 21.09.2026: для выкупа нужен только Pass ID — пасс есть,
+     выставлен и цена сошлась, значит заказ принимаем. Отказ «пасс другого
+     аккаунта» снят, но подмена получателя НЕ тихая: страница переключает
+     карточку аккаунта на владельца пасса с пометкой, сервер пишет строку в
+     заметку заказа. От случая «вбил цену вместо номера» по-прежнему защищают
+     `BARE_ID_RE` (длина) и сверка цены с номиналом. */
+  it("страница принимает пасс и открыто переключает получателя на владельца", () => {
     expect(guide).toContain("const owner = typeof gp.creatorName === \"string\" ? gp.creatorName.trim() : \"\"");
     expect(guide).toContain("const claimed = (account?.username ?? nick).trim()");
     expect(guide).toContain("owner.toLowerCase() !== claimed.toLowerCase()");
-    expect(guide).toContain("Этот пасс принадлежит аккаунту ${owner}");
+    expect(guide).toContain("setOwnerSwitched({ from: claimed, to: owner })");
+    expect(guide).toContain("робуксы придут сюда, а не на");
+    expect(guide).not.toContain("Этот пасс принадлежит аккаунту ${owner}");
   });
 
-  it("владелец подставляется только когда своего ника ещё нет", () => {
-    // Вход по одному номеру (ник не называли) — единственный случай, где имя
-    // владельца законно становится ником заказа.
+  it("снятый с продажи пасс по номеру не принимается", () => {
+    expect(guide).toContain("if (gp.isForSale === false)");
+  });
+
+  it("владелец подставляется, когда своего ника ещё нет", () => {
     expect(guide).toContain("if (!account && owner && NICK_RE.test(owner))");
   });
 
-  it("сервер отвечает OWNER_MISMATCH вместо тихой подмены получателя", () => {
+  it("сервер принимает пасс другого ника и оставляет след в заметке", () => {
     expect(route).toContain("NICK_RE.test(rawNick) && rawNick.toLowerCase() !== creatorName.toLowerCase()");
-    expect(route).toContain('code: "OWNER_MISMATCH"');
-    expect(route).toContain("Робуксы придут владельцу пасса");
+    expect(route).not.toContain('code: "OWNER_MISMATCH"');
+    expect(route).toContain("[ПАСС ДРУГОГО НИКА");
+    expect(route).toContain("робуксы владельцу пасса");
   });
 
-  it("ник по-прежнему выводится из пасса, когда покупатель его не называл", () => {
-    // Ручной вход по одной ссылке приходит без ника вовсе — там подмены нет,
-    // есть единственный источник.
+  it("ник заказа всегда берётся у пасса — робуксы уходят его владельцу", () => {
     expect(route).toContain("nick = creatorName;");
   });
 });

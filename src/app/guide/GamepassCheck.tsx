@@ -40,6 +40,7 @@ import { GUIDE_CSS } from "./guide-css";
 import GuideSteps from "./guide-steps";
 import KeyCreate from "./KeyCreate";
 import type { GuidePlatform } from "@/lib/device-platform";
+import type { GamesVisibility } from "../../../bots/shared/roblox-owned-games";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 /** Анимация проверки не должна мигать: ответ приходит быстрее, чем читается строка. */
@@ -97,6 +98,10 @@ export default function GamepassCheck({
   const [nick, setNick] = useState(initialUsername.trim().replace(/^@/, ""));
   const [touched, setTouched] = useState(false);
   const [account, setAccount] = useState<RobloxAccount | null>(null);
+  /** Видны ли игры аккаунта: пустой список при «hidden» значит «не видим», а не «нет». */
+  const [gamesVisibility, setGamesVisibility] = useState<GamesVisibility | null>(null);
+  /** Pass ID принят с аккаунта, отличного от введённого ника: робуксы уйдут владельцу пасса. */
+  const [ownerSwitched, setOwnerSwitched] = useState<{ from: string; to: string } | null>(null);
   const [owned, setOwned] = useState<OwnedPass[]>([]);
   const [plan, setPlan] = useState<CheckPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -242,6 +247,8 @@ export default function GamepassCheck({
         return;
       }
       setAccount(data.account ?? { id: "", username: data.detectedUsername ?? value, avatarUrl: null });
+      setGamesVisibility(isGamesVisibility(data.gamesVisibility) ? data.gamesVisibility : null);
+      setOwnerSwitched(null);
       replan(((data.gamepasses ?? []) as Array<Record<string, unknown>>).map(toOwned));
       setPhase("result");
       if (keyWanted.current) {
@@ -311,19 +318,27 @@ export default function GamepassCheck({
         setManualErr("Не нашли пасс с таким номером. Проверь, что взял его из колонки Pass ID, а не номер игры.");
         return;
       }
-      // Робуксы уходят ВЛАДЕЛЬЦУ пасса, а не тому, кого назвал покупатель.
-      // Вставленный чужой номер (или свой, но от другого аккаунта) иначе тихо
-      // уехал бы в заказ и оставил человека без робуксов.
-      const owner = typeof gp.creatorName === "string" ? gp.creatorName.trim() : "";
-      const claimed = (account?.username ?? nick).trim();
-      if (owner && claimed && owner.toLowerCase() !== claimed.toLowerCase()) {
-        setManualErr(`Этот пасс принадлежит аккаунту ${owner}, а робуксы ты просишь на ${claimed}. Робуксы придут владельцу пасса — проверь номер или вернись и смени ник.`);
+      // Робуксы уходят ВЛАДЕЛЬЦУ пасса. Решение владельца 21.09.2026: для
+      // выкупа нужен только Pass ID — пасс есть, выставлен и цена сошлась,
+      // значит принимаем. Раньше здесь был отказ «пасс другого аккаунта»; теперь
+      // получателем становится владелец пасса, и экран говорит это прямо, а
+      // не тихо: карточка аккаунта переключается на него с пометкой.
+      if (gp.isForSale === false) {
+        setManualErr("Этот пасс снят с продажи. Открой его в Creator Hub, включи продажу и вставь номер ещё раз.");
         return;
       }
+      const owner = typeof gp.creatorName === "string" ? gp.creatorName.trim() : "";
+      const claimed = (account?.username ?? nick).trim();
+      const switching = Boolean(owner && claimed && NICK_RE.test(owner) && owner.toLowerCase() !== claimed.toLowerCase());
       const pass = toOwned(gp);
-      const next = [...owned.filter((p) => p.gamepassId !== pass.gamepassId), pass];
-      replan(next);
-      if (!account && owner && NICK_RE.test(owner)) {
+      // Пассы прежнего аккаунта в заказ с новым получателем не годятся.
+      const base = switching ? [] : owned.filter((p) => p.gamepassId !== pass.gamepassId);
+      replan([...base, pass]);
+      if (switching) {
+        setOwnerSwitched({ from: claimed, to: owner });
+        setNick(owner);
+        setAccount({ id: "", username: owner, avatarUrl: null });
+      } else if (!account && owner && NICK_RE.test(owner)) {
         setNick(owner);
         setAccount({ id: "", username: owner, avatarUrl: null });
       }
@@ -608,6 +623,8 @@ export default function GamepassCheck({
                 plan={plan}
                 amount={amount}
                 account={account}
+                gamesVisibility={gamesVisibility}
+                ownerSwitched={ownerSwitched}
                 nick={nick}
                 orderPlaced={orderPlaced}
                 confirming={confirming}
@@ -919,13 +936,46 @@ function toOwned(gp: Record<string, unknown>): OwnedPass {
 
 const TONE: Record<CheckPlan["kind"], string> = { ready: "ok", assembled: "mix", build: "half", empty: "none" };
 
+function isGamesVisibility(value: unknown): value is GamesVisibility {
+  return value === "ok" || value === "hidden" || value === "none" || value === "error";
+}
+
+/**
+ * Пустой результат — три разных положения, и говорить о них одинаково значит
+ * врать двум из трёх. Закрытая игра — не «пасса нет»: мы её просто не видим,
+ * а по Pass ID находим любой пасс.
+ */
+function emptyHead(visibility: GamesVisibility | null) {
+  if (visibility === "hidden") {
+    return {
+      k: "🙈 игры скрыты",
+      h: "Не видим игры этого аккаунта",
+      s: <><b>Они скрыты настройками приватности Roblox</b>, поэтому по нику их не видно. Если геймпасс уже создан — вставь его Pass ID ниже, найдём его в любой игре. Если ещё нет — создай, это пара минут.</>,
+    };
+  }
+  if (visibility === "none") {
+    return {
+      k: "🔍 игры нет",
+      h: "У аккаунта нет ни одной игры",
+      s: <><b>Геймпасс — это платная вещь внутри игры в Roblox</b>, а игр у этого аккаунта Roblox не показывает, ни открытых, ни закрытых. Проверь ник или напиши менеджеру — поможем.</>,
+    };
+  }
+  return {
+    k: "🔍 подходящего не нашли",
+    h: "На аккаунте нет геймпасса, который мы можем купить",
+    s: <><b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Выставленного пасса у тебя пока нет.</>,
+  };
+}
+
 function ResultCard({
-  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek,
+  plan, amount, account, gamesVisibility, ownerSwitched, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek,
   storedKey, storedBusy, onStoredKey, onConfirm, onChangeNick, onOpenFork,
 }: {
   plan: CheckPlan;
   amount: number;
   account: RobloxAccount | null;
+  gamesVisibility: GamesVisibility | null;
+  ownerSwitched: { from: string; to: string } | null;
   nick: string;
   orderPlaced: boolean;
   confirming: boolean;
@@ -951,7 +1001,7 @@ function ResultCard({
     ready: { k: "✅ всё уже готово", h: "Создавать ничего не нужно", s: <>У тебя уже выставлены геймпассы с нужными ценами. Мы подставили их сами — остаётся подтвердить.</> },
     assembled: { k: "🧩 собрали из твоих", h: "Создавать ничего не нужно", s: <>Твои геймпассы складываются в <b>ровно {amount.toLocaleString("ru-RU")} R$</b> без остатка — один из них мы выкупим несколько раз, покупки идут с разных аккаунтов. Тебе делать ничего не надо.</> },
     build: { k: "➕ берём твой и добавляем", h: "Твой геймпасс подходит — нужен ещё один", s: <>Твой закрывает <b>{covered.toLocaleString("ru-RU")} R$</b> из {amount.toLocaleString("ru-RU")} — его выкупим столько раз, сколько нужно. Ровно этим не добрать, поэтому под остаток нужен ещё один геймпасс.</> },
-    empty: { k: "🔍 подходящего не нашли", h: "На аккаунте нет геймпасса, который мы можем купить", s: <><b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Такой вещи у тебя пока нет.</> },
+    empty: emptyHead(gamesVisibility),
   }[plan.kind];
 
   return (
@@ -967,7 +1017,11 @@ function ResultCard({
         <span className="m">
           <span className="k">Аккаунт найден</span>
           <span className="n">{account?.username ?? nick}</span>
-          <span className="i">Робуксы придут на этот аккаунт</span>
+          <span className="i">
+            {ownerSwitched
+              ? <>Пасс принадлежит этому аккаунту, поэтому робуксы придут сюда, а не на {ownerSwitched.from}</>
+              : "Робуксы придут на этот аккаунт"}
+          </span>
         </span>
         {!orderPlaced && <button className="chg" onClick={onChangeNick}>Не тот аккаунт?</button>}
       </div>

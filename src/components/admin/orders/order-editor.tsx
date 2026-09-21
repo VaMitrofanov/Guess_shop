@@ -43,6 +43,8 @@ const SOURCES = [
 interface GpCheck {
   gamepassId?: string;
   livePrice?: number | null;
+  /** `mirror` — цена из кэширующего зеркала: первоисточник Roblox не ответил. */
+  priceSource?: "live" | "mirror" | null;
   isForSale?: boolean | null;
   expected?: number | null;
   priceMismatch?: boolean;
@@ -245,6 +247,7 @@ export default function OrderEditor({
                     ? <>
                         цена <b>{num(check.livePrice)} R$</b>
                         {check.priceMismatch ? <span style={{ color: "var(--o-orange)" }}> ≠ ожидаемой {num(expected)} R$</span> : " — сходится с номиналом"}
+                        {check.priceSource === "mirror" && <span style={{ color: "var(--o-orange)" }}> · из зеркала, может быть устаревшей</span>}
                         {check.isForSale === false && <span style={{ color: "var(--o-red)" }}> · снят с продажи</span>}
                         {check.sellerMatch === false && <span style={{ color: "var(--o-orange)" }}> · пасс не этого ника</span>}
                       </>

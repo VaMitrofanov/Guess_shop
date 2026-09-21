@@ -88,6 +88,8 @@ export default function CustomerRobloxKeyCard({
   const [keys, setKeys] = useState(initialKeys);
   const [open, setOpen] = useState(initialKeys.length === 0);
   const [value, setValue] = useState("");
+  /** Ссылка на игру — когда по нику игры не видны (закрытый инвентарь). */
+  const [gameRef, setGameRef] = useState("");
   // Ник по умолчанию — из выбранного профиля, но человек может ввести другой:
   // ключ выпускается на том аккаунте, где лежит игра, а он не всегда основной.
   // Значение выводим при рендере, а не синхронизируем эффектом — иначе смена
@@ -137,7 +139,7 @@ export default function CustomerRobloxKeyCard({
     const account = nick.trim().replace(/^@/, "");
     if (!key || phase === "scanning") return;
     if (!/^[A-Za-z0-9_]{3,20}$/.test(account)) {
-      setError("no_universe");
+      setError("nick_not_found");
       setPhase("done");
       return;
     }
@@ -155,7 +157,7 @@ export default function CustomerRobloxKeyCard({
       const response = await fetch("/api/account/roblox-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, username: account }),
+        body: JSON.stringify({ key, username: account, ...(gameRef.trim() ? { gameRef: gameRef.trim() } : {}) }),
       });
       const body = (await response.json().catch(() => null)) as
         | { ok?: boolean; error?: string; keys?: LinkedKeyView[]; account?: KeyAccount | null; applied?: AppliedOrder | null }
@@ -180,7 +182,7 @@ export default function CustomerRobloxKeyCard({
       setError("network");
       setPhase("done");
     }
-  }, [value, nick, phase]);
+  }, [value, nick, phase, gameRef]);
 
   const remove = useCallback(async (id: string) => {
     if (!window.confirm("Удалить ключ? Геймпассы, созданные раньше, останутся на месте.")) return;
@@ -337,6 +339,25 @@ export default function CustomerRobloxKeyCard({
               <strong>{verdict.title}</strong>
               <span>{verdict.text}</span>
             </div>
+          )}
+          {/* Игры по нику не видны (закрытый инвентарь): ключ годный, просим
+              ссылку на игру и повторяем проверку — ключ остаётся в поле. */}
+          {(verdict?.needsGameLink || gameRef) && (
+            <>
+              <label htmlFor="roblox-key-game">Ссылка на твою игру</label>
+              <input
+                id="roblox-key-game"
+                value={gameRef}
+                onChange={(event) => setGameRef(event.target.value)}
+                placeholder="https://create.roblox.com/dashboard/creations/experiences/…"
+                autoComplete="off"
+                spellCheck={false}
+                inputMode="url"
+              />
+              <small className={styles.keyNote}>
+                Creator Hub → Creations → нажми на свою игру → скопируй адрес из строки браузера и нажми «Проверить и сохранить» ещё раз.
+              </small>
+            </>
           )}
 
           <details className={styles.keyHow}>

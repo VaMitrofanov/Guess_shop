@@ -10,8 +10,9 @@
  * This module:
  *   1. Resolves the username → account (id, canonical nick, headshot), so we
  *      can detect "no such user on Roblox" separately.
- *   2. Lists every for-sale gamepass across all the user's public games,
- *      with no price-based filtering.
+ *   2. Lists every for-sale gamepass across ALL the user's games — public
+ *      and closed (place inventory, see `roblox-owned-games.ts`) — with no
+ *      price-based filtering.
  *   3. Tags each result with `isPriceMatch` (|robux − expectedPrice| ≤ 2),
  *      so the caller renders the matching/non-matching split.
  *
@@ -23,16 +24,20 @@ import {
   searchGamepassesByNickRouted,
   type GamepassSearchResult,
 } from "./roblox";
+import type { GamesVisibility } from "./roblox-owned-games";
 
 export interface AnnotatedGamepass extends GamepassSearchResult {
   /** `Math.abs(robux − expectedPrice) ≤ PRICE_MATCH_TOLERANCE`. */
   isPriceMatch: boolean;
 }
 
+/** Видны ли игры аккаунта; `undefined` — старый мост, различить нельзя. */
+type GamesInfo = { games?: { visibility: GamesVisibility; count: number } };
+
 export type GamepassSearchOutcome =
   | { status: "user_not_found"; nick: string;           expectedPrice: number }
-  | { status: "no_gamepasses";  nick: string;           expectedPrice: number; userId: number }
-  | { status: "ok";             nick: string;           expectedPrice: number; userId: number; all: AnnotatedGamepass[]; matches: AnnotatedGamepass[]; nonMatches: AnnotatedGamepass[] };
+  | ({ status: "no_gamepasses";  nick: string;           expectedPrice: number; userId: number } & GamesInfo)
+  | ({ status: "ok";             nick: string;           expectedPrice: number; userId: number; all: AnnotatedGamepass[]; matches: AnnotatedGamepass[]; nonMatches: AnnotatedGamepass[] } & GamesInfo);
 
 /** Same ±tolerance we used in Phase A — Roblox rounds prices, this preserves UX. */
 export const PRICE_MATCH_TOLERANCE = 2;
@@ -45,14 +50,14 @@ export async function searchGamepassesByNick(
   // and a direct call there answers "user_not_found" for every nick after a
   // ~90 s retry budget. `searchGamepassesByNickRouted` prefers the bridge and
   // only falls back to direct calls where Roblox is actually reachable.
-  const { account, gamepasses: raw } = await searchGamepassesByNickRouted(nick);
+  const { account, gamepasses: raw, games } = await searchGamepassesByNickRouted(nick);
   if (!account) {
     return { status: "user_not_found", nick, expectedPrice };
   }
   const userId = Number(account.id);
 
   if (raw.length === 0) {
-    return { status: "no_gamepasses", nick, expectedPrice, userId };
+    return { status: "no_gamepasses", nick, expectedPrice, userId, games };
   }
 
   const annotated: AnnotatedGamepass[] = raw
@@ -65,5 +70,5 @@ export async function searchGamepassesByNick(
   const matches    = annotated.filter(g =>  g.isPriceMatch);
   const nonMatches = annotated.filter(g => !g.isPriceMatch);
 
-  return { status: "ok", nick, expectedPrice, userId, all: annotated, matches, nonMatches };
+  return { status: "ok", nick, expectedPrice, userId, all: annotated, matches, nonMatches, games };
 }

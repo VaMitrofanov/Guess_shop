@@ -12,6 +12,13 @@
  */
 
 import { getBrowserGamepassPreflight, getBrowserSession, purchaseGamepassInBrowser } from "./browser-purchase";
+import {
+  isSellablePass,
+  listOwnedUniverses,
+  listUniversePasses,
+  type GamesVisibility,
+  type JsonGet,
+} from "./roblox-owned-games";
 
 // Mobile UA + Roblox-origin headers — mirrors what the Roblox Android app sends.
 // Origin/Referer trick the API into treating the request as same-site frontend.
@@ -122,6 +129,17 @@ async function rFetch(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** JSON-ответ Roblox через `rFetch`; `null` — сеть не ответила вовсе. */
+const rGetJson: JsonGet = async (url) => {
+  try {
+    const res = await rFetch(url);
+    const body = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, body };
+  } catch {
+    return null;
+  }
+};
+
 export interface GamepassDetails {
   id:          string;
   name:        string;
@@ -194,43 +212,6 @@ async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false)
 }
 
 type GameAccessResult = "ok" | "private" | "age_restricted";
-
-/**
- * Playability check keyed by placeId (not gamepassId).
- *
- * `apis.roblox.com/universes/v1/assets/{gamepassId}/universe` currently 404s from
- * our server IP, which cripples checkGamePrivate/checkGameAccess. The places-based
- * endpoint `universes/v1/places/{placeId}/universe` resolves reliably, and
- * getUserGamepasses() already hands us the placeId — so we can run the real
- * playability check on the gamepass's actual game.
- *
- * Returns "private" for unrated / private / unapproved games (gamepass not buyable),
- * "ok" otherwise. Playable + GuestProhibited both count as OK.
- */
-async function placeIsPlayable(placeId: number): Promise<GameAccessResult> {
-  try {
-    if (!placeId) return "ok";
-    const uRes = await rFetch(
-      `https://apis.roblox.com/universes/v1/places/${placeId}/universe`
-    ).catch(() => null);
-    if (!uRes?.ok) return "ok";
-    const uData: any = await uRes.json().catch(() => null);
-    const universeId = uData?.universeId;
-    if (!universeId) return "ok";
-
-    const pRes = await rFetch(
-      `https://games.roblox.com/v1/games/multiget-playability-status?universeIds=${universeId}`
-    ).catch(() => null);
-    if (!pRes?.ok) return "ok";
-    const status = (((await pRes.json().catch(() => null)) as any[]) ?? [])[0];
-    const ps = status?.playabilityStatus as string | undefined;
-    if (ps === "Playable" || ps === "GuestProhibited" || ps === "ContextualPlayabilityUnrated") return "ok";
-    if (ps === "PrivateGame" || ps === "GameUnapproved") return "private";
-    return status?.isPlayable === false ? "private" : "ok";
-  } catch {
-    return "ok";
-  }
-}
 
 /**
  * Detailed game access check used in the roproxy fallback block where
@@ -368,6 +349,37 @@ export async function getGamepassDetailsDirect(
     };
   };
 
+  // ── Attempt 0 — product-info на apis.roblox.com: первоисточник ───────────
+  // Решение владельца 21.09.2026: пасс есть, выставлен и цена сошлась — заказ
+  // принимаем, в закрытой он игре или нет. Нужен только Pass ID, а продаёт
+  // Roblox и пасс закрытого опыта. Поэтому первым спрашиваем тот единственный
+  // источник, который отвечает про сам пасс вживую (roproxy отдаёт кэш, а
+  // каталог/маркетплейс не индексируют закрытые игры), и НЕ гоняем эвристики
+  // приватности: они про видимость игры, а не про продажу пасса.
+  try {
+    const res = await rFetch(
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
+      {},
+    );
+    httpResponses++;
+    if (res.ok) {
+      const d: any = await res.json().catch(() => null);
+      if (d?.ProductId && (d.TargetId == null || String(d.TargetId) === gamepassId)) {
+        return {
+          id:          String(d.TargetId ?? gamepassId),
+          name:        d.Name ?? "Gamepass",
+          // У снятого с продажи пасса PriceInRobux = null.
+          price:       Number(d.PriceInRobux ?? 0),
+          creatorId:   Number(d.Creator?.Id ?? d.Creator?.CreatorTargetId ?? 0),
+          creatorName: typeof d.Creator?.Name === "string" ? d.Creator.Name : undefined,
+          isActive:    d.IsForSale === true,
+        };
+      }
+    } else {
+      console.warn(`[Roblox/bots] endpoint 0 (product-info) failed: HTTP ${res.status} for id=${gamepassId}`);
+    }
+  } catch { /* network error — fall through to the older sources */ }
+
   // ── Attempt 1 — marketplace-items (Roblox mobile app endpoint) ───────────
   try {
     const res = await rFetch(
@@ -473,16 +485,11 @@ export async function getGamepassDetailsDirect(
             const match  = listed.find((g) => String(g.gamepassId) === gamepassId);
             if (match) {
               if (match.robux > 0) parsed.price = match.robux;
-              const access = await placeIsPlayable(match.placeId);
-              if (access === "private") {
-                console.warn(
-                  `[Roblox/bots] roproxy: gamepass ${gamepassId} listed for sale but its game ` +
-                  `(place ${match.placeId}) is unrated/private — isActive→false isGamePrivate→true`
-                );
-                parsed.isActive = false;
-                parsed.isGamePrivate = true;
-                return parsed;
-              }
+              // Закрытая игра — не отказ (решение владельца 21.09.2026): список
+              // пассов опыта отдаёт живые цену и продажу и для закрытых игр, а
+              // выкупаем мы по Pass ID. Проверка «играбельности» здесь раньше
+              // гасила пасс, но до 21.09 закрытые игры в этот список и не
+              // попадали — теперь попадают (инвентарь плейсов).
               console.log(
                 `[Roblox/bots] roproxy: gamepass ${gamepassId} confirmed for-sale & playable via ` +
                 `creator listing "${parsed.creatorName}" — accepting (primary endpoints degraded)`
@@ -858,6 +865,12 @@ export interface NickSearchPayload {
   /** null → Roblox says there is no such account (or it is banned). */
   account:    RobloxUserProfile | null;
   gamepasses: GamepassSearchResult[];
+  /**
+   * Что мы знаем об играх аккаунта (см. `roblox-owned-games.ts`). Пустой список
+   * пассов значит разное: «игры не видны» лечится ссылкой на пасс, «игр нет» —
+   * созданием игры. Старый мост поле не отдаёт — тогда его нет.
+   */
+  games?:     { visibility: GamesVisibility; count: number };
 }
 
 /**
@@ -871,15 +884,15 @@ export interface NickSearchPayload {
 export async function searchGamepassesByNickDirect(username: string): Promise<NickSearchPayload> {
   const account = await getRobloxUserProfileDirect({ username });
   if (!account) return { account: null, gamepasses: [] };
-  const gamepasses = await listForSaleGamepasses(Number(account.id), account.name);
-  return { account, gamepasses };
+  const { gamepasses, games } = await listForSaleGamepassesWithGames(Number(account.id), account.name);
+  return { account, gamepasses, games };
 }
 
 /**
- * Fetch every for-sale gamepass across a userId's public games. Returns an
- * empty array when the user has no public games, or none of their games
- * carry a for-sale gamepass — the caller is responsible for diagnosing
- * which of these is the case (e.g. via the universes count if needed).
+ * Every for-sale gamepass across ALL of a user's games — public ones from the
+ * profile and closed ones found through the place inventory
+ * (`roblox-owned-games.ts`). A closed game is not a reason to miss a pass: we
+ * buy by pass ID, and Roblox sells a pass from a private experience just fine.
  *
  * `fallbackUsername` is used for the `sellerName` field if Roblox's creator
  * blob doesn't carry it back (rare, but happens for legacy gamepasses).
@@ -888,40 +901,31 @@ export async function listForSaleGamepasses(
   userId: number,
   fallbackUsername: string,
 ): Promise<GamepassSearchResult[]> {
-  // Fetch all public games with cursor-based pagination (up to 3 pages / 150 games)
-  const universes: any[] = [];
-  let gamesCursor: string | null = null;
-  for (let page = 0; page < 3; page++) {
-    const cursorParam = gamesCursor ? `&cursor=${encodeURIComponent(gamesCursor)}` : "";
-    const gRes = await rFetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50${cursorParam}`
-    ).catch(() => null);
-    if (!gRes?.ok) break;
-    const gData: any = await gRes.json().catch(() => null);
-    universes.push(...(gData?.data ?? []));
-    gamesCursor = gData?.nextPageCursor ?? null;
-    if (!gamesCursor) break;
+  return (await listForSaleGamepassesWithGames(userId, fallbackUsername)).gamepasses;
+}
+
+export async function listForSaleGamepassesWithGames(
+  userId: number,
+  fallbackUsername: string,
+): Promise<{ gamepasses: GamepassSearchResult[]; games: { visibility: GamesVisibility; count: number } }> {
+  const owned = await listOwnedUniverses(userId, rGetJson);
+  const games = { visibility: owned.visibility, count: owned.universes.length };
+  if (owned.universes.length === 0) {
+    console.log(`[Roblox/bots] listForSaleGamepasses: no games for userId=${userId} (${owned.visibility})`);
+    return { gamepasses: [], games };
   }
 
-  if (universes.length === 0) {
-    console.log(`[Roblox/bots] listForSaleGamepasses: no public games for userId=${userId}`);
-    return [];
+  const all = await listUniversePasses(owned.universes, rGetJson);
+  const sellable = all.filter(isSellablePass);
+  if (all.length > 0 && sellable.length === 0) {
+    console.warn(
+      `[Roblox/bots] listForSaleGamepasses: ${all.length} passes found but none for sale ` +
+      `for userId=${userId}. Sample:`, JSON.stringify(all[0])
+    );
   }
+  if (sellable.length === 0) return { gamepasses: [], games };
 
-  const passBatches = await Promise.all(universes.map(async (game: any) => {
-    const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
-    const pRes = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`
-    ).catch(() => null);
-    if (!pRes?.ok) return [];
-    const pData: any = await pRes.json().catch(() => null);
-    return (pData?.gamePasses ?? []).map((gp: any) => ({ ...gp, _placeId: placeId }));
-  }));
-
-  const all: any[] = passBatches.flat();
-  if (all.length === 0) return [];
-
-  const ids = all.map((gp: any) => gp.id).join(",");
+  const ids = sellable.map((gp) => gp.id).join(",");
   const tRes = await rFetch(
     `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${ids}&size=150x150&format=Png&isCircular=false`
   ).catch(() => null);
@@ -930,31 +934,17 @@ export async function listForSaleGamepasses(
     (tData?.data ?? []).map((t: any) => [t.targetId, t.imageUrl])
   );
 
-  // Relaxed filter: isForSale !== false (not strict === true) + price > 0.
-  // The strict === true filter was silently dropping gamepasses where the API
-  // omitted the isForSale field — the site never had this problem because
-  // src/lib/roblox.ts returns all passes without filtering.
-  const filtered = all
-    .filter((gp: any) => gp.isForSale !== false && (gp.price ?? 0) > 0);
-
-  if (all.length > 0 && filtered.length === 0) {
-    console.warn(
-      `[Roblox/bots] listForSaleGamepasses: ${all.length} passes found but ALL filtered out ` +
-      `for userId=${userId}. Sample:`, JSON.stringify(all[0])
-    );
-  }
-
-  return filtered
-    .map((gp: any): GamepassSearchResult => ({
-      gamepassId: gp.id,
-      productId:  gp.productId ?? 0,
-      placeId:    gp._placeId ?? 0,
-      name:       gp.name ?? gp.displayName ?? "Gamepass",
-      robux:      gp.price ?? 0,
-      sellerName: gp.creator?.name ?? fallbackUsername,
-      image:      thumbMap[gp.id]
-        ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
-    }));
+  const gamepasses = sellable.map((gp): GamepassSearchResult => ({
+    gamepassId: gp.id,
+    productId:  gp.productId,
+    placeId:    gp.placeId,
+    name:       gp.name,
+    robux:      gp.price ?? 0,
+    sellerName: gp.creatorName ?? fallbackUsername,
+    image:      thumbMap[gp.id]
+      ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
+  }));
+  return { gamepasses, games };
 }
 
 /**
@@ -1012,7 +1002,10 @@ async function searchViaBridge(
     const account = (body.account ?? null) as RobloxUserProfile | null;
     const userExists = typeof body.userExists === "boolean" ? body.userExists : true;
     if (!userExists) return { account: null, gamepasses: [] };
-    return { account, gamepasses };
+    const games = body.games && typeof body.games.visibility === "string"
+      ? { visibility: body.games.visibility as GamesVisibility, count: Number(body.games.count) || 0 }
+      : undefined;
+    return { account, gamepasses, games };
   } catch (err: any) {
     console.warn(`[Roblox/bots] Bridge unreachable for nick search "${username}": ${err?.message ?? err}`);
     return BRIDGE_UNAVAILABLE;
@@ -1429,7 +1422,8 @@ export interface CreateGamePassResult {
   name?: string;
   /**
    * Машинный код: bad_key | bad_scope | bad_scope_write | not_authorized |
-   * no_universe | bad_price | roblox_error | network.
+   * no_universe | games_hidden | nick_not_found | bad_game_link | bad_price |
+   * roblox_error | network.
    *
    * `bad_scope` — ключ не умеет ничего (выбран не тот API System);
    * `bad_scope_write` — читать умеет, создавать нет (отмечена одна операция).
@@ -1437,6 +1431,8 @@ export interface CreateGamePassResult {
   error?: string;
   /** Человекочитаемая деталь для админа (без ключа!). */
   detail?: string;
+  /** HTTP-статус Roblox при отказе создания — по нему решается повтор. */
+  httpStatus?: number;
 }
 
 /**
@@ -1492,53 +1488,75 @@ function isValidGamePassPrice(p: unknown): p is number {
   return typeof p === "number" && Number.isInteger(p) && p >= 1 && p <= 1_000_000;
 }
 
-/** placeId → universeId (эндпоинт уже используется в этом файле выше). */
-async function placeToUniverseDirect(placeId: string | number): Promise<string | null> {
-  try {
-    const res = await rFetch(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`);
-    if (!res.ok) return null;
-    const data: any = await res.json().catch(() => null);
-    return data?.universeId != null ? String(data.universeId) : null;
-  } catch {
-    return null;
-  }
-}
+/**
+ * Почему не нашлось ни одного опыта. У каждой причины своё действие покупателя,
+ * и сваливать их в одно «не нашли твою игру» нельзя — именно так 41 из 45
+ * отказов за пять дней (21.09.2026) звучали как тупик, хотя игра была:
+ *   nick_not_found — такого ника нет (опечатка);
+ *   network        — Roblox не ответил, повторить;
+ *   games_hidden   — инвентарь закрыт настройками и публичных игр нет:
+ *                    игра может быть, нужна ссылка на неё;
+ *   no_universe    — Roblox ответил, игр у аккаунта нет вовсе;
+ *   bad_game_link  — присланная ссылка не ведёт на игру.
+ */
+export type UniverseLookupFailure = "nick_not_found" | "network" | "games_hidden" | "no_universe" | "bad_game_link";
 
-/** Публичные experience'ы аккаунта (universeId). Скрытый плейс здесь не появится. */
-async function listUserUniverseIdsDirect(userId: number | string): Promise<string[]> {
-  const out: string[] = [];
+/** Ник → id, отличая «ника нет» от «Roblox не ответил». */
+async function lookupRobloxUserId(username: string): Promise<number | "not_found" | "network"> {
   try {
-    const res = await rFetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`,
-    );
-    if (!res.ok) return out;
+    const res = await rFetch("https://users.roblox.com/v1/usernames/users", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
+    });
+    if (!res.ok) return "network";
     const data: any = await res.json().catch(() => null);
-    for (const g of data?.data ?? []) if (g?.id != null) out.push(String(g.id));
+    const id = Number(data?.data?.[0]?.id);
+    return Number.isFinite(id) && id > 0 ? id : "not_found";
   } catch {
-    /* ignore */
+    return "network";
   }
-  return out;
 }
 
 /**
- * Кандидаты-universe в порядке приоритета: явный universeId → placeId → ник.
- * Скрытый плейс в публичном списке не появится — тогда нужен явный universeId/
- * placeId (клиент даёт ссылку на опыт).
+ * Кандидаты-universe в порядке приоритета: явный universeId → placeId → игры
+ * аккаунта по нику (публичные И закрытые, см. `roblox-owned-games.ts`).
+ * Явная ссылка на игру — ответ покупателя на `games_hidden`.
  */
 export async function resolveUniverseCandidatesDirect(
   params: Pick<CreateGamePassParams, "universeId" | "placeId" | "username">,
-): Promise<string[]> {
+): Promise<{ candidates: string[]; failure?: UniverseLookupFailure }> {
   const cands: string[] = [];
-  if (params.universeId != null) cands.push(String(params.universeId));
+  let explicitFailure: UniverseLookupFailure | undefined;
+  if (params.universeId != null && /^\d{1,20}$/.test(String(params.universeId))) {
+    cands.push(String(params.universeId));
+  }
   if (params.placeId != null) {
-    const u = await placeToUniverseDirect(params.placeId);
-    if (u) cands.push(u);
+    const res = await rGetJson(`https://apis.roblox.com/universes/v1/places/${params.placeId}/universe`);
+    if (res?.ok && res.body?.universeId != null) cands.push(String(res.body.universeId));
+    else explicitFailure = res ? "bad_game_link" : "network";
   }
-  if (params.username && params.username.trim()) {
-    const userId = await resolveRobloxUserId(params.username.trim());
-    if (userId != null) cands.push(...(await listUserUniverseIdsDirect(userId)));
+
+  let nickFailure: UniverseLookupFailure | undefined;
+  const username = params.username?.trim();
+  if (username) {
+    const userId = await lookupRobloxUserId(username);
+    if (userId === "not_found") nickFailure = "nick_not_found";
+    else if (userId === "network") nickFailure = "network";
+    else {
+      const owned = await listOwnedUniverses(userId, rGetJson);
+      cands.push(...owned.universes.map((u) => u.universeId));
+      if (owned.universes.length === 0) {
+        nickFailure = owned.visibility === "hidden" ? "games_hidden"
+          : owned.visibility === "none" ? "no_universe"
+          : "network";
+      }
+    }
   }
-  return [...new Set(cands)];
+
+  const candidates = [...new Set(cands)];
+  if (candidates.length > 0) return { candidates };
+  return { candidates, failure: explicitFailure ?? nickFailure ?? "no_universe" };
 }
 
 /** Довести пасс до «в продаже» (PATCH, 204). Подстраховка на случай isForSale=false. */
@@ -1569,7 +1587,44 @@ async function patchGamePassOnSaleDirect(
  * bad_scope (ключ не на том API System, перебор не поможет); прочий 403 →
  * not_authorized (чужой опыт) → следующий кандидат.
  */
+/** Имя, которое Roblox принимает всегда: латиница без пробелов. */
+export const LATIN_GAMEPASS_NAME = "RobloxBank";
+
+/**
+ * Создать пасс; на 5xx — один повтор с латинским именем.
+ *
+ * 13.09.2026 закрытый опыт ответил `500 InternalError` на кириллическое имя из
+ * брендового пула, а `RobloxBank` прошёл с первого раза. Пока поиск видел
+ * только публичные игры, это было редкостью; теперь пассы создаются и на
+ * закрытых опытах, и без повтора такой отказ стал бы обычным делом.
+ *
+ * Перед повтором проверяем, не создался ли пасс всё-таки: `create` не
+ * идемпотентен, и второй пасс на аккаунте покупателя хуже, чем отказ.
+ */
 export async function createGamePassDirect(
+  apiKey: string,
+  universeId: string,
+  name: string,
+  priceInRobux: number,
+): Promise<CreateGamePassResult> {
+  const first = await createGamePassOnce(apiKey, universeId, name, priceInRobux);
+  if (first.ok || (first.httpStatus ?? 0) < 500 || name === LATIN_GAMEPASS_NAME) return first;
+
+  // Только свежий: старый пасс с тем же именем и ценой мог остаться от прошлого
+  // заказа и быть уже выкупленным — второй раз его не купить.
+  const since = Date.now() - 10 * 60_000;
+  const listed = await listUniversePasses([{ universeId, placeId: 0, source: "inventory" }], rGetJson).catch(() => []);
+  const ghost = listed.find((p) =>
+    p.name === name && p.price === priceInRobux && p.createdAt != null && p.createdAt >= since);
+  if (ghost) {
+    console.warn(`[Roblox/bots] create: ${first.httpStatus}, но пасс ${ghost.id} уже создан — берём его`);
+    return { ok: true, gamePassId: ghost.id, universeId, priceInRobux, isForSale: ghost.isForSale, name };
+  }
+  console.warn(`[Roblox/bots] create: HTTP ${first.httpStatus} на имени «${name}» — повтор с латинским именем`);
+  return createGamePassOnce(apiKey, universeId, LATIN_GAMEPASS_NAME, priceInRobux);
+}
+
+async function createGamePassOnce(
   apiKey: string,
   universeId: string,
   name: string,
@@ -1611,7 +1666,13 @@ export async function createGamePassDirect(
       return { ok: false, error: "not_authorized", universeId, detail: "ключ не авторизован на этот experience" };
     }
     if (!res.ok) {
-      return { ok: false, error: "roblox_error", universeId, detail: `HTTP ${res.status}: ${text.slice(0, 300)}` };
+      return {
+        ok: false,
+        error: "roblox_error",
+        universeId,
+        httpStatus: res.status,
+        detail: `HTTP ${res.status}: ${text.slice(0, 300)}`,
+      };
     }
     let body: any = null;
     try { body = JSON.parse(text); } catch { /* ignore */ }
@@ -1681,9 +1742,9 @@ export async function verifyGamePassKeyDirect(
   if (!params.apiKey || !params.apiKey.trim()) {
     return { ok: false, error: "bad_key", detail: "пустой ключ" };
   }
-  const candidates = await resolveUniverseCandidatesDirect(params);
+  const { candidates, failure } = await resolveUniverseCandidatesDirect(params);
   if (candidates.length === 0) {
-    return { ok: false, error: "no_universe", detail: "не удалось определить experience" };
+    return { ok: false, error: failure ?? "no_universe", detail: "не удалось определить experience" };
   }
 
   let last: VerifyGamePassKeyResult | null = null;
@@ -1793,12 +1854,12 @@ export async function createGamePassForUserDirect(
     return { ok: false, error: "bad_price", detail: `цена вне диапазона: ${params.priceInRobux}` };
   }
   const name = safeGamePassName(params.priceInRobux, params.name);
-  const candidates = await resolveUniverseCandidatesDirect(params);
+  const { candidates, failure } = await resolveUniverseCandidatesDirect(params);
   if (candidates.length === 0) {
     return {
       ok: false,
-      error: "no_universe",
-      detail: "не удалось определить experience (нужен universeId/placeId или публичный опыт по нику)",
+      error: failure ?? "no_universe",
+      detail: `не удалось определить experience (${failure ?? "no_universe"})`,
     };
   }
   let last: CreateGamePassResult | null = null;

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { getGamepassById } from "@/lib/roblox";
+import { bridgeConfigured, bridgeGamepassDetails } from "@/lib/roblox-bridge";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
 import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
@@ -63,33 +64,60 @@ let cachedCounts: {
 const COUNT_CACHE_TTL = 30_000;
 
 // ── П5: живая цена геймпасса для карточек очереди (кэш product-info) ────────
-const gpInfoCache = new Map<string, { price: number | null; isForSale: boolean; ts: number }>();
-const GP_INFO_TTL = 10 * 60_000;
+/** `live` — ответ первоисточника; `mirror` — кэширующее зеркало roproxy. */
+type GpInfo = { price: number | null; isForSale: boolean; source: "live" | "mirror" };
+const gpInfoCache = new Map<string, GpInfo & { ts: number }>();
+/** Кэш только для списков очереди; правка заказа всегда спрашивает заново. */
+const GP_INFO_TTL = 2 * 60_000;
 
 function gpIdOf(url: string | null | undefined): string | null {
   const m = url?.match(/game-pass(?:es)?\/(\d+)/);
   return m ? m[1] : null;
 }
 
-async function getGpInfoCached(gpId: string): Promise<{ price: number | null; isForSale: boolean } | null> {
+/**
+ * Живая цена пасса.
+ *
+ * 20.09.2026 в правке D53GT92 стояло «1 111 R$ ≠ 715», когда пасс уже стоил
+ * 715: цена жила 10 минут в памяти процесса, а при сбое первоисточника
+ * подменялась зеркалом roproxy, которое само кэширует. Теперь порядок такой:
+ * первоисточник напрямую → он же через SG-мост → зеркало, и ответ зеркала
+ * помечен `mirror`, чтобы экран не выдавал его за живой. `fresh` — мимо кэша.
+ */
+async function getGpInfoCached(gpId: string, opts: { fresh?: boolean } = {}): Promise<GpInfo | null> {
   const hit = gpInfoCache.get(gpId);
-  if (hit && Date.now() - hit.ts < GP_INFO_TTL) return hit;
-  const urls = [
-    `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
-    `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
-  ];
-  for (const url of urls) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
-      if (r.ok) {
-        const j: any = await r.json().catch(() => null);
-        if (!j) continue;
-        const entry = { price: j.PriceInRobux ?? null, isForSale: j.IsForSale ?? false, ts: Date.now() };
-        gpInfoCache.set(gpId, entry);
-        return entry;
-      }
-    } catch { /* try next */ }
+  if (!opts.fresh && hit && Date.now() - hit.ts < GP_INFO_TTL) return hit;
+  const remember = (info: GpInfo): GpInfo => {
+    gpInfoCache.set(gpId, { ...info, ts: Date.now() });
+    return info;
+  };
+
+  try {
+    const r = await fetch(`https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`, {
+      signal: AbortSignal.timeout(6000),
+      cache: "no-store",
+    });
+    if (r.ok) {
+      const j: any = await r.json().catch(() => null);
+      if (j?.ProductId) return remember({ price: j.PriceInRobux ?? null, isForSale: j.IsForSale === true, source: "live" });
+    }
+  } catch { /* дальше — мост */ }
+
+  if (bridgeConfigured()) {
+    const d = await bridgeGamepassDetails(gpId).catch(() => null);
+    if (d) return remember({ price: d.isActive ? d.price : null, isForSale: d.isActive, source: "live" });
   }
+
+  try {
+    const r = await fetch(`https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`, {
+      signal: AbortSignal.timeout(6000),
+      cache: "no-store",
+    });
+    if (r.ok) {
+      const j: any = await r.json().catch(() => null);
+      if (j) return remember({ price: j.PriceInRobux ?? null, isForSale: j.IsForSale ?? false, source: "mirror" });
+    }
+  } catch { /* нет данных */ }
   return null;
 }
 
@@ -894,7 +922,7 @@ export async function POST(req: NextRequest) {
     else if (gpId) {
       const amount = Number(body.amount) || out.code?.denomination || 0;
       const expected = amount > 0 ? Math.ceil(amount / 0.7) : null;
-      const info = await getGpInfoCached(gpId);
+      const info = await getGpInfoCached(gpId, { fresh: true });
       const candidates = await (prisma as any).wbOrder.findMany({
         where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
         orderBy: { createdAt: "desc" }, take: 5,
@@ -912,6 +940,8 @@ export async function POST(req: NextRequest) {
         gamepassId: gpId,
         livePrice: info?.price ?? null,
         isForSale: info?.isForSale ?? null,
+        /** `mirror` — цена из кэширующего зеркала, первоисточник не ответил. */
+        priceSource: info?.source ?? null,
         expected,
         priceMismatch: expected != null && info?.price != null && Math.abs(info.price - expected) > 2,
         sellerMatch,
@@ -1085,7 +1115,7 @@ export async function POST(req: NextRequest) {
 
     if (isDirect) {
       if (!gpId) return NextResponse.json({ error: "Выбери геймпасс из результатов поиска" }, { status: 400 });
-      const info = await getGpInfoCached(gpId);
+      const info = await getGpInfoCached(gpId, { fresh: true });
       if (!info?.price || info.isForSale === false)
         return NextResponse.json({ error: "Не удалось подтвердить цену геймпасса или он снят с продажи" }, { status: 400 });
       // Для ручного DIRECT сумма клиенту = цена геймпасса × 70%.

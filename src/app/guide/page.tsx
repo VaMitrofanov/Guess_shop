@@ -1,5 +1,7 @@
 import { Metadata } from "next";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { repairEscapedQuery } from "@/lib/escaped-query";
 import GuideClient from "./GuideClient";
 import { platformFromUserAgent } from "@/lib/device-platform";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
@@ -19,7 +21,13 @@ interface GuidPageProps {
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom, preview, amount, username, flow, keyauto, stage } = await searchParams;
+  const params = await searchParams;
+  // Ссылка из чата WB могла прийти с `&amp;` (WB экранирует текст с 16.09.2026):
+  // тогда параметры называются `amp;skip`/`amp;code`, и код не подставляется.
+  // Переадресуем на чистый адрес — покупатель попадает ровно туда, куда вела ссылка.
+  const repaired = repairEscapedQuery(params as Record<string, string | string[] | undefined>);
+  if (repaired) redirect(`/guide?${repaired}`);
+  const { source, skip, code, test, nom, preview, amount, username, flow, keyauto, stage } = params;
   // Телефон или компьютер: вход в Creator Hub на них разный, и кадры инструкции
   // тоже. Догадка приходит в первом HTML, чтобы страница не мигала после
   // гидратации; в браузере она уточняется, а переключатель её перекрывает.

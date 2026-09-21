@@ -13,6 +13,8 @@
  * On process restart the bot re-derives state from the DB (see handlers.ts).
  */
 
+import { createHeldApiKeyStore } from "../shared/held-api-key";
+
 interface DirectFlowData {
   amount: number;
   totalAmount: number;
@@ -49,6 +51,9 @@ export type VKState =
   | { type: "AWAITING_NICK_EDIT" };
 
 const store = new Map<number, VKState>();
+
+/** Ключ, ждущий ссылку на игру (игры по нику не видны). Только память, 15 минут. */
+export const heldGameKeys = createHeldApiKeyStore();
 
 export function getState(vkUserId: number): VKState | undefined {
   return store.get(vkUserId);

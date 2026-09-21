@@ -17,6 +17,9 @@ const ACTIVATION_CODE_RE = /(код(?:\s+активации)?\s*[:—-]?\s*)([A-
  * prose pattern above cannot see. Without this the code would survive in the
  * stored transcript inside the URL. */
 const ACTIVATION_CODE_URL_RE = /(\bcode=)([A-Z0-9]{7})(?![A-Z0-9])/gi;
+/** Короткая ссылка гейта для чата WB (`/wb/<код>`, с 21.09.2026) несёт код в
+ * пути — без этого шаблона он оставался бы в сохранённой переписке открытым. */
+const ACTIVATION_CODE_SHORT_URL_RE = /(\/wb\/)([A-Z0-9]{7})(?![A-Z0-9])/gi;
 
 function decodeKey(raw = process.env.WB_DELIVERY_ENCRYPTION_KEY ?? ""): Buffer {
   const value = raw.trim().replace(/^['"`]|['"`]$/g, "");
@@ -110,6 +113,7 @@ export function redactWbChatText(text: string): string {
     .replace(/\r\n?/g, "\n")
     .replace(ACTIVATION_CODE_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .replace(ACTIVATION_CODE_URL_RE, (_whole, prefix: string) => `${prefix}•••••••`)
+    .replace(ACTIVATION_CODE_SHORT_URL_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .slice(0, 2_000);
 }
 

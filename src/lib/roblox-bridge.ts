@@ -20,6 +20,8 @@
  * Зеркало потребителя моста в ботах — `bots/shared/roblox.ts`.
  */
 
+import type { GamesVisibility } from "../../bots/shared/roblox-owned-games";
+
 const BRIDGE_TIMEOUT_MS = 20_000;
 
 export type BridgeAccount = {
@@ -103,6 +105,8 @@ export type BridgeNickSearch = {
   userExists: boolean;
   account: BridgeAccount | null;
   gamepasses: BridgePass[];
+  /** Видны ли игры аккаунта; старый мост поле не отдаёт. */
+  games: { visibility: GamesVisibility; count: number } | null;
 };
 
 /** `null` отличает «мост не ответил» от «мост ответил, ника нет». */
@@ -122,7 +126,11 @@ export async function bridgeSearchGamepasses(username: string): Promise<BridgeNi
   const userExists = typeof body.userExists === "boolean"
     ? body.userExists
     : account !== null || gamepasses.length > 0;
-  return { userExists, account, gamepasses };
+  const rawGames = body.games as { visibility?: unknown; count?: unknown } | null | undefined;
+  const games = rawGames && typeof rawGames.visibility === "string"
+    ? { visibility: rawGames.visibility as GamesVisibility, count: Number(rawGames.count) || 0 }
+    : null;
+  return { userExists, account, gamepasses, games };
 }
 
 /** Полные данные одного геймпасса: продаётся ли, чей он, картинка, placeId. */

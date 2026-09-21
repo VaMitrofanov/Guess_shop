@@ -9,6 +9,7 @@ import {
   sanitizeTargets,
 } from "@/lib/gamepass-key-create";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
+import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
 
 /**
  * Создание геймпасса по ключу покупателя (инструкция V2, шаг «вставь ключ»).
@@ -106,12 +107,20 @@ export async function POST(req: NextRequest) {
   const nick = typeof body.nick === "string" ? body.nick.trim().replace(/^@/, "") : "";
   const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
   const targets = sanitizeTargets(body.targets);
+  // Ссылка на игру приходит, когда по нику игры не видны (закрытый инвентарь).
+  const rawGameRef = typeof body.gameRef === "string" ? body.gameRef.slice(0, 500) : "";
+  const game = rawGameRef ? parseExperienceRef(rawGameRef) : null;
 
   if (targets.length === 0) {
     return NextResponse.json({ ok: false, error: "bad_price" });
   }
+  // Кривой ник — это про ник, а не про игру: раньше здесь звучало «не нашли
+  // твою игру», и человек искал проблему не там.
   if (!NICK_RE.test(nick)) {
-    return NextResponse.json({ ok: false, error: "no_universe" });
+    return NextResponse.json({ ok: false, error: "nick_not_found" });
+  }
+  if (rawGameRef && !game) {
+    return NextResponse.json({ ok: false, error: "bad_game_link" });
   }
 
   let key: string;
@@ -127,7 +136,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const outcome = await createPassesWithKey({ key, nick, code, targets });
+  const outcome = await createPassesWithKey({ key, nick, code, targets, game });
 
   if (outcome.error) {
     return NextResponse.json({ ok: false, error: outcome.error, created: outcome.created });

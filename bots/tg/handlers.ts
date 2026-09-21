@@ -15,10 +15,11 @@ import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { assertOrderNotHeld } from "../shared/order-hold";
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, heldGameKeys, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { parseExperienceRef, type GamesVisibility } from "../shared/roblox-owned-games";
 import {
   createTargetsFor,
   netFromPrice,
@@ -49,7 +50,7 @@ import {
   looksLikeApiKey,
   recordAutocreateTrace,
 } from "../shared/gamepass-autocreate";
-import { keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
+import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
@@ -62,7 +63,7 @@ import { recordCompletedNotice } from "../shared/notice-delivery";
 import { requoteForPass } from "../shared/direct-requote";
 import { keyPitchText, noGamepassText, priceMismatchText } from "../shared/direct-gamepass-copy";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
-import { rememberRobloxApiKey } from "../shared/roblox-api-key-store";
+import { loadRobloxApiKeyForUser, rememberRobloxApiKey } from "../shared/roblox-api-key-store";
 import { formatOrderAge } from "../shared/order-age";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { twaLaunchUrl } from "../shared/twa-link";
@@ -2756,7 +2757,14 @@ function ownedFromSearch(all: { gamepassId: number | string; name: string; robux
  */
 async function showQuestPlan(
   ctx: any,
-  opts: { wbCode: string; denomination: number; nick: string; owned: OwnedPass[] },
+  opts: {
+    wbCode: string;
+    denomination: number;
+    nick: string;
+    owned: OwnedPass[];
+    /** Видны ли игры аккаунта — чтобы пустой результат не звучал как «игры нет». */
+    gamesVisibility?: GamesVisibility | null;
+  },
   edit?: (text: string, extra: Record<string, unknown>) => Promise<void>,
 ): Promise<CheckPlan> {
   const plan = planFromOwned(opts.denomination, opts.owned);
@@ -2775,6 +2783,7 @@ async function showQuestPlan(
       plan,
       keyEnabled: gamepassAutocreateEnabled(),
       wbCode: opts.wbCode,
+      gamesVisibility: opts.gamesVisibility,
     }),
     edit,
   );
@@ -2882,7 +2891,11 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   // Ветка ника в боте теперь считает тем же модулем (`gamepass-plan`), поэтому
   // на один и тот же аккаунт бот и сайт отвечают одинаково.
   const owned = outcome.status === "no_gamepasses" ? [] : ownedFromSearch(outcome.all);
-  await showQuestPlan(ctx, { wbCode: state.wbCode, denomination: state.denomination, nick, owned }, showResult);
+  await showQuestPlan(
+    ctx,
+    { wbCode: state.wbCode, denomination: state.denomination, nick, owned, gamesVisibility: outcome.games?.visibility },
+    showResult,
+  );
 }
 
 /** Id нашего пользователя по Telegram-аккаунту — нужен, чтобы взять ЕГО ключ. */
@@ -2947,14 +2960,23 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
   const pending = pendingApiKey.get(ctx.from.id);
   if (!pending) return;
   const quest = questPlans.get(ctx.from.id);
-  const key = raw.trim();
 
-  // Своё сообщение убираем первым делом, ещё до похода в Roblox.
-  try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* нет прав/старое — не беда */ }
+  // Ключ уже у нас и ждёт ссылку на игру (по нику игры не видны): ссылка —
+  // ответ на наш же вопрос, ключ заново не нужен.
+  const heldKey = heldGameKeys.get(ctx.from.id);
+  const game = heldKey ? parseExperienceRef(raw) : null;
+  const key = game && heldKey ? heldKey : raw.trim();
 
-  if (!looksLikeApiKey(key)) {
+  if (!game) {
+    // Своё сообщение убираем первым делом, ещё до похода в Roblox.
+    try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* нет прав/старое — не беда */ }
+  }
+
+  if (!game && !looksLikeApiKey(key)) {
     await ctx.reply(
-      "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой <b>Copy Key To Clipboard</b>.",
+      heldKey
+        ? `Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`
+        : "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой <b>Copy Key To Clipboard</b>.",
       { parse_mode: "HTML", ...Markup.inlineKeyboard([
         [Markup.button.url("📸 Шаги с картинками", guideUrlFor(pending.wbCode, pending.nick, "key"))],
         [Markup.button.callback("↩️ Другой способ", QUEST.fork)],
@@ -2988,7 +3010,7 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
     }
   };
 
-  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: prices });
+  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: prices, game });
 
   if (outcome.created.length > 0) {
     // След пишем ДО ответа покупателю: пасс уже создан на чужом аккаунте, и
@@ -3005,6 +3027,7 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
 
   if (!outcome.error && outcome.created.length > 0 && quest) {
     pendingApiKey.delete(ctx.from.id);
+    heldGameKeys.drop(ctx.from.id);
     const owned: OwnedPass[] = [
       ...quest.owned,
       ...outcome.created.map((c) => ({
@@ -3028,6 +3051,9 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
   }
 
   const verdict = keyCreateVerdict(outcome.error);
+  // Ключ годный, не хватает ссылки на игру — держим его до следующего сообщения.
+  if (verdict.needsGameLink && outcome.created.length === 0) heldGameKeys.hold(ctx.from.id, key);
+  else heldGameKeys.drop(ctx.from.id);
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }), edit);
 }
 
@@ -3044,19 +3070,27 @@ async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Pr
   const pending = pendingDirectKey.get(ctx.from.id);
   const flow = pendingDirectFlow.get(ctx.from.id);
   if (!pending || !flow) return;
-  const key = raw.trim();
+
+  // Ключ ждёт ссылку на игру — см. ту же развилку в `handleApiKeyInput`.
+  const heldKey = heldGameKeys.get(ctx.from.id);
+  const game = heldKey ? parseExperienceRef(raw) : null;
+  const key = game && heldKey ? heldKey : raw.trim();
 
   // Своё сообщение убираем первым делом, ещё до похода в Roblox.
-  try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* нет прав/старое — не беда */ }
+  if (!game) {
+    try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* нет прав/старое — не беда */ }
+  }
 
   const backKb = Markup.inlineKeyboard([
     [Markup.button.url("📸 Шаги с картинками", "https://robloxbank.ru/guide?source=direct&stage=key")],
     [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
   ]);
 
-  if (!looksLikeApiKey(key)) {
+  if (!game && !looksLikeApiKey(key)) {
     await ctx.reply(
-      "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой <b>Copy Key To Clipboard</b>.",
+      heldKey
+        ? `Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`
+        : "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой <b>Copy Key To Clipboard</b>.",
       { parse_mode: "HTML", ...backKb },
     );
     return;
@@ -3069,10 +3103,11 @@ async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Pr
     } catch { await ctx.reply(t, extra); }
   };
 
-  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: [pending.passPrice] });
+  const outcome = await createPassesByKey({ apiKey: key, nick: pending.nick, targets: [pending.passPrice], game });
   const created = outcome.created[0];
 
   if (created) {
+    heldGameKeys.drop(ctx.from.id);
     // Ключ храним зашифрованным на пользователе — следующий заказ создаст пасс
     // сам, без единого действия покупателя. Это и есть обещание «раз и навсегда».
     const dbUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
@@ -3100,6 +3135,8 @@ async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Pr
   }
 
   const verdict = keyCreateVerdict(outcome.error);
+  if (verdict.needsGameLink) heldGameKeys.hold(ctx.from.id, key);
+  else heldGameKeys.drop(ctx.from.id);
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: pending.nick }), edit);
 }
 
@@ -4986,6 +5023,15 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       if (outcome.error && outcome.created.length === 0) {
         const verdict = keyCreateVerdict(outcome.error);
+        // Игры по нику не видны: сохранённый ключ годный, ждём ссылку на игру
+        // следующим сообщением — тем же путём, что и присланный ключ.
+        if (verdict.needsGameLink) {
+          const stored = await loadRobloxApiKeyForUser(db as any, userId, quest.nick).catch(() => null);
+          if (stored) {
+            heldGameKeys.hold(ctx.from.id, stored.key);
+            pendingApiKey.set(ctx.from.id, { wbCode: quest.wbCode, denomination: quest.denomination, nick: quest.nick });
+          }
+        }
         await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), edit);
         return;
       }

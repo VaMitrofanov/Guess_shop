@@ -15,6 +15,53 @@ function wbGuideOrigin(origin = "https://robloxbank.ru"): string {
   return origin.replace(/\/$/, "");
 }
 
+/**
+ * Ссылка гейта для чата WB — без `&`.
+ *
+ * С 16.09.2026 WB экранирует текст чата: `&` доходит до покупателя как
+ * `&amp;`, и ссылка `…&skip=1&code=…` открывается с параметрами `amp;skip` и
+ * `amp;code` — код не подставляется (21.09: 14 из 42 гейтов DBS открыты
+ * именно так). Короткий адрес `/wb/<код>` обходится без `&` вовсе, а
+ * `src/app/wb/[...slug]/route.ts` разворачивает его в полный адрес гайда.
+ * Ветка ключа — сегментом `/key`, ник — единственным параметром `?u=`.
+ */
+export function wbGateShortUrl(
+  code: string,
+  origin = "https://robloxbank.ru",
+  opts: { nick?: string | null; stage?: "key" | null } = {},
+): string {
+  const stage = opts.stage === "key" ? "/key" : "";
+  const nick = opts.nick ? `?u=${encodeURIComponent(opts.nick)}` : "";
+  return `${wbGuideOrigin(origin)}/wb/${encodeURIComponent(code)}${stage}${nick}`;
+}
+
+const GATE_URL_IN_TEXT_RE =
+  /https?:\/\/([a-z0-9.-]+)\/guide\?source=wb&skip=1&code=([A-Z0-9]{7})((?:&(?:username|stage)=[^\s&]*)*)/gi;
+
+/**
+ * Текст, который WB доставит покупателю без искажений.
+ *
+ * WB экранирует `"` → `&#34;`, `&` → `&amp;`, `'` → `&#39;` (с 16.09.2026, и
+ * в наших сообщениях, и в сообщениях покупателей). Поэтому прямые кавычки
+ * становятся «ёлочками», апостроф — типографским, а ссылки гайда — короткими.
+ * Функция идемпотентна: повторный прогон ничего не меняет. Её зовёт
+ * единственная точка отправки (`sendBuyerChatMessage`) и зеркало консоли,
+ * чтобы сверка «наше сообщение ↔ эхо WB» видела один и тот же текст.
+ */
+export function wbChatSafeText(text: string): string {
+  return text
+    .replace(GATE_URL_IN_TEXT_RE, (_match, host: string, code: string, tail: string) => {
+      const params = new URLSearchParams(tail.replace(/^&/, ""));
+      return wbGateShortUrl(code, `https://${host}`, {
+        nick: params.get("username"),
+        stage: params.get("stage") === "key" ? "key" : null,
+      });
+    })
+    .replace(/"([^"\n]*)"/g, "«$1»")
+    .replace(/"/g, "”")
+    .replace(/'/g, "’");
+}
+
 /** Fallback for a buyer whose link did not open. `source=wb` is not decoration:
  * Traefik only routes `Path(/guide)` with that query to the guide container, so
  * a bare `/guide` never reaches it at all. */
@@ -38,7 +85,7 @@ export function wbGuideFallbackUrl(origin?: string): string {
 export function wbCodeRequestMessage(): string {
   return [
     "Здравствуйте! Для успешного получения заказа просим прислать код доставки — это 5-7 цифр"
-    + " в разделе \"Доставки\" приложения Wildberries, рядом с QR-кодом.",
+    + " в разделе «Доставки» приложения Wildberries, рядом с QR-кодом.",
     "Код необходимо направить в этот чат ТЕКСТОМ, ровно так, как он показан в приложении:"
     + " 111 111 или 111111. Скриншот или фото кода мы прочитать не сможем.",
     "Доставка заказов осуществляется Онлайн через этот чат, без необходимости физической доставки,"
@@ -68,7 +115,7 @@ export function wbGateMessage(
     `Спасибо, код доставки получен! Заказ подтверждён, ${amount} готовы к зачислению.`,
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
-    wbGateUrl(code, origin),
+    wbGateShortUrl(code, origin),
     `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,
     // Геймпасс назван прямо здесь: до страницы покупатель доходит с уже
     // сложившимся ожиданием «сейчас просто скажу ник», а без геймпасса
@@ -133,7 +180,7 @@ export function wbCodeRecheckMessage(): string {
     "Делать ничего не нужно: мы повторим ещё несколько раз в ближайшие часы и сразу пришлём"
     + " ссылку на получение заказа.",
     "Если код мог быть набран с ошибкой — пришлите его ещё раз текстом: это 5-7 цифр в приложении"
-    + " Wildberries, раздел \"Доставки\", рядом с QR-кодом вашего заказа.",
+    + " Wildberries, раздел «Доставки», рядом с QR-кодом вашего заказа.",
   ].join("\n\n");
 }
 
@@ -148,7 +195,7 @@ export function wbCodeRetryMessage(): string {
   return [
     "К сожалению, этот код доставки не подошёл — Wildberries его не принял.",
     "Пожалуйста, проверьте и пришлите код ещё раз текстом, как он показан в приложении"
-    + " (111 111 или 111111): это 5-7 цифр в приложении Wildberries, раздел \"Доставки\","
+    + " (111 111 или 111111): это 5-7 цифр в приложении Wildberries, раздел «Доставки»,"
     + " рядом с QR-кодом вашего заказа.",
     "Как только код подойдёт, сразу пришлём ссылку на получение — заказ никуда не денется.",
   ].join("\n\n");
@@ -187,14 +234,14 @@ export function wbGateReminderMessage(
         + " Если дело в нём, просто напишите в этот чат «помогите» — проведём по шагам"
         + " и всё получится. Отвечает живой человек.",
       "Если удобнее самому — вот ссылка, код в ней уже подставлен:",
-      wbGateUrl(code, origin),
+      wbGateShortUrl(code, origin),
     ].join("\n\n");
   }
   return [
     opening,
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
-    wbGateUrl(code, origin),
+    wbGateShortUrl(code, origin),
     `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,
     level === 1
       ? "На странице будет вся инструкция: указать ник Roblox, куда зачислить Robux,"
