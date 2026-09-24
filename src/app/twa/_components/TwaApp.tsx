@@ -1,58 +1,134 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import BottomNav from "./BottomNav";
-import Dashboard from "./screens/Dashboard";
-import AnalyticsScreen from "./screens/AnalyticsScreen";
-import StocksScreen from "./screens/StocksScreen";
-import CodesScreen from "./screens/CodesScreen";
-import CalcScreen from "./screens/CalcScreen";
+import { ToastHost } from "./Toast";
+import { C } from "./theme";
+import { haptic } from "./haptics";
+import type { WbDeliveryFocus } from "./screens/WbDeliveryScreen";
+
+const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
+const OrdersScreen    = dynamic(() => import("./screens/OrdersScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
+const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
+const WbDeliveryScreen = dynamic(() => import("./screens/WbDeliveryScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
+const EconomicsScreen = dynamic(() => import("./screens/EconomicsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+
+function ScreenSkeleton() {
+  return (
+    <div style={{ padding: "32px 16px", color: C.textSecondary, fontSize: 13, textAlign: "center" }}>
+      Загружаем экран…
+    </div>
+  );
+}
 
 declare global {
   interface Window {
+    __tgHash?: string;
     Telegram?: {
       WebApp?: {
         ready: () => void;
         expand: () => void;
         initData: string;
-        initDataUnsafe: { user?: { id: number; first_name?: string; username?: string } };
+        initDataUnsafe: {
+          user?: { id: number; first_name?: string; username?: string };
+          start_param?: string;
+        };
         colorScheme: "dark" | "light";
         themeParams: Record<string, string>;
+        platform?: string;
+        setHeaderColor?: (color: string) => void;
+        setBackgroundColor?: (color: string) => void;
+        setBottomBarColor?: (color: string) => void;
         close: () => void;
+        BackButton?: {
+          show: () => void;
+          hide: () => void;
+          onClick: (callback: () => void) => void;
+          offClick: (callback: () => void) => void;
+        };
       };
     };
   }
 }
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc";
+type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics";
 
 const SCREEN_TITLES: Record<Screen, string> = {
-  dashboard: "Главная",
-  analytics: "Аналитика",
-  stocks:    "Склад",
-  codes:     "Коды",
-  calc:      "Калькулятор",
+  dashboard:  "Главная",
+  orders:     "Заказы",
+  wb:         "Wildberries",
+  delivery:   "WB Доставка",
+  account:    "Аккаунт",
+  settings:   "Настройки",
+  system:     "Система",
+  economics:  "Экономика",
+};
+
+// Drill-down screens reachable from a parent tab (not in the bottom nav).
+// The title bar shows a back chevron to the parent instead of the date.
+const SCREEN_PARENT: Partial<Record<Screen, Screen>> = {
+  system: "settings",
 };
 
 export default function TwaApp() {
-  const [auth,     setAuth]     = useState<"loading" | "ok" | "error">("loading");
-  const [token,    setToken]    = useState<string | null>(null);
-  const [screen,   setScreen]   = useState<Screen>("dashboard");
-  const [debugMsg, setDebugMsg] = useState("");
+  const [auth,               setAuth]               = useState<"loading" | "ok" | "error">("loading");
+  const [token,              setToken]              = useState<string | null>(null);
+  const [screen,             setScreen]             = useState<Screen>(() => {
+    if (typeof window === "undefined") return "dashboard";
+    const q = new URLSearchParams(window.location.search).get("q");
+    const start = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    return q || start ? "orders" : "dashboard";
+  });
+  const [debugMsg,           setDebugMsg]           = useState("");
+  const [ordersBadge,        setOrdersBadge]        = useState(0);
+  const [dbsBadge,            setDbsBadge]            = useState(0);
+  // Pre-focus the Orders search when launched via admin notification deep-link.
+  // Accepts either ?q=... in the URL (works with InlineKeyboardButton.web_app
+  // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
+  const [orderQueryPreload,  setOrderQueryPreload]  = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const fromUrl = new URLSearchParams(window.location.search).get("q") ?? "";
+    const fromStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param ?? "";
+    return (fromUrl || fromStartParam || "").trim();
+  });
+  // Ф2: виджет «Ошибки» дашборда «Свои» открывает Заказы сразу на вкладке ERROR.
+  const [ordersTabPreload,   setOrdersTabPreload]   = useState<string>("");
+  // «Новый заказ» на главной раньше вёл на вкладку NEW (лента заказов, ждущих
+  // ссылку) — экран менялся, ничего не происходило. Теперь тот же тап открывает
+  // форму создания, которая уже живёт в Заказах.
+  const [ordersCreatePreload, setOrdersCreatePreload] = useState<"manual" | "direct" | null>(null);
+  const [wbTabPreload,       setWbTabPreload]       = useState<"analytics" | "reviews">("analytics");
+  const [deliveryFocusPreload, setDeliveryFocusPreload] = useState<WbDeliveryFocus | null>(null);
+  // Заказ DBS, найденный из общего поиска в «Заказах», открывается на своём
+  // экране с тем же запросом — иначе его пришлось бы вводить второй раз.
+  const [deliveryQueryPreload, setDeliveryQueryPreload] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
+
+    function extractInitDataFromHash(hash: string): string {
+      if (!hash || !hash.includes("tgWebAppData")) return "";
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      return params.get("tgWebAppData") ?? "";
+    }
 
     async function waitForInitData(maxMs = 3000): Promise<string> {
       const deadline = Date.now() + maxMs;
       while (Date.now() < deadline) {
         const id = window.Telegram?.WebApp?.initData;
         if (id) return id;
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
       }
       return "";
     }
 
     async function doAuth(payload: Record<string, unknown>) {
+      // platform (ios/android/macos/tdesktop…) — для серверного лога
+      // [twa-auth]: инструментирование риска #1 (наличие initData).
+      payload.platform = window.Telegram?.WebApp?.platform ?? "unknown";
       const res = await fetch("/api/twa/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,21 +152,40 @@ export default function TwaApp() {
     }
 
     (async () => {
+      // Signal Telegram that the app is ready — on some iOS versions this
+      // triggers the native side to populate initData/initDataUnsafe.
+      window.Telegram?.WebApp?.ready();
+      window.Telegram?.WebApp?.expand();
+
       const stored = localStorage.getItem("twa_token");
 
       if (stored) {
-        const r = await fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
+        const r = await fetch("/api/twa/ping", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
         if (cancelled) return;
         if (r?.ok) {
-          setToken(stored);
+          // U1: TTL сокращён до 2 ч, ping тихо продлевает пропуск при работе.
+          const body = await r.json().catch(() => null);
+          const fresh = typeof body?.token === "string" ? body.token : stored;
+          if (fresh !== stored) localStorage.setItem("twa_token", fresh);
+          setToken(fresh);
           setAuth("ok");
-          window.Telegram?.WebApp?.ready();
-          window.Telegram?.WebApp?.expand();
           return;
         }
         localStorage.removeItem("twa_token");
       }
 
+      // Fast path: initData already populated.
+      //
+      // U1: ветки с `initDataUnsafe.user.id` и `?uid=` убраны — они посылали
+      // серверу неподписанный Telegram ID, а он не секретен. Запасной путь
+      // теперь один: подписанный ботом `?k=` (см. bots/tg/admin/menu.ts).
+      const initDataEarly = window.Telegram?.WebApp?.initData;
+      if (initDataEarly) {
+        doAuth({ initData: initDataEarly });
+        return;
+      }
+
+      // Poll — SDK may still be hydrating after async beforeInteractive load.
       const initData = await waitForInitData();
       if (cancelled) return;
 
@@ -99,15 +194,31 @@ export default function TwaApp() {
         return;
       }
 
-      const unsafeUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      if (unsafeUser?.id) {
-        doAuth({ userId: unsafeUser.id, firstName: unsafeUser.first_name });
+      // Fallback: parse the hash captured by the inline script in layout.tsx
+      // before Next.js async script loading had a chance to run.
+      const earlyHash = window.__tgHash ?? "";
+      const hashInitData = extractInitDataFromHash(earlyHash) || extractInitDataFromHash(location.hash);
+      if (hashInitData) {
+        doAuth({ initData: hashInitData });
+        return;
+      }
+
+      // Fallback: iOS Telegram v9.6+ omits tgWebAppData from the hash
+      // entirely. Бот подписывает токен запуска и кладёт его в web_app-ссылку
+      // как `?k=` — знание публичного Telegram ID больше не даёт входа.
+      const linkToken = new URLSearchParams(window.location.search).get("k");
+      if (linkToken) {
+        doAuth({ linkToken });
         return;
       }
 
       if (!cancelled) {
         const sdk = window.Telegram?.WebApp;
-        setDebugMsg(`SDK:${sdk ? "ok" : "no"} initData:"${sdk?.initData ?? ""}" unsafe:${JSON.stringify(sdk?.initDataUnsafe?.user ?? null)}`);
+        setDebugMsg(
+          `SDK:${sdk ? "ok" : "no"} initData:"${sdk?.initData ?? ""}" ` +
+          `unsafe:${JSON.stringify(sdk?.initDataUnsafe?.user ?? null)} ` +
+          `hash:${earlyHash ? earlyHash.slice(0, 80) + "…" : "(empty)"}`
+        );
         setAuth("error");
       }
     })();
@@ -115,12 +226,77 @@ export default function TwaApp() {
     return () => { cancelled = true; };
   }, []);
 
+  // ready()+expand() гарантированно после реальной загрузки SDK: путь с
+  // сохранённым токеном раньше их пропускал, и на iOS Telegram viewport мог
+  // остаться неразвёрнутым (нижний бар за пределами видимой области).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const deadline = Date.now() + 6000;
+      while (!cancelled && Date.now() < deadline) {
+        const wa = window.Telegram?.WebApp;
+        if (wa) {
+          // Keep Telegram's native chrome and the WebView underlay aligned
+          // with the TWA canvas during keyboard and sheet transitions. Color
+          // methods are isolated because older SDK versions may reject one of
+          // them; ready/expand must still run in that case.
+          try { wa.setHeaderColor?.(C.bg); } catch { /* unsupported SDK */ }
+          try { wa.setBackgroundColor?.(C.bg); } catch { /* unsupported SDK */ }
+          try { wa.setBottomBarColor?.(C.bg); } catch { /* unsupported SDK */ }
+          try { wa.ready(); wa.expand(); } catch { /* SDK ещё гидрируется */ }
+          return;
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch urgent orders count for badge after auth.
+  // Uses the lightweight /urgent-count endpoint (single COUNT on indexed
+  // status column) instead of the full Orders pipeline.
+  const refreshBadge = useCallback(() => {
+    if (!token) return;
+    fetch("/api/twa/orders/urgent-count", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setOrdersBadge(d.count ?? 0); })
+      .catch(() => {});
+    fetch("/api/twa/wb-delivery/active-count", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setDbsBadge(d.count ?? 0); })
+      .catch(() => {});
+  }, [token]);
+
+  useEffect(() => {
+    if (auth !== "ok" || !token) return;
+    refreshBadge();
+    const iv = setInterval(refreshBadge, 30_000);
+    return () => clearInterval(iv);
+  }, [auth, token, refreshBadge]);
+
   if (auth === "loading") {
+    // Skeleton matches the post-auth chrome (title bar + content + bottom nav)
+    // so the visual transition to the real Orders screen is a fade-in,
+    // not a layout pop. Cuts perceived load time even when the JWT verify
+    // takes its usual ~150 ms.
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#8e8e93" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>🟣</div>
-          <div style={{ fontSize: 14 }}>Загрузка…</div>
+      <div className="twa-root twa-liquid-root twa-loading-shell" style={{
+        display: "flex", flexDirection: "column",
+        background: C.bg, color: C.textPrimary,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}>
+        <div className="twa-liquid-titlebar">
+          <div style={{ width: 118, height: 24, borderRadius: 7, background: C.elevated }} />
+          <div style={{ width: 74, height: 12, borderRadius: 5, background: C.elevated, marginTop: 5 }} />
+        </div>
+        <div style={{ flex: 1, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} style={{
+              height: 96, borderRadius: 20, background: C.card,
+              boxShadow: "0 1px 0 rgba(255,255,255,0.04) inset",
+              opacity: 0.7 - i * 0.12,
+            }} />
+          ))}
         </div>
       </div>
     );
@@ -128,7 +304,7 @@ export default function TwaApp() {
 
   if (auth === "error") {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#ff453a", padding: 24 }}>
+      <div className="twa-root twa-liquid-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.red, padding: 24 }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
@@ -142,30 +318,67 @@ export default function TwaApp() {
   const sp = { token: token! };
 
   return (
-    <div style={{
-      display: "flex", flexDirection: "column", height: "100dvh",
-      background: "#1c1c1e",
+    <div className="twa-root twa-liquid-root" style={{
+      display: "flex", flexDirection: "column",
+      background: C.bg,
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      color: "#fff",
+      color: C.textPrimary,
     }}>
-      {/* Title bar */}
-      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #2c2c2e", flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
-        <div style={{ fontSize: 12, color: "#636366", marginTop: 1 }}>
-          {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
-        </div>
+      {/* Title bar — doubles as a context zone: back chevron on drill-down
+          screens, date otherwise. */}
+      <div className="twa-liquid-titlebar">
+        {(() => {
+          const parent = SCREEN_PARENT[screen];
+          if (parent) {
+            return (
+              <>
+                <button
+                  className="twa-press-sm"
+                  onClick={() => { haptic.select(); setScreen(parent); }}
+                  style={{
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 3,
+                    color: C.accent, fontSize: 14, fontWeight: 500, marginBottom: 2,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <span style={{ fontSize: 19, lineHeight: 1, marginTop: -1 }}>‹</span>
+                  {SCREEN_TITLES[parent]}
+                </button>
+                <div className="twa-liquid-title">{SCREEN_TITLES[screen]}</div>
+              </>
+            );
+          }
+          return (
+            <>
+              <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 1 }}>
+                {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
+              </div>
+              <div className="twa-liquid-title">{SCREEN_TITLES[screen]}</div>
+            </>
+          );
+        })()}
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {screen === "dashboard" && <Dashboard       {...sp} />}
-        {screen === "analytics" && <AnalyticsScreen  {...sp} />}
-        {screen === "stocks"    && <StocksScreen     {...sp} />}
-        {screen === "codes"     && <CodesScreen      {...sp} />}
-        {screen === "calc"      && <CalcScreen       {...sp} />}
+      <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        {screen === "dashboard"  && <Dashboard      {...sp}
+          onOpenOrders={(query, tab) => { setOrderQueryPreload(query ?? ""); setOrdersTabPreload(tab ?? ""); setScreen("orders"); }}
+          onOpenInbox={() => { setWbTabPreload("reviews"); setScreen("wb"); }}
+          onOpenDelivery={(focus) => { setDeliveryFocusPreload(focus ?? null); setDeliveryQueryPreload(""); setScreen("delivery"); }}
+          onCreateOrder={(mode) => { setOrdersCreatePreload(mode); setScreen("orders"); }}
+        />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} initialCreate={ordersCreatePreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); setOrdersCreatePreload(null); }} onOpenDelivery={(q) => { setDeliveryQueryPreload(q); setDeliveryFocusPreload(null); setScreen("delivery"); }} />}
+        {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
+        {screen === "delivery"   && <WbDeliveryScreen {...sp} initialFocus={deliveryFocusPreload} initialQuery={deliveryQueryPreload} />}
+        {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
+        {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
+        {screen === "system"     && <SystemScreen    {...sp} />}
+        {screen === "economics"  && <EconomicsScreen {...sp} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} />
+      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} />
+      <ToastHost />
     </div>
   );
 }

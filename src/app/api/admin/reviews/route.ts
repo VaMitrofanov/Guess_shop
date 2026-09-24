@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { resolveAdminFromSession } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -13,9 +13,9 @@ const CreateReviewSchema = z.object({
   isVerified: z.boolean().default(true),
 });
 
+// A1: доступ решает единственный гейт, а не сверка `role` из сессии.
 async function requireAdmin() {
-  const session = await auth();
-  return (!session || (session.user as any).role !== "ADMIN") ? null : session;
+  return resolveAdminFromSession();
 }
 
 export async function GET() {

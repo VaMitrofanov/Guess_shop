@@ -1,45 +1,18 @@
-'use client';
+"use client";
 
-import { motion } from 'framer-motion';
-import { HelpCircle } from 'lucide-react';
-import { GlowCard } from '@/components/ui/spotlight-card';
+import { motion } from "framer-motion";
+import styles from "@/app/public-sections.module.css";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } }
-};
+type PublicFaq = { id: string; question: string; answer: string };
 
-const item = {
-  hidden: { x: -20, opacity: 0 },
-  show: { x: 0, opacity: 1 }
-};
-
-export default function FAQClient({ initialFaqs }: { initialFaqs: any[] }) {
+export default function FAQClient({ initialFaqs }: { initialFaqs: PublicFaq[] }) {
   return (
-    <motion.div 
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="grid gap-4"
-    >
-      {initialFaqs.map((faq) => (
-        <motion.div key={faq.id} variants={item}>
-          <GlowCard
-            customSize
-            glowColor="golden"
-            className="group bg-[#141416] p-6 flex gap-6 items-start w-full"
-          >
-            <div className="pt-1 opacity-50 group-hover:opacity-100 transition-opacity flex-shrink-0">
-              <HelpCircle className="text-yellow-500" />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-lg font-bold uppercase tracking-tight text-zinc-100">{faq.question}</h3>
-              <p className="text-zinc-400 leading-relaxed font-medium">
-                {faq.answer}
-              </p>
-            </div>
-          </GlowCard>
-        </motion.div>
+    <motion.div initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: .04 } } }} className={styles.faqList}>
+      {initialFaqs.map((faq, index) => (
+        <motion.details key={faq.id} variants={{ hidden: { y: 12, opacity: 0 }, show: { y: 0, opacity: 1 } }} className={styles.faqItem} open={index === 0}>
+          <summary><span>{faq.question}</span><i>+</i></summary>
+          <div className={styles.faqAnswer}>{faq.answer}</div>
+        </motion.details>
       ))}
     </motion.div>
   );

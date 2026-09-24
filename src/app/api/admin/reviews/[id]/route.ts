@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { resolveAdminFromSession } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -15,8 +15,8 @@ const UpdateReviewSchema = z.object({
 
 function isValidId(id: string) { return /^[a-z0-9]{20,30}$/.test(id); }
 async function requireAdmin() {
-  const session = await auth();
-  return (!session || (session.user as any).role !== "ADMIN") ? null : session;
+  // A1: доступ решает единственный гейт, а не сверка `role` из сессии.
+  return resolveAdminFromSession();
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

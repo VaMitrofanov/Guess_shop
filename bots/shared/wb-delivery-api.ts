@@ -1,0 +1,263 @@
+import { z } from "zod";
+import {
+  WbBulkMutationResponseSchema,
+  decodeWbEntities,
+  WbChatEventsResponseSchema,
+  WbChatsResponseSchema,
+  WbDbsClientResponseSchema,
+  WbDbsOrdersResponseSchema,
+  WbDeliveryDatesResponseSchema,
+  WbStatusesResponseSchema,
+  WbClaimsResponseSchema,
+  type WbBulkMutationResponse,
+} from "./wb-delivery-contract";
+import { wbChatSafeText } from "./wb-gate-link";
+
+const MARKETPLACE_BASE = "https://marketplace-api.wildberries.ru";
+const CHAT_BASE = "https://buyer-chat-api.wildberries.ru";
+const RETURNS_BASE = "https://returns-api.wildberries.ru";
+
+type WbScope = "marketplace" | "chat";
+
+function cleanToken(value: string | undefined): string {
+  return (value ?? "").trim().replace(/^['"`]|['"`]$/g, "").trim();
+}
+
+function tokenFor(scope: WbScope): string {
+  const scoped = scope === "marketplace"
+    ? process.env.WB_MARKETPLACE_TOKEN
+    : process.env.WB_CHAT_TOKEN;
+  const token = cleanToken(scoped) || cleanToken(process.env.WB_API_TOKEN);
+  if (!token) throw new WbDeliveryApiError(scope, 503, "TOKEN_MISSING", false);
+  return token;
+}
+
+function safeProviderCode(body: unknown): string {
+  if (!body || typeof body !== "object") return "UNKNOWN";
+  const value = (body as Record<string, unknown>).code ?? (body as Record<string, unknown>).message;
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).replace(/[^a-z0-9_.-]/gi, "_").slice(0, 80)
+    : "UNKNOWN";
+}
+
+export class WbDeliveryApiError extends Error {
+  constructor(
+    readonly scope: WbScope,
+    readonly status: number,
+    readonly providerCode: string,
+    readonly outcomeUnknown: boolean,
+  ) {
+    super(`WB_${scope.toUpperCase()}_${status}_${providerCode}`);
+  }
+}
+
+async function requestJson<T>(
+  scope: WbScope,
+  url: string,
+  schema: z.ZodType<T>,
+  init: RequestInit = {},
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
+      ...init,
+      headers: {
+        Authorization: tokenFor(scope),
+        Accept: "application/json",
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new WbDeliveryApiError(scope, 0, "NETWORK_OR_TIMEOUT", init.method !== undefined && init.method !== "GET");
+  }
+  const body = response.status === 204 ? {} : await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new WbDeliveryApiError(scope, response.status, safeProviderCode(body), response.status >= 500);
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new WbDeliveryApiError(scope, 502, "SCHEMA_MISMATCH", false);
+  return parsed.data;
+}
+
+function jsonBody(body: unknown): Pick<RequestInit, "method" | "headers" | "body"> {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+export function wbDeliveryApiReadiness() {
+  return {
+    marketplace: Boolean(cleanToken(process.env.WB_MARKETPLACE_TOKEN) || cleanToken(process.env.WB_API_TOKEN)),
+    chat: Boolean(cleanToken(process.env.WB_CHAT_TOKEN) || cleanToken(process.env.WB_API_TOKEN)),
+    scopedMarketplace: Boolean(cleanToken(process.env.WB_MARKETPLACE_TOKEN)),
+    scopedChat: Boolean(cleanToken(process.env.WB_CHAT_TOKEN)),
+  };
+}
+
+/** Отзыв WB в сыром виде — берём только то, что нужно гейту выкупа. */
+const FeedbackSchema = z.object({
+  productValuation: z.number().optional(),
+  userName: z.string().optional(),
+  nmId: z.number().optional(),
+  productDetails: z.object({ nmId: z.number().optional() }).partial().optional(),
+  createdDate: z.string().optional(),
+  text: z.string().optional(),
+}).passthrough();
+const FeedbacksListSchema = z.object({
+  data: z.object({ feedbacks: z.array(FeedbackSchema).optional().default([]) }).partial().optional(),
+}).passthrough();
+
+/**
+ * Плохие отзывы (оценка ≤ 3) со всего кабинета — для гейта выкупа.
+ *
+ * Тянем обе половины (отвеченные и нет) одним широким `take`: у магазина этого
+ * размера отзывов сотни, не тысячи. Сеть молчит — отдаём пусто, гейт тогда
+ * просто ничего не блокирует по отзыву (fail-open: лучше не заморозить, чем
+ * заморозить вслепую).
+ */
+export async function fetchNegativeFeedbacks(): Promise<Array<z.infer<typeof FeedbackSchema>>> {
+  const base = "https://feedbacks-api.wildberries.ru/api/v1/feedbacks";
+  const out: Array<z.infer<typeof FeedbackSchema>> = [];
+  for (const isAnswered of ["true", "false"]) {
+    const page = await requestJson(
+      "marketplace",
+      `${base}?isAnswered=${isAnswered}&take=5000&skip=0&order=dateDesc`,
+      FeedbacksListSchema,
+    ).catch(() => null);
+    for (const f of page?.data?.feedbacks ?? []) {
+      if (Number(f.productValuation ?? 5) <= 3) out.push(f);
+    }
+  }
+  return out;
+}
+
+export async function fetchNewDbsOrders() {
+  return requestJson("marketplace", `${MARKETPLACE_BASE}/api/v3/dbs/orders/new`, WbDbsOrdersResponseSchema);
+}
+
+export async function fetchCompletedDbsOrders(input: { dateFrom: Date; dateTo: Date; next?: string }) {
+  const params = new URLSearchParams({
+    limit: "1000",
+    next: input.next ?? "0",
+    dateFrom: String(Math.floor(input.dateFrom.getTime() / 1000)),
+    dateTo: String(Math.floor(input.dateTo.getTime() / 1000)),
+  });
+  return requestJson("marketplace", `${MARKETPLACE_BASE}/api/v3/dbs/orders?${params}`, WbDbsOrdersResponseSchema);
+}
+
+export async function fetchDbsDeliveryDates(orderIds: string[]) {
+  if (orderIds.length === 0) return { orders: [] };
+  return requestJson(
+    "marketplace",
+    `${MARKETPLACE_BASE}/api/v3/dbs/orders/delivery-date`,
+    WbDeliveryDatesResponseSchema,
+    jsonBody({ orders: orderIds.map(Number) }),
+  );
+}
+
+/** Buyer identity for DBS orders. WB only serves this after `confirm`, and it
+ * is best-effort by design: a missing name costs the operator a nicer label,
+ * never the order. */
+export async function fetchDbsClients(orderIds: string[]) {
+  if (orderIds.length === 0) return { orders: [] };
+  return requestJson(
+    "marketplace",
+    `${MARKETPLACE_BASE}/api/v3/dbs/orders/client`,
+    WbDbsClientResponseSchema,
+    jsonBody({ orders: orderIds.map(Number) }),
+  );
+}
+
+export async function fetchDbsStatuses(orderIds: string[]) {
+  if (orderIds.length === 0) return { orders: [] };
+  return requestJson(
+    "marketplace",
+    `${MARKETPLACE_BASE}/api/marketplace/v3/dbs/orders/status/info`,
+    WbStatusesResponseSchema,
+    jsonBody({ ordersIds: orderIds.map(Number) }),
+  );
+}
+
+/**
+ * Заявки покупателей на возврат.
+ *
+ * Отдельный контур WB: в статусах DBS-заказа возврата не видно вообще, и заказ
+ * с открытой заявкой выглядит как обычный `receive/sold`. Архив спрашиваем
+ * тоже — решённая заявка уезжает туда сразу, а нам важен сам факт «человек
+ * просил деньги назад», а не её текущая стадия.
+ */
+export async function fetchBuyerClaims(isArchive: boolean) {
+  return requestJson(
+    "marketplace",
+    `${RETURNS_BASE}/api/v1/claims?is_archive=${isArchive ? "true" : "false"}&limit=200`,
+    WbClaimsResponseSchema,
+  );
+}
+
+export async function fetchBuyerChats() {
+  const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/chats`, WbChatsResponseSchema);
+  // Имя покупателя приходит экранированным так же, как текст (см. ниже).
+  for (const chat of response.result ?? []) {
+    if (chat.clientName) chat.clientName = decodeWbEntities(chat.clientName);
+    if (chat.lastMessage?.text) chat.lastMessage.text = decodeWbEntities(chat.lastMessage.text);
+  }
+  return response;
+}
+
+export async function fetchBuyerChatEvents(next?: string | null) {
+  const suffix = next ? `?next=${encodeURIComponent(next)}` : "";
+  const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/events${suffix}`, WbChatEventsResponseSchema);
+  // WB отдаёт текст экранированным (с 16.09.2026) — всё, что ниже по течению
+  // (коды, пассы, уведомления, лента консоли), видит его уже нормальным.
+  for (const event of response.result.events) {
+    if (event.message?.text) event.message.text = decodeWbEntities(event.message.text);
+    if (event.clientName) event.clientName = decodeWbEntities(event.clientName);
+  }
+  return response;
+}
+
+export async function sendBuyerChatMessage(replySign: string, message: string): Promise<void> {
+  const form = new FormData();
+  form.set("replySign", replySign);
+  // Единственная дверь в чат WB: здесь текст приводится к виду, который WB
+  // доставит без `&#34;`/`&amp;` (см. `wbChatSafeText`).
+  form.set("message", wbChatSafeText(message));
+  await requestJson("chat", `${CHAT_BASE}/api/v1/seller/message`, z.unknown(), { method: "POST", body: form });
+}
+
+async function bulkStatusAction(action: "confirm" | "deliver", orderId: string): Promise<WbBulkMutationResponse> {
+  return requestJson(
+    "marketplace",
+    `${MARKETPLACE_BASE}/api/marketplace/v3/dbs/orders/status/${action}`,
+    WbBulkMutationResponseSchema,
+    jsonBody({ ordersIds: [Number(orderId)] }),
+  );
+}
+
+export function confirmDbsOrder(orderId: string) {
+  return bulkStatusAction("confirm", orderId);
+}
+
+export function deliverDbsOrder(orderId: string) {
+  return bulkStatusAction("deliver", orderId);
+}
+
+export async function receiveDbsOrder(orderId: string, code: string): Promise<WbBulkMutationResponse> {
+  return requestJson(
+    "marketplace",
+    `${MARKETPLACE_BASE}/api/marketplace/v3/dbs/orders/status/receive`,
+    WbBulkMutationResponseSchema,
+    jsonBody({ orders: [{ orderId: Number(orderId), code }] }),
+  );
+}
+
+export function assertBulkOrderSucceeded(response: WbBulkMutationResponse, orderId: string): void {
+  const result = response.results.find((row) => row.orderId === orderId);
+  if (!result || result.isError) {
+    const providerCode = result?.errors[0]?.code ?? result?.errors[0]?.detail ?? "RESULT_MISSING";
+    throw new WbDeliveryApiError("marketplace", 409, String(providerCode), false);
+  }
+}

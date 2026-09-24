@@ -3,7 +3,7 @@
 # setup-swap.sh — one-shot configure 4 GB swap on the deploy host.
 #
 # Why:
-#   The deploy host is 89.110.94.117 (Ubuntu 22.04, 2 vCPU, 4 GB RAM, Moscow).
+#   The deploy host (Ubuntu 22.04, 2 vCPU, 4 GB RAM, Moscow — адрес в HANDOFF.md).
 #   Next.js 16 build comfortably hits 1.8–2.4 GB peak memory; combined with
 #   Docker daemon, Coolify\'s PHP-fpm, and the running container, total RAM
 #   pressure during build can exceed 4 GB. Without swap, the kernel\'s
@@ -21,7 +21,7 @@
 #   5. Print swap status
 #
 # How to run:
-#   ssh <user>@89.110.94.117
+#   ssh <user>@<deploy-host>   # адрес — в HANDOFF.md
 #   curl -O https://raw.githubusercontent.com/<your-org>/<repo>/main/scripts/setup-swap.sh
 #   sudo bash setup-swap.sh
 #
