@@ -22,6 +22,8 @@ export interface AccountMePayload {
   }>;
   email: string | null;
   emailVerified: boolean;
+  /** Бонус, который применится к заказу (R$). Нужен кассе ДО котировки: он меняет цену пасса. */
+  bonusRobux: number;
 }
 
 export const GUEST_ACCOUNT_PAYLOAD: Readonly<AccountMePayload> = Object.freeze({
@@ -31,6 +33,7 @@ export const GUEST_ACCOUNT_PAYLOAD: Readonly<AccountMePayload> = Object.freeze({
   robloxAccounts: [],
   email: null,
   emailVerified: false,
+  bonusRobux: 0,
 });
 
 export function accountMePayload(
@@ -40,6 +43,7 @@ export function accountMePayload(
     robloxAccounts?: AccountMePayload["robloxAccounts"];
     email?: string | null;
     emailVerifiedAt?: Date | null;
+    bonusRobux?: number | null;
   } | null | undefined,
 ): AccountMePayload {
   if (!user) return { ...GUEST_ACCOUNT_PAYLOAD };
@@ -50,5 +54,6 @@ export function accountMePayload(
     robloxAccounts: user.robloxAccounts ? [...user.robloxAccounts] : [],
     email: user.email ?? null,
     emailVerified: user.emailVerifiedAt instanceof Date,
+    bonusRobux: Math.max(0, Math.trunc(Number(user.bonusRobux ?? 0)) || 0),
   };
 }

@@ -5,18 +5,19 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import {
   createCanonicalWebOrder,
-  expectedPartPrice,
-  validateCheckoutGamepass,
-  validateCheckoutParts,
   validateCheckoutQuote,
   WebOrderError,
   type CheckoutPart,
 } from "@/lib/canonical-web-order";
 import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
-import { PRICE_TOL } from "@/lib/purchase-guard";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
+import { getCheckoutGamepassDetails, getGamepassDetails, getRobloxUser, getRobloxUserById } from "@/lib/roblox";
+import {
+  acceptGamepasses,
+  ownerSwitchNote,
+  type AcceptanceResult,
+} from "../../../../../bots/shared/gamepass-acceptance";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
 import { siteAcquiringDecision } from "@/lib/site-acquiring";
 import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
@@ -38,15 +39,65 @@ const CreateOrderSchema = z.object({
    * Первая часть обязана совпадать с `gamepassId`: он остаётся «головой» заказа
    * (по нему заказ ищется и он же едет в карточку админа).
    */
+  // Одна часть допустима и значит «обычный одиночный заказ»: до 24.09.2026 здесь
+  // стояло `.min(2)`, и план «хватит одного пасса» получал 400.
   parts: z
     .array(z.object({ gamepassId: z.string().regex(/^\d+$/), amount: z.number().int().positive() }))
-    .min(2)
+    .min(1)
     .max(MAX_AUTO_PARTS)
     .optional(),
   receiptEmail: z.email().max(254),
   agreedToTerms: z.literal(true),
   idempotencyKey: z.uuid(),
 });
+
+/**
+ * Приём пассов под заказ сайта — то же правило, что у гейта коридора ВБ
+ * (`bots/shared/gamepass-acceptance.ts`): пасс продаётся, цена каждой части
+ * сходится с её номиналом, весь набор — одного владельца, получатель — владелец
+ * пасса. Отличие одно и намеренное: Roblox молчит — отказываем с просьбой
+ * повторить, потому что деньги ещё не списаны.
+ */
+async function acceptForCheckout(input: {
+  orderAmount: number;
+  gamepassId: string;
+  parts?: readonly { gamepassId: string; amount: number }[] | null;
+  username: string;
+}) {
+  const robloxUser = await getRobloxUser(input.username).catch(() => null);
+  const owner = robloxUser?.id
+    ? { id: robloxUser.id, username: String(robloxUser.name ?? input.username) }
+    : null;
+  const accepted = await acceptGamepasses({
+    orderAmount: input.orderAmount,
+    gamepassId: input.gamepassId,
+    parts: input.parts ?? null,
+    claimedNick: owner?.username ?? input.username,
+    getDetails: async (id) => {
+      // Список пассов названного аккаунта — запасной источник, когда карточка
+      // пасса у Roblox не отвечает (`getCheckoutGamepassDetails`).
+      const d = owner ? await getCheckoutGamepassDetails(id, owner) : await getGamepassDetails(id);
+      return d ? { price: d.price, isActive: d.isActive, creatorId: d.creatorId, creatorName: d.creatorName ?? null } : null;
+    },
+    resolveCreatorName: async (creatorId) => (await getRobloxUserById(creatorId))?.name ?? null,
+    onUnreachable: "reject",
+  });
+  return accepted;
+}
+
+function acceptanceErrorResponse(accepted: Extract<AcceptanceResult, { ok: false }>) {
+  const status = accepted.code === "ROBLOX_UNAVAILABLE" ? 503 : accepted.code === "BAD_SPLIT" || accepted.code === "TOO_MANY_PARTS" ? 400 : 409;
+  return NextResponse.json(
+    {
+      error: accepted.message,
+      code: accepted.code,
+      expectedPrice: accepted.expectedPrice,
+      gamepassId: accepted.gamepassId,
+      retryable: accepted.code === "ROBLOX_UNAVAILABLE",
+    },
+    { status, headers: accepted.code === "ROBLOX_UNAVAILABLE" ? { "retry-after": "60" } : undefined },
+  );
+}
 
 /**
  * U9: адрес согласия с офертой берётся тем же `clientIp()`, что и лимиты —
@@ -195,6 +246,7 @@ export async function POST(req: NextRequest) {
         gamepassId: true,
         amount: true,
         paidAt: true,
+        splitGamepasses: { orderBy: { position: "asc" }, select: { gamepassId: true, amount: true } },
         paymentAttempts: {
           orderBy: { createdAt: "desc" },
           select: { status: true, paymentUrl: true, createdAt: true },
@@ -215,25 +267,22 @@ export async function POST(req: NextRequest) {
       if (live || existing.paidAt) {
         return NextResponse.json({ error: "Платёж уже обрабатывается" }, { status: 409 });
       }
-      if (
-        existing.gamepassId !== input.gamepassId ||
-        existing.robloxUsername?.toLowerCase() !== input.username.toLowerCase()
-      ) {
+      // Сверяем пасс, а не ник: получатель заказа — владелец пасса, и он мог
+      // отличаться от набранного ника с самого начала (пометка в заметке).
+      if (existing.gamepassId !== input.gamepassId) {
         return NextResponse.json({ error: "Данные сохранённого заказа изменились. Создайте новый заказ." }, { status: 409 });
       }
 
-      const robloxUser = await getRobloxUser(input.username);
-      if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
-      const gamepass = await getCheckoutGamepassDetails(input.gamepassId, {
-        id: robloxUser.id,
-        username: String(robloxUser.name ?? input.username),
+      // Перепроверяем СОХРАНЁННЫЙ набор: до 24.09.2026 здесь головной пасс
+      // набора сверялся с суммой всего заказа («цена должна быть 2858» на пассе
+      // 2143), и повтор оплаты заказа-набора упирался в ложный отказ.
+      const recheck = await acceptForCheckout({
+        orderAmount: existing.amount,
+        gamepassId: existing.gamepassId ?? input.gamepassId,
+        parts: existing.splitGamepasses.length > 1 ? existing.splitGamepasses : null,
+        username: existing.robloxUsername ?? input.username,
       });
-      if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
-      validateCheckoutGamepass(
-        { requestedRobux: existing.amount, bonusRobux: 0 },
-        gamepass,
-        Number(robloxUser.id),
-      );
+      if (!recheck.ok) return acceptanceErrorResponse(recheck);
 
       const retry = await createPaymentRetry({
         orderId: existing.id,
@@ -298,63 +347,36 @@ export async function POST(req: NextRequest) {
     });
     const checkedQuote = validateCheckoutQuote(quote, userId);
 
-    const robloxUser = await getRobloxUser(input.username);
-    if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
-    const robloxAccount = { id: robloxUser.id, username: String(robloxUser.name ?? input.username) };
-    const parts: CheckoutPart[] | undefined = input.parts;
-
-    if (parts) {
-      // Набор: сумма частей = сумме заказа, каждая часть кратна шагу и влезает
-      // в донора, и КАЖДЫЙ пасс проверяется по номиналу СВОЕЙ части.
-      validateCheckoutParts(checkedQuote, parts);
-      if (parts[0].gamepassId !== input.gamepassId) {
-        return NextResponse.json(
-          { error: "Первая часть должна совпадать с выбранным геймпассом", code: "PARTS_INVALID" },
-          { status: 400 },
-        );
-      }
-      // Один и тот же пасс законно стоит в нескольких частях (его выкупают
-      // РАЗНЫЕ доноры), поэтому Roblox спрашиваем один раз на пасс.
-      const seen = new Map<string, Awaited<ReturnType<typeof getCheckoutGamepassDetails>>>();
-      for (const part of parts) {
-        let details = seen.get(part.gamepassId);
-        if (details === undefined) {
-          details = await getCheckoutGamepassDetails(part.gamepassId, robloxAccount);
-          seen.set(part.gamepassId, details);
-        }
-        if (!details) {
-          return NextResponse.json({ error: `Геймпасс ${part.gamepassId} не найден` }, { status: 404 });
-        }
-        if (!details.isActive) {
-          throw new WebOrderError("GAMEPASS_NOT_FOR_SALE", `Геймпасс ${part.gamepassId} снят с продажи`);
-        }
-        if (details.creatorId !== Number(robloxUser.id)) {
-          throw new WebOrderError("GAMEPASS_OWNER_MISMATCH", `Геймпасс ${part.gamepassId} принадлежит другому аккаунту`);
-        }
-        const expected = expectedPartPrice(part.amount);
-        if (Math.abs(details.price - expected) > PRICE_TOL) {
-          throw new WebOrderError(
-            "GAMEPASS_PRICE_MISMATCH",
-            `Цена геймпасса ${part.gamepassId} должна быть ${expected} R$`,
-          );
-        }
-      }
-    } else {
-      const gamepass = await getCheckoutGamepassDetails(input.gamepassId, robloxAccount);
-      if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
-      validateCheckoutGamepass(checkedQuote, gamepass, Number(robloxUser.id));
+    // Сумма заказа — оплаченное ПЛЮС бонус: пассы закрывают всё, что придёт на
+    // аккаунт. Набор из одной части — обычный одиночный заказ.
+    const accepted = await acceptForCheckout({
+      orderAmount: checkedQuote.requestedRobux + checkedQuote.bonusRobux,
+      gamepassId: input.gamepassId,
+      parts: input.parts,
+      username: input.username,
+    });
+    if (!accepted.ok) return acceptanceErrorResponse(accepted);
+    if (!accepted.recipient) {
+      return NextResponse.json(
+        { error: "Не удалось определить владельца геймпасса — проверь ник и ссылку.", code: "NO_NICK" },
+        { status: 422 },
+      );
     }
+    const parts: CheckoutPart[] | undefined = accepted.split ? accepted.parts : undefined;
 
     const created = await createCanonicalWebOrder({
       quote: checkedQuote,
       userId,
-      username: String(robloxUser.name ?? input.username),
+      username: accepted.recipient,
       gamepassId: input.gamepassId,
       parts,
       receiptEmail: input.receiptEmail.toLowerCase(),
       idempotencyKey: input.idempotencyKey,
       termsIpAddress: consentIp(req),
       termsUserAgent: req.headers.get("user-agent"),
+      adminNote: accepted.ownerSwitchedFrom
+        ? ownerSwitchNote({ from: accepted.ownerSwitchedFrom, to: accepted.recipient, gamepassId: input.gamepassId })
+        : null,
     });
 
     try {

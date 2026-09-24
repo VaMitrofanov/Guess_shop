@@ -5,8 +5,7 @@ import { BONUS_REASONS, applyBonusDeltaTx, directOrderBonusKey } from "@/lib/bon
 import { hashStatusToken } from "@/lib/canonical-web-order";
 import { deterministicBotPublicOrderId, deterministicBotStatusToken } from "@/lib/bot-payment-auth";
 import { getGamepassById } from "@/lib/roblox";
-import { expectedGamepassPrice } from "../../bots/shared/gamepass-plan";
-import { passFitsAmount } from "../../bots/shared/direct-requote";
+import { acceptGamepasses, intentPartsRows } from "../../bots/shared/gamepass-acceptance";
 
 export const BOT_ORDER_TERMS_VERSION = "2026-08-09";
 export const DIRECT_INTENT_TTL_MS = 24 * 60 * 60_000;
@@ -62,22 +61,27 @@ async function assertIntentGamepassStillValid(intentId: string, platform: BotPla
   const gamepassId = intent.gamepassId ?? intent.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/)?.[1];
   if (!gamepassId) return;
 
-  const pass = await getGamepassById(String(gamepassId)).catch(() => null);
-  // Roblox молчит — не наш повод не пускать оплату.
-  if (!pass || !pass.price) return;
-
-  if (pass.isForSale === false) {
-    throw new BotPaymentError("GAMEPASS_CHANGED", "Геймпасс снят с продажи — включи «Item for sale» и оформи заказ заново");
+  // Общее правило приёма (как гейт ВБ и касса сайта) — по ВСЕМУ набору заявки,
+  // а не только по первому пассу. Roblox молчит — не наш повод не пускать оплату.
+  const accepted = await acceptGamepasses({
+    orderAmount: intent.totalAmount,
+    gamepassId: String(gamepassId),
+    parts: Array.isArray(intent.parts) ? (intent.parts as { gamepassId: unknown; amount: unknown }[]) : null,
+    claimedNick: intent.robloxUsername,
+    getDetails: async (id) => {
+      const pass = await getGamepassById(id).catch(() => null);
+      return pass
+        ? { price: Number(pass.price ?? 0), isActive: pass.isForSale !== false, creatorId: pass.creatorId, creatorName: pass.creatorName }
+        : null;
+    },
+    onUnreachable: "accept",
+  });
+  if (!accepted.ok) {
+    throw new BotPaymentError("GAMEPASS_CHANGED", `${accepted.message}. Поправь и оформи заказ заново`);
   }
-  if (!passFitsAmount(pass.price, intent.totalAmount)) {
-    const need = expectedGamepassPrice(intent.totalAmount);
-    throw new BotPaymentError(
-      "GAMEPASS_CHANGED",
-      `Цена геймпасса изменилась: сейчас ${pass.price} R$, а для ${intent.totalAmount} R$ нужен пасс на ${need} R$. Поправь цену и оформи заказ заново`,
-    );
-  }
-  if (intent.robloxUsername && pass.creatorName
-      && pass.creatorName.toLowerCase() !== intent.robloxUsername.toLowerCase()) {
+  // Получатель зафиксирован в заявке: пасс, ушедший к другому аккаунту после
+  // оформления, — уже не тот заказ, за который человек собирается платить.
+  if (accepted.ownerSwitchedFrom) {
     throw new BotPaymentError("GAMEPASS_CHANGED", "Геймпасс принадлежит другому аккаунту Roblox — оформи заказ заново со своим");
   }
 
@@ -85,15 +89,17 @@ async function assertIntentGamepassStillValid(intentId: string, platform: BotPla
      `AlreadyOwned`, а другой донор заплатил бы за то, что у нас уже есть.
      Клиент Kratos01395 привязал к заказу на 200 R$ пасс, купленный нами
      четырьмя днями раньше по другому заказу (08.09.2026). */
-  const reused = await prisma.wbOrder.findFirst({
-    where: { gamepassId: String(gamepassId), status: "COMPLETED", isTest: false },
-    select: { wbCode: true },
-  }).catch(() => null);
-  if (reused) {
-    throw new BotPaymentError(
-      "GAMEPASS_CHANGED",
-      "Этот геймпасс уже выкуплен по прошлому заказу — создай новый и оформи заказ заново",
-    );
+  for (const id of new Set(accepted.parts.map((part) => part.gamepassId))) {
+    const reused = await prisma.wbOrder.findFirst({
+      where: { gamepassId: id, status: "COMPLETED", isTest: false },
+      select: { wbCode: true },
+    }).catch(() => null);
+    if (reused) {
+      throw new BotPaymentError(
+        "GAMEPASS_CHANGED",
+        "Этот геймпасс уже выкуплен по прошлому заказу — создай новый и оформи заказ заново",
+      );
+    }
   }
 }
 
@@ -172,6 +178,11 @@ export async function createCanonicalBotOrder(input: {
           : null,
       },
     });
+
+    // Набор пассов заявки — в те же строки `WbOrderGamepass`, что у коридора ВБ
+    // и сайта: выкуп и обе админки читают разбиение оттуда.
+    const partRows = intentPartsRows(intent.parts, intent.totalAmount, order.id);
+    if (partRows) await tx.wbOrderGamepass.createMany({ data: partRows });
 
     if (intent.bonus > 0) {
       const bonus = await applyBonusDeltaTx(tx, {

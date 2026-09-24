@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
@@ -45,6 +46,18 @@ export const dynamic = "force-dynamic";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
+/**
+ * Чей ключ здесь разрешено брать: покупателя заказа по коду ВБ, а без кода —
+ * вошедшего покупателя сайта (касса, инструкция `source=site`). До 24.09.2026
+ * без кода ответ был всегда «ключа нет», и привязанный в кабинете ключ на
+ * прямой покупке с сайта не работал вовсе. Ник ключ не выбирает никогда.
+ */
+async function keyOwnerId(code: string): Promise<string | null> {
+  if (code) return orderOwnerId(code);
+  const session = await auth().catch(() => null);
+  return (session?.user as { id?: string } | undefined)?.id ?? null;
+}
+
 /** Покупатель этого заказа — единственный, чей ключ здесь разрешено брать. */
 async function orderOwnerId(code: string): Promise<string | null> {
   if (!CODE_RE.test(code)) return null;
@@ -74,10 +87,10 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = (url.searchParams.get("code") ?? "").trim().toUpperCase();
   const nick = (url.searchParams.get("nick") ?? "").trim().replace(/^@/, "");
-  if (!CODE_RE.test(code) || !NICK_RE.test(nick)) {
+  if ((code && !CODE_RE.test(code)) || !NICK_RE.test(nick)) {
     return NextResponse.json({ stored: false }, { headers: { "cache-control": "private, no-store" } });
   }
-  const userId = await orderOwnerId(code);
+  const userId = await keyOwnerId(code);
   const stored = userId ? Boolean(await loadRobloxApiKeyForUser(userId, nick).catch(() => null)) : false;
   return NextResponse.json({ stored }, { headers: { "cache-control": "private, no-store" } });
 }
@@ -125,7 +138,7 @@ export async function POST(req: NextRequest) {
 
   let key: string;
   if (useStored) {
-    const userId = await orderOwnerId(code);
+    const userId = await keyOwnerId(code);
     const stored = userId ? await loadRobloxApiKeyForUser(userId, nick).catch(() => null) : null;
     if (!stored) return NextResponse.json({ ok: false, error: "no_stored_key" });
     key = stored.key;
@@ -136,7 +149,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const outcome = await createPassesWithKey({ key, nick, code, targets, game });
+  // Без кода ключ запоминается за вошедшим покупателем — следующая покупка на
+  // сайте создаст пасс сама («создать за меня» без повторного ключа).
+  const ownerForNewKey = code ? null : await keyOwnerId("");
+  const outcome = await createPassesWithKey({ key, nick, code, userId: ownerForNewKey, targets, game });
 
   if (outcome.error) {
     return NextResponse.json({ ok: false, error: outcome.error, created: outcome.created });

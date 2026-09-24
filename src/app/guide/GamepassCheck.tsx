@@ -68,9 +68,16 @@ export default function GamepassCheck({
   initialPlatform = "mobile",
   keyAutoEnabled = false,
   initialStage,
+  sitePayAmount,
+  siteUseBonus = true,
 }: {
   mode: "WB" | "SITE" | "BOT";
+  /** Сколько придёт на аккаунт — под эту сумму собирается набор пассов. */
   amount: number;
+  /** Сайт: оплачиваемая часть, когда `amount` включает бонус. */
+  sitePayAmount?: number;
+  /** Сайт: покупатель отказался от бонуса — касса должна это помнить. */
+  siteUseBonus?: boolean;
   code?: string;
   initialUsername?: string;
   testMode?: boolean;
@@ -84,7 +91,6 @@ export default function GamepassCheck({
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
-  /** На сайте заказ несёт ОДИН `gamepassId` — набор из нескольких там был бы тупиком. */
   const planOptions = useMemo(
     // Сайт больше не «один пасс на заказ»: с 13.09.2026 оформление умеет набор,
     // и логика разбивки у сайта та же, что у коридора ВБ — иначе заказ на 2000
@@ -180,14 +186,15 @@ export default function GamepassCheck({
 
   // Есть ли привязанный ключ на этот ник — спрашиваем один раз на результат.
   useEffect(() => {
-    if (!keyAutoEnabled || !code || testMode || phase !== "result") return;
+    // Сайт без кода: владельца ключа сервер берёт из сессии покупателя.
+    if (!keyAutoEnabled || (!code && !isSite) || testMode || phase !== "result") return;
     const value = (account?.username ?? nick).trim();
     if (!NICK_RE.test(value)) return;
     let alive = true;
     (async () => {
       try {
         const res = await fetch(
-          `/api/roblox/gamepass-create?code=${encodeURIComponent(code)}&nick=${encodeURIComponent(value)}`,
+          `/api/roblox/gamepass-create?code=${encodeURIComponent(code ?? "")}&nick=${encodeURIComponent(value)}`,
         );
         if (!res.ok) return;
         const data = await res.json();
@@ -197,7 +204,7 @@ export default function GamepassCheck({
       }
     })();
     return () => { alive = false; };
-  }, [keyAutoEnabled, code, testMode, phase, account, nick]);
+  }, [keyAutoEnabled, code, isSite, testMode, phase, account, nick]);
 
   const replan = useCallback((passes: OwnedPass[]) => {
     setOwned(passes);
@@ -360,7 +367,7 @@ export default function GamepassCheck({
    * получать пассы, неудобные для выкупа. То же правило у ботов и у ветки ключа.
    */
   const runStoredKey = useCallback(async () => {
-    if (!code || storedBusy) return;
+    if ((!code && !isSite) || storedBusy) return;
     const value = (account?.username ?? nick).trim();
     const targets = createTargetsFor(amount);
     if (targets.length === 0) return;
@@ -411,10 +418,12 @@ export default function GamepassCheck({
     const recipient = account?.username ?? nick;
     if (isSite) {
       const params = new URLSearchParams({
-        amount: String(amount),
+        // Касса принимает ОПЛАЧИВАЕМУЮ сумму и сама добавит бонус.
+        amount: String(sitePayAmount ?? amount),
         username: recipient,
         gamepassId: parts[0].gamepassId,
       });
+      if (!siteUseBonus) params.set("bonus", "0");
       // Набор едет на оформление целиком: `ID:НОМИНАЛ` через запятую. Сумма
       // частей равна сумме заказа, и сервер сверяет каждую часть по её цене.
       if (parts.length > 1) {
@@ -450,7 +459,7 @@ export default function GamepassCheck({
     } finally {
       setConfirming(false);
     }
-  }, [plan, account, nick, isSite, amount, testMode, code, router]);
+  }, [plan, account, nick, isSite, amount, sitePayAmount, siteUseBonus, testMode, code, router]);
 
   const toCreate = plan ? targetsToCreate(plan) : [];
   const peekTargets: CreateTarget[] = useMemo(

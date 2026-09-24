@@ -19,9 +19,14 @@ import { createGamePassViaBridge } from "@/lib/roblox-gamepass-create";
 import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { appendOrderAudit } from "@/lib/order-recovery";
 import { auditGamepassAutocreated, type OrderAuditClient } from "@/lib/order-audit";
+import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
 
-/** Больше двух пассов на один заказ не бывает (разбивка номинала 2000). */
-export const MAX_TARGETS = 2;
+/**
+ * Сколько пассов создаём за раз — столько же частей умеет заказ
+ * (`MAX_AUTO_PARTS`). До 24.09.2026 здесь стояло 2, и набор под 3200
+ * (1500 + 1000 + 700) молча обрезался до двух пассов.
+ */
+export const MAX_TARGETS = MAX_AUTO_PARTS;
 export const MIN_PRICE = 1;
 export const MAX_PRICE = 100_000;
 export const CODE_RE = /^[A-Z0-9]{7}$/;
@@ -39,7 +44,7 @@ export interface KeyCreateOutcome {
   error?: string;
 }
 
-/** Отсечь мусор из цен: только целые в разумных пределах, не больше двух. */
+/** Отсечь мусор из цен: только целые в разумных пределах, не больше `MAX_TARGETS`. */
 export function sanitizeTargets(raw: unknown): number[] {
   return (Array.isArray(raw) ? raw : [])
     .map((t) => Number(t))
@@ -58,6 +63,8 @@ export async function createPassesWithKey(opts: {
   nick: string;
   /** Код ВБ, если заказ известен: по нему находится заказ для следа. */
   code: string;
+  /** Покупатель, когда кода нет (касса сайта под сессией): ключ запомнится за ним. */
+  userId?: string | null;
   targets: number[];
   /** Игра из присланной ссылки — ответ на «не видим твою игру». */
   game?: { universeId: string } | { placeId: string } | null;
@@ -88,6 +95,7 @@ export async function createPassesWithKey(opts: {
   if (created.length > 0) {
     await recordCreation({
       code: opts.code,
+      userId: opts.userId ?? null,
       nick: opts.nick,
       key: opts.key,
       created,
@@ -107,6 +115,7 @@ export async function createPassesWithKey(opts: {
  */
 async function recordCreation(opts: {
   code: string;
+  userId: string | null;
   nick: string;
   key: string;
   created: CreatedPass[];
@@ -123,7 +132,7 @@ async function recordCreation(opts: {
   await rememberRobloxApiKey({
     key: opts.key,
     robloxUsername: opts.nick,
-    userId: order?.userId ?? null,
+    userId: order?.userId ?? opts.userId ?? null,
     orderId: order?.id ?? null,
     result: opts.partial ? "partial" : "ok",
     createdPasses: opts.created.length,

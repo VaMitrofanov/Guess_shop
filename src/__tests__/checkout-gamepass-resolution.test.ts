@@ -19,6 +19,7 @@ describe("checkout gamepass resolution", () => {
       name: "Purchase pass",
       price: 143,
       creatorId: 42,
+      creatorName: "KrytishVadim4ick",
       isActive: true,
     });
   });

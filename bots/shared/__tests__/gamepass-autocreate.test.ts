@@ -66,10 +66,10 @@ describe("createPassesByKey", () => {
     expect(createMock).toHaveBeenCalledTimes(2);
   });
 
-  test("больше двух пассов на заказ не создаём", async () => {
+  test("пассов создаём не больше, чем частей умеет заказ (MAX_AUTO_PARTS = 4)", async () => {
     createMock.mockResolvedValue({ ok: true, gamePassId: 1, priceInRobux: 100 });
-    await createPassesByKey({ apiKey: KEY, nick: "Nick", targets: [100, 200, 300] });
-    expect(createMock).toHaveBeenCalledTimes(2);
+    await createPassesByKey({ apiKey: KEY, nick: "Nick", targets: [100, 200, 300, 400, 500] });
+    expect(createMock).toHaveBeenCalledTimes(4);
   });
 
   test("ключ не печатается в лог ни при успехе, ни при отказе", async () => {

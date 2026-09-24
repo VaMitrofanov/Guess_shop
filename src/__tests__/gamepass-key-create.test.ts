@@ -17,6 +17,7 @@ const mockAudit = jest.fn();
 const mockOrderFind = jest.fn();
 const mockOrderUpdate = jest.fn();
 
+jest.mock("@/auth", () => ({ auth: async () => null }));
 jest.mock("@/lib/roblox-gamepass-create", () => ({
   createGamePassViaBridge: (...args: unknown[]) => mockCreate(...args),
 }));
@@ -139,10 +140,10 @@ describe("POST /api/roblox/gamepass-create", () => {
     expect(data.created).toHaveLength(1);
   });
 
-  test("больше двух пассов на заказ не создаём", async () => {
+  test("пассов создаём не больше, чем частей умеет заказ (MAX_AUTO_PARTS = 4)", async () => {
     mockCreate.mockResolvedValue({ ok: true, gamePassId: 1, priceInRobux: 100 });
-    await POST(req({ key: KEY, nick: "mono262910", targets: [100, 100, 100, 100] }, "10.0.1.7"));
-    expect(mockCreate).toHaveBeenCalledTimes(2);
+    await POST(req({ key: KEY, nick: "mono262910", targets: [100, 100, 100, 100, 100, 100] }, "10.0.1.7"));
+    expect(mockCreate).toHaveBeenCalledTimes(4);
   });
 
   test("частим → 429 и мост не трогаем", async () => {

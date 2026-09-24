@@ -9,6 +9,7 @@ describe("public session probe", () => {
       robloxAccounts: [],
       email: null,
       emailVerified: false,
+      bonusRobux: 0,
     });
   });
 
@@ -30,6 +31,7 @@ describe("public session probe", () => {
       robloxAccounts: [],
       email: "owner@example.com",
       emailVerified: true,
+      bonusRobux: 0,
     });
   });
 
@@ -41,7 +43,13 @@ describe("public session probe", () => {
       robloxAccounts: [],
       email: null,
       emailVerified: false,
+      bonusRobux: 0,
     });
+  });
+
+  test("carries the customer's own bonus so checkout can price the pass before quoting", () => {
+    expect(accountMePayload({ robloxUsername: null, bonusRobux: 37 }).bonusRobux).toBe(37);
+    expect(accountMePayload({ robloxUsername: null, bonusRobux: -5 }).bonusRobux).toBe(0);
   });
 
   test("does not let a caller mutate the shared guest payload", () => {

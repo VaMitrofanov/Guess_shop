@@ -34,7 +34,10 @@ describe("ссылки на /guide", () => {
   test.each(BUYING)("%s ведёт покупателя в проверку аккаунта (flow=order)", (file) => {
     const source = read(file);
     const links = source.match(/\/guide\?source=site[^"`]*/g) ?? [];
-    expect(links.length).toBeGreaterThan(0);
+    // Касса собирает ссылку одним помощником (`guideHref`): сумма с бонусом и
+    // оплачиваемая часть — параметрами, а не склейкой строк.
+    const builder = /source: "site", flow: "order"/.test(source);
+    expect(links.length > 0 || builder).toBe(true);
     for (const link of links) expect(link).toContain("flow=order");
   });
 

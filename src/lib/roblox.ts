@@ -589,6 +589,8 @@ type CheckoutGamepass = {
   name: string;
   price: number;
   creatorId: number;
+  /** Владелец пасса — ему уйдут робуксы; получатель заказа берётся отсюда. */
+  creatorName?: string;
   isActive: boolean;
 };
 
@@ -628,6 +630,7 @@ export async function getCheckoutGamepassDetails(
     name: listedPass.name ?? "Gamepass",
     price: Number(listedPass.price ?? 0),
     creatorId: Number(owner.id),
+    creatorName: owner.username,
     isActive: listedPass.isForSale === true,
   };
 }

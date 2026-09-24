@@ -170,6 +170,8 @@ type CreateCanonicalWebOrderInput = {
   idempotencyKey: string;
   termsIpAddress: string | null;
   termsUserAgent?: string | null;
+  /** Заметка админу (например, «пасс другого ника» из приёма пассов). */
+  adminNote?: string | null;
   now?: Date;
 };
 
@@ -271,6 +273,7 @@ export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInpu
         robloxUsername: input.username,
         probableNick: input.username,
         probableNickAt: now,
+        ...(input.adminNote ? { adminNote: input.adminNote.slice(-2000) } : {}),
       },
     });
 

@@ -270,6 +270,10 @@ robloxUsername, userId+createdAt, heldAt, priorityAt).
 превращён в `WbOrder` `DIR-…` через Bot→Web hybrid checkout; legacy TG/TWA действия
 используют тот же compare-and-set) /
 `CANCELLED` (отклонён) / `EXPIRED` (>24 ч, авто). Предотвращает «мёртвые» полу-заказы.
+`parts Json?` (24.09.2026, миграция `20260924_direct_intent_parts`) — набор пассов
+`[{gamepassId, amount}]`, когда прямой заказ закрывается несколькими (как коридор ВБ);
+при создании заказа переносится в `WbOrderGamepass` (`intentPartsRows`). Пусто —
+одиночный пасс из `gamepassUrl`.
 
 С 24.07.2026 менеджер может создать прямой заказ вручную из TWA → Orders → «Прямой» → «+».
 После поиска ника Roblox выбирается for-sale геймпасс, сумма `WbOrder.amount` считается как

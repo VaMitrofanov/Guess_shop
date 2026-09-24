@@ -714,7 +714,9 @@ export const CB = {
   directRequote:      "dir_requote",                             // 11 b
   /** Ключ Roblox для прямого заказа: «сделаем пасс за тебя». */
   directKey:          "dir_key",                                 // 7 b
-  directPaySite:      (id: string) => `dps:${id}`,
+  /** Создать недостающие пассы СОХРАНЁННЫМ ключом — без повторного ввода. */
+  directKeyStored:    "dir_key_saved",                           // 13 b
+  directPaySite:     (id: string) => `dps:${id}`,
   directPayBank:      (id: string) => `dpb:${id}`,
   directPayManual:    (id: string) => `dpm:${id}`,
   directCancel:       "dir_cancel",                              // 10 b

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { accountMePayload } from "@/lib/account-session";
 import { prisma } from "@/lib/prisma";
+import { availableBonusRobux } from "@/lib/price-quote";
 import { loadCustomerRobloxProfile } from "@/lib/roblox-profile";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export async function GET() {
   const [user, roblox] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true, emailVerifiedAt: true },
+      select: { email: true, emailVerifiedAt: true, balance: true, bonusExpiresAt: true },
     }),
     loadCustomerRobloxProfile(userId),
   ]);
@@ -38,5 +39,6 @@ export async function GET() {
     })),
     email: user?.email ?? null,
     emailVerifiedAt: user?.emailVerifiedAt ?? null,
+    bonusRobux: availableBonusRobux(user),
   }), { headers: PRIVATE });
 }

@@ -25,16 +25,18 @@ const screen = read("src/app/twa/_components/screens/OrdersScreen.tsx");
 const presentation = read("src/lib/order-presentation.ts");
 const adminCards = read("bots/shared/admin.ts");
 const crons = read("bots/tg/crons.ts");
+const directPlan = read("bots/shared/direct-plan.ts");
 
 describe("Сервер перепроверяет пасс перед созданием заказа", () => {
   it("гейт стоит в каноническом создателе заказа бота", () => {
     expect(botOrder).toContain("await assertIntentGamepassStillValid(input.intentId, input.platform, input.subject);");
   });
 
-  it("сверяются цена, продавец и «в продаже»", () => {
-    expect(botOrder).toContain("passFitsAmount(pass.price, intent.totalAmount)");
-    expect(botOrder).toContain("pass.isForSale === false");
-    expect(botOrder).toContain("pass.creatorName.toLowerCase() !== intent.robloxUsername.toLowerCase()");
+  it("сверяются цена, продавец и «в продаже» — общим правилом приёма, по всему набору", () => {
+    // С 24.09.2026 — тот же модуль, что у гейта ВБ и кассы сайта.
+    expect(botOrder).toContain("acceptGamepasses({");
+    expect(botOrder).toContain("isActive: pass.isForSale !== false");
+    expect(botOrder).toContain("if (accepted.ownerSwitchedFrom)");
   });
 
   it("уже выкупленный пасс второй раз не принимается", () => {
@@ -43,7 +45,7 @@ describe("Сервер перепроверяет пасс перед созда
   });
 
   it("молчание Roblox не блокирует оплату — иначе наша недоступность станет отказом клиенту", () => {
-    expect(botOrder).toContain("if (!pass || !pass.price) return;");
+    expect(botOrder).toContain('onUnreachable: "accept"');
   });
 });
 
@@ -58,8 +60,10 @@ describe("Бот не предлагает оформить пасс не по �
   });
 
   it("пасс не той цены подписан тем, во что он превращается", () => {
-    expect(tg).toContain("→ заказ на ${Math.floor(g.robux * 0.7)} R$");
-    expect(vk).toContain("→ заказ на ${Math.floor(g.robux * 0.7)} R$");
+    // Один экран на оба бота (`direct-plan.ts`), слова — квеста ВБ.
+    expect(directPlan).toContain("→ заказ на ${netFromPrice(pass.price)} R$");
+    expect(tg).toContain("directNeedsScreen(");
+    expect(vk).toContain("directNeedsScreen(");
   });
 });
 

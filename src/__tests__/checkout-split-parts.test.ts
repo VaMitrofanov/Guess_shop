@@ -32,21 +32,29 @@ describe("набор пассов на сайте", () => {
     const source = read("src/app/checkout/page.tsx");
     expect(source).toContain("parsePartsParam");
     // Готовность к оплате — либо один пасс нужной цены, либо набор на всю сумму.
-    expect(source).toContain("planCoversAmount");
-    expect(source).toMatch(/parts: planCoversAmount && planParts/);
+    // Набор — это НЕСКОЛЬКО частей: план из одной части раньше уезжал на сервер
+    // «набором» и получал 400, теперь это обычный выбранный пасс.
+    expect(source).toContain("const planIsSet = planCoversAmount && rawPlanParts!.length > 1");
+    expect(source).toMatch(/parts: planIsSet && planParts/);
+    // Сумма набора — оплаченное плюс бонус: под неё и делаются пассы.
+    expect(source).toContain("=== orderTotal");
     // Смена суммы обнуляет набор ИНСТРУКЦИИ: он был посчитан под другой заказ.
-    // Собственный подбор страницы сбрасывать нечем и незачем — он производная
-    // (`ownedPlanParts`) и пересчитывается от новой суммы сам.
     expect(source).toMatch(/setGuidePlanParts\(null\)/);
-    expect(source).toMatch(/const planParts = guidePlanParts \?\? ownedPlanParts/);
+    // И смена ника тоже: набор чужого аккаунта не наш.
+    expect(source).toContain("const guidePartsForNick");
+    expect(source).toMatch(/const rawPlanParts = guidePartsForNick \?\? ownedPlanParts/);
   });
 
   test("сервер проверяет каждую часть отдельно и пишет разбивку в заказ", () => {
     const route = read("src/app/api/orders/create/route.ts");
-    expect(route).toContain("validateCheckoutParts");
-    expect(route).toContain("expectedPartPrice");
-    // Голова заказа обязана совпадать с первой частью — по ней заказ ищут.
-    expect(route).toContain("Первая часть должна совпадать");
+    // Одно правило приёма на все входы — то же, что у гейта коридора ВБ.
+    expect(route).toContain("acceptGamepasses");
+    expect(route).toContain('onUnreachable: "reject"');
+    // Повтор оплаты перепроверяет СОХРАНЁННЫЙ набор, а не голову против суммы.
+    expect(route).toContain("existing.splitGamepasses");
+    const acceptance = read("bots/shared/gamepass-acceptance.ts");
+    expect(acceptance).toContain("Первая часть должна совпадать");
+    expect(acceptance).toContain("MIXED_OWNERS");
 
     const core = read("src/lib/canonical-web-order.ts");
     expect(core).toContain("wbOrderGamepass.createMany");

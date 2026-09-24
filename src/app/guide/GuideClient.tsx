@@ -2870,6 +2870,8 @@ export default function GuideClient({
   previewMode = false,
   testNom,
   initialAmount = 1000,
+  sitePayAmount,
+  siteUseBonus = true,
   initialUsername = "",
   orderFlow = false,
   initialPlatform = "mobile",
@@ -2884,6 +2886,10 @@ export default function GuideClient({
   previewMode?: boolean;
   testNom?: number;
   initialAmount?: number;
+  /** Оплачиваемая часть заказа сайта, когда `initialAmount` уже включает бонус. */
+  sitePayAmount?: number;
+  /** Покупатель на кассе отказался от бонуса (`bonus=0`) — вернуть это в кассу. */
+  siteUseBonus?: boolean;
   initialUsername?: string;
   /** Человек пришёл с заказом (оформляет покупку), а не просто читает инструкцию. */
   orderFlow?: boolean;
@@ -3106,6 +3112,8 @@ export default function GuideClient({
       <GamepassCheck
         mode={guideMode === "BOT" ? "BOT" : "SITE"}
         amount={guideMode === "SITE" ? initialAmount : denomination || 1000}
+        sitePayAmount={guideMode === "SITE" ? sitePayAmount : undefined}
+        siteUseBonus={siteUseBonus}
         code={activeCode || undefined}
         initialUsername={initialUsername}
         initialPlatform={initialPlatform}

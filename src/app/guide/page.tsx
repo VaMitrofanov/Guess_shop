@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string; keyauto?: string; stage?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; pay?: string; bonus?: string; username?: string; flow?: string; keyauto?: string; stage?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
@@ -27,7 +27,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   // Переадресуем на чистый адрес — покупатель попадает ровно туда, куда вела ссылка.
   const repaired = repairEscapedQuery(params as Record<string, string | string[] | undefined>);
   if (repaired) redirect(`/guide?${repaired}`);
-  const { source, skip, code, test, nom, preview, amount, username, flow, keyauto, stage } = params;
+  const { source, skip, code, test, nom, preview, amount, pay, bonus, username, flow, keyauto, stage } = params;
   // Телефон или компьютер: вход в Creator Hub на них разный, и кадры инструкции
   // тоже. Догадка приходит в первом HTML, чтобы страница не мигала после
   // гидратации; в браузере она уточняется, а переключатель её перекрывает.
@@ -51,6 +51,11 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   const previewMode = isWB && preview === "1";
   const testNom = nom ? Math.max(0, parseInt(nom, 10) || 0) : undefined;
   const siteAmount = Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(amount ?? "1000", 10) || 1000));
+  // Касса шлёт `amount` = сколько придёт (с бонусом) — под неё делаются пассы, —
+  // и `pay` = оплачиваемая часть. Назад в кассу уходит именно `pay`, иначе бонус
+  // прибавился бы второй раз.
+  const parsedPay = parseInt(pay ?? "", 10);
+  const sitePayAmount = Number.isFinite(parsedPay) && parsedPay >= CUSTOM_MIN && parsedPay <= siteAmount ? parsedPay : undefined;
   // `flow=order` несут только ссылки из покупки (калькулятор, оформление, личный
   // кабинет). «Инструкция» из меню, футера и главной его не несёт — там человек
   // просто читает, и проверять у него нечего.
@@ -84,6 +89,8 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         previewMode={previewMode}
         testNom={testNom}
         initialAmount={siteAmount}
+        sitePayAmount={sitePayAmount}
+        siteUseBonus={bonus !== "0"}
         initialUsername={username ?? ""}
         orderFlow={orderFlow}
         initialPlatform={initialPlatform}

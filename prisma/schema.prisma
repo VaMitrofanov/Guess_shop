@@ -1324,6 +1324,9 @@ model DirectIntent {
   robloxUsername String
   gamepassId     String
   gamepassUrl    String
+  /// Набор пассов `[{ gamepassId, amount }]`, когда заказ закрывается несколькими
+  /// (как коридор ВБ). Пусто — одиночный пасс из `gamepassUrl`.
+  parts          Json?
   platform       Platform
   status         DirectIntentStatus @default(PENDING)
   createdAt      DateTime           @default(now())

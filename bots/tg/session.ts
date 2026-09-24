@@ -8,6 +8,8 @@
 
 import { createHeldApiKeyStore } from "../shared/held-api-key";
 import type { DirectRequote } from "../shared/direct-requote";
+import type { OwnedPass, PlanPart } from "../shared/gamepass-plan";
+import type { GamesVisibility } from "../shared/roblox-owned-games";
 
 export interface LinkState {
   wbCode:      string;
@@ -55,6 +57,15 @@ export interface DirectFlowState {
   gamepassRobux?: number;
   /** Пересчёт заказа под цену выбранного пасса — предложен, ещё не применён. */
   requote?: DirectRequote;
+  /**
+   * Набор из НЕСКОЛЬКИХ пассов, которым закрывается заказ (как коридор ВБ:
+   * 1500 + 500 под 2000). Пусто — одиночный пасс из `gamepassId`.
+   */
+  parts?: PlanPart[];
+  /** Пассы найденного аккаунта — чтобы ключ/ссылка достраивали план, а не начинали заново. */
+  owned?: OwnedPass[];
+  /** Видны ли игры аккаунта: пустой результат при «hidden» — «не видим», а не «нет». */
+  gamesVisibility?: GamesVisibility | null;
 }
 export const pendingDirectFlow = new Map<number, DirectFlowState>();
 
@@ -188,7 +199,7 @@ export const pendingApiKey = new Map<number, { wbCode: string; denomination: num
  * только цена пасса, который надо создать, и ник. Отдельный стейт, потому что
  * возврат после создания идёт не в квест WB, а в итог прямого заказа.
  */
-export const pendingDirectKey = new Map<number, { nick: string; passPrice: number }>();
+export const pendingDirectKey = new Map<number, { nick: string; targets: number[] }>();
 
 /** Ключ, ждущий ссылку на игру (игры по нику не видны). Только память, 15 минут. */
 export const heldGameKeys = createHeldApiKeyStore();

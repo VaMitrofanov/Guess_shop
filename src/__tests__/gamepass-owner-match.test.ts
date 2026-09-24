@@ -45,14 +45,21 @@ describe("ручной Pass ID — владелец против названн�
     expect(guide).toContain("if (!account && owner && NICK_RE.test(owner))");
   });
 
+  // С 24.09.2026 правило живёт в общем модуле приёма — им пользуются и касса
+  // сайта, и прямой заказ ботов, а гейт ВБ его только зовёт.
+  const acceptance = readFileSync(path.join(ROOT, "bots/shared/gamepass-acceptance.ts"), "utf8");
+
   it("сервер принимает пасс другого ника и оставляет след в заметке", () => {
-    expect(route).toContain("NICK_RE.test(rawNick) && rawNick.toLowerCase() !== creatorName.toLowerCase()");
+    expect(route).toContain("acceptGamepasses(");
+    expect(route).toContain("ownerSwitchNote(");
     expect(route).not.toContain('code: "OWNER_MISMATCH"');
-    expect(route).toContain("[ПАСС ДРУГОГО НИКА");
-    expect(route).toContain("робуксы владельцу пасса");
+    expect(acceptance).toContain("owner.toLowerCase() !== claimed.toLowerCase() ? claimed : null");
+    expect(acceptance).toContain("[ПАСС ДРУГОГО НИКА");
+    expect(acceptance).toContain("робуксы владельцу пасса");
   });
 
   it("ник заказа всегда берётся у пасса — робуксы уходят его владельцу", () => {
-    expect(route).toContain("nick = creatorName;");
+    expect(route).toContain("const nick = accepted.recipient");
+    expect(acceptance).toContain("const recipient = NICK_RE.test(owner) ? owner");
   });
 });

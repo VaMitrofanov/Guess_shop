@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 
 const QuoteSchema = z.object({
   amountRobux: z.number().int().min(CUSTOM_MIN).max(CUSTOM_MAX),
+  /** `false` — покупатель отказался от бонуса (цена пасса без него). */
+  useBonus: z.boolean().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -28,7 +30,9 @@ export async function POST(req: NextRequest) {
   try {
     const session = await auth();
     const userId = (session?.user as { id?: string } | undefined)?.id;
-    const { quote, calculated } = await createPriceQuote(parsed.data.amountRobux, userId);
+    const { quote, calculated } = await createPriceQuote(parsed.data.amountRobux, userId, {
+      useBonus: parsed.data.useBonus,
+    });
 
     return NextResponse.json(
       {

@@ -23,10 +23,12 @@ const mockAudit = jest.fn();
 const mockOrderFind = jest.fn();
 const mockOrderUpdate = jest.fn();
 const mockLoadForUser = jest.fn();
+const mockAuth = jest.fn();
 
 jest.mock("@/lib/roblox-gamepass-create", () => ({
   createGamePassViaBridge: (...args: unknown[]) => mockCreate(...args),
 }));
+jest.mock("@/auth", () => ({ auth: () => mockAuth() }));
 jest.mock("@/lib/gamepass-autocreate-flag", () => ({
   gamepassAutocreateEnabled: () => mockFlag(),
 }));
@@ -70,6 +72,7 @@ beforeEach(() => {
   mockOrderFind.mockReset().mockResolvedValue({ id: "ord_1", userId: "user_1", adminNote: null });
   mockOrderUpdate.mockReset().mockResolvedValue({});
   mockLoadForUser.mockReset().mockResolvedValue({ id: "k1", robloxUsername: "alumette277", key: KEY, lastUsedAt: null, createdPasses: 0 });
+  mockAuth.mockReset().mockResolvedValue(null);
 });
 
 describe("GET — есть ли привязанный ключ", () => {
@@ -109,10 +112,18 @@ describe("POST useStored — одно нажатие вместо похода �
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  test("без кода заказа владельца ключа определить не по чему — отказ", async () => {
+  test("без кода и без входа владельца ключа определить не по чему — отказ", async () => {
     const body = await (await post({ useStored: true, nick: "Alumette277", targets: [715] }, "10.1.1.3")).json();
     expect(body).toEqual({ ok: false, error: "no_stored_key" });
     expect(mockLoadForUser).not.toHaveBeenCalled();
+  });
+
+  test("касса сайта: без кода владелец ключа — вошедший покупатель, а не ник", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "site_user" } });
+    const body = await (await post({ useStored: true, nick: "Alumette277", targets: [2143, 715] }, "10.1.1.5")).json();
+    expect(mockLoadForUser).toHaveBeenCalledWith("site_user", "Alumette277");
+    expect(body).toMatchObject({ ok: true });
+    expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
   test("обычный режим по-прежнему требует ключ в теле", async () => {

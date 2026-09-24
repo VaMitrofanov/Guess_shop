@@ -31,19 +31,31 @@ export type CalculatedPriceQuote = {
  * endpoint and later order creation use this one function, so an authenticated
  * customer's bot bonus/discount cannot diverge from their web total.
  */
+/**
+ * Бонус, который можно применить к заказу прямо сейчас (0 — нет или истёк).
+ * Та же проверка, что у ботов (`handleDirectPackChosen`), — чтобы касса сайта
+ * заранее знала цену пасса С бонусом, а не узнавала её из котировки.
+ */
+export function availableBonusRobux(customer?: QuoteCustomerBenefits | null, now = new Date()): number {
+  const active = !!customer?.balance && (!customer.bonusExpiresAt || customer.bonusExpiresAt > now);
+  return active ? Math.max(0, customer?.balance ?? 0) : 0;
+}
+
 export function calculatePriceQuote(
   requestedRobux: number,
   customer?: QuoteCustomerBenefits | null,
   now = new Date(),
+  options: { useBonus?: boolean } = {},
 ): CalculatedPriceQuote {
   if (!Number.isInteger(requestedRobux) || requestedRobux < CUSTOM_MIN || requestedRobux > CUSTOM_MAX) {
     throw new RangeError(`Robux amount must be an integer between ${CUSTOM_MIN} and ${CUSTOM_MAX}`);
   }
 
-  const bonusIsActive = !!customer?.balance &&
-    (!customer.bonusExpiresAt || customer.bonusExpiresAt > now);
-  const bonusRobux = bonusIsActive && requestedRobux >= BONUS_MIN_PACK
-    ? Math.max(0, customer.balance ?? 0)
+  // Бонус меняет цену пасса, поэтому от него можно отказаться — как в ботах
+  // («Без бонуса»). До 24.09.2026 сайт применял его всегда и молча, и пасс,
+  // сделанный по инструкции без бонуса, на оплате оказывался «не той цены».
+  const bonusRobux = options.useBonus !== false && requestedRobux >= BONUS_MIN_PACK
+    ? availableBonusRobux(customer, now)
     : 0;
   const baseAmountKopecks = Math.round(directPrice(requestedRobux) * 100);
   // The bot policy has no promo expiry gate: an operator removes the one-shot
@@ -61,7 +73,11 @@ export function calculatePriceQuote(
   };
 }
 
-export async function createPriceQuote(requestedRobux: number, userId?: string | null) {
+export async function createPriceQuote(
+  requestedRobux: number,
+  userId?: string | null,
+  options: { useBonus?: boolean } = {},
+) {
   const now = new Date();
   const [policy, customer] = await Promise.all([
     prisma.pricingPolicy.findFirst({
@@ -85,7 +101,7 @@ export async function createPriceQuote(requestedRobux: number, userId?: string |
     throw new Error("The active retail pricing policy is unavailable");
   }
 
-  const calculated = calculatePriceQuote(requestedRobux, customer, now);
+  const calculated = calculatePriceQuote(requestedRobux, customer, now, options);
   const expiresAt = new Date(now.getTime() + PRICE_QUOTE_TTL_MS);
 
   // U12: анонимную котировку невозможно потребить — `validateCheckoutQuote`

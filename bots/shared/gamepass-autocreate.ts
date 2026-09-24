@@ -17,6 +17,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { createGamePassForUserRouted } from "./roblox";
+import { MAX_AUTO_PARTS } from "./gamepass-plan";
 import { auditGamepassAutocreated, type OrderAuditClient } from "./order-audit";
 import {
   loadRobloxApiKeyForUser,
@@ -24,8 +25,11 @@ import {
   type RobloxApiKeyClient,
 } from "./roblox-api-key-store";
 
-/** Больше двух пассов на один заказ не бывает (разбивка номинала 2000). */
-export const MAX_KEY_TARGETS = 2;
+/**
+ * Сколько пассов создаём за раз — столько же частей умеет заказ. До 24.09.2026
+ * здесь стояло 2, и эталонный набор под 3200 (1500 + 1000 + 700) обрезался.
+ */
+export const MAX_KEY_TARGETS = MAX_AUTO_PARTS;
 /**
  * Предел одного сообщения в Telegram и во ВКонтакте. Ключ приходит текстом, и
  * всё, что мессенджер физически способен доставить, мы обязаны принять: свой

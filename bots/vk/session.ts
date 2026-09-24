@@ -14,6 +14,8 @@
  */
 
 import { createHeldApiKeyStore } from "../shared/held-api-key";
+import type { OwnedPass, PlanPart } from "../shared/gamepass-plan";
+import type { GamesVisibility } from "../shared/roblox-owned-games";
 
 interface DirectFlowData {
   amount: number;
@@ -24,6 +26,15 @@ interface DirectFlowData {
   /** Ф4 (О1): флоу 5 шагов с экраном «🎁 Бонус» (bonus>0) или 4 шага без него.
    *  Фиксируется при выборе пака и не меняется, даже если юзер выбрал «Без бонуса». */
   hasBonusStep: boolean;
+  /**
+   * Набор из НЕСКОЛЬКИХ пассов, которым закрывается заказ (как коридор ВБ:
+   * 1500 + 500 под 2000). Пусто — одиночный пасс из `gamepassId`.
+   */
+  parts?: PlanPart[];
+  /** Пассы найденного аккаунта — ключ и Pass ID достраивают план, а не начинают заново. */
+  owned?: OwnedPass[];
+  /** Видны ли игры аккаунта: пустой результат при «hidden» — «не видим», а не «нет». */
+  gamesVisibility?: GamesVisibility | null;
 }
 
 export type VKState =
@@ -47,7 +58,7 @@ export type VKState =
   | { type: "AWAITING_API_KEY";        wbCode: string; denomination: number; nick: string }
   /* То же для ПРЯМОГО заказа: кода WB у него нет, зато есть весь флоу — после
      создания пасса человек возвращается к подтверждению заказа, а не в квест. */
-  | { type: "AWAITING_DIRECT_API_KEY"; robloxUsername: string; passPrice: number } & DirectFlowData
+  | { type: "AWAITING_DIRECT_API_KEY"; robloxUsername: string; targets: number[] } & DirectFlowData
   | { type: "AWAITING_NICK_EDIT" };
 
 const store = new Map<number, VKState>();

@@ -74,12 +74,21 @@ export const MIN_AUTO_PART_ROBUX = SPLIT_STEP;
  * Весь заказ одной частью законен всегда: номиналы 300, 800 и 1200 существуют
  * в каталоге ВБ (и их там больше тысячи), на 500 не делятся, но целиком
  * помещаются в одного донора — дробить их не нужно и нечем.
+ *
+ * Некратная часть законна в одном случае: заказ больше донора (его всё равно
+ * дробить) и часть несёт «хвост» самого заказа (`amount ≡ orderAmount mod 500`).
+ * Заказ на 1700 иначе не собрать вовсе — до 24.09.2026 разбивка просила создать
+ * 850 + 850, а это же правило их отвергало, и инструкция бесконечно просила
+ * создать те же два пасса. Заказ, который влезает в донора (1200), по-прежнему
+ * идёт ОДНИМ пассом, а не 500 + 700.
  */
 export function isAllowedPartAmount(amount: number, orderAmount: number): boolean {
   if (!Number.isInteger(amount) || amount <= 0) return false;
   if (amount > Math.min(orderAmount, DONOR_NET_CAPACITY)) return false;
   if (amount === orderAmount) return true;
-  return amount % SPLIT_STEP === 0 && amount >= MIN_AUTO_PART_ROBUX;
+  if (amount < MIN_AUTO_PART_ROBUX) return false;
+  if (amount % SPLIT_STEP === 0) return true;
+  return orderAmount > DONOR_NET_CAPACITY && amount % SPLIT_STEP === orderAmount % SPLIT_STEP;
 }
 
 /**
@@ -87,8 +96,10 @@ export function isAllowedPartAmount(amount: number, orderAmount: number): boolea
  *
  * Правило: пока номинал влезает в донора — не дробим вовсе; выше — куски по
  * 1500, остаток последней частью. Огрызок мельче шага (1700 → 1500 + 200) не
- * выпускаем: вместо него делим последний кусок пополам (850 + 850) — две
- * рабочие части вместо одной рабочей и одного похода к донору ради двухсот.
+ * выпускаем: последний кусок вместе с огрызком делится на 1000 + остаток
+ * (1700 → 1000 + 700). Так некратной остаётся ровно одна часть, и она
+ * проходит `isAllowedPartAmount` — раньше здесь было 850 + 850, которые это
+ * правило отвергало, и заказ зацикливался на «создай пассы».
  */
 export function splitIntoDonorChunks(amount: number): number[] {
   if (!Number.isInteger(amount) || amount <= 0) return [];
@@ -104,9 +115,8 @@ export function splitIntoDonorChunks(amount: number): number[] {
     chunks.push(rest);
     return chunks;
   }
-  const last = chunks.pop()! + rest;
-  const half = Math.ceil(last / 2);
-  return [...chunks, half, last - half];
+  chunks.pop();
+  return [...chunks, DONOR_NET_CAPACITY - SPLIT_STEP, SPLIT_STEP + rest];
 }
 
 /**
@@ -122,8 +132,7 @@ export const MAX_AUTO_PARTS = 4;
 export const netFromPrice = (price: number): number => Math.floor(price * 0.7);
 
 export interface PlanOptions {
-  /** Сколько частей заказ может получить. На сайте это всегда 1: оформление и
-   *  оплата несут один `gamepassId`, и набор из двух пассов там был бы тупиком. */
+  /** Сколько частей заказ может получить (по умолчанию `MAX_AUTO_PARTS`). */
   maxParts?: number;
   /** Разрешена ли раскладка номинала на пару пассов (`SPLIT_PLANS`). */
   splitPlan?: boolean;
@@ -298,8 +307,16 @@ export function planFromOwned(
   // это уже не «достроить», а сделать заново.
   let bestRest = 0;
   let bestParts = Infinity;
-  for (let rest = MIN_AUTO_PART_ROBUX; rest <= orderAmount - MIN_AUTO_PART_ROBUX; rest += SPLIT_STEP) {
-    // Достраиваем только «рабочей» частью: кратной 500 и в пределах донора.
+  // Кандидаты на недостающую часть: кратные шагу и те, что несут «хвост»
+  // заказа (1700 = 1000 + 700) — других частей `isAllowedPartAmount` не пустит.
+  const tail = orderAmount % SPLIT_STEP;
+  const restCandidates: number[] = [];
+  for (let base = MIN_AUTO_PART_ROBUX; base <= orderAmount - MIN_AUTO_PART_ROBUX; base += SPLIT_STEP) {
+    restCandidates.push(base);
+    if (tail > 0 && base + tail <= orderAmount - MIN_AUTO_PART_ROBUX) restCandidates.push(base + tail);
+  }
+  for (const rest of restCandidates) {
+    // Достраиваем только «рабочей» частью в пределах донора.
     if (!isAllowedPartAmount(rest, orderAmount)) continue;
     const covered = table.best[orderAmount - rest];
     if (!Number.isFinite(covered) || covered > maxParts - 1) continue;

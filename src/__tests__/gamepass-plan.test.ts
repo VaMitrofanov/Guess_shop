@@ -33,14 +33,35 @@ describe("разбивка под донора (1500 чистых на акка�
     expect(splitIntoDonorChunks(5000)).toEqual([1500, 1500, 1500, 500]);
   });
 
-  it("огрызка мельче шага не бывает: 1700 — это 850 + 850, а не 1500 + 200", () => {
-    expect(splitIntoDonorChunks(1700)).toEqual([850, 850]);
-    expect(splitIntoDonorChunks(1501)).toEqual([751, 750]);
-    for (const amount of [1501, 1700, 2000, 2500, 3000, 5000]) {
+  it("огрызка мельче шага не бывает: 1700 — это 1000 + 700, а не 1500 + 200", () => {
+    expect(splitIntoDonorChunks(1700)).toEqual([1000, 700]);
+    expect(splitIntoDonorChunks(1501)).toEqual([1000, 501]);
+    expect(splitIntoDonorChunks(3200)).toEqual([1500, 1000, 700]);
+    expect(splitIntoDonorChunks(2037)).toEqual([1500, 537]);
+    for (const amount of [1501, 1600, 1700, 2000, 2037, 2100, 2500, 3000, 3200, 5000]) {
       const parts = splitIntoDonorChunks(amount);
       expect(parts.reduce((sum, part) => sum + part, 0)).toBe(amount);
       for (const part of parts) expect(part).toBeLessThanOrEqual(DONOR_NET_CAPACITY);
     }
+  });
+
+  it("то, что разбивка просит создать, разбор и принимает — без цикла «создай ещё раз»", () => {
+    // До 24.09.2026: 1600 → «создай 800 + 800», созданные пассы отвергались
+    // `isAllowedPartAmount`, и план снова говорил «пусто».
+    for (const amount of [1501, 1600, 1700, 1800, 2037, 2100, 3200, 5999]) {
+      const created = idealTargetsFor(amount).map((part, i) => pass(String(i + 1), expectedGamepassPrice(part)));
+      for (const part of idealTargetsFor(amount)) expect(isAllowedPartAmount(part, amount)).toBe(true);
+      const plan = planFromOwned(amount, created);
+      expect(["ready", "assembled"]).toContain(plan.kind);
+      expect(coveredRobux(plan)).toBe(amount);
+    }
+  });
+
+  it("некратная часть законна, только если несёт хвост самого заказа", () => {
+    expect(isAllowedPartAmount(700, 1700)).toBe(true);
+    expect(isAllowedPartAmount(700, 2000)).toBe(false);
+    expect(isAllowedPartAmount(700, 1200)).toBe(false); // влезает в донора — одним пассом
+    expect(isAllowedPartAmount(200, 1700)).toBe(false); // мельче шага — огрызок
   });
 
   it("разбивка не крадёт у покупателя: сумма цен частей равна цене целого", () => {

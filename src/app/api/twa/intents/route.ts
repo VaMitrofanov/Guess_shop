@@ -12,6 +12,7 @@ import {
 } from "@/lib/twa-direct";
 import { BONUS_REASONS, applyBonusDeltaTx, directOrderBonusKey } from "@/lib/bonus-ledger";
 import { parseGamepassId } from "@/lib/roblox-buyout";
+import { intentPartsRows } from "../../../../../bots/shared/gamepass-acceptance";
 
 /**
  * Заявки прямых заказов (DirectIntent, «⏳ Ожидаем реквизиты») в TWA.
@@ -66,6 +67,8 @@ export async function GET(req: NextRequest) {
       robloxUsername: i.robloxUsername,
       gamepassId: i.gamepassId,
       gamepassUrl: i.gamepassUrl,
+      /** Набор пассов, когда заявка закрывается несколькими (как коридор ВБ). */
+      parts: Array.isArray(i.parts) ? i.parts : null,
       platform: i.platform,
       createdAt: i.createdAt,
       prevOrders: prevByUser.get(i.userId) ?? 0,
@@ -145,6 +148,9 @@ export async function POST(req: NextRequest) {
           gamepassId: intent.gamepassUrl ? parseGamepassId(intent.gamepassUrl) : null,
         },
       });
+      // Набор заявки — в `WbOrderGamepass`, как у коридора ВБ и заказов сайта.
+      const partRows = intentPartsRows(intent.parts, intent.totalAmount, ord.id);
+      if (partRows) await tx.wbOrderGamepass.createMany({ data: partRows });
       if (intent.bonus > 0) {
         // Списание бонуса — только через единую точку (`BonusLedger`), как в
         // TG-обработчике. Прежний `balance = 0` обнулял баланс мимо журнала:

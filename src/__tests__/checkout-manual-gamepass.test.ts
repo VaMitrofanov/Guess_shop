@@ -17,7 +17,17 @@ describe("checkout — ручной ввод геймпасса", () => {
   it("тупик поиска по нику сам открывает запасной вход", () => {
     expect(checkout).toContain("setNickDeadEnd(true)");
     expect(checkout).toContain("setManualOpen(true)");
-    expect(checkout).toContain("вставь ссылку на геймпасс ниже");
+    // Тупик называется по причине — как в коридоре ВБ: опечатка, игры скрыты
+    // настройками, игр нет вовсе. Во всех случаях путь один — Pass ID ниже.
+    expect(checkout).toContain("вставь Pass ID геймпасса ниже");
+    expect(checkout).toContain('visibility === "hidden"');
+    expect(checkout).toContain('visibility === "none"');
+  });
+
+  it("запасной вход есть и в быстрой покупке, а не только в полной форме", () => {
+    // До 24.09.2026 быстрая покупка звала «вставь ниже», а поля не было.
+    expect(checkout).toContain("const manualEntry =");
+    expect(checkout.match(/\{[^{}]*manualEntry\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
   it("принимает и ссылку, и голый ID", () => {

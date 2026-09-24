@@ -157,6 +157,8 @@ interface Intent {
   robloxUsername: string;
   gamepassId: string;
   gamepassUrl: string;
+  /** Набор пассов (как коридор ВБ: 1500 + 500 под 2000); `null` — одиночный пасс. */
+  parts?: { gamepassId: string; amount: number }[] | null;
   platform: string;
   createdAt: string;
   prevOrders: number;
@@ -4543,9 +4545,17 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
             {intent.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}
           </a>
         </DataRow>
-        <div style={{ fontSize: 13, color: C.textTertiary, padding: "2px 0 0 26px" }}>
-          геймпасс ≈ {expectedPass.toLocaleString("ru-RU")} R$ · выдать {intent.totalAmount.toLocaleString("ru-RU")} R$
-        </div>
+        {intent.parts && intent.parts.length > 1 ? (
+          // Набор: каждая часть — отдельный выкуп со своей ценой пасса.
+          <div style={{ fontSize: 13, color: C.textTertiary, padding: "2px 0 0 26px" }}>
+            🧩 набор {intent.parts.map((part) => part.amount.toLocaleString("ru-RU")).join(" + ")} R$ ·{" "}
+            {intent.parts.map((part) => `#${part.gamepassId}`).join(", ")} · выдать {intent.totalAmount.toLocaleString("ru-RU")} R$
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: C.textTertiary, padding: "2px 0 0 26px" }}>
+            геймпасс ≈ {expectedPass.toLocaleString("ru-RU")} R$ · выдать {intent.totalAmount.toLocaleString("ru-RU")} R$
+          </div>
+        )}
       </div>
 
       {detailsOpen && (
