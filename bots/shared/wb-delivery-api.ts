@@ -219,13 +219,34 @@ export async function fetchBuyerChatEvents(next?: string | null) {
   return response;
 }
 
+/** Ответ WB на отправку. HTTP 200 сам по себе ничего не обещает: отказ приходит
+ * в `errors` того же ответа. */
+const WbSendMessageResponseSchema = z.object({
+  result: z.object({ addTime: z.number().optional() }).passthrough().nullable().optional(),
+  errors: z.array(z.unknown()).nullable().optional(),
+}).passthrough();
+
+/**
+ * 27.09.2026: гейт заказа `5890328310` получил HTTP 200, заказ записан как
+ * «гейт отправлен», а в ленте чата WB сообщения не оказалось — покупатель
+ * остался без кода. Тело ответа тогда не читалось вовсе (`z.unknown()`).
+ * Теперь непустой `errors` — это отказ, а не успех. Доставку по-прежнему
+ * подтверждает только эхо в ленте событий (`verifyGateDelivery`).
+ */
 export async function sendBuyerChatMessage(replySign: string, message: string): Promise<void> {
   const form = new FormData();
   form.set("replySign", replySign);
   // Единственная дверь в чат WB: здесь текст приводится к виду, который WB
   // доставит без `&#34;`/`&amp;` (см. `wbChatSafeText`).
   form.set("message", wbChatSafeText(message));
-  await requestJson("chat", `${CHAT_BASE}/api/v1/seller/message`, z.unknown(), { method: "POST", body: form });
+  const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/message`, WbSendMessageResponseSchema, { method: "POST", body: form });
+  if (response.errors?.length) {
+    console.warn(`[wb-chat] WB отклонил сообщение: ${JSON.stringify(response.errors).slice(0, 200)}`);
+    throw new WbDeliveryApiError("chat", 200, "SEND_REJECTED", false);
+  }
+  if (!response.result?.addTime) {
+    console.warn(`[wb-chat] WB принял сообщение без addTime: ${JSON.stringify(response).slice(0, 200)}`);
+  }
 }
 
 async function bulkStatusAction(action: "confirm" | "deliver", orderId: string): Promise<WbBulkMutationResponse> {

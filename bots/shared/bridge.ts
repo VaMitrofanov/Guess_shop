@@ -32,6 +32,7 @@ import {
   getRobloxUserProfileDirect,
   searchGamepassesByNickDirect,
 } from "./roblox";
+import { telegramRequestInit } from "./telegram-photo";
 
 /** What the bridge hands back to the caller after a Telegram call.
  *
@@ -161,7 +162,7 @@ export function startBridgeServer(): http.Server {
       // Auto-detect method if not explicitly provided
       const resolvedMethod: string =
         typeof tgMethod === "string" ? tgMethod :
-        rest.photo                  ? "sendPhoto" :
+        rest.photo || rest.photo_base64 ? "sendPhoto" :
                                       "sendMessage";
 
       if (resolvedMethod === "sendMessage" && !rest.text) {
@@ -174,12 +175,9 @@ export function startBridgeServer(): http.Server {
       try {
         const tgRes = await fetch(
           `https://api.telegram.org/bot${token}/${resolvedMethod}`,
-          {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            // parse_mode default; individual callers can override via rest
-            body:    JSON.stringify({ parse_mode: "HTML", ...rest, chat_id }),
-          }
+          // parse_mode по умолчанию; вызывающий может переопределить. Фото
+          // байтами (`photo_base64`) уходит multipart — см. telegram-photo.ts.
+          telegramRequestInit({ ...rest, chat_id }),
         );
         const tgBody = await tgRes.json() as { description?: string; result?: unknown };
         if (!tgRes.ok) {

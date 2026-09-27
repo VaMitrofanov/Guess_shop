@@ -5,6 +5,8 @@
  * send/edit messages — keeping the dependency graph clean.
  */
 
+import { telegramRequestInit } from "./telegram-photo";
+
 // ── Telegram ──────────────────────────────────────────────────────────────────
 
 function tgUrl(method: string): string {
@@ -185,13 +187,15 @@ export async function tgDelete(chatId: string | number, messageId: number): Prom
  */
 export async function tgSendPhoto(
   chatId: string | number,
-  photo: string,
+  /** Ссылка/file_id — или сами байты (см. `telegram-photo.ts`). */
+  photo: string | Buffer,
   caption: string,
   extra: Record<string, unknown> = {}
 ): Promise<boolean> {
   const bridgeUrl    = process.env.VALIDATOR_SOURCE_URL?.trim();
   const validatorKey = process.env.VALIDATOR_KEY?.trim();
-  const payload = { chat_id: chatId, photo, caption, parse_mode: "HTML", ...extra };
+  const photoField = typeof photo === "string" ? { photo } : { photo_base64: photo.toString("base64") };
+  const payload = { chat_id: chatId, ...photoField, caption, parse_mode: "HTML", ...extra };
 
   try {
     const res = bridgeUrl
@@ -206,9 +210,7 @@ export async function tgSendPhoto(
         signal: AbortSignal.timeout(20_000),
       })
       : await fetch(tgUrl("sendPhoto"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        ...telegramRequestInit(payload),
         signal: AbortSignal.timeout(20_000),
       });
 

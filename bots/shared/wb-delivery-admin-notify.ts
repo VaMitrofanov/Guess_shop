@@ -55,8 +55,15 @@ function refLine(ref: DbsRef, extra?: Array<string | null | undefined | false>):
 function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
   if (!ADMIN_IDS.length) return;
   const text = formatAdminNotice(notice);
-  void Promise.allSettled(ADMIN_IDS.map((id) =>
-    tgSend(id, text, { parse_mode: "HTML", ...threadTo(ref, id) })));
+  // Провал доставки обязан быть слышен: раньше ответ Telegram не читался, и
+  // потерянное уведомление не оставляло следа (разбор 27.09).
+  void Promise.allSettled(ADMIN_IDS.map(async (id) => {
+    const reply = await tgSend(id, text, { parse_mode: "HTML", ...threadTo(ref, id) });
+    if (reply?.ok !== true) {
+      console.warn(`[dbs-notify] «${notice.title}» не доставлено chat_id=${id}: ${JSON.stringify(reply).slice(0, 200)}`);
+    }
+  }).map((p) => p.catch((err) =>
+    console.warn(`[dbs-notify] «${notice.title}» упало: ${err instanceof Error ? err.message : err}`))));
 }
 
 // Отдельных сообщений на «заказ принят», «ушёл автозапрос», «доставка закрыта»
@@ -73,6 +80,21 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string) {
     title: "сообщение покупателя",
     lines: [refLine(ref), `<i>${escapeHtml(preview)}</i>`],
     next: "ответить из консоли DBS или из кабинета WB",
+  }, ref);
+}
+
+/** Гейт ушёл дважды, а в чате WB его так и нет: покупатель без кода. */
+export function notifyDbsGateUndelivered(ref: DbsRef, code: string | null) {
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: "код не дошёл до покупателя",
+    lines: [
+      refLine(ref),
+      "WB принял отправку дважды, но в чате сообщения нет",
+      code ? `Код активации: <code>${escapeHtml(code)}</code>` : null,
+    ],
+    next: "отправить ссылку с кодом из кабинета WB руками",
   }, ref);
 }
 

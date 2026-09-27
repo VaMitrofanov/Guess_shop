@@ -283,6 +283,14 @@ Wildberries** (`bots/shared/wb-chat-notify.ts`). Это тот самый кан
   Ошибка VK API даёт `null` и сохраняет прежние данные — фиктивный `VK #id` больше не
   записывается как профиль. Provider-specific handle хранится в metadata identity, поэтому
   у связанного TG+VK профиля один канал не перетирает другой.
+- **Фото в Telegram — байтами (27.09.2026).** CDN VK (`sun9-*.userapi.com`) за рубеж почти
+  не отдаёт (с RF 0,19 с, с SG обрыв на 15 с), и Telegram не забирал по ссылке ни одного
+  скрина оплаты/отзыва из VK — админам уходил только текстовый фолбэк со ссылкой.
+  `broadcastPhotoCard` теперь качает фото сам (`downloadPhoto`, `telegram-photo.ts`), а
+  `tgSendPhoto` принимает `Buffer`: через мост — полем `photo_base64`, мост шлёт multipart
+  (`telegramRequestInit`). Не скачалось — прежний путь со ссылкой и фолбэком.
+- Уведомления DBS (`broadcast` в `wb-delivery-admin-notify.ts`) логируют недоставку
+  (`[dbs-notify] … не доставлено`) — раньше ответ Telegram не читался.
 - SG bridge `/tg-proxy` возвращает payload `result` только для read-only
   `getChat`/`getChatMemberCount`. Это позволяет RF Web показывать живой размер Telegram-
   канала, не имея прямого маршрута к `api.telegram.org` и не передавая токен бота через

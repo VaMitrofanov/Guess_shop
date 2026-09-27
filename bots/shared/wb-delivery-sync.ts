@@ -8,6 +8,7 @@ import {
   wbGateMessage,
   wbGateReminderMessage,
   wbSiblingPosition,
+  WB_GATE_MESSAGE_LEAD,
   type WbOrderSibling,
 } from "./wb-gate-link";
 import {
@@ -76,6 +77,7 @@ import {
   notifyDbsOrderCancelled,
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
+  notifyDbsGateUndelivered,
   notifyWbBuyerClaim,
   notifyWbClaimResolved,
 } from "./wb-delivery-admin-notify";
@@ -789,6 +791,105 @@ async function dispatchGatesForClosedOrders(db: Db) {
   });
   for (const order of closed) {
     await tryAutoGate(db, order.id, order.wbOrderId);
+  }
+}
+
+/** Эху гейта даётся три минуты: лента событий догоняет отправку за 3–10 с. */
+const GATE_ECHO_GRACE_MS = 3 * 60_000;
+/** Дальше трёх часов не смотрим: там уже работают напоминания по гейту. */
+const GATE_ECHO_WINDOW_MS = 3 * 60 * 60_000;
+
+/**
+ * Дошёл ли гейт до покупателя — по эху в ленте чата WB, а не по ответу API.
+ *
+ * 27.09.2026 три выдачи из 34 получили HTTP 200 и `gateState=SENT`, а в ленте
+ * WB сообщения не было: покупатель `5890328310` остался без кода и думал, что
+ * всё в порядке, как и мы. Эхо своих сообщений WB присылает `sender=seller`
+ * через 3–10 с, поэтому его отсутствие через три минуты — сигнал.
+ *
+ * Сюда же попадает гейт, чья отправка упала (`AUTO_GATE_SEND_FAILED`): такой
+ * заказ застревал в `ISSUED`, и повтора не было никакого.
+ *
+ * Один повтор; если и он без эха — тревога админам, один раз. Дубль
+ * сообщения покупателю дешевле, чем код, который так и не пришёл.
+ * Зовётся только после успешного `chat-events`: без свежей ленты отсутствие
+ * эха ничего не значит.
+ */
+async function verifyGateDelivery(db: Db) {
+  if (process.env.WB_DBS_AUTO_GATE !== "true") return;
+  if (process.env.WB_CHAT_SEND_ENABLED !== "true") return;
+  const now = Date.now();
+  const candidates = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      cancelledAt: null,
+      gateState: { in: ["SENT", "ISSUED"] },
+      completedAt: { gte: new Date(now - CLOSED_GATE_WINDOW_MS) },
+      wbCode: { is: { status: "AVAILABLE" } },
+    },
+    include: {
+      wbCode: true,
+      chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 },
+    },
+    take: 50,
+  });
+
+  for (const order of candidates) {
+    // С какого момента ждём эхо: для SENT — с отправки, для ISSUED — с
+    // записанного провала. ISSUED без провала — это отправка прямо сейчас.
+    let since: Date | null = order.gateState === "SENT" ? order.gateSentAt : null;
+    if (order.gateState === "ISSUED") {
+      const failed = await db.wbMarketplaceEvent.findUnique({
+        where: { idempotencyKey: `auto-gate-fail:${order.id}` },
+        select: { createdAt: true },
+      });
+      since = failed?.createdAt ?? null;
+    }
+    if (!since) continue;
+    const age = now - since.getTime();
+    if (age < GATE_ECHO_GRACE_MS || age > GATE_ECHO_WINDOW_MS) continue;
+
+    const echo = await db.wbBuyerChatEvent.findFirst({
+      where: {
+        marketplaceOrderId: order.id,
+        sender: "seller",
+        wbEventId: { not: { startsWith: "local:outbound:" } },
+        textRedacted: { startsWith: WB_GATE_MESSAGE_LEAD },
+        sentAt: { gte: new Date(since.getTime() - 60_000) },
+      },
+      select: { id: true },
+    });
+    if (echo) continue;
+
+    const resendKey = `gate-resend:${order.id}`;
+    const resent = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: resendKey }, select: { id: true } });
+    const chat = order.chats?.[0];
+    const code = order.wbCode?.code;
+
+    if (!resent && chat?.replySignEncrypted && code) {
+      // Сначала запись, потом отправка: второй цикл не должен слать ещё раз.
+      await audit(db, order.id, "GATE_RESENT", resendKey, { reason: order.gateState === "SENT" ? "no_echo" : "send_failed" });
+      try {
+        await sendBuyerChatMessage(
+          decryptWbSecret(chat.replySignEncrypted, "reply-sign"),
+          wbGateMessage(code, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order)),
+        );
+        await db.wbMarketplaceOrder.update({
+          where: { id: order.id },
+          data: { gateState: "SENT", lastErrorCode: null, gateSentAt: new Date() },
+        });
+        console.warn(`[WbDbsSync] гейт ${order.wbOrderId} без эха в чате WB — отправлен повторно`);
+      } catch (e) {
+        console.error(`[WbDbsSync] повтор гейта ${order.wbOrderId} не ушёл: ${safeErrorCode(e)}`);
+      }
+      continue;
+    }
+
+    const alertKey = `gate-undelivered:${order.id}`;
+    const alerted = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: alertKey }, select: { id: true } });
+    if (alerted) continue;
+    await audit(db, order.id, "GATE_UNDELIVERED", alertKey, { code: code ?? null });
+    notifyDbsGateUndelivered(await dbsRef(db, order.id, order.wbOrderId), code ?? null);
   }
 }
 
@@ -1932,7 +2033,11 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     if (await streamDue(db, CHATS_STREAM, 60_000, force)) {
       await step("chat-directory", () => syncChatDirectory(db, out), CHATS_STREAM);
     }
-    await step("chat-events", () => syncChatEvents(db, out), EVENTS_STREAM);
+    let chatEventsFresh = false;
+    await step("chat-events", async () => {
+      await syncChatEvents(db, out);
+      chatEventsFresh = true;
+    }, EVENTS_STREAM);
     await step("backfill-codes", () => backfillDeliveryCodes(db, out));
 
     // ── Обязательства перед WB: marketplace-api ───────────────────────────
@@ -1944,6 +2049,7 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     // проход — то место, где покупатель получает свой код, если закрытие
     // случилось позже прихода кода (лаг WB или закрытие руками в кабинете).
     await step("auto-gate", () => dispatchGatesForClosedOrders(db));
+    if (chatEventsFresh) await step("gate-echo", () => verifyGateDelivery(db));
     await step("stuck-alert", () => alertStuckDeliveries(db));
 
     if (await streamDue(db, STATUSES_STREAM, 60_000, force)) {

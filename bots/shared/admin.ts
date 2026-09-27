@@ -8,6 +8,7 @@
  */
 
 import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
+import { downloadPhoto } from "./telegram-photo";
 import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
@@ -1147,10 +1148,13 @@ async function broadcastPhotoCard(
    *  заказа, а не отдельные дела с собственной перепиской. */
   roots?: Record<string, number> | null,
 ): Promise<number> {
+  // Качаем здесь, рядом с источником: Telegram за рубежом не может забрать фото
+  // с CDN VK (разбор 27.09, `telegram-photo.ts`). Не вышло — шлём ссылку.
+  const bytes = await downloadPhoto(photo);
   const results = await Promise.all(
     ADMIN_IDS.map(async (id) => {
       const thread = replyToRoot(roots, id);
-      if (await tgSendPhoto(id, photo, caption, { reply_markup, ...thread })) return true;
+      if (await tgSendPhoto(id, bytes ?? photo, caption, { reply_markup, ...thread })) return true;
       try {
         // URL экранируем: в ссылках VK CDN есть `&`, и на нём Telegram роняет
         // разбор HTML целиком — фолбэк молча повторил бы исходную поломку.

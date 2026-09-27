@@ -104,6 +104,10 @@ export function wbCodeRequestMessage(): string {
  *
  * Deliberately names no messenger: Wildberries penalises sellers for steering
  * buyers to outside platforms, so the page itself introduces the next step. */
+/** Первая строка гейта. По ней сверка находит эхо отправленного гейта в ленте
+ * чата WB (`verifyGateDelivery`) — текст и поиск обязаны совпадать. */
+export const WB_GATE_MESSAGE_LEAD = "Спасибо, код доставки получен!";
+
 export function wbGateMessage(
   code: string,
   denomination: number | null,
@@ -112,7 +116,7 @@ export function wbGateMessage(
 ): string {
   const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
   return [
-    `Спасибо, код доставки получен! Заказ подтверждён, ${amount} готовы к зачислению.`,
+    `${WB_GATE_MESSAGE_LEAD} Заказ подтверждён, ${amount} готовы к зачислению.`,
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
     wbGateShortUrl(code, origin),
