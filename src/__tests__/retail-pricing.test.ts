@@ -5,59 +5,66 @@ import {
   directPrice,
   getRetailPriceBreakdown,
   retainedAfterPaymentCosts,
-  targetNetRate,
 } from "../../bots/shared/retail-pricing";
 
 describe("canonical retail pricing", () => {
-  it("keeps the owner-approved target-net curve anchors", () => {
-    expect(targetNetRate(1)).toBeCloseTo(3);
-    expect(targetNetRate(10)).toBeCloseTo(2);
-    expect(targetNetRate(50)).toBeCloseTo(1.6);
-    expect(targetNetRate(100)).toBeCloseTo(1.3);
-    expect(targetNetRate(500)).toBeCloseTo(1);
-    expect(targetNetRate(1000)).toBeCloseTo(0.9);
-    expect(targetNetRate(3000)).toBeCloseTo(0.8);
-    expect(targetNetRate(5000)).toBeCloseTo(0.7);
-    expect(targetNetRate(10_000)).toBeCloseTo(0.7);
+  it("applies the owner's progressive brackets: 1 ₽ up to 200, 0.9 up to 500, 0.8 above", () => {
+    expect(directPrice(1)).toBe(1);
+    expect(directPrice(200)).toBe(200);
+    expect(directPrice(500)).toBe(200 + 300 * 0.9);
+    expect(directPrice(1000)).toBe(470 + 500 * 0.8);
+    expect(directPrice(4218)).toBe(3445);
   });
 
-  it("grosses up the retained target for 6% USN and max(3.49 RUB, 3.49%)", () => {
-    expect(customerPriceForTargetNet(80)).toBeCloseTo((80 + 3.49) / 0.94);
-    expect(customerPriceForTargetNet(500)).toBeCloseTo(500 / 0.9051);
-    expect(directPrice(50)).toBe(89);
-    expect(directPrice(500)).toBe(553);
+  it("keeps the old curve for large orders where it is cheaper (down to ≈0.77 ₽/R$)", () => {
+    expect(directPrice(4219)).toBe(3445);
+    expect(directPrice(5000)).toBe(3867);
+    expect(directPrice(10_000)).toBe(7734);
   });
 
-  it("rounds up and never retains less than the dynamic target", () => {
-    for (let amount = 100; amount <= 100_000; amount += 1) {
-      const target = amount * targetNetRate(amount);
-      expect(retainedAfterPaymentCosts(directPrice(amount)) + 1e-9).toBeGreaterThanOrEqual(target);
+  it("rounds up to whole rubles", () => {
+    expect(directPrice(201)).toBe(201);
+    expect(directPrice(499)).toBe(470);
+    expect(directPrice(501)).toBe(471);
+  });
+
+  it("never charges less for a bigger order", () => {
+    let previous = 0;
+    for (let amount = 1; amount <= 100_000; amount += 1) {
+      const price = directPrice(amount);
+      expect(price).toBeGreaterThanOrEqual(previous);
+      previous = price;
     }
   });
 
-  it("derives every published pack from the same curve", () => {
+  it("keeps the payment-cost helpers consistent", () => {
+    expect(customerPriceForTargetNet(80)).toBeCloseTo((80 + 3.49) / 0.94);
+    expect(retainedAfterPaymentCosts(customerPriceForTargetNet(500))).toBeCloseTo(500);
+  });
+
+  it("derives every published pack from the same brackets", () => {
     expect(DIRECT_PRICES).toEqual({
-      100: 144,
-      200: 271,
-      300: 382,
-      400: 476,
-      500: 553,
-      800: 831,
-      1000: 995,
-      1200: 1180,
-      1500: 1451,
-      2000: 1879,
+      100: 100,
+      200: 200,
+      300: 290,
+      400: 380,
+      500: 470,
+      800: 710,
+      1000: 870,
+      1200: 1030,
+      1500: 1270,
+      2000: 1670,
     });
   });
 
-  it("returns the buyer-facing rate, not the internal retained rate", () => {
+  it("returns the buyer-facing rate and what remains after payment costs", () => {
     expect(getRetailPriceBreakdown(500)).toEqual({
       amountRobux: 500,
-      rubles: 553,
-      rubPerRobux: 1.106,
-      targetNetRate: 1,
-      targetNetRubles: 500,
-      paymentOverheadRubles: 53,
+      rubles: 470,
+      rubPerRobux: 0.94,
+      targetNetRate: 0.8508,
+      targetNetRubles: 425.4,
+      paymentOverheadRubles: 44.6,
       smallOrderSurcharge: 0,
       policyVersion: RETAIL_PRICING_POLICY_VERSION,
     });

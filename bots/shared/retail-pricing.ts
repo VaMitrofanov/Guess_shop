@@ -1,15 +1,18 @@
 /**
  * Canonical retail price policy shared by Telegram, VK and the web storefront.
  *
- * The owner defines a decreasing target amount that RobloxBank must retain per
- * paid R$ after the conservative ordinary-payment deductions. The customer
- * price is grossed up for:
- *   - USN "income": 6% of the full customer payment;
- *   - acquiring: max(3.49 RUB, 3.49% of the customer payment).
- *
- * "Dolями" and an unconfirmed separate fiscal-service fee are intentionally
- * outside this policy. Customer prices round up to whole rubles so the retained
- * amount can never fall below the target because of display/payment rounding.
+ * Since 2026-09-28 the owner sets the BUYER price directly, progressively
+ * (like a tax bracket), so a bigger order never costs less than a smaller one:
+ *   - first 200 R$      — 1.0 RUB per R$;
+ *   - 201…500 R$        — 0.9 RUB per R$;
+ *   - everything above  — 0.8 RUB per R$.
+ * Large orders keep the older, cheaper curve (retained-net target grossed up
+ * for USN and acquiring, bottoming out at ≈0.77 RUB per R$): the buyer pays the
+ * lower of the two, which takes over from 4219 R$. Both are non-decreasing, so
+ * their minimum never charges less for a bigger order.
+ * USN and acquiring are no longer grossed up on top: they come out of this
+ * price, and `getRetailPriceBreakdown` reports what remains after them.
+ * Customer prices round up to whole rubles.
  */
 
 export const RETAIL_PRICING_POLICY_VERSION = "retail-direct-v2";
@@ -26,8 +29,27 @@ export const BONUS_MIN_PACK = 0;
 /** Stable quick-pick denominations shown by TG/VK and the site. */
 export const DIRECT_PACKS: readonly number[] = [100, 200, 300, 400, 500, 800, 1000, 1200, 1500, 2000];
 
-/** Desired RUB retained per paid R$ before Robux cost, after payment deductions. */
-export function targetNetRate(amount: number): number {
+/** Progressive brackets: [upper bound of the bracket in R$, RUB per R$ inside it]. */
+export const PRICE_BRACKETS: readonly (readonly [number, number])[] = [
+  [200, 1],
+  [500, 0.9],
+  [Infinity, 0.8],
+];
+
+/** Exact, unrounded buyer price for `amount` R$ under the progressive brackets. */
+function bracketPrice(amount: number): number {
+  let total = 0;
+  let lower = 0;
+  for (const [upper, rate] of PRICE_BRACKETS) {
+    if (amount <= lower) break;
+    total += (Math.min(amount, upper) - lower) * rate;
+    lower = upper;
+  }
+  return total;
+}
+
+/** Pre-2026-09-28 target RUB retained per paid R$; still caps large orders. */
+export function legacyTargetNetRate(amount: number): number {
   if (!Number.isFinite(amount) || amount < 1) return 0;
 
   if (amount <= 10) return 3 - ((3 - 2) / (10 - 1)) * (amount - 1);
@@ -38,6 +60,13 @@ export function targetNetRate(amount: number): number {
   if (amount <= 3000) return 0.9 - ((0.9 - 0.8) / (3000 - 1000)) * (amount - 1000);
   if (amount <= 5000) return 0.8 - ((0.8 - 0.7) / (5000 - 3000)) * (amount - 3000);
   return 0.7;
+}
+
+/** RUB retained per paid R$ after USN and acquiring at the published price. */
+export function targetNetRate(amount: number): number {
+  if (!Number.isFinite(amount) || amount < 1) return 0;
+  const normalized = Math.round(amount);
+  return retainedAfterPaymentCosts(directPrice(normalized)) / normalized;
 }
 
 /** Amount retained after USN and the conservative ordinary acquiring fee. */
@@ -70,8 +99,10 @@ export function customerPriceForTargetNet(targetNetRub: number): number {
 export function directPrice(amount: number): number {
   if (!Number.isFinite(amount) || amount <= 0) return 0;
   const normalized = Math.round(amount);
-  const targetNetRub = normalized * targetNetRate(normalized);
-  return Math.ceil(customerPriceForTargetNet(targetNetRub));
+  // toFixed guards against float noise (e.g. 290.00000000000006 → 291).
+  const brackets = Math.ceil(Number(bracketPrice(normalized).toFixed(6)));
+  const legacy = Math.ceil(customerPriceForTargetNet(normalized * legacyTargetNetRate(normalized)));
+  return Math.min(brackets, legacy);
 }
 
 /** Published pack prices are derived from the same curve, never overridden. */
@@ -91,7 +122,7 @@ export interface RetailPriceBreakdown {
   rubles: number;
   /** What the buyer pays per received paid R$. */
   rubPerRobux: number;
-  /** Internal target retained per paid R$ after USN and acquiring. */
+  /** Retained per paid R$ after USN and acquiring. */
   targetNetRate: number;
   targetNetRubles: number;
   paymentOverheadRubles: number;

@@ -8,9 +8,9 @@ describe("price quote calculation", () => {
       requestedRobux: 500,
       bonusRobux: 0,
       gamepassPriceRobux: 715,
-      baseAmountKopecks: 55_300,
+      baseAmountKopecks: 47_000,
       discountKopecks: 0,
-      finalAmountKopecks: 55_300,
+      finalAmountKopecks: 47_000,
     });
   });
 
@@ -22,8 +22,8 @@ describe("price quote calculation", () => {
     }, now)).toMatchObject({
       bonusRobux: 25,
       gamepassPriceRobux: 179,
-      baseAmountKopecks: 14_400,
-      discountKopecks: 14_400,
+      baseAmountKopecks: 10_000,
+      discountKopecks: 10_000,
       finalAmountKopecks: 0,
     });
   });

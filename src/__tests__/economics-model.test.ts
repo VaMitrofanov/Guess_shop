@@ -64,9 +64,9 @@ describe("modelPriceKop", () => {
     expect(modelPriceKop(1000, PRICES)).toBe(80_000);
   });
 
-  it("нестандартный объём считает по той же динамической кривой, что бот", () => {
-    expect(modelPriceKop(300, PRICES)).toBe(38_200);
-    expect(modelPriceKop(800, PRICES)).toBe(83_100);
+  it("нестандартный объём считает по той же ступенчатой шкале, что бот", () => {
+    expect(modelPriceKop(300, PRICES)).toBe(29_000);
+    expect(modelPriceKop(800, PRICES)).toBe(71_000);
   });
 });
 
