@@ -26,8 +26,11 @@
 
 import "dotenv/config";
 import { VK } from "vk-io";
-import { handleMessage, initVkHandlers } from "./handlers";
+import { handleMessage, handleOutboxMessage, handleVkGroupJoin, initVkHandlers } from "./handlers";
+import { notifyBotError } from "../shared/admin";
 import { startBridgeServer } from "../shared/bridge";
+import { startIndependentPaymentWorkerWatchdog } from "../shared/payment-worker-watchdog";
+import { syncVkActor } from "../shared/user-profile-sync";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
 
@@ -39,13 +42,54 @@ if (!groupId) throw new Error("[VK] VK_GROUP_ID is not set");
 
 export const vk = new VK({ token, apiVersion: "5.131" });
 initVkHandlers(vk);
+startIndependentPaymentWorkerWatchdog();
 
 // Register message_new handler
 vk.updates.on("message_new", async (ctx) => {
   try {
     await handleMessage(ctx as any);
+    if (!ctx.isOutbox && ctx.senderId > 0) void syncVkActor(ctx.senderId);
   } catch (err) {
     console.error("[VK] Unhandled error in message_new:", err);
+    if (!ctx.isOutbox) {
+      // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
+      // Текст сообщения — часть улики: без него ветку, на которой упало, не
+      // воспроизвести (разбор 02.09.2026 встал ровно на этом).
+      notifyBotError({
+        platform: "VK",
+        userId: ctx.senderId,
+        err,
+        input: (ctx as any)?.text ?? (ctx as any)?.messagePayload
+          ? String((ctx as any)?.text ?? JSON.stringify((ctx as any)?.messagePayload))
+          : null,
+      }).catch(() => {});
+      try {
+        await ctx.reply("⚠️ Произошла ошибка. Попробуй ещё раз или напиши нам: https://t.me/RobloxBank_PA");
+      } catch {}
+    }
+  }
+});
+
+// message_reply — исходящие сообщения сообщества (живой менеджер из интерфейса VK
+// или сам бот). Нужно для support-pause: менеджерское сообщение (admin_author_id)
+// ставит паузу, «+бот» от менеджера возвращает бота. Без этой подписки outbox-ветка
+// не получала событий вовсе (бот был подписан только на message_new).
+vk.updates.on("message_reply", async (ctx) => {
+  try {
+    await handleOutboxMessage(ctx as any);
+  } catch (err) {
+    console.error("[VK] Unhandled error in message_reply:", err);
+  }
+});
+
+// group_join — бесшовный гейт подписки (PLAN +5.D): юзер вступил в сообщество
+// сам, без кнопки «Я вступил» — продолжаем его флоу сразу.
+vk.updates.on("group_join" as any, async (ctx: any) => {
+  try {
+    const uid = ctx.userId ?? ctx.user_id ?? ctx?.wrapped?.user_id;
+    if (typeof uid === "number" && uid > 0) await handleVkGroupJoin(uid);
+  } catch (err) {
+    console.error("[VK] Unhandled error in group_join:", err);
   }
 });
 
@@ -61,6 +105,25 @@ if (process.env.VALIDATOR_KEY) {
 }
 
 // ── Start long polling ───────────────────────────────────────────────────────
+// Явно фиксируем события Bots Long Poll (идемпотентно): на проде
+// getLongPollSettings показывал is_enabled=false при живом message_new — не
+// полагаемся на магию. message_reply нужен support-pause (пауза от живого
+// менеджера, «+бот»), group_join — бесшовному гейту подписки (PLAN +5.D).
+// vk-io сам настройки НЕ включает (только groups.getLongPollServer).
+vk.api.groups
+  .setLongPollSettings({
+    group_id: groupId,
+    enabled: true,
+    api_version: "5.131",
+    message_new: true,
+    message_reply: true,
+    group_join: true,
+  })
+  .then(() => console.log("[VK] LongPoll settings ensured (message_new, message_reply, group_join)"))
+  .catch((err: any) =>
+    console.warn("[VK] setLongPollSettings failed (нужны manage-права токена):", err?.message ?? err)
+  );
+
 vk.updates
   .startPolling()
   .then(() => {

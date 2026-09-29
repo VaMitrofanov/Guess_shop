@@ -2,8 +2,8 @@
 
 # ────────────────────────────────────────────────────────────────────────────
 # Multi-stage Dockerfile for the Next.js 16 storefront (standalone build).
-# Tuned for the production deploy host: 89.110.94.117 — Ubuntu 22.04,
-# 2 vCPU / 4 GB RAM / 100 GB disk, Moscow.
+# Tuned for the production deploy host (Ubuntu 22.04, 2 vCPU / 4 GB RAM,
+# Moscow — адрес в HANDOFF.md, не в публичном репо).
 #
 # Monorepo context (new layout — share with bots/vk/Dockerfile, bots/tg/Dockerfile):
 #   Base Directory      = /              (repo root)
@@ -104,11 +104,17 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
+# T-Bank uses certificates signed by the Russian Trusted Root CA (MinDigital),
+# which is not in the default Debian CA bundle.
+COPY certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
+RUN update-ca-certificates
+
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    NODE_OPTIONS="--max-old-space-size=512"
+    NODE_OPTIONS="--max-old-space-size=512" \
+    NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-ca.crt
 
 # Non-root user — security hardening + Coolify volume permissions sanity.
 RUN groupadd --system --gid 1001 nodejs \
@@ -134,9 +140,11 @@ USER nextjs
 
 EXPOSE 3000
 
-# Healthcheck: 30s interval is friendly to the constrained host. Hits root
-# rather than /api/health (which doesn't exist yet) — switch when ready.
+# Healthcheck hits /api/health, NOT `/`. The root path is gated by the
+# maintenance proxy (src/proxy.ts) — probing it would return 503 whenever
+# MAINTENANCE_MODE=on, marking the container unhealthy and taking the whole
+# Web service (incl. /twa and /api) out of rotation. /api/* is never gated.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/ || exit 1
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["node", "server.js"]

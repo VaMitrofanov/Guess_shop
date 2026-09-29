@@ -39,13 +39,24 @@ export async function GET(req: NextRequest) {
     ? (settings.lastAdAttributedAt as Date).toISOString().split("T")[0]
     : new Date(Date.now() - 30 * 864e5).toISOString().split("T")[0];
 
-  const [advertResult, realizResult, pricesResult] = await Promise.allSettled([
+  const today = new Date().toISOString().split("T")[0];
+  const [advertResult, realizResult, pricesResult, commResult, boxResult] = await Promise.allSettled([
     getAdvertDataForPeriod(fromDate),
     getRealizData(4),
     token
       ? fetch("https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0", {
           cache: "no-store",
           headers: { Authorization: token },
+        }).then(r => r.ok ? r.json() : null).catch(() => null)
+      : Promise.resolve(null),
+    token
+      ? fetch("https://common-api.wildberries.ru/api/v1/tariffs/commission?locale=ru", {
+          cache: "no-store", headers: { Authorization: token },
+        }).then(r => r.ok ? r.json() : null).catch(() => null)
+      : Promise.resolve(null),
+    token
+      ? fetch(`https://common-api.wildberries.ru/api/v1/tariffs/box?date=${today}`, {
+          cache: "no-store", headers: { Authorization: token },
         }).then(r => r.ok ? r.json() : null).catch(() => null)
       : Promise.resolve(null),
   ]);
@@ -72,12 +83,14 @@ export async function GET(req: NextRequest) {
   const storageByArticle: Record<string, number> = {};
   const logByArticle:     Record<string, number> = {};
   const retByArticle:     Record<string, number> = {};
+  const penaltyByArticle: Record<string, number> = {};
   const commByArticle:    Record<string, number> = {};
   if (realiz) {
     for (const a of realiz.byArticle) {
       if (a.storagePerUnit > 0) storageByArticle[a.article] = a.storagePerUnit;
       if (a.logPerUnit > 0)     logByArticle[a.article]     = a.logPerUnit;
       if (a.retPct > 0)         retByArticle[a.article]     = a.retPct;
+      if (a.penaltyPerUnit > 0) penaltyByArticle[a.article] = a.penaltyPerUnit;
       if (a.commPct > 0)        commByArticle[a.article]    = a.commPct;
     }
   }
@@ -97,6 +110,26 @@ export async function GET(req: NextRequest) {
         });
       }
     } catch { /* ignore parse errors, products stays empty */ }
+  }
+
+  // Live WB tariffs — used as a forecast fallback for products without sales history.
+  // Our cards are all in subjectID 532 ("Диски с играми"); use the marketplace (FBS) rate.
+  let defaultCommissionPct: number | null = null;
+  let defaultLogistics:     number | null = null;
+  const commData = commResult.status === "fulfilled" ? commResult.value : null;
+  if (commData?.report && Array.isArray(commData.report)) {
+    const row = commData.report.find((r: any) => r.subjectID === 532);
+    if (row && typeof row.kgvpMarketplace === "number") defaultCommissionPct = row.kgvpMarketplace / 100;
+  }
+  const boxData = boxResult.status === "fulfilled" ? boxResult.value : null;
+  const warehouseList = boxData?.response?.data?.warehouseList;
+  if (Array.isArray(warehouseList)) {
+    const digital = warehouseList.find((w: any) => /цифров/i.test(w.warehouseName ?? ""));
+    const base = digital?.boxDeliveryBase;
+    if (typeof base === "string" && base !== "-") {
+      const n = parseFloat(base.replace(/\s/g, "").replace(",", "."));
+      if (!isNaN(n)) defaultLogistics = n;
+    }
   }
 
   // Build per-product cost map (article → commission/taxRate/denomination)
@@ -126,7 +159,10 @@ export async function GET(req: NextRequest) {
     retPct: retPctGlobal,
     retByArticle,
     penaltyPerUnit,
+    penaltyByArticle,
     commByArticle,
+    defaultCommissionPct,
+    defaultLogistics,
     products,
     costByArticle: Object.fromEntries(costByArticle),
     lastAdAttributedAt,

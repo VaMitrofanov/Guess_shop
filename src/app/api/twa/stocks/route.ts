@@ -1,23 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
-import { getStats30d, getStocks } from "@/lib/wb-api";
+import { getNmFunnel, getStocks } from "@/lib/wb-api";
 
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [stocks, stats] = await Promise.all([getStocks(), getStats30d()]);
+  const [stocks, funnel] = await Promise.all([getStocks(), getNmFunnel()]);
   if (!stocks) return NextResponse.json({ error: "WB API unavailable" }, { status: 503 });
 
-  // Compute avg daily sales per article from last 14 days
+  // The official funnel is cohort-aligned; operational /orders uses
+  // lastChangeDate and makes an unreliable runway denominator.
   const avgMap = new Map<string, number>();
-  if (stats) {
-    const cutoff = Date.now() - 14 * 864e5;
-    const byArt  = new Map<string, number>();
-    for (const o of stats.orders) {
-      if (new Date(o.date).getTime() < cutoff || o.isCancel) continue;
-      byArt.set(o.supplierArticle, (byArt.get(o.supplierArticle) ?? 0) + 1);
+  if (funnel) {
+    for (const item of funnel) {
+      avgMap.set(item.article, item.orders / 30);
     }
-    for (const [art, cnt] of byArt) avgMap.set(art, cnt / 14);
   }
 
   const result = stocks.map(s => {

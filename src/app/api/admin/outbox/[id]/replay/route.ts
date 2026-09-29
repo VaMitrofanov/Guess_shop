@@ -1,0 +1,38 @@
+import { revalidateTag } from "next/cache";
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { resolveAdminFromSession } from "@/lib/admin-access";
+import { OutboxReplayError, requestOutboxReplay } from "@/lib/outbox-replay";
+
+export const dynamic = "force-dynamic";
+
+const ReplaySchema = z.object({
+  idempotencyKey: z.uuid(),
+  reason: z.string().trim().min(3).max(300).optional(),
+});
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  // A1: доступ решает единственный гейт. Повтор доставки пишется в аудит на
+  // внутренний `User.id`, поэтому запасной вход без него сюда не пройдёт.
+  const admin = await resolveAdminFromSession();
+  if (!admin?.userId) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+
+  const { id } = await params;
+  if (!/^[a-z0-9_-]{8,40}$/i.test(id)) return NextResponse.json({ error: "Invalid outbox ID" }, { status: 400 });
+  const parsed = ReplaySchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Укажите причину и корректный ключ операции" }, { status: 400 });
+
+  try {
+    const result = await requestOutboxReplay({ outboxId: id, requestedBy: admin.userId, ...parsed.data });
+    revalidateTag("admin-operational", "max");
+    return NextResponse.json({ success: true, alreadyExists: result.kind === "existing", outbox: result.outbox }, { status: 202 });
+  } catch (error) {
+    if (error instanceof OutboxReplayError) {
+      if (error.code === "OUTBOX_NOT_FOUND") return NextResponse.json({ error: "Сообщение outbox не найдено" }, { status: 404 });
+      if (error.code === "OUTBOX_NOT_DEAD") return NextResponse.json({ error: "Повтор допустим только для DEAD-letter сообщений" }, { status: 409 });
+      return NextResponse.json({ error: "Состояние сообщения уже изменилось; обновите страницу" }, { status: 409 });
+    }
+    console.error("[outbox-replay] failed", error);
+    return NextResponse.json({ error: "Не удалось поставить повторную доставку в очередь" }, { status: 500 });
+  }
+}
