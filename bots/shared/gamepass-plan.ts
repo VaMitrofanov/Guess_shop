@@ -59,6 +59,30 @@ export const expectedGamepassPrice = (amount: number): number => Math.ceil(amoun
 export const DONOR_NET_CAPACITY = 1500;
 
 /**
+ * Закрывается ли заказ ОДНИМ пассом.
+ *
+ * Пасс дороже донора (2000 R$ → 2858 грязных при потолке 2143) не выкупит ни
+ * один наш аккаунт — такой пасс нельзя принимать ни на одном входе. До
+ * 29.09.2026 потолок проверялся только у частей набора, а одиночный пасс на
+ * всю сумму проходил везде: WEB-7AFD5548810D… (2000 R$) оплатили под пасс за
+ * 2858, а EANWU8F и PCMVDH4 стоят в очереди с такими же.
+ */
+export function singlePassFits(amount: number): boolean {
+  return Number.isInteger(amount) && amount > 0 && amount <= DONOR_NET_CAPACITY;
+}
+
+/** Покупателю: почему одного пасса мало и какие пассы нужны вместо него. */
+export function splitRequiredMessage(amount: number): string {
+  const chunks = splitIntoDonorChunks(amount);
+  const prices = chunks.map((chunk) => `${expectedGamepassPrice(chunk)} R$`);
+  return (
+    `Заказ на ${amount} R$ одним геймпассом не закрыть: пасс дороже ` +
+    `${expectedGamepassPrice(DONOR_NET_CAPACITY)} R$ мы выкупить не можем. ` +
+    `Нужны геймпассы по ${prices.join(" + ")} (придёт ${chunks.join(" + ")} = ${amount} R$).`
+  );
+}
+
+/**
  * Шаг номинала части. Кратность 500 держит остатки на донорах пригодными:
  * часть на 70 или 430 робуксов оставляет на аккаунте огрызок, которым уже не
  * закрыть ни одну следующую часть.

@@ -1,3 +1,5 @@
+import { singlePassFits } from "./gamepass-plan";
+
 export type SearchableGamepass = {
   price: number;
   isForSale?: boolean;
@@ -17,6 +19,9 @@ export function robuxForGamepassPrice(price: number): number | null {
   if (!Number.isFinite(gross) || gross <= 0) return null;
   const net = Math.floor((gross * 7) / 10);
   if (net < SITE_MIN_ROBUX || net > SITE_MAX_ROBUX) return null;
+  // Один пасс — один донор: пасс дороже 2143 (больше 1500 на руки) не выкупить,
+  // и пересчитывать заказ «под него» нельзя — такой заказ собирается набором.
+  if (!singlePassFits(net)) return null;
   return Math.abs(Math.ceil(net / 0.7) - gross) <= GAMEPASS_PRICE_TOLERANCE ? net : null;
 }
 

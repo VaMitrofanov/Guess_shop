@@ -33,5 +33,8 @@ describe("search-first gamepass results", () => {
     expect(robuxForGamepassPrice(1429)).toBe(1000);
     expect(robuxForGamepassPrice(1430)).toBe(1001);
     expect(robuxForGamepassPrice(100)).toBeNull();
+    // Один пасс — один донор: дороже 2143 заказ «под пасс» не пересчитываем.
+    expect(robuxForGamepassPrice(2143)).toBe(1500);
+    expect(robuxForGamepassPrice(2858)).toBeNull();
   });
 });

@@ -35,6 +35,25 @@ describe("форма набора", () => {
     expect(res).toMatchObject({ ok: false, code: "BAD_SPLIT" });
   });
 
+  // WEB-7AFD5548810D… (29.09.2026): заказ на 2000 оплачен под один пасс за
+  // 2858 — такой пасс не выкупит ни один донор (потолок 2143).
+  test("одиночный пасс на заказ больше донора — отказ NEEDS_SPLIT на любом входе", () => {
+    for (const raw of [null, [], [{ gamepassId: "111", amount: 2000 }]]) {
+      const res = normalizeParts("111", raw, 2000);
+      expect(res).toMatchObject({ ok: false, code: "NEEDS_SPLIT" });
+      if (!res.ok) expect(res.message).toContain("2143 R$ + 715 R$");
+    }
+  });
+
+  test("ровно 1500 — ещё одним пассом", () => {
+    expect(normalizeParts("111", null, 1500)).toMatchObject({ ok: true });
+  });
+
+  test("2000 набором 1500 + 500 проходит", () => {
+    const res = normalizeParts("1", [{ gamepassId: "1", amount: 1500 }, { gamepassId: "2", amount: 500 }], 2000);
+    expect(res.ok).toBe(true);
+  });
+
   test("хвост заказа больше донора — законная часть (1700 = 1000 + 700)", () => {
     const res = normalizeParts("1", [{ gamepassId: "1", amount: 1000 }, { gamepassId: "2", amount: 700 }], 1700);
     expect(res.ok).toBe(true);
@@ -42,6 +61,17 @@ describe("форма набора", () => {
 });
 
 describe("acceptGamepasses", () => {
+  test("пасс за 2858 на заказ 2000 не принимается даже при верной цене", async () => {
+    const res = await acceptGamepasses({
+      orderAmount: 2000,
+      gamepassId: "1",
+      claimedNick: "Owner",
+      getDetails: live({ "1": pass(2858) }),
+      onUnreachable: "accept",
+    });
+    expect(res).toMatchObject({ ok: false, code: "NEEDS_SPLIT" });
+  });
+
   test("пасс нужной цены принимается, получатель — его владелец", async () => {
     const res = await acceptGamepasses({
       orderAmount: 1000,

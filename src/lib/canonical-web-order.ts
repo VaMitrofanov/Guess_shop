@@ -7,6 +7,7 @@ import {
   MAX_AUTO_PARTS,
   SPLIT_STEP,
   isAllowedPartAmount,
+  splitRequiredMessage,
 } from "@/lib/gamepass-plan";
 import { BONUS_REASONS, webOrderBonusKey } from "@/lib/bonus-ledger";
 
@@ -182,6 +183,17 @@ type CreateCanonicalWebOrderInput = {
  */
 export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInput) {
   const now = input.now ?? new Date();
+  // Второй рубеж после приёма пассов: заказ больше донора пишется ТОЛЬКО
+  // набором. `validateCheckoutParts` до 29.09.2026 здесь не вызывался вовсе, и
+  // WEB-7AFD5548810D… (2000 R$) лёг в базу одним пассом за 2858.
+  if (input.parts && input.parts.length > 1) {
+    validateCheckoutParts(input.quote, input.parts);
+  } else if (input.quote.requestedRobux + input.quote.bonusRobux > DONOR_NET_CAPACITY) {
+    throw new WebOrderError(
+      "PARTS_INVALID",
+      splitRequiredMessage(input.quote.requestedRobux + input.quote.bonusRobux),
+    );
+  }
   const publicId = publicOrderId();
   const rawStatusToken = createStatusToken();
   const tokenHash = hashStatusToken(rawStatusToken);

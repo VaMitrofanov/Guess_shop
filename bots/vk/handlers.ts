@@ -33,6 +33,8 @@ import { parseExperienceRef, type GamesVisibility } from "../shared/roblox-owned
 import {
   createTargetsFor,
   planFromOwned,
+  singlePassFits,
+  splitRequiredMessage,
   targetsToCreate,
   type CheckPlan,
   type OwnedPass,
@@ -2449,6 +2451,27 @@ async function handleGamepassLink(
       "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
       "Если геймпасс точно существует — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
     );
+    return;
+  }
+
+  // Заказ больше донора одним пассом не закрыть (2000 R$ → пасс за 2858, а
+  // донор держит 2143). До 29.09.2026 такой пасс принимался по ссылке. Вместо
+  // отказа — разбор аккаунта владельца: набор 1500 + 500 считается там.
+  if (!parts && !singlePassFits(denomination)) {
+    const owner = (gamepassInfo.creatorName ?? "").trim();
+    if (ROBLOX_NICK_RE.test(owner)) {
+      await showResult(`⚠️ ${splitRequiredMessage(denomination)}\n\n🔎 Смотрю, что уже выставлено на аккаунте ${owner}…`);
+      await handleRobloxNickInput(ctx, vkUserId, owner, wbCode, denomination);
+    } else {
+      await showResult({
+        message: `⚠️ ${splitRequiredMessage(denomination)}\n\nПришли свой ник Roblox — посмотрю, что уже выставлено, и скажу, что досоздать.`,
+        keyboard: Keyboard.builder()
+          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+          .row()
+          .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
+          .inline(),
+      });
+    }
     return;
   }
 

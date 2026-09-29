@@ -39,7 +39,7 @@ import {
   robuxForGamepassPrice,
 } from "@/lib/gamepass-search-view";
 import { parseGamepassRef } from "@/lib/gamepass-id";
-import { MAX_AUTO_PARTS, planFromOwned } from "@/lib/gamepass-plan";
+import { DONOR_NET_CAPACITY, MAX_AUTO_PARTS, idealTargetsFor, planFromOwned, singlePassFits, splitRequiredMessage } from "@/lib/gamepass-plan";
 import styles from "./checkout.module.css";
 
 const MIN_ROBUX = 100;
@@ -89,6 +89,13 @@ type CustomerRobloxProfileLike = KnownRobloxAccount;
 
 const normalizeAmount = (value: string) => Math.min(MAX_ROBUX, Math.max(MIN_ROBUX, Number.parseInt(value, 10) || 1000));
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
+/**
+ * Какие пассы нужны под сумму: до 1500 — один, выше — набор («2 143 + 715 R$»).
+ * До 29.09.2026 страница просила «пасс за 2 858» на заказ 2000 — такой пасс не
+ * выкупит ни один донор (потолок 2 143).
+ */
+const passPriceText = (amount: number) =>
+  `${idealTargetsFor(amount).map((net) => grossPassPrice(net).toLocaleString("ru-RU")).join(" + ")} R$`;
 
 /** Часть заказа на стороне страницы: пасс, его номинал и что показать человеку. */
 type CheckoutPlanPart = { gamepassId: string; amount: number; name?: string; price?: number };
@@ -238,7 +245,9 @@ function CheckoutContent() {
     const nextPassPrice = grossPassPrice(normalized + bonus);
     const ranked = rankSellableGamepasses(gamepasses, nextPassPrice);
     const repeatBuyer = authenticated === true && knownAccounts.length > 0;
-    const nextSelected = selectedPass && gamepassPriceMatches(Number(selectedPass.price), nextPassPrice)
+    const nextSelected = !singlePassFits(normalized + bonus)
+      ? null
+      : selectedPass && gamepassPriceMatches(Number(selectedPass.price), nextPassPrice)
       ? selectedPass
       : repeatBuyer
         ? ranked.find((pass) => gamepassPriceMatches(Number(pass.price), nextPassPrice)) ?? null
@@ -259,7 +268,9 @@ function CheckoutContent() {
 
   const price = getPrice(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(orderTotal), [orderTotal]);
-  const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
+  /** Заказ закрывается одним пассом — только пока влезает в донора (≤ 1500). */
+  const singleFits = singlePassFits(orderTotal);
+  const selectedPriceMatches = singleFits && !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
   /**
    * Набор из уже выставленных пассов — то же, что делает коридор ВБ.
    *
@@ -415,10 +426,13 @@ function CheckoutContent() {
         setAccount(data.account ?? null);
         setGamepasses(ranked);
         const remembered = rememberedGamepassId ? ranked.find((pass) => String(pass.id) === rememberedGamepassId) : null;
-        const matching = ranked.filter((pass) => gamepassPriceMatches(Number(pass.price), expectedPassPrice));
+        // Пасс дороже донора (заказ > 1500) одиночным выбором не становится —
+        // иначе «Продолжить» ждал бы цену, которую никто не запросит.
+        const singleOk = expectedPassPrice <= grossPassPrice(DONOR_NET_CAPACITY);
+        const matching = singleOk ? ranked.filter((pass) => gamepassPriceMatches(Number(pass.price), expectedPassPrice)) : [];
         if (remembered) {
           setSelectedPass(remembered);
-          if (autoSelectMatching && gamepassPriceMatches(Number(remembered.price), expectedPassPrice)) setQuoteLoading(true);
+          if (autoSelectMatching && singleOk && gamepassPriceMatches(Number(remembered.price), expectedPassPrice)) setQuoteLoading(true);
         } else if (matching.length === 1 || (autoSelectMatching && matching.length > 0)) {
           setSelectedPass(matching[0]);
           if (autoSelectMatching) setQuoteLoading(true);
@@ -714,7 +728,9 @@ function CheckoutContent() {
 
   const prepareConfirmation = async () => {
     if (!username || !passReady) {
-      setError(selectedPass && !selectedPriceMatches
+      setError(!singleFits
+        ? splitRequiredMessage(orderTotal)
+        : selectedPass && !selectedPriceMatches
         ? `У выбранного пасса должна стоять цена ${expectedPassPrice.toLocaleString("ru-RU")} R$.`
         : "Сначала найди аккаунт и выбери геймпасс.");
       return;
@@ -815,9 +831,9 @@ function CheckoutContent() {
       <Checkbox checked={useBonus} onChange={(event) => toggleBonus(event.target.checked)} />
       <span>
         Добавить бонус <b>+{availableBonus.toLocaleString("ru-RU")} R$</b> бесплатно — придёт{" "}
-        {(robux + availableBonus).toLocaleString("ru-RU")} R$, пасс нужен за{" "}
-        {grossPassPrice(robux + availableBonus).toLocaleString("ru-RU")} R$
-        {" "}(без бонуса — {grossPassPrice(robux).toLocaleString("ru-RU")} R$).
+        {(robux + availableBonus).toLocaleString("ru-RU")} R$, {singlePassFits(robux + availableBonus) ? "пасс нужен" : "пассы нужны"} за{" "}
+        {passPriceText(robux + availableBonus)}
+        {" "}(без бонуса — {passPriceText(robux)}).
       </span>
     </label>
   ) : null;
@@ -870,7 +886,7 @@ function CheckoutContent() {
                   // что именно править, а не гадал над серой кнопкой.
                   const offsale = manualPass.isForSale === false;
                   const passRobux = robuxForGamepassPrice(Number(manualPass.price));
-                  const matches = gamepassPriceMatches(Number(manualPass.price), expectedPassPrice);
+                  const matches = singleFits && gamepassPriceMatches(Number(manualPass.price), expectedPassPrice);
                   const ready = !offsale && (matches || passRobux !== null);
                   const owner = manualPass.creatorName || manualPass.sellerName || "";
                   // Ник, который человек уже назвал сам. Если владелец пасса
@@ -890,7 +906,9 @@ function CheckoutContent() {
                         <div className={styles.manualWarn}><CircleAlert size={18} /><span>Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> на его странице и нажми «Проверить» снова.</span></div>
                       )}
                       {!offsale && !matches && passRobux === null && (
-                        <div className={styles.manualWarn}><CircleAlert size={18} /><span>Цена пасса <b>{Number(manualPass.price).toLocaleString("ru-RU")} R$</b> вне диапазона заказа ({MIN_ROBUX.toLocaleString("ru-RU")}–{MAX_ROBUX.toLocaleString("ru-RU")} R$). Поставь <b>{expectedPassPrice.toLocaleString("ru-RU")} R$</b> и нажми «Проверить» снова.</span></div>
+                        Number(manualPass.price) > grossPassPrice(DONOR_NET_CAPACITY) + 2
+                          ? <div className={styles.manualWarn}><CircleAlert size={18} /><span>Пасс за <b>{Number(manualPass.price).toLocaleString("ru-RU")} R$</b> одним выкупом не взять — дороже <b>{grossPassPrice(DONOR_NET_CAPACITY).toLocaleString("ru-RU")} R$</b> мы не покупаем. {singleFits ? <>Поставь <b>{expectedPassPrice.toLocaleString("ru-RU")} R$</b></> : <>Для {orderTotal.toLocaleString("ru-RU")} R$ нужны пассы по <b>{passPriceText(orderTotal)}</b></>} и нажми «Проверить» снова.</span></div>
+                          : <div className={styles.manualWarn}><CircleAlert size={18} /><span>Цена пасса <b>{Number(manualPass.price).toLocaleString("ru-RU")} R$</b> вне диапазона заказа ({MIN_ROBUX.toLocaleString("ru-RU")}–{MAX_ROBUX.toLocaleString("ru-RU")} R$). Поставь <b>{passPriceText(orderTotal)}</b> и нажми «Проверить» снова.</span></div>
                       )}
                       {ready && owner && !ownerMismatch && (
                         <div className={styles.manualOk}><BadgeCheck size={18} /><span>Владелец пасса — <b>{owner}</b>. Робуксы придут именно на этот аккаунт.</span></div>
@@ -917,7 +935,7 @@ function CheckoutContent() {
                           <strong>{manualPass.name}</strong>
                           <small>Цена пасса · {Number(manualPass.price).toLocaleString("ru-RU")} R$</small>
                           <em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>
-                            {matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}
+                            {matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : Number(manualPass.price) > grossPassPrice(DONOR_NET_CAPACITY) + 2 ? `Дороже ${grossPassPrice(DONOR_NET_CAPACITY).toLocaleString("ru-RU")} R$ — одним выкупом не взять` : "Вне доступного диапазона"}
                           </em>
                           {/* Последствие названо там, где палец: карточку жмут,
                               не долистав до предупреждения выше. */}
@@ -1079,7 +1097,9 @@ function CheckoutContent() {
                     ? `${planSummary} R$ — каждую часть выкупаем отдельно`
                     : effectivePass
                       ? `${effectivePass.name} · ${Number(effectivePass.price).toLocaleString("ru-RU")} R$`
-                      : `Нужен геймпасс за ${expectedPassPrice.toLocaleString("ru-RU")} R$ — создай его по инструкции или вставь Pass ID ниже.`}
+                      : singleFits
+                        ? `Нужен геймпасс за ${expectedPassPrice.toLocaleString("ru-RU")} R$ — создай его по инструкции или вставь Pass ID ниже.`
+                        : `Нужны геймпассы по ${passPriceText(orderTotal)} — одним пассом ${orderTotal.toLocaleString("ru-RU")} R$ не выкупить. Создай их по инструкции.`}
                 </small>
               </span>
               {!searching && !passReady && <Link href={guideHref(username)}>Инструкция</Link>}
@@ -1114,7 +1134,7 @@ function CheckoutContent() {
               <div><span>Получишь</span><strong>{orderTotal.toLocaleString("ru-RU")} R$</strong></div>
               {appliedBonus > 0 && <div><span>Из них бонус</span><strong>+{appliedBonus.toLocaleString("ru-RU")} R$</strong></div>}
               <div><span>Аккаунт</span><strong>@{username}</strong></div>
-              <div><span>Цена геймпасса</span><strong>{expectedPassPrice.toLocaleString("ru-RU")} R$</strong></div>
+              <div><span>{singleFits ? "Цена геймпасса" : "Цены геймпассов"}</span><strong>{passPriceText(orderTotal)}</strong></div>
               <div><span>Твой курс</span><strong>{formatCustomerRate(customerRate)} ₽/R$</strong></div>
               {!!quote?.discountKopecks && <div><span>Скидка</span><strong>−{(quote.discountKopecks / 100).toLocaleString("ru-RU")} ₽</strong></div>}
             </div>
@@ -1184,12 +1204,12 @@ function CheckoutContent() {
                 <p className={styles.resultLead}>Подходящие для {orderTotal.toLocaleString("ru-RU")} R$ уже наверху. Если готов только один — мы выбрали его автоматически.{planIsSet ? ` Заказ соберём из ${planParts?.length} твоих пассов: ${planSummary} R$.` : ""}</p>
                 <div className={styles.passGrid}>
                     {gamepasses.map((pass) => {
-                      const matches = gamepassPriceMatches(Number(pass.price), expectedPassPrice);
+                      const matches = singleFits && gamepassPriceMatches(Number(pass.price), expectedPassPrice);
                       const active = String(effectivePass?.id ?? selectedPass?.id ?? "") === String(pass.id);
                       const passRobux = robuxForGamepassPrice(Number(pass.price));
                       return <button type="button" key={String(pass.id)} onClick={() => selectPass(pass)} className={active ? styles.passSelected : styles.passCard}>
                         <span className={styles.passImage}>{pass.image ? <Image src={pass.image} width={150} height={150} alt="" unoptimized /> : <WalletCards size={22} />}</span>
-                        <span className={styles.passInfo}><strong>{pass.name}</strong><small>Цена пасса · {Number(pass.price).toLocaleString("ru-RU")} R$</small><em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>{matches ? `Получишь ${orderTotal.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}</em></span>
+                        <span className={styles.passInfo}><strong>{pass.name}</strong><small>Цена пасса · {Number(pass.price).toLocaleString("ru-RU")} R$</small><em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>{matches ? `Получишь ${orderTotal.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : Number(pass.price) > grossPassPrice(DONOR_NET_CAPACITY) + 2 ? `Дороже ${grossPassPrice(DONOR_NET_CAPACITY).toLocaleString("ru-RU")} R$ — одним выкупом не взять` : "Вне доступного диапазона"}</em></span>
                         {active && <Check size={19} />}
                       </button>;
                     })}
@@ -1210,7 +1230,7 @@ function CheckoutContent() {
             <div className={styles.summaryRows}>
               {appliedBonus > 0 && <div><span>Из них бонус</span><strong>+{appliedBonus.toLocaleString("ru-RU")} R$</strong></div>}
               <div><span>Стоимость</span><strong>{priceLoading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</strong></div>
-              <div><span>Цена геймпасса</span><strong>{expectedPassPrice.toLocaleString("ru-RU")} R$</strong></div>
+              <div><span>{singleFits ? "Цена геймпасса" : "Цены геймпассов"}</span><strong>{passPriceText(orderTotal)}</strong></div>
               <div><span>Аккаунт</span><strong>{username || "Не выбран"}</strong></div>
               <div>
                 <span>{planIsSet ? "Геймпассы" : "Геймпасс"}</span>

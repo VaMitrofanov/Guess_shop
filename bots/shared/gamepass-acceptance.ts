@@ -22,9 +22,11 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import {
+  DONOR_NET_CAPACITY,
   MAX_AUTO_PARTS,
   expectedGamepassPrice,
   isAllowedPartAmount,
+  splitRequiredMessage,
 } from "./gamepass-plan";
 
 /** Допуск цены — тот же, что у прайс-гарда выкупа (`PRICE_TOL`). */
@@ -49,6 +51,8 @@ export interface AcceptancePart {
 
 export type AcceptanceErrorCode =
   | "BAD_SPLIT"
+  /** Заказ больше донора, а пасс один: нужен набор (2000 = 1500 + 500). */
+  | "NEEDS_SPLIT"
   | "TOO_MANY_PARTS"
   | "NOT_FOR_SALE"
   | "WRONG_PRICE"
@@ -103,6 +107,12 @@ export function normalizeParts(
     const only = rawParts?.[0];
     if (only && (String(only.gamepassId) !== gamepassId || Number(only.amount) !== orderAmount)) {
       return { ok: false, code: "BAD_SPLIT", message: "Единственная часть должна закрывать весь заказ выбранным геймпассом" };
+    }
+    // Потолок донора держит и одиночный пасс, а не только части набора: до
+    // 29.09.2026 заказ на 2000 принимался под один пасс за 2858, который не
+    // выкупит ни один аккаунт. Номинал неизвестен (≤ 0) — сверять не с чем.
+    if (orderAmount > DONOR_NET_CAPACITY) {
+      return { ok: false, code: "NEEDS_SPLIT", message: splitRequiredMessage(orderAmount) };
     }
     return { ok: true, parts: [{ gamepassId, amount: orderAmount }] };
   }

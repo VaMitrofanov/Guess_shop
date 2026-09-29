@@ -21,6 +21,7 @@ import { tgBotHref, vkBotHref } from "@/lib/bot-links";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
 import { parseGamepassRef, parseGamepassUrl } from "@/lib/gamepass-id";
+import { idealTargetsFor } from "@/lib/gamepass-plan";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 import { GUIDE_CSS } from "./guide-css";
 import GuideSteps, { Step, guideStepCount } from "./guide-steps";
@@ -103,9 +104,12 @@ export default function WBInstructionV2({
   // WB is fixed by the activated card. SITE/BOT can edit the desired amount at
   // the calculation step, therefore their expected gamepass price follows `nom`.
   const expectedPrice = calcPrice(mode === "WB" ? nomDefault : nom);
-  /** Что именно предлагаем создать. Здесь всегда один пасс: разбивку на два
-   *  показывает проверка аккаунта, а не страница для читателя. */
-  const createTargets = [{ price: expectedPrice, amount: mode === "WB" ? nomDefault : nom }];
+  /** Что именно предлагаем создать — тот же набор, что у проверки аккаунта:
+   *  до 1500 один пасс, выше — части по донору (2000 = 1500 + 500). До
+   *  29.09.2026 здесь всегда был один пасс, и читатель создавал пасс за 2858,
+   *  который не выкупит ни один наш аккаунт. */
+  const createTargets = idealTargetsFor(mode === "WB" ? nomDefault : nom)
+    .map((amount) => ({ price: calcPrice(amount), amount }));
   /** Шаги «найди пасс» и «зачем бот» идут ПОСЛЕ инструкции и продолжают её
    *  нумерацию. Считаем от самой инструкции, чтобы при её пересборке номера
    *  не разъехались молча. */

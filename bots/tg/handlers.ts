@@ -24,6 +24,8 @@ import {
   createTargetsFor,
   netFromPrice,
   planFromOwned,
+  singlePassFits,
+  splitRequiredMessage,
   targetsToCreate,
   type CheckPlan,
   type OwnedPass,
@@ -3301,6 +3303,30 @@ async function processGamepassSubmission(
         "Если геймпасс точно существует — мы поможем разобраться:",
         { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "pass_not_found", ctx) }
       );
+      return;
+    }
+
+    // Заказ больше донора одним пассом не закрыть: пасс за 2858 (2000 R$) не
+    // выкупит ни один аккаунт. До 29.09.2026 такой пасс принимался по ссылке.
+    // Вместо отказа — разбор аккаунта владельца: там набор 1500 + 500 считается
+    // из того, что уже выставлено, и просится создать только недостающее.
+    if (!parts && !singlePassFits(state.denomination)) {
+      const owner = (gamepassInfo.creatorName ?? "").trim();
+      if (ROBLOX_NICK_RE.test(owner)) {
+        await showResult(`⚠️ ${splitRequiredMessage(state.denomination)}\n\n🔎 Смотрю, что уже выставлено на аккаунте <b>${escapeHtml(owner)}</b>…`, { parse_mode: "HTML" });
+        pendingRobloxNick.set(ctx.from.id, state);
+        await handleRobloxNickInput(bot, ctx, owner);
+      } else {
+        await showResult(`⚠️ ${splitRequiredMessage(state.denomination)}\n\nПришли свой ник Roblox — посмотрю, что уже выставлено, и скажу, что досоздать.`, {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+            [Markup.button.url("📖 ИНСТРУКЦИЯ", state.wbCode.startsWith("DIR-")
+              ? "https://robloxbank.ru/guide?source=direct"
+              : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+          ]),
+        });
+      }
       return;
     }
 
