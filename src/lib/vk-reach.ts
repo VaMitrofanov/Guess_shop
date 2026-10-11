@@ -27,7 +27,9 @@ async function checkOne(vkId: string): Promise<boolean | null> {
       access_token: token,
       v: "5.131",
     });
-    const r = await fetch(`https://api.vk.com/method/messages.isMessagesFromGroupAllowed?${qs}`);
+    const r = await fetch(`https://api.vk.com/method/messages.isMessagesFromGroupAllowed?${qs}`, {
+      signal: AbortSignal.timeout(4_000),
+    });
     const j: any = await r.json().catch(() => null);
     if (j?.error) return null; // rate-limit/приватность — не кэшируем, попробуем позже
     return !!j?.response?.is_allowed;
@@ -64,4 +66,20 @@ export async function checkVkReachable(vkIds: string[]): Promise<Map<string, boo
   }
 
   return result;
+}
+
+/**
+ * Одна свежая проверка — для шага «напиши боту» на сайте (11.10.2026).
+ *
+ * Кэш отвечает только на «да»: разрешение, однажды выданное, не пропадает
+ * через минуту. «Нет» не кэшируется вовсе — страница опрашивает, ожидая, что
+ * человек вот-вот нажмёт «Начать», и час кэша держал бы его на шаге зря.
+ * `null` — VK не ответил: решать за человека по сбою нельзя.
+ */
+export async function checkVkReachableFresh(vkId: string): Promise<boolean | null> {
+  const hit = cache.get(vkId);
+  if (hit?.allowed && Date.now() - hit.ts < TTL_MS) return true;
+  const allowed = await checkOne(vkId);
+  if (allowed !== null) cache.set(vkId, { allowed, ts: Date.now() });
+  return allowed;
 }

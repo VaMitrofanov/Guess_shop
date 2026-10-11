@@ -34,6 +34,29 @@ export function tgMessageId(sent: unknown): number | null {
   return typeof id === "number" ? id : null;
 }
 
+/** Чем кончилась отправка в Telegram — для тех, кому важно, ПОВТОРЯТЬ ли.
+ *
+ * «Заблокировал бота», «удалил аккаунт», «чат не найден» — навсегда: повтор
+ * через час получит тот же отказ. GP-watch раньше считал любой отказ
+ * временным и каждый час заново будил админов одним и тем же алертом
+ * (FLBDVYK, 11.10.2026). Пустой ответ (мост не ответил) — временный. */
+export type TgDeliveryOutcome = "delivered" | "permanent" | "transient";
+
+const PERMANENT_TG_REFUSALS = [
+  "bot was blocked by the user",
+  "user is deactivated",
+  "chat not found",
+  "bot can't initiate conversation",
+];
+
+export function tgDeliveryOutcome(sent: unknown): TgDeliveryOutcome {
+  const body = (sent ?? {}) as TelegramReply & { delivered?: boolean; warning?: string };
+  if (body.ok === true && body.delivered !== false) return "delivered";
+  const reason = `${telegramDescription(body)} ${body.warning ?? ""}`.toLowerCase().replace(/_/g, " ");
+  if (PERMANENT_TG_REFUSALS.some((p) => reason.includes(p))) return "permanent";
+  return "transient";
+}
+
 /** Send a text message to a Telegram chat. Returns the sent message object. */
 export async function tgSend(
   chatId: string | number,

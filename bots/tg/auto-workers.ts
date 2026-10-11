@@ -21,7 +21,7 @@
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
-import { tgSend, vkSend, escapeHtml } from "../shared/notify";
+import { tgSend, tgDeliveryOutcome, vkSend, vkCanReceive, escapeHtml } from "../shared/notify";
 import {
   getGamepassProductInfo,
   isLegacyPurchaseFlowFailure,
@@ -433,7 +433,12 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
       // but ROLL BACK on a confirmed delivery failure so the next tick retries.
       await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: String(pass.gamepassId) } });
 
-      let delivered: "tg" | "vk" | "skip" | null = pingCustomer ? null : "skip";
+      // Исход пинга: доставлен / клиенту писать нельзя вообще / временный сбой.
+      // Временный сбой — единственный повод повторить на следующем тике, и
+      // только он молчит перед админами: алерт уходит один раз, когда исход
+      // известен. Раньше любой отказ сбрасывал дедуп, и тот же пасс каждый час
+      // рождал тот же алерт (FLBDVYK: покупатель заблокировал бота, 11.10.2026).
+      let delivered: "tg" | "vk" | "skip" | "unreachable" | null = pingCustomer ? null : "skip";
       if (pingCustomer) {
         const tgMsg =
           `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
@@ -449,7 +454,8 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
 
         if (order.user?.tgId) {
           const res = await tgSend(order.user.tgId, tgMsg, { parse_mode: "HTML", reply_markup: kb });
-          if ((res as any)?.ok !== false) delivered = "tg";
+          const outcome = tgDeliveryOutcome(res);
+          delivered = outcome === "delivered" ? "tg" : outcome === "permanent" ? "unreachable" : null;
         } else if (order.user?.vkId) {
           const vkKb = JSON.stringify({
             inline: true,
@@ -462,20 +468,27 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
             `🎉 Похоже, твой геймпасс готов!\n\nНик: ${order.probableNick}\nГеймпасс: ${pass.name} · ${pass.robux} R$\n\n` +
             `Это твой геймпасс? Подтверди — заберём его в выкуп 💛`,
             { keyboard: vkKb });
+          // VK 901 («нет разрешения на сообщения») не лечится повтором —
+          // спрашиваем VK прямо, а не гадаем по коду ошибки.
           if (ok) delivered = "vk";
+          else if ((await vkCanReceive(order.user.vkId)) === false) delivered = "unreachable";
+        } else {
+          delivered = "unreachable";
         }
 
         if (delivered === null) {
-          // Confirmed failure (e.g. VK 901) — free the dedup slot for a retry.
+          // Временный сбой — освобождаем дедуп, следующий тик попробует снова.
+          // Админов не будим: они узнают исход, когда он станет известен.
           await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: null } });
+          continue;
         }
       }
 
       if (alertAdmin) {
         const pingLine =
-          delivered === "skip" ? "клиенту НЕ отправлял (режим admin) — оповести из карточки TWA" :
-          delivered            ? `клиент оповещён (${delivered.toUpperCase()}), ждём ✅/❌` :
-                                 "⚠️ пинг клиенту НЕ доставлен — повторим следующим тиком";
+          delivered === "skip"        ? "клиенту НЕ отправлял (режим admin) — оповести из карточки TWA" :
+          delivered === "unreachable" ? "📵 клиенту написать нельзя (заблокировал бота / закрыл сообщения) — подтверди пасс сам или напиши в чат WB" :
+                                        `клиент оповещён (${String(delivered).toUpperCase()}), ждём ✅/❌`;
         await alertAdmins(
           `👁 <b>GP-watch: нашёл геймпасс по вероятному нику</b>\n` +
           `Заказ <code>${order.wbCode}</code> · ник <b>${escapeHtml(order.probableNick)}</b>\n` +

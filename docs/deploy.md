@@ -484,7 +484,9 @@ OpenGraph и корректный maintenance-ответ.
 `ADMIN_BREAKGLASS_EMAILS` (опц., запасной вход владельца — см. ниже),
 `ADMIN_SECRET`, `WB_API_TOKEN`, `MAINTENANCE_MODE` (опц., см. ниже), `SITE_UNLOCK_SECRET`
 (опц., байпас техработ), `NEXT_PUBLIC_VK_AUTH_ENABLED` (опц.; fail-closed, VK ID виден
-только при точном `true` после живого acceptance); B2B «Антон»:
+только при точном `true` после живого acceptance), `NEXT_PUBLIC_VK_COMMUNITY_SUBSCRIBE`
+(опц., build-time, Web **и** Guide; `1` — окно подписки на сообщество после VK-входа, только
+после включения доступа «Сообщества» в кабинете VK ID); B2B «Антон»:
 `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID`,
 `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_PROTECTED_EDITORS` (email владельца
 таблицы для защиты выполненных строк, Этап 5.8). SITE-эквайринг (по умолчанию выключен):

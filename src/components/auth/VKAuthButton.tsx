@@ -11,6 +11,35 @@ const VK_CLUB_HREF = "https://vk.me/club237309399";
 const SUPPORT_URL = "https://t.me/RobloxBank_PA";
 let vkSdkInitialized = false;
 
+/** Сообщество, на которое предлагаем подписаться после входа. */
+const VK_COMMUNITY_ID = 237309399;
+/**
+ * Окно «Подписаться на сообщество» после входа (11.10.2026).
+ *
+ * Выключено по умолчанию: окну нужен доступ `groups` в токене VK ID, а его
+ * сначала надо включить в кабинете VK ID у приложения. Запрос недоступного
+ * доступа может уронить вход через ВК целиком — ровно так 28.07 чужой app id
+ * сломал вход всем. Порядок: включить «Сообщества» в кабинете VK ID →
+ * `NEXT_PUBLIC_VK_COMMUNITY_SUBSCRIBE=1` на Web и Guide → пересборка.
+ *
+ * Подписка НЕ даёт права писать человеку — это делает только его сообщение
+ * боту (шаг «Нажми «Начать»» в инструкции). Подписку только предлагаем:
+ * требовать её за услугу правила VK запрещают.
+ */
+const VK_SUBSCRIBE_ENABLED = process.env.NEXT_PUBLIC_VK_COMMUNITY_SUBSCRIBE === "1";
+
+/** Показать окно подписки. Любой отказ (уже подписан, нет доступа, лимит
+ * показов) молча закрывает окно — вход от него не зависит. */
+function offerCommunitySubscription(accessToken: string): void {
+  try {
+    new VKID.CommunitySubscription()
+      .render({ groupId: VK_COMMUNITY_ID, accessToken, scheme: VKID.Scheme.DARK })
+      .on(VKID.CommunitySubscriptionEvents.Error, () => undefined);
+  } catch (error) {
+    console.warn("[VKAuthButton] окно подписки не открылось:", error);
+  }
+}
+
 interface VKAuthButtonProps {
   /** 'login' — sign in to the site dashboard (default).
    *  'order' — sign in and redirect to VK community with ref code. */
@@ -69,6 +98,8 @@ export default function VKAuthButton({
           mode:         VKID.ConfigAuthMode.InNewWindow,
           responseMode: VKID.ConfigResponseMode.Callback,
           source:       VKID.ConfigSource.LOWCODE,
+          // Без явного scope VK ID выдаёт только `vkid.personal_info`.
+          ...(VK_SUBSCRIBE_ENABLED ? { scope: "vkid.personal_info groups" } : {}),
         });
         vkSdkInitialized = true;
       }
@@ -120,6 +151,9 @@ export default function VKAuthButton({
       if (isLoginMode) {
         window.location.href = customRedirectUrl || "/dashboard";
         return;
+      }
+      if (resolvedWbCode && VK_SUBSCRIBE_ENABLED && data.access_token) {
+        offerCommunitySubscription(data.access_token);
       }
       if (resolvedWbCode) {
         // Without «Начать» in the community dialog, VK cannot deliver order

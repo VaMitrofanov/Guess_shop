@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { checkVkReachableFresh } from "@/lib/vk-reach";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
@@ -120,6 +121,35 @@ export async function POST(request: Request) {
   }
 }
 
+/** Заказы, по которым мы ещё будем писать покупателю: дальше — только итог. */
+const VK_REACH_STATUSES = new Set([null, "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"]);
+
+/**
+ * Код забран входом через VK ID, но написать человеку сообщество не может.
+ *
+ * Вход на сайте создаёт пользователя без диалога с сообществом: пока человек
+ * сам не написал боту, VK отвечает на любое наше сообщение ошибкой 901. За
+ * 30 дней до 11.10.2026 так остались без уведомлений 37 покупателей DBS — им
+ * писали уже только в чат WB. Страница инструкции держит такого покупателя на
+ * шаге «нажми «Начать»», пока VK не подтвердит разрешение.
+ *
+ * Отвечает `false` при любом сомнении: есть Telegram, нет VK, VK молчит.
+ * Задержать человека зря хуже, чем пропустить.
+ */
+async function vkMessagesMissing(userId: string, orderStatus: string | null): Promise<boolean> {
+  if (!VK_REACH_STATUSES.has(orderStatus)) return false;
+  try {
+    const user = await (db as any).user.findUnique({
+      where: { id: userId },
+      select: { tgId: true, vkId: true },
+    });
+    if (!user?.vkId || user.tgId) return false;
+    return (await checkVkReachableFresh(String(user.vkId))) === false;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: Request) {
   const rl = limited(request, 20, 0.5); // burst 20, then 1 per 2s (status polling)
   if (rl) return rl;
@@ -159,7 +189,18 @@ export async function GET(request: Request) {
       /* non-fatal — CTA falls back to showing both channels */
     }
 
-    return NextResponse.json({ claimed, denomination: wbCode.denomination, platform, orderStatus, robloxUsername });
+    const needsVkMessages = claimed && wbCode.userId
+      ? await vkMessagesMissing(wbCode.userId, orderStatus)
+      : false;
+
+    return NextResponse.json({
+      claimed,
+      denomination: wbCode.denomination,
+      platform,
+      orderStatus,
+      robloxUsername,
+      needsVkMessages,
+    });
   } catch (err) {
     console.error("[wb-code GET] error:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

@@ -2358,6 +2358,65 @@ function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: s
 }
 
 
+/** Шаг «нажми «Начать» в чате ВКонтакте» (11.10.2026).
+ *
+ * Вход через VK ID забирает код, но не открывает диалог с сообществом: пока
+ * человек сам не написал боту, VK не даёт нам ему ответить (ошибка 901). Так
+ * за месяц 37 покупателей DBS остались без статуса и «заказ выполнен» — им
+ * писали уже только в чат WB. Экран не пускает к инструкции, пока VK не
+ * подтвердит разрешение: опрос `needsVkMessages` ниже снимает его сам, как
+ * только человек нажмёт «Начать». Выход без VK — Telegram или менеджер. */
+function WBVkMessagesStep({ code, denomination }: { code: string; denomination: number }) {
+  return (
+    <main className="min-h-screen flex flex-col relative">
+      <WBStaticHeader />
+      <div className="flex-1 flex items-center justify-center px-4 py-10 sm:py-16 bg-[var(--rb-bg)] relative overflow-hidden">
+        <div className="pointer-events-none absolute -left-48 top-0 h-[560px] w-[560px] rounded-full bg-[#45d6aa]/10 blur-[100px]" />
+        <div className="pointer-events-none absolute -right-40 bottom-0 h-[520px] w-[520px] rounded-full bg-[#7556e8]/15 blur-[100px]" />
+        <div className="wbg-root wbg-stage wbg-prefilled animate-in fade-in zoom-in">
+          <style>{WBG_CSS}</style>
+          <section className="wbg-welcome animate-in fade-in animate-delay-100">
+            <div className="wbg-badge"><CheckCircle2 className="w-4 h-4" /> Вход через ВКонтакте выполнен</div>
+            <h1>Последний<br />шаг.<br /><span>Напиши боту.</span></h1>
+            <p>ВКонтакте не даёт сообществу писать тому, кто ещё ни разу не писал ему сам. Без этого шага мы не сможем прислать статус заказа и сообщить, когда робуксы придут.</p>
+          </section>
+          <div className="wbg-card-column">
+            <div className="wbg-card animate-in fade-in zoom-in animate-delay-200">
+              <div style={{ textAlign: "center" }}>
+                <div className="wbg-icon"><Ticket className="w-7 h-7" style={{ color: "#f0c040" }} /></div>
+                <div className="wbg-eye">Заказ {code}{denomination ? ` · ${denomination.toLocaleString("ru-RU")} R$` : ""}</div>
+                <h1 className="wbg-h1">Нажми «Начать» в чате</h1>
+                <p className="wbg-lead">Откроется диалог с нашим сообществом — нажми «Начать» или отправь любое сообщение. Эта страница сама откроет инструкцию, как только ВКонтакте это подтвердит.</p>
+              </div>
+              <div className="wbg-hr" style={{ margin: "22px 0" }} />
+              <div className="wbg-btns">
+                <a href={vkBotHref(code)} target="_blank" rel="noopener noreferrer" className="wbg-btn vk">
+                  Открыть чат ВКонтакте →
+                </a>
+                <a href={tgBotHref(code, getOrInitSessionId())} target="_blank" rel="noopener noreferrer" className="wbg-btn tg">
+                  Лучше в Telegram
+                </a>
+              </div>
+              <p className="wbg-foot" role="status" aria-live="polite" style={{ fontSize: 14 }}>
+                <span className="wbg-spin" style={{ display: "inline-block", verticalAlign: "-2px", marginRight: 8 }} />
+                Ждём сообщение в чате…
+              </p>
+            </div>
+            <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="wbg-help">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "#aab1c0" }} />
+              <span className="wbg-help-t">
+                <span>Не получается? Напиши нам — доведём заказ вручную</span>
+                <b>Живой менеджер → @RobloxBank_PA или прямо в чат Wildberries по заказу</b>
+              </span>
+              <ExternalLink className="w-4 h-4 flex-shrink-0" style={{ marginLeft: "auto", color: "#71798c" }} />
+            </a>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
 // ─── Interactive Formula Calculator ──────────────────────────────────────────
 
 function FormulaCalculator({
@@ -2904,7 +2963,7 @@ export default function GuideClient({
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
   // previewMode keeps them working — "as if a code was already activated".
   const directInstruction = testMode || previewMode;
-  const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
+  const [phase, setPhase] = useState<"intro" | "gate" | "vk-messages" | "instruction">(
     !isWB ? "instruction" : directInstruction ? "instruction" : skipGate ? "gate" : "intro"
   );
   const [denomination, setDenomination] = useState<number>(directInstruction ? (testNom && testNom > 0 ? testNom : 1000) : 0);
@@ -2944,7 +3003,7 @@ export default function GuideClient({
           const denom = statusData.denomination ?? savedDenom ?? 0;
           setDenomination(denom);
           setActiveCode(codeToCheck);
-          setPhase("instruction");
+          setPhase(statusData.needsVkMessages ? "vk-messages" : "instruction");
           // Сессия и cookie переезжают на открытый сейчас заказ: следующий заход
           // без `?code` (или кнопка ВКонтакте, которая читает cookie `wb_code`)
           // должен продолжать его, а не предыдущий.
@@ -3000,7 +3059,7 @@ export default function GuideClient({
         if (!stopped && res.ok && data.claimed) {
           setDenomination(data.denomination ?? 0);
           setActiveCode(prefilledCode);
-          setPhase("instruction");
+          setPhase(data.needsVkMessages ? "vk-messages" : "instruction");
         }
       } catch {
         // Сеть моргнула — следующий тик попробует снова.
@@ -3014,6 +3073,31 @@ export default function GuideClient({
       window.removeEventListener("focus", check);
     };
   }, [phase, prefilledCode]);
+
+  /** Шаг «напиши боту»: ждём, пока VK подтвердит разрешение на сообщения. */
+  useEffect(() => {
+    if (phase !== "vk-messages" || !activeCode) return;
+    let stopped = false;
+    const check = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const res = await fetch(`/api/wb-code?code=${encodeURIComponent(activeCode)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!stopped && res.ok && data.claimed && !data.needsVkMessages) setPhase("instruction");
+      } catch {
+        // Сеть моргнула — следующий тик попробует снова.
+      }
+    };
+    const timer = setInterval(check, 4_000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [phase, activeCode]);
 
   if (isRestoring) {
     // Этот экран — SSR-разметка: если JS-чанки не догрузились (обрывы сети у
@@ -3082,6 +3166,10 @@ export default function GuideClient({
     return (
       <WBGate initialCode={prefilledCode} initialDenomination={denomination} />
     );
+  }
+
+  if (phase === "vk-messages") {
+    return <WBVkMessagesStep code={activeCode} denomination={denomination} />;
   }
 
   // Кто пришёл С ЗАКАЗОМ — тому сначала проверка аккаунта: у половины нужный
