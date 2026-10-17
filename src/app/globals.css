@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 @import "tailwindcss";
 
 @keyframes float {
@@ -11,55 +10,178 @@
 }
 
 @theme {
-  --color-background: #0a0e1a;
-  --color-foreground: #eef2ff;
-  --color-primary: #00b06f;
+  --color-background: #fbfaff;
+  --color-foreground: #251b3f;
+  --color-primary: #7556e8;
   --color-primary-foreground: #ffffff;
-  --color-card: #0f1528;
-  --color-card-foreground: #eef2ff;
-  --color-muted: #151c30;
-  --color-border: #1e2a45;
+  --color-card: #ffffff;
+  --color-card-foreground: #251b3f;
+  --color-muted: #f0ecfa;
+  --color-border: #ded8f1;
 }
 
 @layer base {
   :root {
-    --background: 228 40% 7%;
-    --foreground: 230 60% 96%;
-    --card: 228 40% 10%;
-    --card-foreground: 230 60% 96%;
-    --primary: 153 100% 35%;
+    --background: 260 100% 99%;
+    --foreground: 258 40% 18%;
+    --card: 0 0% 100%;
+    --card-foreground: 258 40% 18%;
+    --primary: 253 76% 62%;
     --primary-foreground: 0 0% 100%;
-    --muted: 228 35% 14%;
-    --muted-foreground: 220 20% 55%;
-    --border: 225 30% 19%;
+    --muted: 258 38% 95%;
+    --muted-foreground: 258 12% 48%;
+    --border: 258 34% 90%;
     --radius: 0.75rem;
+    --rb-bg: #fbfaff;
+    --rb-surface: #ffffff;
+    --rb-surface-2: #f4f1fb;
+    --rb-nav: rgba(251, 250, 255, .9);
+    --rb-footer: #f4f1fb;
+    --rb-text: #251b3f;
+    --rb-muted: #706780;
+    --rb-border: #ded8f1;
+    --rb-accent: #7556e8;
+    --rb-accent-soft: #ece7ff;
+    --rb-strong: #251b3f;
+  }
+
+  html[data-theme="dark"] {
+    --background: 252 32% 7%;
+    --foreground: 252 30% 95%;
+    --card: 252 24% 11%;
+    --card-foreground: 252 30% 95%;
+    --muted: 252 20% 15%;
+    --muted-foreground: 252 10% 67%;
+    --border: 252 18% 22%;
+    --rb-bg: #0b0912;
+    --rb-surface: #151120;
+    --rb-surface-2: #100d18;
+    --rb-nav: rgba(11, 9, 18, .9);
+    --rb-footer: #100d18;
+    --rb-text: #f4f0ff;
+    --rb-muted: #aaa3b8;
+    --rb-border: #30283f;
+    --rb-accent: #a68bff;
+    --rb-accent-soft: #241b3b;
+    --rb-strong: #7556e8;
+  }
+}
+
+:root {
+  --rb-bg: #fbfaff;
+  --rb-surface: #ffffff;
+  --rb-surface-2: #f4f1fb;
+  --rb-nav: rgba(251, 250, 255, .9);
+  --rb-footer: #f4f1fb;
+  --rb-text: #251b3f;
+  --rb-muted: #706780;
+  --rb-border: #ded8f1;
+  --rb-accent: #7556e8;
+  --rb-accent-soft: #ece7ff;
+  --rb-strong: #251b3f;
+}
+
+html[data-theme="dark"] {
+  --rb-bg: #0b0912;
+  --rb-surface: #151120;
+  --rb-surface-2: #100d18;
+  --rb-nav: rgba(11, 9, 18, .9);
+  --rb-footer: #100d18;
+  --rb-text: #f4f0ff;
+  --rb-muted: #aaa3b8;
+  --rb-border: #30283f;
+  --rb-accent: #a68bff;
+  --rb-accent-soft: #241b3b;
+  --rb-strong: #7556e8;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    --rb-bg: #0b0912;
+    --rb-surface: #151120;
+    --rb-surface-2: #100d18;
+    --rb-nav: rgba(11, 9, 18, .9);
+    --rb-footer: #100d18;
+    --rb-text: #f4f0ff;
+    --rb-muted: #aaa3b8;
+    --rb-border: #30283f;
+    --rb-accent: #a68bff;
+    --rb-accent-soft: #241b3b;
+    --rb-strong: #7556e8;
+    color-scheme: dark;
   }
 }
 
 .font-pixel {
-  font-family: 'Press Start 2P', monospace;
+  font-family: var(--font-pixel), 'Press Start 2P', monospace;
   line-height: 1.8;
 }
 
 /* Unified pixel label — used for small tags/badges */
 .pixel-tag {
-  font-family: 'Press Start 2P', monospace;
-  font-size: 9px;
+  font-family: var(--font-pixel), 'Press Start 2P', monospace;
+  font-size: 13px;
   letter-spacing: 0.12em;
   line-height: 1.6;
 }
 
 body {
-  background-color: #0a0e1a;
-  color: #eef2ff;
-  font-size: 16px;
+  background-color: var(--rb-bg);
+  color: var(--rb-text);
+  font-size: 17px;
   line-height: 1.6;
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui;
-  background-image:
-    radial-gradient(ellipse 70% 40% at 50% -5%, rgba(0,176,111,0.08) 0%, transparent 55%),
-    radial-gradient(ellipse 50% 30% at 100% 20%, rgba(88,101,242,0.05) 0%, transparent 50%),
-    radial-gradient(ellipse 40% 30% at 0% 80%, rgba(0,176,111,0.04) 0%, transparent 50%);
+  background-image: radial-gradient(ellipse 65% 38% at 75% -8%, rgba(117,86,232,.09), transparent 58%);
 }
+
+.theme-toggle-button {
+  min-width: 42px;
+  height: 42px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--rb-border);
+  border-radius: 12px;
+  background: var(--rb-surface);
+  color: var(--rb-text);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform .2s ease, border-color .2s ease, background .2s ease;
+}
+.theme-toggle-button:hover { transform: translateY(-1px); border-color: var(--rb-accent); }
+.theme-toggle-button-compact { width: 42px; padding: 0; }
+.theme-toggle-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 9px);
+  z-index: 100;
+  width: 210px;
+  padding: 8px;
+  border: 1px solid var(--rb-border);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--rb-surface) 94%, transparent);
+  color: var(--rb-text);
+  box-shadow: 0 18px 45px rgba(10, 7, 20, .22);
+  backdrop-filter: blur(18px);
+}
+.theme-toggle-title { padding: 7px 9px 8px; color: var(--rb-muted); font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.theme-toggle-menu button { width: 100%; min-height: 42px; padding: 0 10px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
+.theme-toggle-menu button:hover,.theme-toggle-menu button[aria-checked="true"] { background: var(--rb-accent-soft); color: var(--rb-accent); }
+
+.wb-intro {
+  color: var(--rb-text);
+  background:
+    radial-gradient(circle at 78% 18%, rgba(117,86,232,.2), transparent 30rem),
+    radial-gradient(circle at 20% 82%, rgba(69,214,170,.1), transparent 28rem),
+    var(--rb-bg);
+}
+.wb-intro-orbit { position:absolute; border:1px solid color-mix(in srgb,var(--rb-accent) 22%,transparent); border-radius:50%; pointer-events:none; animation:wb-intro-float 8s ease-in-out infinite alternate; }
+.wb-intro-orbit-one { width:520px; height:520px; right:-180px; top:-190px; box-shadow:0 0 0 70px color-mix(in srgb,var(--rb-accent) 5%,transparent),0 0 0 140px color-mix(in srgb,var(--rb-accent) 3%,transparent); }
+.wb-intro-orbit-two { width:360px; height:360px; left:-190px; bottom:-160px; animation-delay:-3s; }
+@keyframes wb-intro-float { to { transform:translate3d(-28px,32px,0) rotate(8deg); } }
 
 .glass {
   background: rgba(15, 21, 40, 0.8);
@@ -68,11 +190,11 @@ body {
 }
 
 .gold-gradient {
-  background: linear-gradient(135deg, #00b06f 0%, #00d084 100%);
+  background: linear-gradient(135deg, #7556e8 0%, #5e83ee 100%);
 }
 
 .gold-text {
-  background: linear-gradient(135deg, #00d084 0%, #00b06f 100%);
+  background: linear-gradient(135deg, #7556e8 0%, #5e83ee 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -81,12 +203,12 @@ body {
 }
 
 .gold-glow {
-  box-shadow: 0 0 40px rgba(0,176,111,0.1), 0 1px 0 rgba(0,176,111,0.12) inset;
+  box-shadow: 0 0 40px rgba(117,86,232,.12), 0 1px 0 rgba(117,86,232,.12) inset;
 }
 
 .pixel-card {
-  background: #0f1528;
-  border: 2px solid #1e2a45;
+  background: var(--rb-surface);
+  border: 2px solid var(--rb-border);
   position: relative;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -99,7 +221,7 @@ body {
   position: absolute;
   width: 8px;
   height: 8px;
-  background: #0a0e1a;
+  background: var(--rb-bg);
   z-index: 1;
 }
 .pixel-card::before { top: -2px; right: -2px; }
@@ -142,8 +264,65 @@ body {
 
 .accent-line {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0,176,111,0.35), transparent);
+  background: linear-gradient(90deg, transparent, rgba(117,86,232,.35), transparent);
 }
+
+/* Violet / Frost checkout shell. The order and payment logic stays intact;
+ * these overrides align the existing, state-heavy form with the new storefront
+ * without duplicating its business logic in a second component. */
+.vf-checkout {
+  background:
+    radial-gradient(circle at 82% 10%, rgba(117,86,232,.12), transparent 28rem),
+    #f8f6ff;
+  color: #251b3f;
+}
+.vf-checkout .pixel-card,
+.vf-checkout .bg-\[\#080c18\] {
+  background-color: #ffffff;
+  border-color: #ded8f1;
+}
+.vf-checkout input,
+.vf-checkout select,
+.vf-checkout textarea {
+  background: #ffffff !important;
+  border-color: #cfc6e8 !important;
+  color: #251b3f !important;
+  border-radius: 12px !important;
+}
+.vf-checkout input::placeholder { color: #aaa2b7 !important; }
+.vf-checkout .text-zinc-300 { color: #554c69; }
+.vf-checkout .text-zinc-400 { color: #6e657f; }
+.vf-checkout .text-zinc-500 { color: #82798f; }
+.vf-checkout .text-zinc-600 { color: #9a92a5; }
+.vf-checkout .text-white { color: #ffffff; }
+.vf-checkout .text-\[\#00b06f\] { color: #7556e8; }
+.vf-checkout .border-\[\#1e2a45\] { border-color: #ded8f1; }
+.vf-checkout .border-\[\#00b06f\] { border-color: #7556e8; }
+.vf-checkout .bg-\[\#00b06f\] { background-color: #7556e8; }
+.vf-checkout .bg-\[\#1e2a45\] { background-color: #ded8f1; }
+.vf-checkout [class~="text-[7px]"],
+.vf-checkout [class~="text-[8px]"],
+.vf-checkout [class~="text-[9px]"] { font-size: 11px; line-height: 1.45; }
+.vf-checkout [class~="text-[10px]"] { font-size: 12px; line-height: 1.45; }
+.vf-checkout [class~="text-[11px]"] { font-size: 13px; line-height: 1.5; }
+.vf-checkout .text-xs { font-size: 14px; line-height: 1.5; }
+.vf-checkout .tracking-widest { letter-spacing: .08em; }
+
+html[data-theme="dark"] .vf-checkout {
+  background:
+    radial-gradient(circle at 82% 10%, rgba(117,86,232,.22), transparent 28rem),
+    #0b0912;
+  color: #f4f0ff;
+}
+html[data-theme="dark"] .vf-checkout .pixel-card,
+html[data-theme="dark"] .vf-checkout .bg-\[\#080c18\] { background-color:#151120; border-color:#352b48; }
+html[data-theme="dark"] .vf-checkout input,
+html[data-theme="dark"] .vf-checkout select,
+html[data-theme="dark"] .vf-checkout textarea { background:#100d18!important; border-color:#403453!important; color:#f4f0ff!important; }
+html[data-theme="dark"] .vf-checkout .text-zinc-300 { color:#ddd6e9; }
+html[data-theme="dark"] .vf-checkout .text-zinc-400 { color:#b3abba; }
+html[data-theme="dark"] .vf-checkout .text-zinc-500 { color:#9991a7; }
+html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48; }
 
 /* ── Page enter animation ──────────────────────────────── */
 @keyframes page-enter {
@@ -152,40 +331,6 @@ body {
 }
 .page-enter {
   animation: page-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-/* ── Top loading bar ───────────────────────────────────── */
-@keyframes loader-slide {
-  0%   { transform: translateX(-100%); }
-  60%  { transform: translateX(-10%);  }
-  100% { transform: translateX(0%);    }
-}
-@keyframes loader-fade-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-.page-loader {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  z-index: 9999;
-  background: linear-gradient(90deg, #00b06f, #00d084, #00b06f);
-  background-size: 200% 100%;
-  animation:
-    loader-slide 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards,
-    loader-fade-out 0.3s ease 1.1s forwards;
-}
-@keyframes loader-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-.page-loader::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.4) 50%, transparent 70%);
-  background-size: 200% 100%;
-  animation: loader-shimmer 1s ease infinite;
 }
 
 .rb-progress { height: 4px; background: #1e2a45; overflow: hidden; }
@@ -334,3 +479,1430 @@ body {
 .vk-auth-widget * {
   border-radius: 0 !important;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TWA — Telegram admin app: tactile + motion layer.
+   Scoped via .twa-* class names so the marketing site is untouched. Inline
+   styles (used throughout the TWA) cannot express :active / pseudo-states,
+   so the press feedback that makes it feel like an app lives here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.twa-root, .twa-root * { -webkit-tap-highlight-color: transparent; }
+.twa-root ::-webkit-scrollbar { width: 0; height: 0; }
+.twa-root ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
+
+/* iOS/Telegram keyboard guard. The fixed dark host remains behind the app
+ * while WebKit and Telegram settle their viewport values, so no light body
+ * background can flash through. The route-active class also covers inputs in
+ * React portals mounted directly under body. */
+.twa-route-host {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #120f1c;
+  color-scheme: dark;
+}
+html.twa-route-active,
+body.twa-route-active {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background-color: #120f1c !important;
+  background-image: none !important;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html.twa-route-active input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.twa-route-active textarea,
+html.twa-route-active select,
+html.twa-route-active [contenteditable="true"] {
+  /* iOS zooms the whole WebView when an editable control is below 16px. */
+  font-size: 16px !important;
+  touch-action: manipulation;
+  scroll-margin-block: 24px;
+}
+
+/* Liquid Glass / Ultraviolet shell. The ambient layers are static and the
+ * expensive blur is limited to the title, tab bar and a handful of summary
+ * surfaces; repeated order cards stay translucent without per-card blur. */
+.twa-liquid-root {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  /* Telegram iOS reports the usable mini-app viewport through its SDK CSS
+   * variable. 100dvh can include Telegram's native header, which pushes the
+   * bottom tab bar below the visible webview and leaves a large empty plate. */
+  height: var(--twa-visual-height, var(--tg-viewport-height, 100dvh));
+  max-height: var(--twa-visual-height, var(--tg-viewport-height, 100dvh));
+  min-height: 0;
+  overscroll-behavior: none;
+  background:
+    radial-gradient(circle at 88% 8%, rgba(167,139,250,.18), transparent 34%),
+    radial-gradient(circle at 5% 58%, rgba(10,132,255,.09), transparent 38%),
+    #120f1c !important;
+}
+.twa-liquid-root::before,
+.twa-liquid-root::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(54px);
+}
+.twa-liquid-root::before {
+  width: 270px;
+  height: 270px;
+  right: -130px;
+  top: 80px;
+  background: rgba(191,90,242,.10);
+}
+.twa-liquid-root::after {
+  width: 320px;
+  height: 320px;
+  left: -190px;
+  bottom: 8%;
+  background: rgba(10,132,255,.07);
+}
+.twa-liquid-titlebar {
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+  padding: 12px 18px 11px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(18,15,28,.72);
+  -webkit-backdrop-filter: blur(18px) saturate(1.22);
+  backdrop-filter: blur(18px) saturate(1.22);
+}
+.twa-liquid-title {
+  color: #f7f5ff;
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -.045em;
+}
+.twa-liquid-content {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  padding-bottom: 4px;
+  overscroll-behavior-y: contain;
+}
+.twa-glass-card,
+.twa-glass-segment {
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(41,34,57,.70) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 16px 34px rgba(3,0,12,.16);
+  -webkit-backdrop-filter: blur(12px) saturate(1.12);
+  backdrop-filter: blur(12px) saturate(1.12);
+}
+.twa-glass-order {
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(41,34,57,.75) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.055) inset, 0 14px 32px rgba(3,0,12,.16) !important;
+}
+.twa-compact-order {
+  width: 100%; min-height: 104px; display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px; border: 0; background: transparent; color: #f7f5ff;
+  text-align: left; font-family: inherit;
+}
+.twa-compact-order-top, .twa-compact-order-main, .twa-compact-order-meta { display: flex; align-items: center; min-width: 0; }
+.twa-compact-order-top { gap: 8px; }
+.twa-compact-order-top > b { max-width: 56%; overflow: hidden; font-size: 11px; letter-spacing: .025em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.twa-compact-order-top > small { color: #777181; font-size: 11px; }
+.twa-compact-order-top > i { margin-left: auto; color: #777181; font-size: 14px; font-style: normal; }
+.twa-compact-order-main { justify-content: space-between; gap: 12px; }
+.twa-compact-order-main > strong { min-width: 0; overflow: hidden; font-size: 17px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
+.twa-compact-order-main > b { flex: 0 0 auto; color: #f7f5ff; font-size: 18px; font-variant-numeric: tabular-nums; }
+.twa-compact-order-main > b small { color: #a78bfa; font-size: 12px; }
+.twa-compact-order-meta { gap: 7px; overflow: hidden; color: #aaa4b8; font-size: 12px; }
+.twa-compact-order-meta > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-compact-order-meta code { color: #b9a6ff; font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.twa-compact-warning { display: flex; align-items: center; min-height: 26px; margin-top: 2px; padding: 5px 8px; border-radius: 9px; background: rgba(255,159,10,.10); color: #ff9f0a; font-size: 11px; }
+.twa-orders-toolbar {
+  border-bottom-color: rgba(255,255,255,.08) !important;
+  background: rgba(18,15,28,.68) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.18);
+  backdrop-filter: blur(16px) saturate(1.18);
+}
+.twa-orders-toolbar-calm {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 9px 16px 10px;
+}
+.twa-orders-search-row { display: flex; align-items: stretch; gap: 8px; }
+.twa-orders-search-wrap { min-width: 0; flex: 1; }
+.twa-orders-search-wrap > div { min-height: 43px; padding: 9px 12px !important; border: 1px solid rgba(255,255,255,.08); border-radius: 12px !important; background: rgba(47,40,61,.66) !important; }
+.twa-order-add {
+  width: 43px;
+  flex: 0 0 43px;
+  display: grid;
+  place-items: center;
+  padding: 0 0 2px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #b59aff, #8257f5);
+  box-shadow: 0 8px 22px rgba(126,87,245,.28), 0 1px 0 rgba(255,255,255,.28) inset;
+  color: #fff;
+  font: 400 26px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.twa-orders-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 13px;
+  background: rgba(47,40,61,.54);
+}
+.twa-orders-modes button {
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #aaa4b8;
+  font-family: inherit;
+}
+.twa-orders-modes button.is-active { background: linear-gradient(145deg, rgba(131,96,220,.58), rgba(75,59,116,.72)); color: #f7f5ff; box-shadow: 0 1px 0 rgba(255,255,255,.10) inset; }
+.twa-orders-modes strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-orders-modes span { color: #8e879d; font-size: 12px; font-variant-numeric: tabular-nums; }
+.twa-orders-modes button.is-active span { color: #c8b8ff; }
+.twa-orders-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  overflow-x: auto;
+  padding: 2px 5px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+  background: rgba(41,34,57,.45);
+}
+.twa-orders-status-strip button {
+  min-height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #aaa4b8;
+  font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+}
+.twa-orders-status-strip button.is-active { color: #f7f5ff; background: rgba(255,255,255,.07); }
+.twa-orders-status-strip i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; }
+.twa-orders-status-strip b { color: #777181; font-size: 11px; font-variant-numeric: tabular-nums; }
+.twa-orders-status-strip .twa-orders-filter-trigger { margin-left: auto; color: #b9a6ff; }
+.twa-orders-list-stack { gap: 0 !important; }
+.twa-orders-list-stack > article {
+  border-width: 0 1px 1px !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.twa-orders-list-stack > article:first-of-type { border-top-width: 1px !important; border-radius: 18px 18px 0 0 !important; }
+.twa-orders-list-stack > article:last-of-type { border-radius: 0 0 18px 18px !important; }
+.twa-orders-list-stack .twa-compact-order { min-height: 83px; gap: 4px; padding: 10px 13px; }
+.twa-orders-list-stack .twa-compact-order-top > i { font-size: 16px; }
+/* Order detail sheet: отдельный fixed-слой (портал в body), а не fixed-карточка
+   внутри iOS-скролла ленты — иначе глитчи рендера и layout shift списка. */
+.twa-sheet-layer,
+.twa-order-sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* Клавиатура подпирает слой снизу: `fixed` считается от макетного окна, и без
+     этого отступа шторка с полями уезжает под клавиатуру. Переменную пишет
+     TwaViewportGuard, вне TWA она просто ноль. */
+  padding: 10px 10px calc(max(10px, env(safe-area-inset-bottom, 0px)) + var(--twa-keyboard-inset, 0px));
+  transition: padding-bottom .2s cubic-bezier(.22,1,.36,1);
+  background: rgba(3,0,12,.66);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+.twa-sheet {
+  width: min(560px, 100%);
+  /* `--twa-visual-height` — единственная величина, которая УМЕНЬШАЕТСЯ вместе с
+     клавиатурой (её пишет TwaViewportGuard из visualViewport). `dvh` и
+     `--tg-viewport-height` про клавиатуру не знают, поэтому шторка с полями
+     оставалась во весь экран, iOS начинал панорамировать документ, и экран
+     «дёргался и улетал» при фокусе. Порядок в `min()` держит прежнее поведение,
+     когда переменной ещё нет. */
+  max-height: min(76dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 52px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 28px 28px 24px 24px;
+  outline: 0;
+  background: linear-gradient(180deg, rgba(43,35,62,.99) 0%, rgba(28,23,41,.99) 22%, rgba(25,20,37,.99) 100%);
+  color: #f7f5ff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 -1px 0 rgba(255,255,255,.08) inset, 0 30px 90px rgba(0,0,0,.68), 0 1px 0 rgba(255,255,255,.12) inset;
+  animation: twa-sheet-up .28s cubic-bezier(.22,1,.36,1) both;
+  transition: max-height .25s cubic-bezier(.22,1,.36,1);
+}
+.twa-sheet button, .twa-sheet input, .twa-sheet textarea { font-family: inherit; }
+.twa-sheet.is-expanded { max-height: calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 20px); }
+.twa-sheet-handle-zone { flex: 0 0 auto; display: grid; place-items: center; height: 26px; }
+.twa-sheet-handle { width: 44px; height: 14px; padding: 0; border: 0; background: transparent; }
+.twa-sheet-handle::after { content: ""; display: block; width: 36px; height: 4px; margin: auto; border-radius: 999px; background: rgba(255,255,255,.28); }
+.twa-sheet-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.twa-sheet-footer { flex: 0 0 auto; padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid rgba(255,255,255,.10); background: linear-gradient(180deg, rgba(28,23,41,.88), rgba(28,23,41,.99)); box-shadow: 0 -12px 30px rgba(3,0,12,.24); }
+.twa-sheet-footer > button { width: 100%; min-height: 56px; }
+@keyframes twa-sheet-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+.twa-order-sheet {
+  max-height: min(72dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 84px));
+}
+
+/* Лист заказа: длинная форма, которую заполняют с клавиатурой на экране.
+   Ей нужно больше высоты, чем карточке-просмотру, и запас снизу, чтобы
+   последнее поле не прилипало к закреплённым кнопкам. */
+.twa-form-sheet {
+  max-height: min(88dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 24px));
+}
+/* Геометрию формы двигает КЛАВИАТУРА, а не жест. Пока эти два перехода тут
+   висели, каждая правка высоты окна запускала 250-мс анимацию высоты шторки и
+   200-мс анимацию отступа слоя — прямо под пальцем, поверх слоёв с блюром, и
+   встречно тому, как iOS сам подкручивает страницу к полю. Плавность нужна
+   карточке заказа, которую разворачивают жестом (`.twa-order-sheet`), а форме
+   нужно попасть на новое место мгновенно. Анимация появления не тронута. */
+.twa-form-sheet { transition: none; }
+.twa-sheet-layer:has(.twa-form-sheet) { transition: none; }
+/* Форма ВСЕГДА над карточкой-просмотром.
+ *
+ * Обе шторки — порталы в `body` с одинаковым `z-index: 70`, поэтому выше
+ * оказывалась та, чей узел встал в DOM последним. Из меню «···» карточка и
+ * форма монтируются одним коммитом, и вложенный портал формы встаёт РАНЬШЕ
+ * родительского: правка открывалась ПОД затемнением карточки — её не было
+ * видно и в неё не проходили тапы (скрин владельца по NGS22UR, 05.09.2026).
+ * Работало только когда карточка уже открыта и монтируется одна форма.
+ * Разница в слое убирает зависимость от порядка монтирования; тост (100)
+ * остаётся выше обеих. */
+.twa-sheet-layer:has(.twa-form-sheet) { z-index: 80; }
+.twa-form-sheet .twa-sheet-scroll { padding-bottom: 6px; }
+/* Поле, к которому подъехала клавиатура, не должно упираться в край. */
+.twa-form-sheet input,
+.twa-form-sheet textarea { scroll-margin: 14px 0 18px; }
+/* Страховка от возврата зума: ниже 16px iOS зумит страницу при фокусе, и после
+   зума геометрия шторки уезжает. `!important` здесь осознан — поля формы
+   стилизуются инлайном, и без него правило просто не применится. */
+.twa-form-sheet input,
+.twa-form-sheet textarea { font-size: max(16px, 1rem) !important; }
+.twa-order-sheet .twa-compact-order {
+  position: relative;
+  min-height: 92px;
+  background: rgba(28,23,41,.98);
+}
+.twa-liquid-content:has(.twa-filter-sheet-layer) { z-index: 30; }
+/* Orders mini-dashboard: summary-карточки категорий в Premium Calm стиле. */
+.twa-dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 16px;
+}
+.twa-dash-grid.is-single { grid-template-columns: 1fr; }
+.twa-dash-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 13px 10px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 16px;
+  background: rgba(41,34,57,.55);
+  color: #f7f5ff;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.twa-dash-label { display: flex; align-items: center; gap: 6px; min-width: 0; color: #9a93a8; font-size: 12px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.twa-dash-label i { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; }
+.twa-dash-value { color: #f7f5ff; font-size: 20px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.twa-dash-value small { margin-left: 3px; color: #9a93a8; font-size: 12px; font-weight: 500; }
+.twa-dash-value em { margin-left: 5px; color: #777181; font-style: normal; font-size: 13px; font-weight: 500; }
+.twa-dash-meta { display: flex; justify-content: space-between; gap: 6px; color: #777181; font-size: 12px; font-variant-numeric: tabular-nums; }
+.twa-dash-meta b { font-weight: 500; }
+.twa-filter-sheet-layer { position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-end; justify-content: center; padding: 12px; background: rgba(3,0,12,.62); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+.twa-filter-sheet { width: min(520px, 100%); max-height: min(620px, calc(100dvh - 40px)); overflow-y: auto; padding: 14px; border: 1px solid rgba(255,255,255,.13); border-radius: 25px; background: rgba(31,25,45,.98); box-shadow: 0 28px 80px rgba(0,0,0,.55); }
+.twa-filter-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 0 1px 12px; }
+.twa-filter-sheet-head > div { display: flex; flex-direction: column; }
+.twa-filter-sheet-head small { color: #777181; font-size: 11px; }
+.twa-filter-sheet-head strong { color: #f7f5ff; font-size: 23px; }
+.twa-filter-options { overflow: hidden; border: 1px solid rgba(255,255,255,.09); border-radius: 17px; background: rgba(41,34,57,.62); }
+.twa-filter-options button { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border: 0; border-bottom: 1px solid rgba(255,255,255,.08); background: transparent; color: #d8d3e3; font: 500 15px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.twa-filter-options button:last-child { border-bottom: 0; }
+.twa-filter-options button.is-active { color: #cbbcff; background: rgba(167,139,250,.10); }
+.twa-filter-options b { color: #777181; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* Premium Calm account: one donor hero, inset operations and a quiet work queue. */
+.twa-account-legacy-summary { display: none !important; }
+.twa-account-calm { scrollbar-gutter: stable; }
+.twa-account-calm > * { flex-shrink: 0; }
+.twa-account-workspace {
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(47,40,61,.54) !important;
+}
+.twa-account-workspace button { min-height: 36px !important; }
+.twa-account-workspace button[style*="background"] { box-shadow: none !important; }
+.twa-account-hero {
+  overflow: hidden;
+  padding: 15px 15px 13px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 91% 34%, rgba(139,92,246,.18), transparent 31%),
+    linear-gradient(145deg, rgba(54,45,75,.78), rgba(27,23,39,.72));
+  box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 20px 52px rgba(3,0,12,.23);
+}
+.twa-account-hero-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.twa-account-hero-head > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.twa-account-hero-head small { color: #aaa4b8; font-size: 12px; }
+.twa-account-hero-head strong { overflow: hidden; color: #f7f5ff; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-account-hero-head > span { max-width: 48%; color: #777181; font-size: 11px; text-align: right; }
+.twa-account-hero-head > span.is-warning { color: #ffd60a; }
+.twa-account-balance-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; }
+.twa-account-balance-row > div:first-child { min-width: 0; display: flex; flex-direction: column; }
+.twa-account-balance-row > div:first-child > strong { color: #f7f5ff; font-size: 35px; line-height: 1.05; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.twa-account-balance-row > div:first-child > strong small { color: #aaa4b8; font-size: 16px; letter-spacing: 0; }
+.twa-account-balance-row > div:first-child > span { margin-top: 3px; color: #777181; font-size: 12px; }
+.twa-account-hero-actions { display: flex; align-items: center; gap: 7px; }
+.twa-account-hero-actions .twa-icon-button { width: 39px; height: 39px; }
+.twa-account-hero-actions svg.is-spinning { animation: twa-spin .8s linear infinite; }
+.twa-account-queue-state {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.twa-account-queue-state > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.twa-account-queue-state span { color: #aaa4b8; font-size: 12px; }
+.twa-account-queue-state strong { overflow: hidden; color: #f7f5ff; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.twa-account-queue-state > button { min-height: 40px; padding: 0 14px; border: 1px solid rgba(255,255,255,.16); border-radius: 11px; background: linear-gradient(145deg, #b59aff, #8257f5); color: #fff; font-size: 13px; font-weight: 700; }
+.twa-account-progress { grid-column: 1 / -1; height: 4px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.10); }
+.twa-account-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ff4d6d, #a78bfa); transition: width .25s ease; }
+.twa-account-operations {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 17px;
+  background: rgba(41,34,57,.56);
+}
+.twa-account-operations button { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 13px; border: 0; border-bottom: 1px solid rgba(255,255,255,.08); background: transparent; color: #f7f5ff; font-family: inherit; }
+.twa-account-operations button:last-child { border-bottom: 0; }
+.twa-account-operations button:disabled { opacity: .55; }
+.twa-account-operations span { flex: 1; text-align: left; font-size: 15px; }
+.twa-account-operations b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.twa-account-operations button > svg:last-child { color: #777181; }
+.twa-account-cookie-sheet { display: flex; flex-direction: column; gap: 10px; padding: 13px; border: 1px solid rgba(255,255,255,.10); border-radius: 18px; background: rgba(41,34,57,.72); }
+.twa-account-cookie-head { display: flex; align-items: center; gap: 10px; color: #cbbcff; }
+.twa-account-cookie-head > div { display: flex; flex-direction: column; gap: 2px; }
+.twa-account-cookie-head strong { color: #f7f5ff; font-size: 15px; }
+.twa-account-cookie-head small { color: #777181; font-size: 11px; }
+.twa-account-cookie-sheet textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 11px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 11px; outline: 0; background: rgba(15,12,23,.68); color: #f7f5ff; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.twa-account-cookie-sheet > button { min-height: 43px; border: 0; border-radius: 11px; background: #a78bfa; color: #fff; font-size: 14px; font-weight: 700; }
+.twa-account-cookie-sheet > button:disabled { opacity: .45; }
+.twa-account-cookie-sheet > span { font-size: 12px; }
+.twa-account-cookie-sheet > span.is-success { color: #30d158; }
+.twa-account-cookie-sheet > span.is-error { color: #ff453a; }
+.twa-account-search-section > div:first-child { display: none !important; }
+.twa-account-search-section .twa-account-card { border: 1px solid rgba(255,255,255,.09); border-radius: 14px !important; background: rgba(41,34,57,.58) !important; }
+.twa-account-search-input { min-height: 43px; padding: 10px 12px 10px 39px !important; border: 1px solid rgba(255,255,255,.07) !important; background: rgba(47,40,61,.62) !important; }
+.twa-account-search-section .twa-account-card > div:first-child > div { position: relative; }
+.twa-account-search-section .twa-account-card > div:first-child > div::before { content: ""; position: absolute; z-index: 1; left: 13px; top: 50%; width: 14px; height: 14px; margin-top: -8px; border: 1.8px solid #8e879d; border-radius: 50%; pointer-events: none; }
+.twa-account-search-section .twa-account-card > div:first-child > div::after { content: ""; position: absolute; z-index: 1; left: 25px; top: 25px; width: 6px; height: 1.8px; background: #8e879d; transform: rotate(45deg); pointer-events: none; }
+.twa-account-search-button { width: 43px; flex: 0 0 43px; display: grid; place-items: center; padding: 0 !important; }
+.twa-account-calm .twa-account-card { border: 1px solid rgba(255,255,255,.09); background: rgba(41,34,57,.58) !important; box-shadow: none; }
+.twa-account-calm .twa-buyout-row { gap: 5px !important; padding: 10px 13px !important; }
+.twa-account-calm .twa-buyout-row + .twa-buyout-row { border-top: 1px solid rgba(255,255,255,.08); }
+.twa-account-calm .twa-buyout-summary { display: none; }
+
+/* Dashboard */
+.twa-liquid-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 14px 16px 28px;
+}
+.twa-search-field {
+  min-height: 49px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 13px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 16px;
+  color: #aaa4b8;
+  background: rgba(47,40,61,.74);
+  box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 12px 30px rgba(3,0,12,.14);
+  -webkit-backdrop-filter: blur(14px) saturate(1.12);
+  backdrop-filter: blur(14px) saturate(1.12);
+}
+.twa-search-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f7f5ff;
+  font: 16px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.twa-search-field input::placeholder { color: #777181; }
+.twa-search-field button {
+  width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: rgba(255,255,255,.13); color: #aaa4b8;
+}
+@keyframes twa-spin { to { transform: rotate(360deg); } }
+.twa-result-row, .twa-inset-row {
+  width: 100%; min-height: 56px; display: flex; align-items: center; gap: 11px;
+  padding: 10px 13px; border: 0; border-bottom: 1px solid rgba(255,255,255,.08);
+  background: transparent; color: #f7f5ff; text-align: left; font-family: inherit;
+}
+.twa-result-row:last-child, .twa-inset-row:last-child { border-bottom: 0; }
+.twa-result-row > span:nth-child(2), .twa-inset-row > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.twa-result-row strong, .twa-inset-row strong { overflow: hidden; color: #f7f5ff; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-result-row small, .twa-inset-row small { overflow: hidden; color: #aaa4b8; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-result-icon { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 11px; color: #d8ccff; background: rgba(167,139,250,.17); }
+.twa-search-empty, .twa-search-loading { padding: 20px 14px; color: #aaa4b8; font-size: 14px; text-align: center; }
+.twa-inset-group { overflow: hidden; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(41,34,57,.56); }
+.twa-inset-row > span:first-child:not(.twa-result-icon) { width: 72px; flex: 0 0 auto; color: #aaa4b8; font-size: 12px; }
+.twa-primary-row { width: 100%; min-height: 45px; display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 12px; border: 0; border-radius: 14px; background: #a78bfa; color: #fff; font-size: 15px; font-weight: 700; }
+.twa-history-list { overflow: hidden; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(41,34,57,.58); }
+.twa-history-row { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.twa-history-row:last-child { border-bottom: 0; }
+.twa-history-primary, .twa-history-secondary, .twa-history-tertiary { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.twa-history-primary { justify-content: space-between; }
+.twa-history-primary strong { min-width: 0; overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-history-primary b { flex: 0 0 auto; font-size: 15px; font-variant-numeric: tabular-nums; }
+.twa-history-secondary { margin-top: 3px; color: #aaa4b8; font-size: 12px; }
+.twa-history-secondary code { color: #b9a6ff; font: 650 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.twa-history-secondary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-history-secondary em { margin-left: auto; font-size: 11px; font-style: normal; font-weight: 650; }
+.twa-history-tertiary { justify-content: space-between; margin-top: 5px; color: #777181; font-size: 11px; }
+.twa-history-tertiary b { font-size: 11px; font-variant-numeric: tabular-nums; }
+.twa-drain-summary { width: 100%; min-height: 64px; display: flex; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(41,34,57,.58); color: #f7f5ff; text-align: left; font-family: inherit; }
+.twa-drain-summary > span:nth-child(2) { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.twa-drain-summary strong { font-size: 15px; }
+.twa-drain-summary small { overflow: hidden; color: #aaa4b8; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-drain-summary > span:last-child { color: #777181; }
+.twa-liquid-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255,214,10,.20);
+  border-radius: 15px;
+  color: #ffd60a;
+  background: rgba(255,214,10,.08);
+}
+.twa-liquid-alert div { display: flex; flex-direction: column; }
+.twa-liquid-alert span { color: #aaa4b8; font-size: 12px; }
+.twa-revenue-glass,
+.twa-stock-glass {
+  padding: 17px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 23px;
+  background: linear-gradient(145deg, rgba(74,59,99,.66), rgba(38,31,53,.58));
+  box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 20px 52px rgba(3,0,12,.19);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+  backdrop-filter: blur(16px) saturate(1.16);
+}
+.twa-revenue-label,
+.twa-revenue-meta,
+.twa-stock-glass > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.twa-revenue-label { color: #aaa4b8; font-size: 13px; }
+.twa-revenue-label b {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #f7f5ff;
+  background: rgba(167,139,250,.23);
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.twa-revenue-glass > strong {
+  display: block;
+  margin: 6px 0 2px;
+  color: #f7f5ff;
+  font-size: 31px;
+  line-height: 1.06;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+}
+.twa-revenue-meta { color: #aaa4b8; font-size: 12px; }
+.twa-revenue-line {
+  height: 44px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(167,139,250,.15), transparent);
+}
+.twa-revenue-line i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(165deg, transparent 46%, rgba(167,139,250,.9) 48%, rgba(167,139,250,.9) 51%, transparent 53%);
+  clip-path: polygon(0 80%, 14% 66%, 28% 70%, 42% 42%, 57% 50%, 70% 27%, 82% 35%, 100% 8%, 100% 16%, 82% 43%, 70% 35%, 57% 58%, 42% 50%, 28% 78%, 14% 74%, 0 88%);
+}/* TWA v3 — Balanced Compact Action Center. */
+.twa-action-list { border-color: rgba(255,255,255,.13); box-shadow: 0 18px 42px rgba(3,0,12,.18), 0 1px 0 rgba(255,255,255,.05) inset; }
+.twa-liquid-dashboard .twa-action-list .twa-inset-row { min-height: 94px; padding: 13px 14px; gap: 13px; }
+.twa-liquid-dashboard .twa-action-list .twa-inset-row strong { overflow: visible; font-size: 23px; line-height: 1.12; text-overflow: clip; white-space: normal; }
+.twa-liquid-dashboard .twa-action-list .twa-inset-row small { overflow: visible; font-size: 16px; line-height: 1.28; text-overflow: clip; white-space: normal; }
+.twa-action-list .twa-result-icon { width: 42px; height: 42px; border-radius: 13px; }
+.twa-result-icon.is-buyout { color: #d8ccff; background: rgba(167,139,250,.18); }
+.twa-result-icon.is-link { color: #75d6ff; background: rgba(100,210,255,.14); }
+.twa-result-icon.is-error { color: #ff958c; background: rgba(255,69,58,.14); }
+.twa-result-icon.is-inbox { color: #ffd66b; background: rgba(255,190,50,.13); }
+.twa-result-icon.is-delivery { color: #7aefb2; background: rgba(52,199,89,.14); }
+.is-spinning { animation: twa-spin .8s linear infinite; }
+
+/* ── Главная: касса выкупа (30.08.2026) ──────────────────────────────────────
+   Экран строится вокруг одной цифры — грязных робуксов очереди. Чистые стоят
+   рядом мелко: обе нужны, но соревноваться им нельзя, иначе главное число
+   перестаёт читаться с одного взгляда.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-home-search input { font-size: 16px; }
+.twa-home-search-go {
+  flex: 0 0 auto; width: auto !important; height: 32px !important; padding: 0 12px;
+  border-radius: 999px !important; background: #a78bfa !important; color: #1c1430 !important;
+  font: 700 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.twa-till {
+  display: flex; flex-direction: column;
+  padding: 15px 16px 14px;
+  border: 1px solid rgba(120,220,150,.20);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 88% -10%, rgba(48,209,88,.16), transparent 52%),
+    linear-gradient(150deg, rgba(58,68,58,.52), rgba(35,28,50,.86));
+  box-shadow: 0 1px 0 rgba(255,255,255,.09) inset, 0 22px 56px rgba(3,0,12,.24);
+}
+.twa-till-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.twa-till-head > span { color: #7ce69a; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.twa-till-head > div { display: flex; align-items: center; gap: 8px; }
+.twa-till-head b { color: #aaa4b8; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.twa-till-refresh {
+  width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: rgba(255,255,255,.09); color: #d8d3e4;
+}
+.twa-till-refresh:disabled { opacity: .55; }
+
+.twa-till-figure {
+  display: block; width: 100%; margin-top: 7px; padding: 0;
+  border: 0; background: transparent; color: #f7f5ff; text-align: left;
+}
+.twa-till-figure > strong {
+  display: block; font-size: 44px; line-height: 1; font-weight: 800;
+  letter-spacing: -.055em; font-variant-numeric: tabular-nums;
+}
+.twa-till-figure > strong small { margin-left: 6px; font-size: 19px; font-weight: 700; letter-spacing: 0; color: #a8f0be; }
+.twa-till-figure > span { display: block; margin-top: 5px; color: #aaa4b8; font-size: 14px; }
+.twa-till-figure > span b { color: #e9e5f2; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.twa-till-age { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 11px; font-size: 13px; }
+.twa-till-age b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-till-age span { color: #aaa4b8; font-variant-numeric: tabular-nums; }
+.twa-till-empty { margin-top: 10px; color: #aaa4b8; font-size: 14px; }
+
+/* Ширина сегмента = доля робуксов. Минимальная ширина — чтобы одинокий
+   прямой заказ не превращался в невидимую нитку. */
+.twa-lane-bar { display: flex; gap: 3px; height: 9px; margin-top: 14px; }
+.twa-lane-bar i { display: block; min-width: 12px; border-radius: 3px; }
+
+.twa-lane-rows { display: flex; flex-direction: column; margin-top: 6px; }
+.twa-lane-row {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 9px;
+  padding: 9px 2px; border: 0; border-bottom: 1px solid rgba(255,255,255,.07);
+  background: transparent; color: #f7f5ff; text-align: left; font-family: inherit;
+}
+.twa-lane-row:last-child { border-bottom: 0; }
+.twa-lane-row > i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; }
+.twa-lane-name { min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-lane-count {
+  flex: 0 0 auto; min-width: 24px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,.09); color: #cfc9dc;
+  font-size: 12px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums;
+}
+.twa-lane-age { flex: 0 0 auto; margin-left: auto; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.twa-lane-sum { flex: 0 0 auto; min-width: 62px; font-size: 16px; font-weight: 700; letter-spacing: -.02em; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── ⚡ Первым делом (Главная) ───────────────────────────────────────────────
+   Два случая, которые выкупаются не по возрасту: поднятый руками заказ и
+   прямой (клиент заплатил лично и ждёт лично). Отдельный блок, а не строчка
+   в кассе: в очереди они и так наверху, но там же стоит просто самый старый —
+   без метки эти случаи неотличимы. Блок жёлтый, а не зелёный, как касса:
+   зелёный на этом экране значит «деньги», жёлтый — «руки».
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-first {
+  display: flex; flex-direction: column;
+  padding: 13px 14px 8px;
+  border: 1px solid rgba(255,214,10,.24);
+  border-radius: 22px;
+  background: linear-gradient(150deg, rgba(72,62,26,.42), rgba(35,28,50,.86));
+}
+.twa-first-head { display: flex; align-items: center; gap: 8px; padding-bottom: 2px; }
+.twa-first-head > span {
+  color: #ffd60a; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+}
+.twa-first-head > em {
+  margin-left: auto; font-style: normal; color: #aaa4b8; font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Пачкой — то, что вставляют в донора одним движением. Кнопка подписана
+   числом ID, а не заказов: у разбитого заказа их несколько. */
+.twa-first-copy-all {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px;
+  min-height: 28px; padding: 0 10px; border: 1px solid rgba(255,214,10,.3);
+  border-radius: 999px; background: rgba(255,214,10,.1); color: #ffd60a;
+  font-family: inherit; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.twa-first-row {
+  width: 100%; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 2px 10px; border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.twa-first-row:last-child { border-bottom: 0; }
+.twa-first-row.is-busy { opacity: .5; pointer-events: none; }
+.twa-first-open {
+  width: 100%; min-height: 40px; display: flex; align-items: center; gap: 9px;
+  padding: 0; border: 0; background: transparent; color: #f7f5ff;
+  text-align: left; font-family: inherit;
+}
+/* Ширина фиксирована, чтобы коды в строках стояли столбиком: «⚡» и «Прямой»
+   разной длины, и без этого вторая строка съезжала относительно первой. */
+.twa-first-why {
+  flex: 0 0 auto; min-width: 62px; padding: 3px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; text-align: center; white-space: nowrap;
+}
+.twa-first-why.is-pinned { color: #ffd60a; background: rgba(255,214,10,.15); }
+.twa-first-why.is-direct { color: #9db8ff; background: rgba(10,132,255,.16); }
+.twa-first-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.twa-first-main > strong {
+  font-size: 14px; font-weight: 700; letter-spacing: .06em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.twa-first-main > small {
+  color: #aaa4b8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.twa-first-sum {
+  flex: 0 0 auto; font-size: 16px; font-weight: 700; letter-spacing: -.02em;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.twa-first-age { flex: 0 0 auto; min-width: 42px; text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Вторая строка карточки: заметка и два действия смены. Заметка тянется,
+   кнопки — нет: «выкуплено» обязано стоять на одном месте во всех строках,
+   иначе большой палец промахивается по соседней. */
+.twa-first-tools { display: flex; align-items: center; gap: 6px; }
+.twa-first-note, .twa-first-note-input {
+  flex: 1 1 auto; min-width: 0; min-height: 34px; padding: 6px 10px;
+  border-radius: 9px; font-family: inherit; font-size: 13px; text-align: left;
+}
+.twa-first-note {
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.045); color: #ded9ea;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.twa-first-note.is-empty { color: #777181; }
+.twa-first-note-input {
+  border: 1px solid rgba(255,214,10,.45); background: rgba(0,0,0,.32); color: #f7f5ff;
+  -webkit-appearance: none; appearance: none;
+}
+/* Своя рамка фокуса вместо системной: белое кольцо Chrome/WebView перебивало
+   жёлтую и в блоке появлялся чужой по цвету элемент. */
+.twa-first-note-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(255,214,10,.22); }
+.twa-first-copy {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px;
+  min-height: 34px; padding: 0 11px; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 9px; background: rgba(255,255,255,.045); color: #ded9ea;
+  font-family: inherit; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.twa-first-copy:disabled { opacity: .35; }
+/* Отделена щелью и своим цветом намеренно: действие необратимо и шлёт клиенту
+   сообщение, а соседняя кнопка — безобидное копирование, которое жмут в
+   десять раз чаще. */
+.twa-first-tick {
+  flex: 0 0 auto; width: 40px; height: 34px; margin-left: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(48,209,88,.4); border-radius: 9px;
+  background: rgba(48,209,88,.14); color: #30d158;
+}
+
+/* ── «Другие пассы на аккаунте» (карточка заказа) ───────────────────────────
+   Зеркало блока из досье сайта. Вторичный по виду намеренно: это не факты
+   заказа, а витрина, из которой заказ можно починить. Строка на телефоне
+   двухэтажная — имя с ID слева, цена с действием справа: в одну линию на
+   390 px не влезает даже имя пасса.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-gp-more-open {
+  width: 100%; min-height: 38px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px; background: rgba(255,255,255,.04); color: #c8c4d4;
+  font-family: inherit; font-size: 13.5px; font-weight: 600;
+}
+.twa-gp-more-open:disabled { opacity: .5; }
+.twa-gp-more {
+  padding: 10px 11px 11px; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px; background: rgba(0,0,0,.28);
+}
+.twa-gp-more-head { display: flex; align-items: center; gap: 8px; }
+/* Заглавные и разрядку гасим явно: они наследуются от шапки карточки, и
+   «…НА АККАУНТЕ BAIZH…» обрезало ровно ник, ради которого подпись и нужна. */
+.twa-gp-more-head > span {
+  min-width: 0; flex: 1; color: #8b8797; font-size: 12px; font-weight: 600;
+  text-transform: none; letter-spacing: normal;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.twa-gp-more-head > button {
+  flex: 0 0 auto; min-height: 26px; padding: 0 8px; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; background: transparent; color: #8b8797; font-family: inherit; font-size: 12px;
+}
+.twa-gp-group { margin-top: 10px; color: #6f6b7a; font-size: 12px; }
+.twa-gp-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.twa-gp-row:last-of-type { border-bottom: 0; }
+.twa-gp-row.is-off { opacity: .62; }
+.twa-gp-name { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.twa-gp-name > b { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-gp-name > small {
+  color: #6f6b7a; font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Занятость — предупреждение, а не цифра: живёт у ID, чтобы не растить
+   колонку цены переносом на три строки. */
+.twa-gp-name em { font-style: normal; font-family: inherit; color: #c9a86a; }
+.twa-gp-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.twa-gp-right > b { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-gp-btn {
+  min-height: 30px; padding: 0 10px; border: 1px solid rgba(255,255,255,.11); border-radius: 9px;
+  background: rgba(255,255,255,.05); color: #ded9ea; font-family: inherit; font-size: 12.5px; font-weight: 600;
+}
+.twa-gp-btn.is-go { color: #bff5d3; border-color: rgba(48,209,88,.35); background: rgba(48,209,88,.14); }
+.twa-gp-btn:disabled { opacity: .45; }
+.twa-gp-fold {
+  margin-top: 10px; border: 0; padding: 0; background: none; color: #8b8797;
+  font-family: inherit; font-size: 12.5px;
+}
+.twa-gp-note { margin-top: 9px; color: #6f6b7a; font-size: 12.5px; line-height: 1.5; }
+
+.twa-section-label { padding: 6px 4px 0; color: #777181; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+
+.twa-stage-strip { display: flex; gap: 7px; overflow-x: auto; padding: 2px 1px; }
+.twa-stage-chip {
+  flex: 0 0 auto; min-height: 38px; display: flex; align-items: center; gap: 6px;
+  padding: 0 12px; border: 1px solid rgba(255,255,255,.10); border-radius: 999px;
+  background: rgba(41,34,57,.62); color: #aaa4b8; font-size: 13px; font-weight: 600; font-family: inherit;
+}
+.twa-stage-chip b { color: #f7f5ff; font-size: 14px; font-variant-numeric: tabular-nums; }
+.twa-stage-chip em { font-size: 12px; font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Тихие строки: их задача — быть видимыми, но не выглядеть невыполненной
+   работой. Исключение — `is-loud`: висяки уже никто не разберёт сам. */
+.twa-quiet-rows { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+/* ── «Пока вас не было» на телефоне ──────────────────────────────────────
+   Тот же блок, что на сайте: итог смены, очаги застрявшего и живая лента.
+   Вкладки две, а не три: нити на 390 px читаются хуже ленты. */
+
+.twa-shift {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 13px 14px 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  background: rgba(41,34,57,.5);
+}
+.twa-shift-head { display: flex; align-items: baseline; gap: 8px; }
+.twa-shift-head > span { color: #f7f5ff; font-size: 15px; font-weight: 700; }
+.twa-shift-head > em { font-style: normal; color: #777181; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.twa-shift-live {
+  margin-left: auto; color: #6ee58d; font-size: 11.5px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.twa-shift-tabs {
+  display: flex; gap: 4px; margin: 9px 0 4px; padding: 3px;
+  border-radius: 12px; background: rgba(0,0,0,.28);
+}
+.twa-shift-tabs button {
+  flex: 1; min-height: 34px; border: 0; border-radius: 9px; background: transparent;
+  color: #aaa4b8; font-family: inherit; font-size: 14px; font-weight: 600;
+}
+.twa-shift-tabs button.is-on { background: rgba(167,139,250,.2); color: #d3c4ff; }
+
+.twa-shift-tiles { display: flex; gap: 8px; margin: 6px 0 4px; }
+.twa-shift-tiles > div {
+  flex: 1; min-width: 0; padding: 9px 10px; border-radius: 14px;
+  background: rgba(255,255,255,.045);
+}
+.twa-shift-tiles span {
+  display: block; color: #777181; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase;
+}
+.twa-shift-tiles strong {
+  display: block; margin-top: 2px; color: #f7f5ff; font-size: 17px; font-weight: 700;
+  letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.twa-shift-tiles strong small { margin-left: 3px; color: #777181; font-size: 12px; font-weight: 600; }
+.twa-shift-tiles strong i { margin-left: 5px; font-style: normal; font-size: 13px; font-weight: 700; }
+
+.twa-shift-key {
+  padding: 10px 2px 2px; color: #ff8c84; font-size: 10.5px; font-weight: 800;
+  letter-spacing: .09em; text-transform: uppercase;
+}
+.twa-shift-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 2px;
+  border-top: 1px solid rgba(255,255,255,.06); font-size: 14px; color: #aaa4b8;
+}
+.twa-shift-row > i { flex: 0 0 auto; width: 18px; font-style: normal; text-align: center; }
+.twa-shift-row > span { flex: 1; min-width: 0; }
+.twa-shift-row b { color: #f7f5ff; font-weight: 650; }
+.twa-shift-row small { display: block; margin-top: 1px; color: #777181; font-size: 12.5px; }
+.twa-shift-row > time {
+  flex: 0 0 auto; color: #777181; font-size: 11.5px; font-variant-numeric: tabular-nums;
+}
+.twa-shift-row.is-alert { color: #ffb4ad; }
+
+.twa-shift-feed { display: flex; flex-direction: column; }
+.twa-shift-empty { padding: 16px 2px; color: #777181; font-size: 13.5px; text-align: center; }
+.twa-shift-event {
+  display: flex; align-items: flex-start; gap: 9px; padding: 7px 2px;
+  border-top: 1px solid rgba(255,255,255,.06); font-size: 13.5px; color: #aaa4b8;
+}
+.twa-shift-event > time {
+  flex: 0 0 38px; padding-top: 1px; color: #777181; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.twa-shift-event > i {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
+  font-style: normal; font-size: 9.5px; font-weight: 800;
+}
+.twa-shift-event > span { flex: 1; min-width: 0; }
+.twa-shift-event b { color: #cfd0ff; font-weight: 600; }
+.twa-shift-event small { display: block; margin-top: 1px; color: #777181; font-size: 12px; }
+.twa-shift-fold {
+  width: 100%; min-height: 40px; display: flex; align-items: center; gap: 9px;
+  padding: 8px 2px; border: 0; border-top: 1px solid rgba(255,255,255,.06);
+  background: transparent; color: #f7f5ff; font-family: inherit; font-size: 13.5px; text-align: left;
+}
+.twa-shift-fold > b { flex: 1; font-weight: 650; }
+.twa-shift-fold > time { color: #777181; font-size: 12px; font-variant-numeric: tabular-nums; }
+.twa-shift-group {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 2px 10px;
+  padding: 2px 2px 8px 30px;
+}
+.twa-shift-group span { color: #777181; font-size: 12px; font-variant-numeric: tabular-nums; }
+.twa-shift-group span b { color: #d8d3e4; font-weight: 600; }
+
+.twa-quiet-row {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px;
+  padding: 10px 13px; border: 1px solid rgba(255,255,255,.07); border-radius: 15px;
+  background: rgba(255,255,255,.035); color: #aaa4b8;
+  font-size: 14px; font-family: inherit; text-align: left;
+}
+.twa-quiet-row > span { min-width: 0; flex: 1; }
+.twa-quiet-row > svg:first-child { flex: 0 0 auto; }
+.twa-quiet-row.is-ice { color: #8fdcff; border-color: rgba(100,210,255,.18); background: rgba(100,210,255,.07); }
+.twa-quiet-row.is-loud {
+  align-items: flex-start; color: #ffc36e;
+  border-color: rgba(255,159,10,.26); background: rgba(255,159,10,.09);
+}
+.twa-quiet-row.is-loud b { color: #ffd08f; font-weight: 700; }
+.twa-quiet-row.is-loud small { display: block; margin-top: 2px; color: #b7a894; font-size: 12px; line-height: 1.3; }
+.twa-quiet-row.is-loud > svg:first-child { margin-top: 2px; }
+
+.twa-home-footer { padding: 4px 4px 0; color: #6a6478; font-size: 12px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+
+/* ── Живая часть поиска в «Заказах»: Roblox и заказы WB Доставки ─────────────
+   Секции намеренно не похожи на карточку заказа: это не заказ, и кнопки
+   заказа к ним не применимы. У каждой ровно один выход — туда, где с
+   найденным можно что-то сделать.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-live-group {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 16px;
+  background: rgba(41,34,57,.5);
+}
+.twa-live-group > span {
+  display: block; padding: 10px 13px 6px;
+  color: #777181; font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase;
+}
+.twa-live-row {
+  width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 9px;
+  padding: 10px 13px; border: 0; border-top: 1px solid rgba(255,255,255,.07);
+  background: transparent; color: #f7f5ff; text-align: left; font-family: inherit;
+}
+.twa-live-row b { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-live-row small { flex: 1 0 100%; color: #aaa4b8; font-size: 12px; }
+.twa-live-row > span:last-child { flex: 0 0 auto; color: #777181; font-size: 17px; }
+.twa-live-cta {
+  flex: 0 0 auto; min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: rgba(48,209,88,.16); color: #6ee58d;
+  font: 700 12.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.twa-live-note { padding: 8px 13px; color: #ffd60a; font-size: 12px; }
+
+@media (max-width: 370px) {
+  .twa-liquid-dashboard .twa-action-list .twa-inset-row strong { font-size: 21px; }
+  .twa-till-figure > strong { font-size: 38px; }
+  .twa-lane-row { gap: 7px; }
+}
+.twa-next-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 2px;
+  border: 0;
+  border-top: 1px solid rgba(255,255,255,.10);
+  border-bottom: 1px solid rgba(255,255,255,.10);
+  background: transparent;
+  color: #f7f5ff;
+  text-align: left;
+}
+.twa-next-action > span:first-child {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: #e0d6ff;
+  background: rgba(167,139,250,.21);
+}
+.twa-next-action > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.twa-next-action small { color: #aaa4b8; font-size: 12px; }
+.twa-stock-list { display: flex; flex-direction: column; gap: 10px; margin-top: 13px; }
+.twa-stock-list > div { display: grid; grid-template-columns: 58px 1fr 28px; align-items: center; gap: 8px; font-size: 12px; }
+.twa-stock-list > div > div { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.09); }
+.twa-stock-list i { display: block; height: 100%; border-radius: inherit; }
+.twa-liquid-skeleton {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  background: rgba(41,34,57,.62);
+  animation: twa-liquid-pulse 1.45s ease-in-out infinite;
+}
+.twa-liquid-error { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 7px; padding: 30px; color: #aaa4b8; text-align: center; }
+.twa-liquid-error strong { color: #f7f5ff; }
+.twa-liquid-error span { font-size: 12px; }
+@keyframes twa-liquid-pulse { 50% { opacity: .42; } }
+
+/* Floating iOS tab bar + "More" sheet. */
+.twa-nav-zone {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  padding: 7px 12px calc(8px + max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px)));
+  pointer-events: none;
+}
+.twa-liquid-tabbar {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 8px 5px 9px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 24px;
+  background: rgba(17,14,25,.72);
+  box-shadow: 0 18px 52px rgba(3,0,12,.34), 0 1px 0 rgba(255,255,255,.07) inset;
+  -webkit-backdrop-filter: blur(22px) saturate(1.28);
+  backdrop-filter: blur(22px) saturate(1.28);
+}
+.twa-tab {
+  min-width: 0;
+  padding: 4px 1px 2px;
+  border: 0;
+  background: none;
+  color: #777181;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+}
+.twa-tab.is-selected { color: #b9a6ff; }
+.twa-tab-icon { position: relative; display: grid; place-items: center; min-height: 22px; }
+.twa-tab-icon b {
+  position: absolute;
+  top: -7px;
+  left: calc(50% + 4px);
+  min-width: 16px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+.twa-more-sheet {
+  pointer-events: auto;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(82px + max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px)));
+  overflow: hidden;
+  padding: 13px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 24px;
+  background: rgba(31,25,45,.90);
+  box-shadow: 0 22px 60px rgba(3,0,12,.46), 0 1px 0 rgba(255,255,255,.07) inset;
+  -webkit-backdrop-filter: blur(24px) saturate(1.28);
+  backdrop-filter: blur(24px) saturate(1.28);
+}
+.twa-more-sheet-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 2px 11px; }
+.twa-more-sheet-head > div { display: flex; flex-direction: column; }
+.twa-more-sheet-head span { color: #777181; font-size: 11px; }
+.twa-more-sheet-head strong { color: #f7f5ff; font-size: 21px; }
+.twa-icon-button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 50%;
+  background: rgba(255,255,255,.07);
+  color: #f7f5ff;
+}
+.twa-more-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 2px;
+  border: 0;
+  border-top: 1px solid rgba(255,255,255,.09);
+  background: transparent;
+  color: #f7f5ff;
+  text-align: left;
+}
+.twa-more-row > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.twa-more-row small { color: #aaa4b8; font-size: 12px; }
+.twa-more-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: #d8ccff; background: rgba(167,139,250,.17); }
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .twa-liquid-titlebar,
+  .twa-liquid-tabbar,
+  .twa-more-sheet,
+  .twa-glass-card,
+  .twa-glass-segment,
+  .twa-revenue-glass,
+  .twa-stock-glass { background: #211a30 !important; }
+}
+
+@media (min-width: 780px) {
+  .twa-liquid-content {
+    width: min(720px, 100%);
+    margin: 0 auto;
+  }
+  .twa-liquid-titlebar {
+    padding-left: max(18px, calc((100% - 720px) / 2 + 18px));
+    padding-right: max(18px, calc((100% - 720px) / 2 + 18px));
+  }
+  .twa-nav-zone {
+    width: min(560px, 100%);
+    margin: 0 auto;
+  }
+}
+
+.twa-press {
+  touch-action: manipulation;
+  -webkit-user-select: none; user-select: none;
+  transition: transform .14s cubic-bezier(.2,.8,.2,1), opacity .14s ease, filter .14s ease;
+}
+.twa-press:active      { transform: scale(.96);  filter: brightness(1.08); }
+.twa-press-sm:active   { transform: scale(.97); }
+.twa-card-press:active { transform: scale(.985); filter: brightness(1.05); }
+.twa-press:disabled,
+.twa-press[aria-disabled="true"] { filter: none; transform: none; }
+
+@keyframes twa-pop       { 0%{transform:scale(.5);opacity:0} 60%{transform:scale(1.18)} 100%{transform:scale(1);opacity:1} }
+@keyframes twa-fade-in   { from{opacity:0} to{opacity:1} }
+@keyframes twa-fade-up   { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+@keyframes twa-chip-in   { from{opacity:0;transform:translateY(-2px) scale(.85)} to{opacity:1;transform:none} }
+@keyframes twa-toast-in  { from{opacity:0;transform:translateY(14px) scale(.96)} to{opacity:1;transform:none} }
+@keyframes twa-card-exit { to{opacity:0;transform:translateX(40px) scale(.97)} }
+
+@media (prefers-reduced-motion: reduce) {
+  .twa-sheet,
+  .twa-fade-in,
+  .twa-fade-up,
+  .twa-pop,
+  .twa-chip-in { animation: none !important; transition: none !important; }
+}
+
+.twa-pop      { animation: twa-pop .4s cubic-bezier(.22,1,.36,1) both; }
+.twa-fade-in  { animation: twa-fade-in .3s ease both; }
+.twa-fade-up  { animation: twa-fade-up .35s cubic-bezier(.22,1,.36,1) both; }
+.twa-chip-in  { animation: twa-chip-in .28s cubic-bezier(.22,1,.36,1) both; }
+.twa-toast-in { animation: twa-toast-in .3s cubic-bezier(.22,1,.36,1) both; }
+.twa-card-exit{ animation: twa-card-exit .26s cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
+
+/* Horizontal chip rail — hide scrollbar cross-browser */
+.twa-no-scrollbar { scrollbar-width: none; }
+.twa-no-scrollbar::-webkit-scrollbar { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .twa-press, .twa-pop, .twa-fade-in, .twa-fade-up,
+  .twa-chip-in, .twa-toast-in, .twa-card-exit {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ═══ Экран «Заказы»: срезы, шапка среза, карточка ═════════════════════════
+   Срез — это не статус в базе, а работа. Три этажа навигации (сегмент, ряд из
+   одиннадцати чипов, мини-дашборд) занимали треть экрана и заставляли выбирать,
+   ещё не начав работать; здесь один ряд срезов, под ним сводка того среза, где
+   вы стоите, и сразу лента.
+
+   Язык — тот же, что у кассы главной (`.twa-till*` выше): тёмная дека, крупная
+   цифра денег, полки по убыванию срочности. Разница одна: касса рассказывает
+   про день, шапка среза — про очередь под ней, и каждая её строка кликабельна.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── Ряд срезов ─────────────────────────────────────────────────────────── */
+/* «Фильтры» стоит ВНЕ горизонтального скролла: четыре среза плюс кнопка не
+   влезают в 390 px, и внутри скролла кнопка уезжала за правый край — то есть
+   всё, что не является ежедневной работой, становилось недостижимым. */
+.twa-slice-row { display: flex; align-items: center; gap: 6px; padding: 0 16px; }
+.twa-slice-scroll { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; }
+.twa-slice-tab {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-height: 34px;
+  padding: 0 13px; border: 0; border-radius: 999px;
+  background: rgba(255,255,255,.06); color: #aaa4b8;
+  font-family: inherit; font-size: 13.5px; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+.twa-slice-tab > i { flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%; }
+.twa-slice-tab > b { font-weight: 700; font-variant-numeric: tabular-nums; opacity: .75; }
+.twa-slice-tab.is-on { color: #f7f5ff; }
+.twa-slice-tab.is-on > b { opacity: 1; }
+.twa-slice-filters { flex: 0 0 auto; }
+.twa-slice-filters.is-on { background: rgba(167,139,250,.2); color: #cdbcff; }
+
+/* Снятие сужения: строка под срезами, живёт только пока сужение есть. */
+.twa-slice-narrow {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 16px;
+  color: #777181; font-size: 12px;
+}
+.twa-slice-narrow > button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px;
+  padding: 0 10px; border: 0; border-radius: 999px;
+  background: rgba(167,139,250,.16); color: #cdbcff; font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1;
+}
+.twa-slice-narrow > button > i { font-style: normal; opacity: .7; }
+
+/* ── Шапка среза ────────────────────────────────────────────────────────── */
+.twa-slice-till {
+  display: flex; flex-direction: column;
+  margin: 0 16px; padding: 13px 15px 12px;
+  border: 1px solid rgba(120,220,150,.20);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 88% -12%, rgba(48,209,88,.15), transparent 52%),
+    linear-gradient(150deg, rgba(58,68,58,.5), rgba(35,28,50,.86));
+  box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 18px 44px rgba(3,0,12,.2);
+}
+.twa-slice-till.is-red { border-color: rgba(255,69,58,.24); background: radial-gradient(circle at 88% -12%, rgba(255,69,58,.13), transparent 52%), linear-gradient(150deg, rgba(66,44,44,.5), rgba(35,28,50,.86)); }
+.twa-slice-till.is-amber { border-color: rgba(255,214,10,.22); background: radial-gradient(circle at 88% -12%, rgba(255,214,10,.13), transparent 52%), linear-gradient(150deg, rgba(66,60,42,.5), rgba(35,28,50,.86)); }
+.twa-slice-till.is-quiet { border-color: rgba(255,255,255,.1); background: linear-gradient(150deg, rgba(48,42,66,.5), rgba(35,28,50,.86)); }
+
+.twa-slice-head { display: flex; align-items: center; gap: 8px; }
+.twa-slice-head-main {
+  flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px;
+  padding: 0; border: 0; background: transparent; text-align: left; font-family: inherit;
+}
+.twa-slice-head-main > span { color: #7ce69a; font-size: 11px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.twa-slice-till.is-red .twa-slice-head-main > span { color: #ff9d94; }
+.twa-slice-till.is-amber .twa-slice-head-main > span { color: #ffd98a; }
+.twa-slice-till.is-quiet .twa-slice-head-main > span { color: #b9a6ff; }
+.twa-slice-head-main > b { color: #e9e5f2; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.twa-slice-head-main > em { margin-left: auto; color: #777181; font-size: 11px; font-style: normal; font-variant-numeric: tabular-nums; }
+
+.twa-slice-figure { margin-top: 6px; }
+.twa-slice-figure > strong {
+  display: block; font-size: 32px; line-height: 1; font-weight: 800;
+  letter-spacing: -.05em; color: #f7f5ff; font-variant-numeric: tabular-nums;
+}
+.twa-slice-figure > strong small { margin-left: 5px; font-size: 14px; font-weight: 700; letter-spacing: 0; color: #a8f0be; }
+.twa-slice-till.is-red .twa-slice-figure > strong small { color: #ff9d94; }
+.twa-slice-till.is-amber .twa-slice-figure > strong small { color: #ffd98a; }
+.twa-slice-till.is-quiet .twa-slice-figure > strong small { color: #cdbcff; }
+.twa-slice-figure > span { display: block; margin-top: 4px; color: #aaa4b8; font-size: 12px; line-height: 1.45; }
+.twa-slice-figure > span b { color: #e9e5f2; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Полоса источников: ширина = доля робуксов, а не заказов. */
+.twa-slice-till .twa-lane-bar { height: 8px; margin-top: 11px; }
+.twa-slice-legend { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.twa-slice-chip {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 28px;
+  padding: 0 9px; border: 0; border-radius: 9px;
+  background: rgba(255,255,255,.05); color: #aaa4b8;
+  font-family: inherit; font-size: 11.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.twa-slice-chip > i { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; }
+.twa-slice-chip > b { color: #e9e5f2; font-weight: 700; }
+.twa-slice-chip > em { color: #777181; font-style: normal; }
+.twa-slice-chip.is-on { background: rgba(255,255,255,.13); color: #f7f5ff; }
+
+.twa-slice-shelf { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.09); }
+.twa-slice-line { display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
+.twa-slice-line .k { flex: 0 0 auto; color: #777181; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.twa-slice-line .v { color: #f7f5ff; font-size: 14px; font-weight: 700; }
+.twa-slice-line .v small { margin-left: 3px; color: #aaa4b8; font-size: 11px; font-weight: 600; }
+.twa-slice-line .tail { margin-left: auto; padding: 0; border: 0; background: transparent; color: #777181; font-family: inherit; font-size: 11px; font-weight: 400; line-height: 1.3; text-align: right; }
+.twa-slice-line .tail b { font-weight: 700; }
+
+.twa-slice-flags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.twa-slice-flag {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px;
+  border: 0; border-radius: 8px; background: rgba(255,255,255,.055); color: #aaa4b8;
+  font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1; text-align: left;
+}
+.twa-slice-flag.is-amber { background: rgba(255,159,10,.14); color: #ffc36e; }
+.twa-slice-flag.is-red { background: rgba(255,69,58,.14); color: #ff958c; }
+.twa-slice-flag.is-on { outline: 1px solid rgba(255,255,255,.35); }
+
+/* Четыре корзины возраста: видно, ровная очередь или с хвостом. */
+.twa-slice-hist { display: flex; align-items: flex-end; gap: 4px; margin-top: 8px; }
+.twa-slice-hist > button {
+  flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
+  padding: 0; border: 0; background: transparent; font-family: inherit; text-align: center;
+}
+.twa-slice-hist > button:disabled { opacity: .45; }
+.twa-slice-hist > button.is-on i { outline: 1px solid rgba(255,255,255,.45); }
+.twa-slice-hist b { color: #e9e5f2; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-slice-hist i { display: block; border-radius: 4px 4px 2px 2px; }
+.twa-slice-hist em { color: #777181; font-size: 9px; font-style: normal; font-variant-numeric: tabular-nums; }
+
+.twa-slice-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px;
+  color: #777181; font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.twa-slice-foot.is-bordered { margin-top: 9px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.07); }
+.twa-slice-foot b { color: #aaa4b8; font-weight: 600; }
+.twa-slice-nominal {
+  min-height: 26px; margin-right: 4px; padding: 0 7px; border: 0; border-radius: 7px;
+  background: rgba(255,255,255,.05); color: #aaa4b8; font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.twa-slice-nominal.is-on { background: rgba(167,139,250,.2); color: #cdbcff; }
+.twa-slice-export {
+  margin-left: auto; min-height: 30px; padding: 0 11px; border: 0; border-radius: 9px;
+  background: rgba(255,255,255,.07); color: #d8d3e4; font-family: inherit; font-size: 11.5px; font-weight: 600; line-height: 1;
+}
+.twa-slice-export b { color: #f7f5ff; font-weight: 700; }
+.twa-slice-empty { margin-top: 8px; color: #aaa4b8; font-size: 13px; line-height: 1.45; }
+
+/* ── Карточка заказа: четыре строки и три крупные цели ──────────────────────
+   Ряд действий видим всегда: цикл выкупа — «скопировал ID → купил в доноре →
+   отметил Выкуплено», и прятать его вторым шагом означало бы +1 тап на каждый
+   заказ очереди. Все цели ≥ 36 px: попадаешь пальцем не глядя.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-oc-open {
+  width: 100%; display: flex; flex-direction: column; gap: 4px;
+  padding: 11px 12px 9px; border: 0; background: transparent; color: #f7f5ff;
+  text-align: left; font-family: inherit;
+}
+.twa-oc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.twa-oc-top > b { flex: 0 0 auto; font-size: 11px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
+.twa-oc-top > small { flex: 0 0 auto; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.twa-oc-bell { flex: 0 0 auto; color: #ff9f0a; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* ⚡ Заказ поднят руками наверх очереди. Тот же вес, что у «🔔 2/3»: это
+   пометка состояния, а не действие, и кликать в ленте её не нужно. */
+.twa-oc-prio {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,214,10,.16); color: #ffd60a;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .01em; white-space: nowrap;
+}
+.twa-oc-chev { flex: 0 0 auto; color: #777181; font-size: 13px; font-style: normal; }
+/* Код ВБ — якорь: заказ ищут и называют именно по нему, поэтому он крупный,
+   всегда на одном месте и копируется тапом. */
+.twa-oc-code {
+  margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 28px; padding: 0 10px; border: 0; border-radius: 9px;
+  background: rgba(167,139,250,.15); color: #cdbcff;
+  font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .09em;
+}
+.twa-oc-code > i { font-family: inherit; font-size: 12px; font-style: normal; opacity: .7; }
+.twa-oc-code.is-done { background: rgba(48,209,88,.18); color: #6ee58d; }
+.twa-oc-main { display: flex; align-items: baseline; gap: 9px; margin-top: 2px; min-width: 0; }
+.twa-oc-main > strong { flex: 1; min-width: 0; overflow: hidden; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-oc-main > b { flex: 0 0 auto; font-size: 16px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.twa-oc-main > b small { margin-left: 3px; color: #a8f0be; font-size: 11px; font-weight: 600; }
+.twa-oc-meta { display: flex; flex-wrap: wrap; gap: 2px 9px; min-width: 0; color: #777181; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.twa-oc-meta > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-oc-flag { margin-top: 2px; font-size: 11.5px; font-weight: 600; line-height: 1.35; }
+
+.twa-oc-acts {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 12px; padding: 9px 0 11px; border-top: 1px solid rgba(255,255,255,.075);
+}
+.twa-oc-prim {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
+  padding: 0 13px; border: 0; border-radius: 11px;
+  background: rgba(48,209,88,.15); color: #6ee58d; font-family: inherit; font-size: 13px; font-weight: 700; line-height: 1; white-space: nowrap;
+}
+.twa-oc-prim > i { font-size: 14px; font-style: normal; }
+.twa-oc-prim.is-blue { background: rgba(10,132,255,.16); color: #7ab8ff; }
+.twa-oc-prim.is-ice { background: rgba(100,210,255,.14); color: #8fdcff; }
+.twa-oc-prim:disabled { opacity: .5; }
+/* Широкая, потому что показывает сам ID: это то, что вставляется в донора. */
+.twa-oc-copy {
+  flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center;
+  gap: 7px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 11px;
+  background: rgba(255,255,255,.05); color: #c9c2dc;
+  font: 500 12.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.twa-oc-copy > i { flex: 0 0 auto; font-family: inherit; font-size: 13px; font-style: normal; opacity: .75; }
+.twa-oc-copy > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-oc-copy.is-hint { font-family: inherit; font-weight: 600; }
+.twa-oc-copy.is-done { background: rgba(48,209,88,.16); color: #6ee58d; }
+.twa-oc-more {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 48px; min-height: 36px; border: 0; border-radius: 11px;
+  background: rgba(255,255,255,.075); color: #d8d3e4;
+  font-family: inherit; font-size: 17px; font-weight: 700; line-height: 1; letter-spacing: .06em;
+}
+/* Рельс слева — состояние заказа целиком: ошибка, заморозка. */
+.twa-oc-rail { position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; }
+.twa-glass-order.has-rail .twa-oc-open { padding-left: 15px; }
+.twa-glass-order.is-done-state { opacity: .8; }
+
+/* ── Меню «···» ─────────────────────────────────────────────────────────── */
+.twa-oc-menu-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px 10px; }
+.twa-oc-menu-head > b { font: 700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; color: #f7f5ff; }
+.twa-oc-menu-head > em { min-width: 0; overflow: hidden; color: #777181; font-size: 12px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.twa-oc-menu-group { margin-top: 10px; padding: 0 4px 4px; color: #777181; font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.twa-oc-menu-row {
+  width: 100%; display: flex; align-items: center; gap: 11px; min-height: 46px;
+  padding: 0 12px; border: 0; border-radius: 12px; background: transparent;
+  color: #f7f5ff; font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.3; text-align: left;
+}
+.twa-oc-menu-row > span:first-child { flex: 0 0 auto; width: 22px; font-size: 16px; text-align: center; }
+.twa-oc-menu-row > span:nth-child(2) { flex: 1; min-width: 0; }
+.twa-oc-menu-row > em { flex: 0 0 auto; max-width: 45%; overflow: hidden; color: #777181; font-size: 12px; font-style: normal; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.twa-oc-menu-row.is-red { color: #ff958c; }
+.twa-oc-menu-row.is-dim { color: #aaa4b8; font-weight: 500; }
+.twa-oc-menu-row:disabled { opacity: .4; }

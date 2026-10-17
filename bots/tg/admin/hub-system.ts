@@ -26,7 +26,8 @@ function getServices(): ServiceConfig[] {
   const defaults: ServiceConfig[] = [
     { name: "Main (Web)",  url: process.env.MAIN_HEALTH_URL  ?? "https://www.robloxbank.ru", icon: "🌐" },
     { name: "Guide (Web)", url: process.env.GUIDE_HEALTH_URL ?? "https://www.robloxbank.ru/guide", icon: "🌐" },
-    { name: "VK Bot",      url: process.env.VK_BOT_HEALTH_URL ?? "http://5.223.95.11:3000", icon: "🤖" },
+    // Env only — no hardcoded IP fallback (public repo). Empty URL → offline.
+    { name: "VK Bot",      url: process.env.VK_BOT_HEALTH_URL ?? "", icon: "🤖" },
   ];
 
   if (containers.length > 0) {
