@@ -107,7 +107,7 @@ if [ -z "$NEON_IPS" ]; then
   log "DNS for Neon returned nothing — leaving state untouched"
   exit 0
 fi
-PROBE_IP=$(echo "$NEON_IPS" | head -1)
+PROBE_IP=${NEON_IPS%%$'\n'*}   # first line; no pipe, so head cannot SIGPIPE the writer
 
 # Three probes, take the median; a failure counts as the worst case.
 fails=0
