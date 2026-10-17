@@ -39,7 +39,12 @@ function createBotClient(): PrismaClient {
     connectionString: verifiedDatabaseUrl(process.env.DATABASE_URL),
     // Keep the pool small — bots are long-lived and Neon free tier has low connection limits.
     max: 3,
-    idleTimeoutMillis:    30_000,
+    // Held for 5 min, not 30 s: on the RF host the TLS+SCRAM handshake to Neon costs
+    // 5-20 s whenever the Singapore transit degrades (17.10 incident), and a short idle
+    // timeout made the bots pay it on nearly every event. keepAlive proves the socket.
+    idleTimeoutMillis:    300_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
     connectionTimeoutMillis: 15_000, // Neon may need ~10 s to wake from cold state
     // Kill individual queries that exceed 8 s — prevents ETIMEDOUT from hanging the process.
     options: "--statement_timeout=8000",

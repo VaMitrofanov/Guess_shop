@@ -31,7 +31,14 @@ function buildPoolerUrl(raw: string): string {
 const pool = new Pool({
   connectionString: buildPoolerUrl(process.env.DATABASE_URL ?? ""),
   max: databasePoolMax,
-  idleTimeoutMillis: 30_000,
+  // 17.10 incident: the RF -> Neon (Singapore) transit degrades in episodes. A TCP
+  // handshake survives it, the TLS+SCRAM handshake does not — it went from ~1.5s to
+  // 5-20s and overran connectionTimeoutMillis, so /admin answered 500 after 15s.
+  // A 30s idle timeout meant almost every admin visit paid that handshake, so hold
+  // connections for 5 minutes instead and let TCP keepalives prove they are alive.
+  idleTimeoutMillis: 300_000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10_000,
   connectionTimeoutMillis: 15_000,
 });
 
