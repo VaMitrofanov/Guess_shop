@@ -430,6 +430,37 @@ export async function notifyGamepassAttached(user: UserRef, wbCode: string): Pro
   return null;
 }
 
+/**
+ * Геймпасс создали МЫ — ключом, который покупатель прислал в чат менеджеру.
+ *
+ * Обычный текст привязки («геймпасс принят») здесь соврал бы дважды: человек
+ * ничего не присылал боту и ничего больше делать не должен. Поэтому отдельное
+ * сообщение: что сделано, на каком аккаунте и что от него больше ничего не
+ * нужно (замечание владельца 18.10.2026 — «проще самим его вставить в заказ и
+ * сделать все за них»).
+ */
+export async function notifyGamepassCreatedForBuyer(
+  user: UserRef,
+  wbCode: string,
+  opts: { nick: string; prices: number[] },
+): Promise<"tg" | "vk" | null> {
+  const passLine = opts.prices.length > 1
+    ? `Создали геймпассы: ${opts.prices.map((price) => `${price} R$`).join(" + ")}`
+    : `Создали геймпасс на ${opts.prices[0] ?? 0} R$`;
+  const tgMsg =
+    `🔑 <b>Сделали за тебя — геймпасс готов</b>\n\n` +
+    `${passLine} на аккаунте <b>${opts.nick}</b> — по ключу, который ты нам прислал.\n\n` +
+    `👍 От тебя больше ничего не нужно: заказ уже в очереди на выкуп.\n` +
+    `⏳ Выкупим в течение нескольких часов — как только будет готово, напишем.\n` +
+    `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
+    `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
+  const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
+
+  if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
+  if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
+  return null;
+}
+
 export async function notifyOrderRejected(
   user: UserRef,
   wbCode: string,

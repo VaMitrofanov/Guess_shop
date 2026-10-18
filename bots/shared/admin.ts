@@ -104,6 +104,18 @@ export interface SupportAlertPayload {
   contextKey:   string;
   wbCode?:      string;
   denomination?: number;
+  /**
+   * Своими словами: что человек написал, нажав «Поддержка».
+   *
+   * До 18.10.2026 алерт уходил в момент нажатия, и в нём была только «📍
+   * Причина» — ЭТАП, с которого человек позвал помощь, а не его проблема.
+   * Менеджер начинал разговор с «расскажите, что у вас». Теперь кнопка ставит
+   * ожидание описания (`bots/shared/support-intake.ts`), и алерт собирается
+   * вокруг этой строки.
+   */
+  problemText?: string;
+  /** Ссылка на скриншот, если человек приложил его к описанию. */
+  problemPhotoUrl?: string;
 }
 
 /**
@@ -308,6 +320,10 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
         mskTime(new Date()),
       ]),
       ...heldLines,
+      // Слова человека — выше всего нашего: это то, с чем он пришёл. «📍
+      // Причина» под ними остаётся этапом, с которого он позвал помощь.
+      p.problemText ? `💬 <b>«${escapeHtml(p.problemText)}»</b>` : null,
+      p.problemPhotoUrl ? `🖼 Скриншот: ${escapeHtml(p.problemPhotoUrl)}` : null,
       `📍 Причина: <b>${label}</b>`,
       // Справка по заказу идёт ПОСЛЕ причины: сначала «с чем пришли», потом
       // «что на самом деле с заказом». В таком порядке их и читают.
@@ -350,7 +366,13 @@ function cleanupSupportAlertSeen(now: number): void {
  *  events (currently fired from the TG `sup:<ctxKey>` callback and from VK's
  *  payload-driven support button). */
 export async function notifySupportShown(p: SupportAlertPayload): Promise<void> {
-  const key = `SOS:${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}`;
+  /* Описание входит в ключ дедупа.
+     Раньше дедуп защищал от двойного нажатия кнопки — само нажатие и слало
+     алерт. С 18.10.2026 алерт шлёт только ОПИСАННАЯ проблема, поэтому гасить
+     по этапу стало опасно: второе сообщение человека несёт новые сведения, а
+     не второй мисклик. Гасим только дословный повтор («помогите… помогите…»). */
+  const said = (p.problemText ?? "").trim().toLowerCase().slice(0, 64);
+  const key = `SOS:${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}:${said}`;
   const now = Date.now();
   const last = supportAlertSeen.get(key);
   if (last && now - last < SUPPORT_ALERT_TTL_MS) return;

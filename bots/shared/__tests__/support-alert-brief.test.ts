@@ -234,3 +234,46 @@ describe("справка не может отменить само сообще�
     expect(sentText()).toContain("VGAA3F2");
   });
 });
+
+/* ── Слова человека внутри алерта (18.10.2026) ───────────────────────────────
+   Владелец: «только после того, как он описал проблему и отправил — нам в
+   админку идёт увед как раньше, только уже с текстом проблемы, чтобы мы сразу
+   ориентировались». До этого в алерте стояла только «📍 Причина» — ЭТАП, с
+   которого человек позвал помощь, и менеджер начинал с «расскажите, что у вас».
+   ────────────────────────────────────────────────────────────────────────── */
+describe("описание проблемы в алерте", () => {
+  const callWithProblem = (problemText: string, extra: Record<string, unknown> = {}) =>
+    sendAdminSupportAlert({
+      platform: "TG",
+      userDisplay: "@Narkosha_zaxvatit_mir",
+      tgId: "12345",
+      contextKey: "pending_long",
+      wbCode: "VGAA3F2",
+      denomination: 500,
+      problemText,
+      ...extra,
+    });
+
+  it("несёт слова человека и ставит их ПЕРЕД нашей причиной", async () => {
+    orderFindUnique.mockResolvedValue(order());
+    await callWithProblem("не пришли робуксы, уже три дня");
+
+    const text = sentText();
+    expect(text).toContain("💬 <b>«не пришли робуксы, уже три дня»</b>");
+    // Сначала то, с чем пришёл человек; потом этап и справка по заказу.
+    expect(text.indexOf("💬")).toBeLessThan(text.indexOf("📍 Причина"));
+    expect(text.indexOf("💬")).toBeLessThan(text.indexOf("📦 Заказ"));
+  });
+
+  it("скриншот к обращению виден ссылкой", async () => {
+    orderFindUnique.mockResolvedValue(order());
+    await callWithProblem("вот скрин", { problemPhotoUrl: "https://vk.com/photo1" });
+    expect(sentText()).toContain("🖼 Скриншот: https://vk.com/photo1");
+  });
+
+  it("без описания алерт остаётся прежним — строка не рисуется пустой", async () => {
+    orderFindUnique.mockResolvedValue(order());
+    await call();
+    expect(sentText()).not.toContain("💬");
+  });
+});

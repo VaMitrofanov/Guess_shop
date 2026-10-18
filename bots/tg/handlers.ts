@@ -14,6 +14,21 @@ import { getSbpQrBuffer } from "../shared/sbp";
 import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { assertOrderNotHeld } from "../shared/order-hold";
+import {
+  cancelIntake,
+  clipProblemText,
+  intakeAckText,
+  intakeCancelText,
+  intakePromptText,
+  intakeRepeatText,
+  isIntakeCancel,
+  isUsableProblem,
+  looksLikeFlowInput,
+  openIntake,
+  readIntake,
+  takeIntake,
+  type SupportIntakeDb,
+} from "../shared/support-intake";
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, heldGameKeys, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
@@ -76,7 +91,8 @@ import {
   readyParts,
   type DirectPlanScreen,
 } from "../shared/direct-plan";
-import { intentPartsRows } from "../shared/gamepass-acceptance";
+import { intentPartsRows, priceMismatchMessage } from "../shared/gamepass-acceptance";
+import { buildBuyerMenuText } from "../shared/buyer-menu";
 import { passFitsAmount } from "../shared/direct-requote";
 import { loadRobloxApiKeyForUser, rememberRobloxApiKey, type RobloxApiKeyClient } from "../shared/roblox-api-key-store";
 import { formatOrderAge } from "../shared/order-age";
@@ -344,6 +360,72 @@ function faqOrSupportBtn(order: any, label?: string, ctxKey = "general", ctx?: a
 function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general", ctx?: any) {
   if (ctx?.from) void fireHurdleAlert(ctx, ctxKey);
   return Markup.button.callback(label, CB.supTap(ctxKey));
+}
+
+/** Клиент БД для ожидания описания проблемы (`User.supportIntakeAt/Ctx`). */
+const intakeDb = db as unknown as SupportIntakeDb;
+
+/** Код и номинал заказа, о котором почти наверняка пойдёт разговор. */
+async function supportOrderHint(ctx: any): Promise<{ wbCode?: string; denomination?: number }> {
+  let wbCode = pendingLink.get(ctx.from.id)?.wbCode ?? pendingRobloxNick.get(ctx.from.id)?.wbCode;
+  let denomination = pendingLink.get(ctx.from.id)?.denomination;
+  if (!wbCode) {
+    try {
+      const u = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
+      if (u) {
+        const o = await (db as any).wbOrder.findFirst({
+          where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
+        });
+        if (o) { wbCode = o.wbCode; denomination = o.amount; }
+      }
+    } catch {}
+  }
+  return { wbCode, denomination };
+}
+
+/**
+ * Описание проблемы получено — вот теперь алерт в админку.
+ *
+ * До 18.10.2026 алерт уходил в момент нажатия кнопки «Поддержка», и в нём была
+ * только «📍 Причина» — ЭТАП, с которого человек позвал помощь. Теперь кнопка
+ * ставит ожидание (`support-intake`), а сюда приходит то, что человек написал.
+ */
+async function deliverSupportIntakeTg(
+  bot: Telegraf,
+  ctx: any,
+  text: string,
+  photoFileId?: string,
+): Promise<void> {
+  const tgId = String(ctx.from.id);
+  const intake = await takeIntake(intakeDb, { tgId });
+  const hint = intake?.wbCode
+    ? { wbCode: intake.wbCode, denomination: intake.denomination }
+    : await supportOrderHint(ctx);
+  const said = clipProblemText(text) || (photoFileId ? "(прислал скриншот без текста)" : "(без описания)");
+  const display = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name ?? `tg:${tgId}`);
+
+  await notifySupportShown({
+    platform: "TG",
+    userDisplay: display,
+    tgId,
+    contextKey: intake?.contextKey ?? "general",
+    wbCode: hint.wbCode,
+    denomination: hint.denomination,
+    problemText: said,
+  });
+  // Скриншот — отдельным сообщением тем же админам: половина обращений «не
+  // вижу геймпасс» объясняется картинкой, а не словами.
+  if (photoFileId) {
+    for (const adminId of ADMIN_IDS) {
+      try {
+        await bot.telegram.sendPhoto(adminId, photoFileId, { caption: `🖼 Скриншот к обращению ${display}` });
+      } catch {}
+    }
+  }
+  await ctx.reply(intakeAckText("TG"), {
+    parse_mode: "HTML",
+    ...Markup.inlineKeyboard([[Markup.button.url("📩 Написать в @RobloxBank_PA", SUPPORT_URL)]]),
+  });
 }
 
 /** Fire-and-forget deduped "user is stuck" heads-up — sent when the bot puts
@@ -2091,7 +2173,7 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
       });
       lastCompleted = await (db as any).wbOrder.findFirst({
         where: { userId: user.id, status: "COMPLETED" },
-        orderBy: { createdAt: "desc" },
+        orderBy: { completedAt: "desc" },
       });
     }
   } catch (err) {
@@ -2101,60 +2183,35 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
   const balance = user?.balance ?? 0;
   const bonusExpiresAt = user?.bonusExpiresAt ? new Date(user.bonusExpiresAt) : null;
   const bonusExpired = bonusExpiresAt ? bonusExpiresAt <= new Date() : false;
-  const effectiveBonus = balance > 0 && !bonusExpired ? balance : 0;
-  const rubleDiscount = user?.rubleDiscount ?? 0;
-  const robloxNick = user?.robloxUsername;
-  const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
-             : status.isReturning   ? "💛 Постоянный клиент"
-             : "🌱 Новый клиент";
+  const robloxNick = user?.robloxUsername as string | undefined;
 
-  const heading = robloxNick
-    ? `🎮 <b>RobloxBank</b> · ${escapeHtml(robloxNick)}`
-    : `👤 <b>Твоё меню</b>${name ? ` ${escapeHtml(name)}` : ""} · RobloxBank`;
+  /* Текст собирает общий модуль (`bots/shared/buyer-menu.ts`): до 18.10.2026
+     TG и VK держали по своей копии этого экрана, и «расширить меню» означало
+     расширять его дважды — а значит, рано или поздно по-разному. */
+  const menu = buildBuyerMenuText({
+    nick: robloxNick ?? null,
+    firstName: name ?? null,
+    orderCount: status.orderCount,
+    isReturning: status.isReturning,
+    bonus: balance > 0 && !bonusExpired ? balance : 0,
+    bonusExpiresAt,
+    rubleDiscount: user?.rubleDiscount ?? 0,
+    active: activeOrders,
+    lastCompleted,
+  });
 
-  const perks: string[] = [];
-  if (effectiveBonus > 0) {
-    const expStr = bonusExpiresAt!.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-    perks.push(`🎁 ${effectiveBonus} R$ (до ${expStr})`);
+  const nickBtn = robloxNick ? `✏️ Ник: ${robloxNick}` : "🎮 Привязать ник Roblox";
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  // Подробно показан ОДИН заказ (решение владельца О4) — остальные за кнопкой.
+  if (menu.othersCount > 0) {
+    rows.push([Markup.button.callback(`📦 Другие заказы (${menu.othersCount})`, CB.ordersList)]);
   }
-  if (rubleDiscount > 0) perks.push(`💰 Скидка ${rubleDiscount} ₽`);
-  const perksStr = perks.length > 0 ? ` · ${perks.join(" · ")}` : "";
-
-  const lines: string[] = [heading, ""];
-  lines.push(`${tier} · ${status.orderCount > 0 ? `${status.orderCount} ${status.orderCount === 1 ? "заказ" : status.orderCount < 5 ? "заказа" : "заказов"}` : "0 заказов"}${perksStr}`);
-
-  if (activeOrders.length > 0) {
-    lines.push("");
-    lines.push("── <b>Активные заказы</b> ──");
-    for (const o of activeOrders) {
-      const statusLbl = STATUS_LABEL[o.status] ?? o.status;
-      // Идентификатор для клиента = сумма+статус (для WB видит код в статусе).
-      lines.push(`📦 ${o.amount} R$ · ${statusLbl}`);
-    }
-  }
-
-  if (lastCompleted) {
-    lines.push("");
-    const dt = new Date(lastCompleted.createdAt).toLocaleDateString("ru-RU");
-    lines.push(`✅ Последний выполненный: ${lastCompleted.amount} R$ · ${dt}`);
-  }
-
-  const nickBtn = robloxNick
-    ? `✏️ Ник: ${robloxNick}`
-    : `🎮 Привязать ник Roblox`;
-
-  if (robloxNick) {
-    lines.push("");
-    lines.push(`💎 Заказать Robux <b>напрямую</b> на <b>${escapeHtml(robloxNick)}</b> — без карты WB, быстрее и выгоднее 👇`);
-  } else {
-    lines.push("");
-    lines.push(`💎 Заказать Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`);
-  }
+  rows.push([Markup.button.callback(nickBtn, CB.editNick)]);
 
   return {
-    text: lines.join("\n"),
+    text: menu.text,
     keyboard: menuReplyKb() as any,
-    nickButton: Markup.inlineKeyboard([[Markup.button.callback(nickBtn, CB.editNick)]]),
+    nickButton: Markup.inlineKeyboard(rows),
   };
 }
 
@@ -2185,6 +2242,9 @@ export function registerText(bot: Telegraf): void {
       pendingNickEdit.delete(ctx.from.id);
       pendingPaymentScreenshot.delete(ctx.from.id);
       pendingReview.delete(ctx.from.id);
+      // Нажал кнопку меню, не описав проблему, — ожидание поддержки снимаем:
+      // иначе следующее сообщение по своему делу уехало бы менеджеру.
+      void cancelIntake(intakeDb, { tgId });
     };
     if (!isAdmin && text === MENU_BTN.direct) {
       clearUserSession();
@@ -2235,6 +2295,38 @@ export function registerText(bot: Telegraf): void {
       const faqRows = FAQ_ITEMS.map(f => [Markup.button.callback(f.label, CB.faqItem(f.key))]);
       await ctx.reply(faqText, { parse_mode: "HTML", ...Markup.inlineKeyboard(faqRows) });
       return;
+    }
+
+    // 0c. 💬 ОПИСАНИЕ ПРОБЛЕМЫ для поддержки — идёт ПЕРЕД ветками флоу.
+    //     Иначе описание попадает в разбор ключа/ника и человек получает «это
+    //     не похоже на ключ» в ответ на рассказ о своей проблеме. Сам ввод флоу
+    //     (ссылка, код, ник, ключ) ожидание снимает и обрабатывается штатно.
+    if (!isAdmin) {
+      const intake = await readIntake(intakeDb, { tgId });
+      if (intake) {
+        if (isIntakeCancel(text)) {
+          await cancelIntake(intakeDb, { tgId });
+          await ctx.reply(intakeCancelText());
+          return;
+        }
+        const expectsNick =
+          pendingRobloxNick.has(ctx.from.id) ||
+          pendingNickEdit.has(ctx.from.id) ||
+          pendingLink.has(ctx.from.id);
+        const isFlow = looksLikeFlowInput(text, {
+          passId: extractPassId(text) !== null,
+          expectsNick,
+        });
+        if (!isFlow) {
+          if (isUsableProblem(text)) {
+            await deliverSupportIntakeTg(bot, ctx, text);
+            return;
+          }
+          await ctx.reply(intakeRepeatText());
+          return;
+        }
+        await cancelIntake(intakeDb, { tgId });
+      }
     }
 
     // 1. ADMIN REJECTION REASON flow
@@ -3413,20 +3505,17 @@ async function processGamepassSubmission(
           : `Неверная цена: ${gamepassInfo.price} R$ (ожидалось ${expectedPrice} R$)`;
         if (fc.priceMismatch === 1) await notifyAdminValidationFail(reasonTag);
 
-        const priceMismatchText = isManaged
-          ? `⚠️ <b>Managed pricing включён</b> — Roblox изменил цену геймпасса.\n\n` +
-            `Цена Roblox: <b>${gamepassInfo.price} R$</b>\n` +
-            `Твоя цена:   <b>${prodInfo!.userBasePriceInRobux} R$</b>\n` +
-            `Нужна:       <b>${expectedPrice} R$</b>\n\n` +
-            `Пока Managed pricing включён — выкупить геймпасс <b>невозможно</b>.\n\n` +
-            `Исправь: Passes → твой пасс → ☰ → Sales → <b>отключи Managed pricing</b> → проверь цену <b>${expectedPrice} R$</b> → <b>Save Changes</b>.\n\n` +
-            `📖 Подробная инструкция:`
-          : `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
-            `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
-            `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-            `❗️ Чаще всего причина — включённый <b>Managed pricing</b>. Он автоматически меняет цену, и выкупить геймпасс <b>невозможно</b>, пока цена не совпадёт.\n\n` +
-            `Исправь: Passes → твой пасс → ☰ → Sales → отключи <b>Managed pricing</b> → поставь правильную цену → <b>Save Changes</b>. Потом пришли ссылку снова.\n\n` +
-            `📖 Подробная инструкция:`;
+        // Текст и порядок причин — общий модуль (`priceMismatchMessage`):
+        // Managed pricing называем только когда product-info его ПОДТВЕРДИЛ,
+        // иначе первой причиной идёт «цена просто не та» (правка 18.10.2026).
+        const priceMismatchText =
+          priceMismatchMessage({
+            expected: expectedPrice,
+            actual: gamepassInfo.price,
+            managed: isManaged,
+            basePrice: prodInfo?.userBasePriceInRobux ?? null,
+            part: Boolean(parts),
+          }) + `\n\n📖 Подробная инструкция:`;
         await showResult(priceMismatchText, {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -4544,6 +4633,19 @@ export function registerPhoto(bot: Telegraf): void {
       }
     }
 
+    // 0c. Скриншот как ОПИСАНИЕ проблемы (решение владельца О3): половина
+    //     обращений — «не вижу геймпасс», и это картинка. Ждёт ли флоу фото
+    //     явно (отзыв/оплата) — выше и ниже; здесь только открытое ожидание
+    //     поддержки, и оно уступает явному ожиданию отзыва.
+    if (!pendingReview.has(ctx.from.id)) {
+      const intakePhoto = await readIntake(intakeDb, { tgId });
+      if (intakePhoto) {
+        const fileId = ctx.message.photo.at(-1)!.file_id;
+        await deliverSupportIntakeTg(bot, ctx, ctx.message.caption ?? "", fileId);
+        return;
+      }
+    }
+
     // 1. Check in-memory state first (fastest path)
     let orderId = pendingReview.get(ctx.from.id);
 
@@ -5471,45 +5573,17 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 🆘 sup: — user tapped a support button ────────────────────────────
     if (data.startsWith("sup:")) {
       const ctxKey = data.slice(4);
-      const userDisplay = ctx.from.username
-        ? `@${ctx.from.username}`
-        : escapeHtml(ctx.from.first_name ?? `tg:${tgId}`);
+      const { wbCode, denomination } = await supportOrderHint(ctx);
 
-      const pendingState = pendingLink.get(ctx.from.id);
-      let wbCode    = pendingState?.wbCode;
-      let denom     = pendingState?.denomination;
-
-      if (!wbCode) {
-        try {
-          const u = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
-          if (u) {
-            const o = await (db as any).wbOrder.findFirst({
-              where: { userId: u.id },
-              orderBy: { updatedAt: "desc" },
-              select: { wbCode: true, amount: true },
-            });
-            if (o) { wbCode = o.wbCode; denom = o.amount; }
-          }
-        } catch {}
-      }
-
-      // Deduped — a double-tap inside the 30-min window won't spam the admin
-      // chat with two SOS messages.
-      await notifySupportShown({
-        platform: "TG", userDisplay, tgId, contextKey: ctxKey,
-        wbCode, denomination: denom,
+      /* Алерта здесь больше НЕТ.
+         Сначала человек описывает проблему, и уже с его словами уведомление
+         идёт в админку (`deliverSupportIntakeTg`). Это же отсекает мисклики:
+         нажал и не написал — тревогу никто не поднимает (владелец, 18.10.2026). */
+      await openIntake(intakeDb, { tgId }, {
+        platform: "TG", contextKey: ctxKey, wbCode, denomination,
       });
-      await ctx.answerCbQuery("Поддержка 👇").catch(() => {});
-      // Final hand-off — single-tap URL button lands the user in the support
-      // chat. Keeping it as an inline_keyboard (not a hyperlink in text) gives
-      // a bigger touch target on mobile.
-      await ctx.reply(
-        "💬 Поддержка — это <b>живой человек</b> в отдельном чате <b>@RobloxBank_PA</b> (это не бот).\n\nНапиши туда сам — поможем с любым вопросом 👇",
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.url("📩 Написать в @RobloxBank_PA", SUPPORT_URL)]]),
-        }
-      );
+      await ctx.answerCbQuery("Опиши проблему 👇").catch(() => {});
+      await ctx.reply(intakePromptText("TG"), { parse_mode: "HTML" });
       return;
     }
 

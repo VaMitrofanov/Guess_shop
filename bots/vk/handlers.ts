@@ -77,6 +77,23 @@ import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { requoteForPass } from "../shared/direct-requote";
 import { priceMismatchText } from "../shared/direct-gamepass-copy";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
+import { priceMismatchMessage } from "../shared/gamepass-acceptance";
+import { buildBuyerMenuText } from "../shared/buyer-menu";
+import {
+  cancelIntake,
+  clipProblemText,
+  intakeAckText,
+  intakeCancelText,
+  intakePromptText,
+  intakeRepeatText,
+  isIntakeCancel,
+  isUsableProblem,
+  looksLikeFlowInput,
+  openIntake,
+  readIntake,
+  takeIntake,
+  type SupportIntakeDb,
+} from "../shared/support-intake";
 import {
   acceptDirectSelection,
   directKeyTargets,
@@ -159,13 +176,15 @@ async function rePromptAfterSupport(vkUserId: number): Promise<void> {
   }
 }
 
-/** Single entry point for "user wants a manager": alert admins, pause the bot,
- *  and reply with a clear explanation of what happens next. */
-async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promise<void> {
-  const firstName = await vkGetName(vkUserId);
-  const state     = getState(vkUserId);
-  let wbCode = state?.type === "AWAITING_LINK" ? state.wbCode       : undefined;
-  let denom  = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
+/** Клиент БД для ожидания описания — те же два поля `User`, что у паузы. */
+const intakeDb = db as unknown as SupportIntakeDb;
+const intakeSubject = (vkUserId: number) => ({ vkId: String(vkUserId) });
+
+/** Код и номинал заказа, о котором почти наверняка идёт разговор. */
+async function supportOrderHint(vkUserId: number): Promise<{ wbCode?: string; denom?: number }> {
+  const state = getState(vkUserId);
+  let wbCode = state?.type === "AWAITING_LINK" ? state.wbCode : undefined;
+  let denom = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
   if (!wbCode) {
     try {
       const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
@@ -177,22 +196,83 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
       }
     } catch {}
   }
-  // Deduped — double-tap inside 30 min won't spam admins. VK button already
-  // fires on real tap (via payload callback), so this is a true SOS.
+  return { wbCode, denom };
+}
+
+/**
+ * «Человеку нужен менеджер» — один вход на все кнопки поддержки.
+ *
+ * До 18.10.2026 функция в этот момент слала алерт 🆘, ставила паузу и только
+ * ПОТОМ просила описать проблему: в админке лежало «обращение в поддержку ·
+ * Причина: Общий вопрос», а слова человека приходили в диалог, которого админ
+ * не видит. Любой мисклик по кнопке поднимал тревогу.
+ *
+ * Теперь нажатие ставит ожидание описания (`support-intake`) и НЕ шлёт ничего.
+ * Алерт уходит из `deliverSupportIntake`, когда человек напишет.
+ *
+ * `problemText` — путь «человек уже всё сказал» (естественный текст «помогите,
+ * не пришли робуксы» или две неудачи с ключом): спрашивать второй раз невежливо,
+ * поэтому алерт уходит сразу и с этими словами.
+ */
+async function triggerSupport(
+  ctx: any,
+  vkUserId: number,
+  ctxKey: string,
+  opts: { problemText?: string } = {},
+): Promise<void> {
+  const firstName = await vkGetName(vkUserId);
+  const { wbCode, denom } = await supportOrderHint(vkUserId);
+
+  const said = clipProblemText(opts.problemText ?? "");
+  if (!said) {
+    // Ожидание описания: бот просит рассказать, админам пока ничего.
+    await openIntake(intakeDb, intakeSubject(vkUserId), {
+      platform: "VK", contextKey: ctxKey, wbCode, denomination: denom,
+    });
+    await ctx.reply(intakePromptText("VK"));
+    return;
+  }
+
   await notifySupportShown({
     platform: "VK", userDisplay: `vk.com/id${vkUserId} (${escapeHtml(firstName)})`,
     // ❄️ vkId — по нему алерт узнаёт замороженного клиента (в TG эту роль
     // играет tgId; без него VK-обращение приходило бы без признака).
     vkId: String(vkUserId),
-    contextKey: ctxKey, wbCode, denomination: denom,
+    contextKey: ctxKey, wbCode, denomination: denom, problemText: said,
   });
   await pauseSupport(vkUserId, "клиент позвал человека"); // бот замолкает, чтобы не мешать разговору
-  await ctx.reply(
-    "✅ Готово! Дальше с тобой общается живой человек (не бот) — менеджер ответит прямо здесь, в этом чате.\n\n" +
-    "Опиши, пожалуйста, что случилось, одним сообщением 👇\n" +
-    "Пока идёт диалог с менеджером, бот не вмешивается. Вернуть бота можно командой «+бот».\n\n" +
-    "Если удобнее в Telegram — там тоже живой человек: https://t.me/RobloxBank_PA"
-  );
+  await ctx.reply(intakeAckText("VK"));
+}
+
+/**
+ * Описание проблемы получено — вот теперь алерт в админку.
+ *
+ * Пауза ставится ТОЛЬКО здесь, после описания: под паузой бот молчит, и если
+ * поставить её на нажатии кнопки (как было), он же и проглотил бы описание.
+ */
+async function deliverSupportIntake(
+  ctx: MessageContext,
+  vkUserId: number,
+  text: string,
+  photoUrl?: string,
+): Promise<void> {
+  const intake = await takeIntake(intakeDb, intakeSubject(vkUserId));
+  const firstName = await vkGetName(vkUserId);
+  const hint = intake?.wbCode ? { wbCode: intake.wbCode, denom: intake.denomination } : await supportOrderHint(vkUserId);
+  const said = clipProblemText(text) || (photoUrl ? "(прислал скриншот без текста)" : "(без описания)");
+
+  await notifySupportShown({
+    platform: "VK",
+    userDisplay: `vk.com/id${vkUserId} (${escapeHtml(firstName)})`,
+    vkId: String(vkUserId),
+    contextKey: intake?.contextKey ?? "general",
+    wbCode: hint.wbCode,
+    denomination: hint.denom,
+    problemText: said,
+    problemPhotoUrl: photoUrl,
+  });
+  await pauseSupport(vkUserId, "клиент описал проблему");
+  await ctx.reply(intakeAckText("VK"));
 }
 
 /**
@@ -937,6 +1017,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // Нажал ДРУГУЮ кнопку, не описав проблему, — ожидание снимаем молча: иначе
+  // следующее сообщение по своему делу уехало бы менеджеру как «проблема».
+  if (typeof msgPayload?.command === "string") {
+    const stale = await readIntake(intakeDb, intakeSubject(vkUserId));
+    if (stale) await cancelIntake(intakeDb, intakeSubject(vkUserId));
+  }
+
   // ── ❓ FAQ — self-service answers ─────────────────────────────────────────
   if (msgPayload?.command === "faq") {
     // Ф6.2: when_rbx персонализируется датой разблокировки последнего заказа.
@@ -1114,6 +1201,41 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
   }
 
+  // ── 💬 Описание проблемы для поддержки ───────────────────────────────────
+  // Кнопка «Поддержка» ожидание уже поставила; алерт в админку уходит отсюда —
+  // вместе со словами человека (замечание владельца 18.10.2026).
+  const intake = await readIntake(intakeDb, intakeSubject(vkUserId));
+  if (intake) {
+    if (isIntakeCancel(lower)) {
+      await cancelIntake(intakeDb, intakeSubject(vkUserId));
+      await ctx.reply(intakeCancelText());
+      return;
+    }
+    const intakeState = getState(vkUserId);
+    const intakeAwaitsNick =
+      intakeState?.type === "AWAITING_LINK" ||
+      intakeState?.type === "AWAITING_ROBLOX_NICK" ||
+      intakeState?.type === "AWAITING_DIRECT_NICK_INPUT" ||
+      intakeState?.type === "AWAITING_NICK_EDIT";
+    const intakePhoto = messageHasPhoto(ctx);
+    // Ввод флоу выигрывает у описания: «помогите, вот ссылка» должно доехать до
+    // квеста, а скриншот отзыва/оплаты — до своей ветки, а не в поддержку.
+    const intakeIsFlow =
+      looksLikeFlowInput(text, { passId: extractPassId(text) !== null, expectsNick: intakeAwaitsNick }) ||
+      (intakePhoto && await hasPendingProofPhoto(vkUserId));
+    if (!intakeIsFlow) {
+      if (isUsableProblem(text, intakePhoto)) {
+        const photo = intakePhoto ? await extractPhotoUrl(ctx) : undefined;
+        await deliverSupportIntake(ctx, vkUserId, text, photo);
+        return;
+      }
+      // «?» или пустое — это ещё не описание: просим ещё раз, алерт не шлём.
+      await ctx.reply(intakeRepeatText());
+      return;
+    }
+    await cancelIntake(intakeDb, intakeSubject(vkUserId));
+  }
+
   // ── Natural-language support request — user can reach a manager by simply
   // writing ("оператор", "поддержка", "помощь"…), not only via the button.
   // Skip when the message carries a recognisable gamepass link/ID — «помоги,
@@ -1134,7 +1256,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         await ctx.reply("С тобой на связи живой человек (не бот) — менеджер ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
       }
     } else {
-      await triggerSupport(ctx, vkUserId, "general");
+      // Человек уже описал проблему своими словами — спрашивать второй раз
+      // невежливо: алерт уходит сразу и с этим текстом.
+      await triggerSupport(ctx, vkUserId, "general", { problemText: text });
     }
     return;
   }
@@ -2531,14 +2655,21 @@ async function handleGamepassLink(
     }
 
     if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
+      // До 18.10.2026 VK не спрашивал product-info вовсе и валил несовпадение
+      // на Managed pricing всегда. Теперь ветка выбирается по факту, а слова —
+      // общие с TG (`priceMismatchMessage`).
+      const prodInfo = await getGamepassProductInfo(passId).catch(() => null);
       await showResult({
         message:
-          `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
-          `Установлено: ${gamepassInfo.price} R$\n` +
-          `Ожидается:   ${expectedPrice} R$\n\n` +
-          `❗️ Чаще всего причина — включённый Managed pricing. Он автоматически меняет цену, и выкупить геймпасс невозможно, пока цена не совпадёт.\n\n` +
-          `Исправь: Passes → твой пасс → ☰ → Sales → отключи Managed pricing → поставь правильную цену → Save Changes. Потом пришли ссылку снова.\n\n` +
-          `📖 Подробная инструкция:`,
+          stripHtml(
+            priceMismatchMessage({
+              expected: expectedPrice,
+              actual: gamepassInfo.price,
+              managed: prodInfo?.isManagedPricing ?? false,
+              basePrice: prodInfo?.userBasePriceInRobux ?? null,
+              part: Boolean(parts),
+            }),
+          ) + `\n\n📖 Подробная инструкция:`,
         keyboard: Keyboard.builder()
           .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
           .inline(),
@@ -3488,7 +3619,9 @@ async function handleVkApiKeyInput(
       resetKeyMisses(vkUserId);
       clearState(vkUserId);
       await ctx.reply("Похоже, с ключом не выходит — не мучайся, сейчас подключу живого человека 🤝");
-      await triggerSupport(ctx, vkUserId, "key-stuck");
+      // Бот только что обещал живого человека — алерт уходит сразу, и в нём
+      // последние слова клиента: описание у нас уже есть.
+      await triggerSupport(ctx, vkUserId, "key-stuck", { problemText: raw });
       return;
     }
     await ctx.reply({
@@ -4271,7 +4404,9 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
       resetKeyMisses(vkUserId);
       clearState(vkUserId);
       await ctx.reply("Похоже, с ключом не выходит — не мучайся, сейчас подключу живого человека 🤝");
-      await triggerSupport(ctx, vkUserId, "key-stuck-direct");
+      // Бот только что обещал живого человека — алерт уходит сразу, и в нём
+      // последние слова клиента: описание у нас уже есть.
+      await triggerSupport(ctx, vkUserId, "key-stuck-direct", { problemText: raw });
       return;
     }
     await ctx.reply("Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».");
@@ -4815,7 +4950,7 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
       });
       lastCompleted = await (db as any).wbOrder.findFirst({
         where: { userId: user.id, status: "COMPLETED" },
-        orderBy: { createdAt: "desc" },
+        orderBy: { completedAt: "desc" },
       });
     }
   } catch (err) {
@@ -4826,47 +4961,22 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
   const balance = user?.balance ?? 0;
   const bonusExpiresAt = user?.bonusExpiresAt ? new Date(user.bonusExpiresAt) : null;
   const bonusExpired = bonusExpiresAt ? bonusExpiresAt <= new Date() : false;
-  const effectiveBonus = balance > 0 && !bonusExpired ? balance : 0;
-  const rubleDiscount = user?.rubleDiscount ?? 0;
-  const robloxNick = user?.robloxUsername;
-  const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
-             : status.isReturning   ? "💛 Постоянный клиент"
-             : "🌱 Новый клиент";
+  const robloxNick = user?.robloxUsername as string | undefined;
 
-  const heading = robloxNick
-    ? `🎮 RobloxBank · ${robloxNick}`
-    : `👤 Твоё меню${firstName ? `, ${firstName}` : ""} · RobloxBank`;
-
-  const perks: string[] = [];
-  if (effectiveBonus > 0) {
-    const expStr = bonusExpiresAt!.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-    perks.push(`🎁 ${effectiveBonus} R$ (до ${expStr})`);
-  }
-  if (rubleDiscount > 0) perks.push(`💰 Скидка ${rubleDiscount} ₽`);
-  const perksStr = perks.length > 0 ? ` · ${perks.join(" · ")}` : "";
-
-  const lines: string[] = [heading, ""];
-  const oc = status.orderCount;
-  lines.push(`${tier} · ${oc > 0 ? `${oc} ${oc === 1 ? "заказ" : oc < 5 ? "заказа" : "заказов"}` : "0 заказов"}${perksStr}`);
-
-  if (activeOrders.length > 0) {
-    lines.push("");
-    lines.push("── Активные заказы ──");
-    for (const o of activeOrders) {
-      const statusLbl = VK_STATUS_LABEL[o.status] ?? o.status;
-      // Идентификатор для клиента = сумма+статус, без внутреннего номера (C2).
-      lines.push(`📦 ${o.amount} R$ · ${statusLbl}`);
-    }
-  }
-
-  if (lastCompleted) {
-    lines.push("");
-    const dt = new Date(lastCompleted.createdAt).toLocaleDateString("ru-RU");
-    lines.push(`✅ Последний: ${lastCompleted.amount} R$ · ${dt}`);
-  }
-
-  lines.push("");
-  lines.push(`💎 Заказать Robux напрямую — без карты WB, быстрее и выгоднее 👇`);
+  /* Тот же текст, что в TG (`bots/shared/buyer-menu.ts`), — VK получает его без
+     HTML. Две копии экрана разъехались бы за месяц, а меню покупателя у нас
+     одно. */
+  const menu = buildBuyerMenuText({
+    nick: robloxNick ?? null,
+    firstName: firstName ?? null,
+    orderCount: status.orderCount,
+    isReturning: status.isReturning,
+    bonus: balance > 0 && !bonusExpired ? balance : 0,
+    bonusExpiresAt,
+    rubleDiscount: user?.rubleDiscount ?? 0,
+    active: activeOrders,
+    lastCompleted,
+  });
 
   // Инструкция показывается только пока есть активный заказ, которому она нужна.
   // Все заказы выполнены → никакого WB, только прямой заказ (решение владельца).
@@ -4878,6 +4988,9 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     ? "https://robloxbank.ru/guide?source=direct"
     : null;
 
+  /* Лимиты VK (≤10 кнопок, ≤6 рядов) — не рекомендация: превышение отдаёт
+     клиенту «Произошла ошибка» без следа (P0 прямых заказов 04.07.2026).
+     Поэтому рядов здесь максимум пять. */
   const kb = Keyboard.builder();
   if (robloxNick) {
     kb.textButton({ label: `💎 Ещё на ${robloxNick}`, payload: { command: "start_direct" }, color: "positive" }).row();
@@ -4885,6 +4998,10 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     kb.textButton({ label: "💎 Купить Robux напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
   }
   if (activeOrders.length > 0) kb.textButton({ label: "📦 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
+  // Подробно показан ОДИН заказ (решение владельца О4) — к остальным кнопка.
+  if (menu.othersCount > 0) {
+    kb.textButton({ label: `📦 Другие заказы (${menu.othersCount})`, payload: { command: "orders_list" }, color: "secondary" }).row();
+  }
   if (guideUrl) kb.urlButton({ label: "📖 Инструкция", url: guideUrl }).row();
   const relevantOrder = activeOrders[0] ?? lastCompleted;
   if (relevantOrder && orderAgeMsFromOrder(relevantOrder) < SUPPORT_COOLDOWN_MS) {
@@ -4893,7 +5010,7 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     kb.textButton({ label: "💬 Поддержка", payload: { command: "support", context: "menu" }, color: "secondary" });
   }
 
-  await ctx.reply({ message: lines.join("\n"), keyboard: kb.inline() });
+  await ctx.reply({ message: stripHtml(menu.text), keyboard: kb.inline() });
 
   // Separate nick edit button
   const nickKb = Keyboard.builder();

@@ -346,6 +346,17 @@ robloxUsername, userId+createdAt, heldAt, priorityAt).
 `tgId` (@unique), `vkId` (@unique), `balance` (бонусы R$), `role` (`USER`/`ADMIN`),
 `robloxUsername`, `username` (@handle для кнопки «Написать» в TWA).
 
+Состояния разговора, которым нельзя жить в памяти процесса (деплой у нас несколько раз в
+день, а потерянное состояние ломает диалог):
+
+- `supportPausedUntil` — живой менеджер ведёт диалог во ВКонтакте, бот молчит (13.09.2026,
+  `bots/vk/support-pause.ts`);
+- `supportIntakeAt` + `supportIntakeCtx` — человек нажал «Поддержка», и бот ждёт от него
+  описание проблемы: алерт в админку уходит только вместе с текстом (18.10.2026, миграция
+  `20261018_support_intake`, модуль `bots/shared/support-intake.ts`). `supportIntakeCtx` —
+  JSON с платформой, этапом кнопки, кодом заказа, номиналом и признаком «про молчание
+  админам уже сказали». Ожидание живёт 2 часа, снимается свипом или первым же описанием.
+
 ### Identity, бонусы и цена витрины (foundation эквайринга, migration применена 2026-07-12)
 
 - `UserIdentity` — серверно проверенная внешняя identity (`TG`/`VK`/`EMAIL`) с уникальностью

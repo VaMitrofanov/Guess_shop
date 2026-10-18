@@ -68,6 +68,10 @@ export async function createPassesWithKey(opts: {
   targets: number[];
   /** Игра из присланной ссылки — ответ на «не видим твою игру». */
   game?: { universeId: string } | { placeId: string } | null;
+  /** Откуда ключ: сайт/инструкция по умолчанию или админ за покупателя. */
+  via?: "site-api-key" | "admin-key";
+  /** Имя админа, если ключ вставил он: попадает в заметку, но НЕ в логи. */
+  byAdmin?: string | null;
 }): Promise<KeyCreateOutcome> {
   const created: CreatedPass[] = [];
   let failure: string | undefined;
@@ -100,6 +104,8 @@ export async function createPassesWithKey(opts: {
       key: opts.key,
       created,
       partial: Boolean(failure),
+      via: opts.via ?? "site-api-key",
+      byAdmin: opts.byAdmin ?? null,
     }).catch((err) => {
       console.warn("[gamepass-create] след не записан:", err instanceof Error ? err.message : err);
     });
@@ -120,6 +126,8 @@ async function recordCreation(opts: {
   key: string;
   created: CreatedPass[];
   partial: boolean;
+  via: "site-api-key" | "admin-key";
+  byAdmin: string | null;
 }): Promise<void> {
   const order = CODE_RE.test(opts.code)
     ? await prisma.wbOrder.findFirst({
@@ -147,11 +155,15 @@ async function recordCreation(opts: {
       robloxUsername: opts.nick,
       orderId: order.id,
       universeId: pass.universeId ?? null,
+      via: opts.via,
     });
   }
 
   // Заметка — то, что админ видит в карточке заказа и в TWA, не открывая ленту.
-  const line = `🔑 Пасс создан по API-ключу покупателя: ${opts.created
+  // Кто ввёл ключ — часть факта: «прислал боту сам» и «менеджер вставил за
+  // него» разбираются по-разному, если покупатель потом спросит про пасс.
+  const who = opts.via === "admin-key" ? ` (ключ вставил админ${opts.byAdmin ? ` ${opts.byAdmin}` : ""})` : "";
+  const line = `🔑 Пасс создан по API-ключу покупателя${who}: ${opts.created
     .map((p) => `${p.gamePassId} · ${p.priceInRobux} R$`)
     .join(", ")}`;
   await prisma.wbOrder.update({

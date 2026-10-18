@@ -43,6 +43,17 @@ import {
 } from "@/lib/order-slices";
 import { gateCodesForWbOrderNumber } from "@/lib/wb-order-number-search";
 import { resolveWbOrderSource } from "../../../../../bots/shared/wb-order-source";
+import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
+import { verifyGamePassKeyViaBridge } from "@/lib/roblox-gamepass-create";
+import { createPassesWithKey } from "@/lib/gamepass-key-create";
+import { createTargetsFor } from "@/lib/gamepass-plan";
+import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { notifyAdminsKeyCreated, passNeedsHands } from "@/lib/gamepass-key-admin-notify";
+import { notifyGamepassCreatedForBuyer } from "@/lib/twa-notify";
+import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
+import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
+import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -2432,6 +2443,252 @@ export async function POST(req: NextRequest) {
       ok: true,
       wbCode: order.wbCode,
       notified,
+    });
+  }
+
+  /* ── 🔑 Ключ покупателя вставляет АДМИН ───────────────────────────────────
+     Владелец, 18.10.2026: «очень часто они кидают ключ нам, а не боту, проще
+     самим его вставить в заказ и сделать все за них».
+
+     До этого ключ принимали только от самого покупателя и только три двери:
+     ветка «пришли ключ» в ботах, форма инструкции и личный кабинет. Когда ключ
+     присылали менеджеру в чат (WB, TG, VK), единственным путём было уговорить
+     человека вставить его ещё раз — уже в бота.
+
+     Ядро не дублируется: пассы создаёт тот же `createPassesWithKey`, что и
+     сайт, со своим следом, шифрованием ключа и событиями аудита. Здесь — дверь
+     для админа, проверка «реально ли создалось» и привязка к заказу.
+
+     Порядок после создания задан владельцем (О1): сначала карточка НАМ — чтобы
+     убедиться, что пассы действительно на месте, — и только потом заказ встаёт
+     в очередь выкупа и уходит сообщение покупателю.
+
+     Ключ не возвращается, не логируется и не попадает ни в одну карточку
+     (`docs/security.md`). Доступ — только `requireAdmin` (гейт в начале POST).
+     ──────────────────────────────────────────────────────────────────────── */
+  if (action === "create-gamepass-by-key") {
+    if (!gamepassAutocreateEnabled())
+      return NextResponse.json({ error: "Создание пассов по ключу выключено (GAMEPASS_AUTOCREATE)" }, { status: 409 });
+    // Привязка ставит заказ в очередь выкупа — то же, что запрещают заморозка
+    // и неоплаченный прямой заказ (дыра, закрытая у `attach-gamepass`).
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    const keyHeld = await assertOrderNotHeld(prisma, orderId);
+    if (keyHeld.held) return NextResponse.json({ error: keyHeld.message }, { status: 409 });
+
+    const KEYABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
+    if (!KEYABLE.includes(order.status))
+      return NextResponse.json({ error: `Нельзя создавать пассы для заказа в статусе ${order.status}` }, { status: 400 });
+
+    // Каждый шаг ходит в Roblox через мост — льём по админу, а не только по IP.
+    const keyLimit = rateLimit(`admin-key:${actor.userId ?? actor.displayName ?? clientIp(req)}`, 8, 0.05);
+    if (!keyLimit.ok)
+      return NextResponse.json(
+        { error: "Слишком часто — подожди немного" },
+        { status: 429, headers: { "retry-after": String(keyLimit.retryAfter) } },
+      );
+
+    const key = typeof body.key === "string" ? body.key.trim() : "";
+    const rawNick = typeof body.nick === "string" && body.nick.trim()
+      ? body.nick
+      : order.robloxUsername ?? order.probableNick ?? "";
+    const nick = String(rawNick).trim().replace(/^@/, "");
+    // Ссылка на игру — когда инвентарь закрыт и по нику игры не видны.
+    const rawGameRef = typeof body.gameRef === "string" ? body.gameRef.slice(0, 500) : "";
+    const game = rawGameRef ? parseExperienceRef(rawGameRef) : null;
+
+    if (!key || key.length > MAX_KEY_LEN || !looksLikeApiKey(key))
+      return NextResponse.json({ error: "Это не похоже на ключ Open Cloud: одна длинная строка без пробелов" }, { status: 400 });
+    if (!/^[A-Za-z0-9_]{3,20}$/.test(nick))
+      return NextResponse.json({ error: "Нужен ник Roblox покупателя (логин из профиля, не отображаемое имя)" }, { status: 400 });
+    if (rawGameRef && !game)
+      return NextResponse.json({ error: keyCreateVerdict("bad_game_link").text, code: "bad_game_link" }, { status: 400 });
+
+    /* Шаг 1 — проверка ключа мостом. Подтверждает `game-pass:read` и
+       `:write` по отдельности и отдаёт КАНОНИЧЕСКИЙ ник с аватаром: админ
+       подтверждает создание по увиденному аккаунту, а не вслепую. */
+    const verdict = await verifyGamePassKeyViaBridge({ apiKey: key, username: nick, ...(game ?? {}) });
+    if (!verdict.ok) {
+      const human = keyCreateVerdict(verdict.error);
+      console.warn(`[admin-key] ключ не принят: ${verdict.error} (заказ ${order.wbCode})`);
+      return NextResponse.json(
+        { error: `${human.title}. ${human.text}`, code: verdict.error ?? "roblox_error", needsGameLink: human.needsGameLink ?? false },
+        { status: 409 },
+      );
+    }
+    // Ник сохраняем канонический: по нему потом ищется ключ и сверяется продавец.
+    const confirmed = verdict.account?.name ?? verdict.username ?? nick;
+    // Набор — ЭТАЛОННЫЙ под номинал (как в боте и в кабинете), а не «чего не
+    // хватает на аккаунте»: лишний пасс никому не мешает, а неудобный для
+    // выкупа — мешает. У сайтового заказа пасс всегда один.
+    const targets = createTargetsFor(order.amount, order.orderSource !== "SITE");
+
+    if (body.dryRun === true) {
+      return NextResponse.json({
+        ok: true,
+        dryRun: true,
+        nick: confirmed,
+        account: verdict.account ?? null,
+        targets,
+        hasGamepass: Boolean(order.gamepassUrl) || splitParts.length > 0,
+      });
+    }
+
+    const keyUserId: string | null = order.user?.id ?? order.userId ?? null;
+
+    /* «Только сохранить» — ключ прислали впрок. Дальше он сработает сам на
+       следующем заказе этого покупателя (`createPassesWithStoredKey`). */
+    if (body.saveOnly === true) {
+      const saved = await rememberRobloxApiKey({
+        key, robloxUsername: confirmed, userId: keyUserId, orderId: order.id,
+        result: "verified", createdPasses: 0,
+      });
+      if (saved === "skipped")
+        return NextResponse.json({ error: "Ключ не сохранён: не настроено шифрование (WB_DELIVERY_ENCRYPTION_KEY)" }, { status: 500 });
+      return NextResponse.json({ ok: true, saved: true, nick: confirmed });
+    }
+
+    // Молча заменить пасс, который уже стоит в очереди выкупа, нельзя.
+    if ((order.gamepassUrl || splitParts.length > 0) && body.replace !== true)
+      return NextResponse.json(
+        { error: "У заказа уже есть геймпасс — отметь «заменить», если точно нужно создать новый", code: "has_gamepass" },
+        { status: 409 },
+      );
+    if (splitParts.some((p) => p.purchasedAt))
+      return NextResponse.json(
+        { error: `Часть заказа уже выкуплена (${describeSplitProgress(splitParts)}) — новые пассы создавать нельзя` },
+        { status: 409 },
+      );
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const outcome = await createPassesWithKey({
+      key,
+      nick: confirmed,
+      code: order.wbCode,
+      userId: keyUserId,
+      targets: targets.map((t) => t.price),
+      game,
+      via: "admin-key",
+      byAdmin: actor.displayName,
+    });
+
+    if (outcome.created.length === 0) {
+      const human = keyCreateVerdict(outcome.error);
+      // След нужен и у неудачи: следующий админ должен видеть, что ключ уже
+      // пробовали и чем это кончилось, а не пробовать второй раз.
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: {
+          adminNote: appendOrderAudit(
+            order.adminNote,
+            `[КЛЮЧ-АДМИН ${stamp}] ${actor.displayName}: ключ принят, создать не вышло (${outcome.error ?? "roblox_error"})`,
+          ),
+        },
+      });
+      return NextResponse.json(
+        { error: `${human.title}. ${human.text}`, code: outcome.error ?? "roblox_error", needsGameLink: human.needsGameLink ?? false },
+        { status: 409 },
+      );
+    }
+
+    /* Шаг 2 — «реально ли создалось» (решение владельца О1).
+       API ответил «создал» — это ещё не значит, что пасс стоит в продаже с
+       нужной ценой. Выкуп такой пасс не возьмёт, и узнать об этом надо здесь,
+       а не из жалобы покупателя через сутки. */
+    const keySettings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const keyCookie = keySettings?.robloxCookie;
+    const checks: { gamepassId: string; price: number; live: { price: number | null; isForSale: boolean } | null }[] = [];
+    for (const pass of outcome.created) {
+      const attempt = await resolveGamepassForBinding(String(pass.gamePassId), keyCookie);
+      checks.push({
+        gamepassId: String(pass.gamePassId),
+        price: pass.priceInRobux,
+        live: attempt.info
+          ? { price: attempt.info.basePrice ?? attempt.info.price, isForSale: attempt.info.isForSale }
+          : null,
+      });
+    }
+
+    // Набор создан не полностью — в очередь выкупа такой заказ ставить нельзя:
+    // сумма частей не закроет номинал. Привязываем головной пасс, статус не
+    // трогаем, и админ добирает остальное «Набрать под заказ».
+    const complete = outcome.created.length === targets.length;
+    const prices = outcome.created.map((pass) => pass.priceInRobux);
+
+    /* Шаг 3 — карточка НАМ. Идёт ДО формирования заказа: владелец просил
+       сначала убедиться, что пассы на месте, и только потом вести заказ дальше. */
+    const adminCard = await notifyAdminsKeyCreated({
+      wbCode: order.wbCode,
+      amount: order.amount,
+      nick: confirmed,
+      adminName: actor.displayName,
+      passes: checks,
+      error: outcome.error ?? null,
+      attached: complete,
+    }).catch(() => ({ admins: 0, sent: 0 }));
+
+    /* Шаг 4 — формируем заказ. Один пасс — путём `attach-gamepass`, набор —
+       строками `WbOrderGamepass`, как `set-gamepass-split`. */
+    const headUrl = `https://www.roblox.com/game-pass/${outcome.created[0].gamePassId}`;
+    const noteLine = complete
+      ? `[КЛЮЧ-АДМИН ${stamp}] ${actor.displayName}: создано и привязано ${checks.map((c) => `${c.gamepassId} (${c.price} R$)`).join(", ")}`
+      : `[КЛЮЧ-АДМИН ${stamp}] ${actor.displayName}: создано ${outcome.created.length} из ${targets.length} ` +
+        `(${checks.map((c) => `${c.gamepassId} (${c.price} R$)`).join(", ")}) — набор НЕ полный, дособерите заказ`;
+    const needsHands = checks.some(passNeedsHands);
+
+    const data: Record<string, unknown> = {
+      gamepassUrl: headUrl,
+      adminNote: appendOrderAudit(order.adminNote, noteLine),
+      // Ник подтверждён ключом: пассы созданы именно на этом аккаунте, и
+      // продавца выкуп сверяет по `robloxUsername`.
+      ...(order.robloxUsername ? {} : { robloxUsername: confirmed }),
+      ...(complete
+        ? {
+            status: "PENDING",
+            pendingAt: order.status === "PENDING" ? order.pendingAt : new Date(),
+            rejectionReason: null,
+            buyoutErrorCode: null,
+            adminId: null,
+          }
+        : {}),
+    };
+
+    if (complete && outcome.created.length > 1) {
+      await (prisma as any).$transaction([
+        (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
+        (prisma as any).wbOrderGamepass.createMany({
+          data: outcome.created.map((pass, index) => ({
+            orderId,
+            gamepassId: String(pass.gamePassId),
+            gamepassUrl: `https://www.roblox.com/game-pass/${pass.gamePassId}`,
+            amount: targets[index].amount,
+            position: index,
+          })),
+        }),
+        (prisma as any).wbOrder.update({ where: { id: orderId }, data }),
+      ]);
+    } else {
+      await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+    }
+    cachedCounts = null;
+
+    /* Шаг 5 — покупателю. Обычный текст привязки здесь соврал бы: человек
+       ничего не присылал боту и делать ему больше нечего. Неполный набор
+       покупателю не анонсируем — заказ ещё не готов. */
+    const notified = complete
+      ? await notifyGamepassCreatedForBuyer(order.user, order.wbCode, { nick: confirmed, prices }).catch(() => null)
+      : null;
+
+    return NextResponse.json({
+      ok: true,
+      wbCode: order.wbCode,
+      nick: confirmed,
+      created: checks,
+      complete,
+      queued: complete,
+      needsHands,
+      notified,
+      adminCard,
+      ...(outcome.error ? { partialError: outcome.error } : {}),
     });
   }
 

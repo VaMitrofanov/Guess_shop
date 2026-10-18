@@ -87,8 +87,11 @@ describe.each([
 
 describe("ключ обрабатывается раньше ника и ссылки", () => {
   test("TG: ветка ключа стоит перед разбором ника", () => {
-    const key = TG.indexOf("pendingApiKey.has(ctx.from.id)");
-    const nick = TG.indexOf("pendingRobloxNick.has(ctx.from.id)");
+    /* Ищем сами ВЕТКИ (`if (!isAdmin && …)`), а не упоминание стейта: с
+       18.10.2026 те же карты читает приём описания проблемы для поддержки
+       (`support-intake`), и голый `indexOf` по имени стейта ловил бы его. */
+    const key = TG.indexOf("if (!isAdmin && pendingApiKey.has(ctx.from.id))");
+    const nick = TG.indexOf("if (!isAdmin && pendingRobloxNick.has(ctx.from.id))");
     expect(key).toBeGreaterThan(-1);
     expect(nick).toBeGreaterThan(-1);
     expect(key).toBeLessThan(nick);

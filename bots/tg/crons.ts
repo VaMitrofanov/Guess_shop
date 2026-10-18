@@ -5,7 +5,8 @@
 
 import { Markup, type Telegraf } from "telegraf";
 import { db } from "../shared/db";
-import { CB, ADMIN_IDS } from "../shared/admin";
+import { CB, ADMIN_IDS, notifyUserHurdle } from "../shared/admin";
+import { sweepSilentIntakes, type IntakeSweepDb } from "../shared/support-intake";
 import { tgSend, vkSend, stripHtml } from "../shared/notify";
 import { REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { ROBUX_UNLOCK_DAYS, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -731,6 +732,32 @@ export function startReviewReminderCron(bot: Telegraf): void {
   setTimeout(runHoldSweep, 20_000); // 20 с после старта
   setInterval(runHoldSweep, 60 * 1000); // каждую минуту
 
+  /* 💬 Нажал «Поддержка» и ничего не написал (решение владельца О2).
+     Полного алерта нет — мисклик не поднимает тревогу. Через 10 минут админам
+     уходит тихий одностроч «клиент застрял», один раз за ожидание; ожидание
+     старше двух часов свип снимает, чтобы описание не прилетело «из ниоткуда».
+     Свип один на оба бота: база общая, а уведомления и так идут в Telegram. */
+  const runIntakeSweep = () =>
+    sweepSilentIntakes(db as unknown as IntakeSweepDb)
+      .then(async (silent) => {
+        for (const { who, ctx } of silent) {
+          await notifyUserHurdle({
+            platform: ctx.platform,
+            userDisplay: who.tgId ? `tg:${who.tgId}` : `vk.com/id${who.vkId}`,
+            tgId: who.tgId ?? undefined,
+            vkId: who.vkId ?? undefined,
+            contextKey: ctx.contextKey,
+            wbCode: ctx.wbCode,
+            denomination: ctx.denomination,
+          }).catch(() => {});
+        }
+        if (silent.length > 0) console.log(`[SupportIntake] нажали и молчат: ${silent.length}`);
+      })
+      .catch((err) => console.error("[SupportIntake] error:", err));
+
+  setTimeout(runIntakeSweep, 45_000);
+  setInterval(runIntakeSweep, 2 * 60 * 1000); // каждые 2 минуты
+
   // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
   startAutoWorkers(bot);
   startPaymentOutboxWorker(bot);
@@ -743,5 +770,6 @@ export function startReviewReminderCron(bot: Telegraf): void {
   console.log("[StaleWebOrders] Cron started ✅");
   console.log("[Retention] Cron started ✅");
   console.log("[OrderHold] Cron started ✅");
+  console.log("[SupportIntake] Cron started ✅");
   console.log(`[WbDbsSync] Worker ${wbDbsStarted ? "started ✅" : "disabled"}`);
 }

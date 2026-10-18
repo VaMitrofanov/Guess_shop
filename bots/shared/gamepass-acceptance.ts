@@ -203,6 +203,7 @@ export async function acceptGamepasses(input: {
       return fail(
         "WRONG_PRICE",
         `Цена геймпасса ${part.gamepassId} должна быть ${want} R$, а стоит ${Number(info.price ?? 0)} R$. ` +
+          "Поставь ровно столько и нажми Save Changes. " +
           "Если цену ставил правильно — выключи Managed pricing на странице пасса.",
         { gamepassId: part.gamepassId, expectedPrice: want },
       );
@@ -260,4 +261,57 @@ export function intentPartsRows(
     amount: part.amount,
     position,
   }));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Несовпадение цены — один текст на оба бота.
+
+   До 18.10.2026 TG и VK в этой ветке первой причиной называли Managed pricing,
+   причём именно тогда, когда product-info сказал, что он ВЫКЛЮЧЕН (а VK не
+   спрашивал вовсе). Владелец: «чаще всего цена реально не та, которая нужна,
+   а потом уже рег. цена». Поэтому порядок причин — по частоте: не та цена →
+   не нажат Save Changes → Managed pricing. Managed-ветка остаётся только там,
+   где он ПОДТВЕРЖДЁН цифрами product-info: это факт, а не догадка.
+   ───────────────────────────────────────────────────────────────────────── */
+export function priceMismatchMessage(opts: {
+  /** Нужная цена: для набора — цена ЭТОЙ части, а не всего заказа. */
+  expected: number;
+  /** Что стоит сейчас. */
+  actual: number;
+  /** Managed pricing подтверждён product-info (не «скорее всего»). */
+  managed?: boolean | null;
+  /** `userBasePriceInRobux` — цена, которую покупатель поставил сам. */
+  basePrice?: number | null;
+  /** Цена относится к одной части набора. */
+  part?: boolean;
+}): string {
+  const expected = Math.round(opts.expected);
+  const actual = Math.round(opts.actual);
+  const fixPath =
+    `Passes → твой пасс → ☰ → Sales → выключи <b>Managed pricing</b> → ` +
+    `цена <b>${expected} R$</b> → <b>Save Changes</b>`;
+
+  if (opts.managed) {
+    const base = opts.basePrice == null ? null : Math.round(opts.basePrice);
+    return (
+      `⚠️ <b>Managed pricing включён</b> — Roblox сам меняет цену геймпасса.\n\n` +
+      `Цена Roblox: <b>${actual} R$</b>\n` +
+      (base == null ? "" : `Твоя цена:   <b>${base} R$</b>\n`) +
+      `Нужна:       <b>${expected} R$</b>\n\n` +
+      `Пока Managed pricing включён, выкупить геймпасс <b>невозможно</b>.\n\n` +
+      `Исправь: ${fixPath}. Потом пришли ссылку снова.`
+    );
+  }
+
+  const partNote = opts.part ? " — это цена <b>одной части</b> набора, не всего заказа" : "";
+  return (
+    `⚠️ Цена геймпасса не совпадает.\n\n` +
+    `Установлено: <b>${actual} R$</b>\n` +
+    `Нужно:       <b>${expected} R$</b>${partNote}\n\n` +
+    `Проверь по порядку:\n` +
+    `1️⃣ Цена указана не та — поставь ровно <b>${expected} R$</b>\n` +
+    `2️⃣ После смены цены нажал <b>Save Changes</b>? Без этого цена не меняется\n` +
+    `3️⃣ Ставил ровно ${expected} R$, а стоит другое — значит включён <b>Managed pricing</b>: ${fixPath}\n\n` +
+    `Потом пришли ссылку снова.`
+  );
 }

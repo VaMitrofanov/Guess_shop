@@ -187,8 +187,13 @@ export async function auditGamepassAutocreated(
     wbCode?: string;
     /** Опыт, на котором пасс создан (для разбора «а почему в этой игре»). */
     universeId?: string | null;
-    /** Откуда пришёл ключ: инструкция на сайте или ветка ключа в боте. */
-    via?: "site-api-key" | "bot-api-key";
+    /**
+     * Откуда пришёл ключ: инструкция на сайте, ветка ключа в боте или админ,
+     * которому ключ прислали в чат (`admin-key`, 18.10.2026). В ленте заказа
+     * это разные утверждения: «покупатель прислал ключ боту» и «ключ вставил
+     * менеджер за него» — в споре отвечать за второе нам.
+     */
+    via?: "site-api-key" | "bot-api-key" | "admin-key";
   },
 ): Promise<void> {
   const gamepassId = String(opts.gamepassId ?? "").trim();
