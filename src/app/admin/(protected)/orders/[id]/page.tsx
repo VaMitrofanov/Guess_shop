@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink, ShoppingBag, Smartphone } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getAdminOrderDetail } from "@/lib/admin-ecosystem";
 import OutboxReplayButton from "@/components/admin/outbox-replay-button";
+import OrderDetailTools from "@/components/admin/orders/order-detail-tools";
 import styles from "@/components/admin/admin-shell.module.css";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 
@@ -63,9 +64,30 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
             <DetailRow label="Номинал" value={`${order.amount.toLocaleString("ru-RU")} R$`} />
             <DetailRow label="Roblox" value={order.robloxUsername ?? order.probableNick ?? "Не подтверждён"} />
             <DetailRow label="Геймпасс" value={order.gamepassUrl ?? "Не привязан"} />
+            {order.heldAt && <DetailRow label="❄️ Заморожен" value={order.heldReason ?? "причина не указана"} />}
             <DetailRow label="В очереди с" value={dateTime(order.pendingAt)} />
             <DetailRow label="Выполнен" value={dateTime(order.completedAt)} />
           </div>
+        </section>
+
+        {/* 🎮 Настройка геймпассов — то же меню, что в рабочем месте и в TWA.
+            Полная карточка была read-only, и за любой правкой приходилось
+            уходить в другой раздел (замечание владельца 19.10.2026). */}
+        <section className={`${styles.panel} ${styles.detailPanel}`}>
+          <h2>Геймпасс</h2>
+          <OrderDetailTools
+            order={{
+              id: order.id,
+              wbCode: order.wbCode,
+              amount: order.amount,
+              status: order.status,
+              heldAt: order.heldAt,
+              isDirectOrder: order.isDirectOrder,
+              paidAt: order.paidAt,
+              robloxUsername: order.robloxUsername,
+              probableNick: order.probableNick,
+            }}
+          />
         </section>
 
         <section className={`${styles.panel} ${styles.detailPanel}`}>

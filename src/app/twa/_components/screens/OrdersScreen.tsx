@@ -9,8 +9,10 @@ import { toast } from "../Toast";
 import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import NickGamepasses from "../NickGamepasses";
+import { AttachGamepassForm, GamepassToolRows, KeyCreateForm } from "../GamepassTools";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
+import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
 import {
   orderBadge as sharedOrderBadge,
   orderFlag as sharedOrderFlag,
@@ -912,299 +914,6 @@ function MoveToModal({ order, token, currentTab, onDone, onClose }: {
    Причина обязательна: через месяц «почему нельзя выкупать» не вспомнит никто,
    а заморозка без причины неотличима от забытого заказа. Четыре заготовки
    закрывают почти всё; текст можно дописать руками. */
-/* ── 🔗 Ссылка на геймпасс руками ─────────────────────────────────────────────
-   Второй выход из «ждём ссылку». Первый — поиск пасса по нику (👁), но он
-   находит не всегда: пасс может быть в скрытом плейсе, назван иначе или просто
-   не отдаться Roblox. Тогда клиент присылает ссылку сам, и её нужно вставить.
-
-   До 05.09.2026 такого поля на поверхности не было вовсе: вставить ссылку можно
-   было только через «···» → «Редактировать» → лист заказа, и на телефоне лист
-   открывался ПОД карточкой (см. `.twa-form-sheet` в globals.css). Форма нарочно
-   маленькая: одно поле и одна кнопка.
-
-   Цена проверяется ДО привязки тем же `manual-validate`, что и лист заказа:
-   пасс не за тот номинал упирается в прайс-гард уже при выкупе, и узнавать об
-   этом лучше здесь. Расхождение не запрещает привязку — оно её называет.
-   ────────────────────────────────────────────────────────────────────────── */
-function AttachGamepassForm({ order, token, onDone, onClose }: {
-  order: Order;
-  token: string;
-  onDone: () => void;
-  onClose: () => void;
-}) {
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [check, setCheck] = useState<{
-    error?: string; gamepassId?: string; livePrice?: number | null;
-    isForSale?: boolean | null; expected?: number | null; priceMismatch?: boolean;
-    sellerMatch?: boolean | null;
-  } | null>(null);
-  const debounce = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const passId = parseGamepassRef(value.trim());
-
-  useEffect(() => {
-    const raw = value.trim();
-    setCheck(null);
-    if (!raw) return;
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(async () => {
-      setChecking(true);
-      try {
-        const r = await fetch("/api/twa/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: "manual-validate", gamepassUrl: raw, amount: order.amount }),
-        });
-        const d = await r.json();
-        if (r.ok) setCheck(d.gamepass ?? null);
-      } catch { /* проверка не обязана мешать привязке */ }
-      finally { setChecking(false); }
-    }, 500);
-    return () => clearTimeout(debounce.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, token, order.amount]);
-
-  async function submit() {
-    const raw = value.trim();
-    if (!raw || busy) return;
-    setBusy(true);
-    haptic.impact("light");
-    try {
-      const r = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action: "attach-gamepass", orderId: order.id, gamepassId: raw }),
-      });
-      const d = await r.json();
-      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Не удалось привязать", "error"); return; }
-      haptic.notify("success");
-      toast(d.notified
-        ? `Геймпасс привязан — заказ к выкупу, клиент оповещён`
-        : `Геймпасс привязан — заказ к выкупу (клиент НЕ оповещён)`, "success");
-      onDone();
-    } catch { toast("Ошибка сети", "error"); }
-    finally { setBusy(false); }
-  }
-
-  const hint = check?.error ? { text: `⛔ ${check.error}`, color: C.red }
-    : check?.isForSale === false ? { text: "⛔ пасс снят с продажи", color: C.red }
-      : check?.priceMismatch && check.livePrice != null
-        ? { text: `⚠️ ${check.livePrice} R$ вместо ${check.expected} R$`, color: C.orange }
-        : check?.livePrice != null ? { text: `✓ ${check.livePrice} R$ — цена сходится`, color: C.green }
-          : checking ? { text: "Проверяю цену…", color: C.textTertiary } : null;
-
-  return (
-    <div onClick={e => e.stopPropagation()} style={{
-      padding: "12px 13px 13px", borderRadius: 12,
-      border: `1px solid ${C.blue}44`, background: `${C.blue}0f`,
-      display: "flex", flexDirection: "column", gap: 9,
-    }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.blue }}>🔗 Ссылка на геймпасс</div>
-      <input
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        placeholder="roblox.com/game-pass/… или ID"
-        inputMode="url"
-        autoComplete="off"
-        style={{
-          width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-          color: "#fff", fontSize: 16, padding: "12px", outline: "none",
-          fontFamily: "inherit", boxSizing: "border-box",
-        }}
-      />
-      {(hint || passId) && (
-        <div style={{ fontSize: 13, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {passId && <span style={{ color: C.textSecondary, fontFamily: MONO }}>{passId}</span>}
-          {hint && <span style={{ color: hint.color, fontWeight: 600 }}>{hint.text}</span>}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="twa-press" onClick={onClose} disabled={busy}
-          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
-          Отмена
-        </button>
-        <button className="twa-press" onClick={submit} disabled={busy || !passId}
-          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.blue, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy || !passId ? 0.5 : 1 }}>
-          {busy ? "…" : "Привязать — заказ к выкупу"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   🔑 Ключ покупателя — админ вставляет его за человека.
-
-   Владелец, 18.10.2026: «очень часто они кидают ключ нам, а не боту, проще
-   самим его вставить в заказ и сделать все за них».
-
-   Два шага намеренно: сначала ключ проверяется мостом и форма показывает, НА
-   КАКОМ аккаунте и КАКИЕ пассы будут созданы, и только потом создание. Пассы
-   ложатся на чужой аккаунт и стоят живых робуксов при выкупе — подтверждать
-   такое вслепую нельзя.
-
-   Ключ живёт только в этом поле: `type=password`, без автозаполнения, в ответе
-   сервера его нет ни при каком исходе.
-   ───────────────────────────────────────────────────────────────────────── */
-function KeyCreateForm({ order, token, onDone, onClose }: {
-  order: Order;
-  token: string;
-  onDone: () => void;
-  onClose: () => void;
-}) {
-  const [key, setKey] = useState("");
-  const [nick, setNick] = useState(order.robloxUsername ?? order.probableNick ?? "");
-  const [gameRef, setGameRef] = useState("");
-  const [needsGameLink, setNeedsGameLink] = useState(false);
-  const [busy, setBusy] = useState<"verify" | "create" | "save" | null>(null);
-  const [plan, setPlan] = useState<{ nick: string; targets: { price: number; amount: number }[]; hasGamepass: boolean } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const call = async (payload: Record<string, unknown>, mode: "verify" | "create" | "save") => {
-    setBusy(mode); setError(null);
-    try {
-      const r = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          action: "create-gamepass-by-key", orderId: order.id,
-          key, nick, ...(gameRef ? { gameRef } : {}), ...payload,
-        }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        haptic.notify("error");
-        setError(d?.error ?? `Сервер ответил ${r.status}`);
-        if (d?.needsGameLink) setNeedsGameLink(true);
-        return null;
-      }
-      return d;
-    } catch {
-      setError("Ошибка сети");
-      return null;
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  async function verify() {
-    const d = await call({ dryRun: true }, "verify");
-    if (!d) return;
-    haptic.notify("success");
-    setPlan({ nick: d.nick, targets: d.targets ?? [], hasGamepass: Boolean(d.hasGamepass) });
-  }
-
-  async function create() {
-    const d = await call({ replace: plan?.hasGamepass === true }, "create");
-    if (!d) return;
-    haptic.notify("success");
-    const made = (d.created ?? []).length;
-    toast(
-      d.complete
-        ? d.notified
-          ? `🔑 Создано ${made} — заказ к выкупу, клиент оповещён`
-          : `🔑 Создано ${made} — заказ к выкупу (клиент НЕ оповещён)`
-        : `🔑 Создано ${made} из набора — набор НЕ полный, дособери заказ`,
-      d.complete && !d.needsHands ? "success" : "error",
-    );
-    setKey("");
-    onDone();
-  }
-
-  async function saveOnly() {
-    const d = await call({ saveOnly: true }, "save");
-    if (!d) return;
-    haptic.notify("success");
-    toast(`🔑 Ключ сохранён за покупателем (${d.nick}) — сработает на следующем заказе`, "success");
-    setKey("");
-    onClose();
-  }
-
-  const field = {
-    width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-    color: "#fff", fontSize: 16, padding: "12px", outline: "none",
-    fontFamily: "inherit", boxSizing: "border-box" as const,
-  };
-
-  return (
-    <div onClick={e => e.stopPropagation()} style={{
-      padding: "12px 13px 13px", borderRadius: 12,
-      border: `1px solid ${C.green}44`, background: `${C.green}0f`,
-      display: "flex", flexDirection: "column", gap: 9,
-    }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.green }}>🔑 Ключ покупателя</div>
-      <div style={{ fontSize: 13, color: C.textSecondary }}>
-        Создадим геймпассы сами — покупателю делать ничего не нужно.
-      </div>
-      <input
-        type="password"
-        value={key}
-        onChange={e => { setKey(e.target.value); setPlan(null); }}
-        placeholder="ключ Open Cloud — одна длинная строка"
-        autoComplete="off"
-        spellCheck={false}
-        style={field}
-      />
-      <input
-        value={nick}
-        onChange={e => { setNick(e.target.value); setPlan(null); }}
-        placeholder="ник Roblox покупателя"
-        autoComplete="off"
-        style={field}
-      />
-      {needsGameLink && (
-        <input
-          value={gameRef}
-          onChange={e => setGameRef(e.target.value)}
-          placeholder="ссылка на игру — её не видно по нику"
-          inputMode="url"
-          autoComplete="off"
-          style={field}
-        />
-      )}
-
-      {plan && (
-        <div style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ color: C.green, fontWeight: 600 }}>✅ Ключ рабочий · аккаунт {plan.nick}</span>
-          {plan.targets.map((t, i) => (
-            <span key={`${t.price}-${i}`} style={{ color: C.textSecondary }}>
-              Создадим пасс <b style={{ fontFamily: MONO, color: "#fff" }}>{t.price} R$</b> → {t.amount} R$ чистыми
-            </span>
-          ))}
-          {plan.hasGamepass && (
-            <span style={{ color: C.orange }}>⚠️ У заказа уже есть геймпасс — он будет заменён</span>
-          )}
-        </div>
-      )}
-
-      {error && <div style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="twa-press" onClick={onClose} disabled={busy !== null}
-          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
-          Отмена
-        </button>
-        {!plan ? (
-          <button className="twa-press" onClick={verify} disabled={busy !== null || !key || !nick}
-            style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.blue, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy !== null || !key || !nick ? 0.5 : 1 }}>
-            {busy === "verify" ? "Проверяю ключ…" : "Проверить ключ"}
-          </button>
-        ) : (
-          <button className="twa-press" onClick={create} disabled={busy !== null}
-            style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.green, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy !== null ? 0.5 : 1 }}>
-            {busy === "create" ? "Создаю пассы…" : "Создать и привязать"}
-          </button>
-        )}
-      </div>
-      <button className="twa-press-sm" onClick={saveOnly} disabled={busy !== null || !key || !nick}
-        style={{ padding: "10px", borderRadius: 10, border: `1px solid ${C.hairline}`, background: "transparent", color: C.textSecondary, fontSize: 13.5, cursor: "pointer" }}>
-        {busy === "save" ? "Сохраняю…" : "Только сохранить ключ — сработает на следующем заказе"}
-      </button>
-    </div>
-  );
-}
-
 function HoldModal({ order, onHold, onClose }: {
   order: Order;
   onHold: (reason: string) => Promise<ActionResult>;
@@ -2262,12 +1971,12 @@ function RejectModal({ order, onReject, onClose }: {
    стоять рядом с копированием ID.
    ────────────────────────────────────────────────────────────────────────── */
 type MenuAction =
-  | "edit" | "attach" | "key" | "split" | "rebind" | "move"
+  | "edit" | "key" | "link" | "nick" | "split" | "rebind" | "move"
   | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
   | "purchase" | "refund" | "trace";
 
 function OrderMenuSheet({
-  open, order, passId, splitIds, grossAmount, canEdit, canAttach, canKey, canSplit, canRefund, canMove, canPurchase, canPrioritize, busy,
+  open, order, passId, splitIds, grossAmount, canEdit, canRefund, canMove, canPurchase, canPrioritize, busy,
   onClose, onCopy, onPick,
 }: {
   open: boolean;
@@ -2276,10 +1985,6 @@ function OrderMenuSheet({
   splitIds: string[];
   grossAmount: number;
   canEdit: boolean;
-  canAttach: boolean;
-  /** Ключ покупателя принимает только незамороженный живой заказ. */
-  canKey: boolean;
-  canSplit: boolean;
   canRefund: boolean;
   canMove: boolean;
   canPurchase: boolean;
@@ -2321,16 +2026,19 @@ function OrderMenuSheet({
       {oneLine && copyRow("⧉", "Всё одной строкой", oneLine, "для донора")}
 
       <div className="twa-oc-menu-group">Правка</div>
-      {/* Ссылка руками — первой строкой и отдельным пунктом, а не полем внутри
-          правки. Заказ без пасса приходит сюда ровно за этим: поиск по нику не
-          нашёл, и менеджер вставляет ссылку, которую прислал клиент. */}
-      {canAttach && row("attach", "🔗", "Вставить ссылку на геймпасс", "поиск не нашёл")}
-      {/* 🔑 Ключ покупателя — когда ключ прислали менеджеру, а не боту: создаём
-          пассы сами и ставим заказ в очередь (владелец, 18.10.2026). */}
-      {canKey && row("key", "🔑", "Вставить ключ покупателя", "создадим пассы сами")}
+      {/* 🎮 Настройка геймпассов — ОДИН список на все админки
+          (`@/lib/gamepass-tools`): те же имена, тот же порядок и те же
+          предусловия, что в досье и в правке на сайте. До 19.10.2026 здесь
+          лежали свои строки, и ключ покупателя жил только в этом меню. */}
+      {gamepassToolsFor(order).map(tool => row(
+        tool.id,
+        tool.icon,
+        tool.label,
+        tool.id === "split" && splitIds.length > 0
+          ? `${order.splitGamepasses?.filter(p => p.purchasedAt).length ?? 0}/${splitIds.length}`
+          : tool.hint,
+      ))}
       {canEdit && row("edit", "✏️", "Редактировать заказ")}
-      {canSplit && row("split", "🧩", "Разбить на несколько пассов",
-        splitIds.length > 0 ? `${order.splitGamepasses?.filter(p => p.purchasedAt).length ?? 0}/${splitIds.length}` : undefined)}
       {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && row("rebind", "🔄", "Перепривязать к клиенту")}
       {canMove && row("move", "↪", "Переместить в другой раздел")}
 
@@ -2396,10 +2104,9 @@ function OrderCard({
      произошло» выглядело так же, как сломанная кнопка. */
   const [scrollTo, setScrollTo] = useState<string | null>(null);
   const sheetBodyRef = useRef<HTMLDivElement | null>(null);
-  /** Ручная вставка ссылки на геймпасс — когда поиск по нику ничего не дал. */
-  const [attachOpen, setAttachOpen] = useState(false);
-  /** 🔑 Ключ покупателя, присланный менеджеру в чат, а не боту. */
-  const [keyOpen, setKeyOpen] = useState(false);
+  /** Какой инструмент геймпасса раскрыт. Один на все: и меню «···», и блок в
+   *  карточке показывают одно и то же состояние, а не каждый своё. */
+  const [tool, setTool] = useState<GamepassToolId | null>(null);
   /** Какая из двух кнопок копирования только что сработала — для галочки. */
   const [copied, setCopied] = useState<"code" | "pass" | null>(null);
   const [primaryBusy, setPrimaryBusy] = useState(false);
@@ -2528,21 +2235,13 @@ function OrderCard({
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
-  /* Вставить ссылку руками. Предусловие ровно как у `attach-gamepass` на
-     сервере, плюс «пасса ещё нет»: там, где пасс уже привязан, ссылку меняют
-     правкой — с проверкой цены и продавца. */
-  const isAttachable = !order.heldAt && !isUnpaidDirect(order)
-    && ["AWAITING_GAMEPASS", "PENDING", "ERROR", "REJECTED"].includes(order.status)
-    && !order.gamepassUrl && split.length === 0;
-  /* 🔑 Ключ покупателя. Предусловие ровно как у `create-gamepass-by-key` на
-     сервере: живой заказ, не заморожен, оплаченный (если прямой). Пасс у заказа
-     быть МОЖЕТ — тогда создание потребует явной замены. */
-  const isKeyable = !order.heldAt && !isUnpaidDirect(order)
-    && ["AWAITING_GAMEPASS", "PENDING", "ERROR", "REJECTED"].includes(order.status);
-  // Разбить можно всё, что ещё не закрыто и уже знает ник — именно ник даёт
-  // список пассов покупателя, из которых собираются части.
-  const isSplittable = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status)
-    && !!(order.robloxUsername || order.probableNick);
+  /* Что можно сделать с геймпассом этого заказа — общий модуль
+     `@/lib/gamepass-tools`. Предусловия списаны с сервера и одинаковы в TWA, в
+     досье сайта и в правке; до 19.10.2026 каждая поверхность считала их сама и
+     они разъехались (ключ был доступнее, чем его показывали). */
+  const tools = gamepassToolsFor(order);
+  const canTool = (id: GamepassToolId) => tools.some(item => item.id === id);
+  const isSplittable = canTool("split");
   // ⚡ Поднять можно то, что стоит в очереди. Замороженный заказ выключен из
   // очередей целиком — «подняли, но не выкупается» было бы враньём.
   const canPrioritize = !!onTogglePriority && !order.heldAt
@@ -2778,9 +2477,6 @@ function OrderCard({
       splitIds={splitIds}
       grossAmount={dirtyAmount}
       canEdit={isEditable}
-      canAttach={isAttachable}
-      canKey={isKeyable}
-      canSplit={isSplittable}
       canRefund={canRefund}
       canMove={showMoveBtn}
       canPurchase={!order.heldAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (!!order.gamepassUrl || split.length > 0)}
@@ -2801,9 +2497,11 @@ function OrderCard({
         };
         switch (id) {
           case "edit":     inSheet(() => setEditOpen(true)); break;
-          case "attach":   inSheet(() => setAttachOpen(true), "attach"); break;
-          case "key":      inSheet(() => setKeyOpen(true), "key"); break;
-          case "split":    inSheet(() => setSplitOpen(true), "split"); break;
+          // Все инструменты геймпасса открываются в одном блоке карточки.
+          case "key":
+          case "link":
+          case "nick":     inSheet(() => setTool(id), "gamepass"); break;
+          case "split":    inSheet(() => { setTool(null); setSplitOpen(true); }, "split"); break;
           case "rebind":   inSheet(() => setRebindOpen(true), "rebind"); break;
           case "move":     inSheet(() => setMoveOpen(true), "move"); break;
           case "hold":     inSheet(() => setHoldOpen(true), "hold"); break;
@@ -3143,43 +2841,55 @@ function OrderCard({
         </div>
       )}
 
-      {/* 🔗 Ссылка руками. Стоит рядом с поиском по нику, а не в правке: поиск
-          находит пасс не всегда, и «вставить то, что прислал клиент» — второй
-          рабочий выход из «ждём ссылку», а не редкая операция. */}
-      {isAttachable && (
-        <div data-form="attach" style={{ padding: "0 14px 10px" }}>
-          {attachOpen ? (
+      {/* ── 🎮 Геймпасс заказа: одно меню на четыре инструмента ──────────────
+          Было четыре отдельных блока со своими кнопками и своими словами —
+          «Вставить ссылку», «Ещё пассы ника», «Разбить», а ключ вообще только
+          в меню «···». Теперь список один (`@/lib/gamepass-tools`, тот же, что
+          на сайте), а раскрывается ровно тот инструмент, который выбрали. */}
+      {tools.length > 0 && (
+        <div data-form="gamepass" style={{ padding: "0 14px 10px", display: "grid", gap: 8 }}>
+          <GamepassToolRows
+            order={order}
+            active={tool}
+            handlers={{ key: true, link: true, nick: true, split: true }}
+            onPick={id => {
+              if (id === "split") { setTool(null); setSplitOpen(true); return; }
+              setTool(prev => (prev === id ? null : id));
+            }}
+          />
+          {tool === "link" && (
             <AttachGamepassForm
               order={order}
               token={token}
-              onDone={() => { setAttachOpen(false); onMoved(); }}
-              onClose={() => setAttachOpen(false)}
+              onDone={() => { setTool(null); onMoved(); }}
+              onClose={() => setTool(null)}
             />
-          ) : (
-            <button className="twa-press-sm" onClick={e => { e.stopPropagation(); haptic.select(); setAttachOpen(true); }}
-              style={{
-                width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.blue}55`,
-                background: "transparent", color: C.blue, fontSize: 14, fontWeight: 600, cursor: "pointer",
-              }}>
-              🔗 Вставить ссылку на геймпасс
-            </button>
+          )}
+          {tool === "key" && (
+            <KeyCreateForm
+              order={order}
+              token={token}
+              onDone={() => { setTool(null); onMoved(); }}
+              onClose={() => setTool(null)}
+            />
+          )}
+          {tool === "nick" && (
+            <NickGamepasses
+              orderId={order.id}
+              wbCode={order.wbCode}
+              orderAmount={order.amount}
+              currentId={parseGamepassRef(order.gamepassUrl)}
+              parts={split}
+              splittable={isSplittable}
+              token={token}
+              autoOpen
+              onChanged={onMoved}
+              onSplitWith={gamepassId => { setTool(null); setSplitSeed(gamepassId); setSplitOpen(true); }}
+            />
           )}
         </div>
       )}
 
-      {/* 🔑 Ключ покупателя. Стоит рядом с «ссылкой руками»: это два выхода из
-          одного тупика «пасса нет», и второй из них не требует от человека
-          ничего (владелец, 18.10.2026). */}
-      {isKeyable && keyOpen && (
-        <div data-form="key" style={{ padding: "0 14px 10px" }}>
-          <KeyCreateForm
-            order={order}
-            token={token}
-            onDone={() => { setKeyOpen(false); onMoved(); }}
-            onClose={() => setKeyOpen(false)}
-          />
-        </div>
-      )}
 
       {/* ❌ П3: клиент отверг GP-watch-ник — вероятного ника больше нет, дожать вручную */}
       {order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername && (
@@ -3309,37 +3019,6 @@ function OrderCard({
       )}
 
       <AuditTrail order={order} token={token} />
-
-      {/* Чем ещё можно закрыть заказ: пассы того же ника. Вторичный блок —
-          грузится по кнопке и свёрнут, пока его не позвали. */}
-      {isEditable && !!(order.robloxUsername || order.probableNick) && !splitOpen && (
-        <div style={{ padding: "0 14px 6px" }}>
-          <NickGamepasses
-            orderId={order.id}
-            wbCode={order.wbCode}
-            orderAmount={order.amount}
-            currentId={parseGamepassRef(order.gamepassUrl)}
-            parts={split}
-            splittable={isSplittable}
-            token={token}
-            onChanged={onMoved}
-            onSplitWith={(gamepassId) => { setSplitSeed(gamepassId); setSplitOpen(true); }}
-          />
-        </div>
-      )}
-
-      {/* Разбиение выкупа: три пасса по 1000 вместо одного на 3000 */}
-      {isSplittable && !splitOpen && (
-        <div style={{ padding: "0 14px 6px" }}>
-          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setSplitOpen(true); }}
-            style={{
-              width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.accent}55`,
-              background: "transparent", color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer",
-            }}>
-            {split.length > 0 ? `🧩 Разбиение · ${split.filter(p => p.purchasedAt).length}/${split.length}` : "🧩 Разбить на несколько пассов"}
-          </button>
-        </div>
-      )}
 
       {splitOpen && (
         <div data-form="split">

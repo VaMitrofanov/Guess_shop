@@ -48,20 +48,29 @@ describe("Форма, открытая из меню «···», попадае�
   });
 
   it("у каждой формы досье есть якорь", () => {
-    for (const form of ["attach", "hold", "reject", "move", "split", "refund", "rebind"]) {
+    /* `gamepass` — общий якорь четырёх инструментов геймпасса: с 19.10.2026
+       ключ, ссылка, пассы ника и разбивка живут в одном блоке и одном меню
+       (`@/lib/gamepass-tools`), а не четырьмя кнопками по карточке. */
+    for (const form of ["gamepass", "hold", "reject", "move", "split", "refund", "rebind"]) {
       expect(screen).toContain(`data-form="${form}"`);
     }
   });
 });
 
 describe("Ссылку на геймпасс можно вставить руками", () => {
-  it("действие есть в меню заказа", () => {
-    expect(screen).toContain('row("attach", "🔗", "Вставить ссылку на геймпасс"');
+  const tools = readFileSync(
+    join(process.cwd(), "src/app/twa/_components/GamepassTools.tsx"),
+    "utf8",
+  );
+
+  it("инструмент есть в меню заказа — строкой из общего списка", () => {
+    expect(screen).toContain("gamepassToolsFor(order).map(tool => row(");
+    expect(screen).toContain('case "link":');
   });
 
   it("форма шлёт attach-gamepass и проверяет цену до привязки", () => {
-    expect(screen).toContain('action: "attach-gamepass", orderId: order.id');
-    expect(screen).toContain('action: "manual-validate", gamepassUrl: raw, amount: order.amount');
+    expect(tools).toContain('action: "attach-gamepass", orderId: order.id');
+    expect(tools).toContain('action: "manual-validate", gamepassUrl: raw, amount: order.amount');
   });
 });
 

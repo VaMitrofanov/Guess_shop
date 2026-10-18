@@ -229,31 +229,41 @@ describe("что получает покупатель", () => {
 });
 
 describe("интерфейс — обе админки", () => {
-  it("сайт: блок ключа в досье заказа", () => {
-    const dossier = read("src/components/admin/orders/order-dossier.tsx");
-    expect(dossier).toContain("KeyCreateBox");
-    expect(dossier).toContain('action: "create-gamepass-by-key"');
+  /* С 19.10.2026 формы живут в общих компонентах, а не внутри одного экрана:
+     ключ вставляется с пяти поверхностей (карточка и лист TWA, досье, правка и
+     полная карточка на сайте). Состав поверхностей сторожит отдельный тест —
+     `gamepass-tools-parity`; здесь проверяется сама форма. */
+  const siteTools = "src/components/admin/orders/gamepass-tools.tsx";
+  const twaTools = "src/app/twa/_components/GamepassTools.tsx";
+
+  it("сайт: форма ключа — общий компонент для всех разделов", () => {
+    const tools = read(siteTools);
+    expect(tools).toContain("export function KeyCreateBox");
+    expect(tools).toContain('action: "create-gamepass-by-key"');
     // Поле ключа — password и без автозаполнения: экран админки шарят.
-    expect(dossier).toContain('type="password"');
-    expect(dossier).toContain('autoComplete="off"');
-    // Блок виден только там, где действие вообще разрешено.
-    expect(dossier).toContain("!order.heldAt && KEYABLE.includes(order.status)");
+    expect(tools).toContain('type="password"');
+    expect(tools).toContain('autoComplete="off"');
   });
 
-  it("TWA: форма ключа в карточке заказа", () => {
-    const twa = read("src/app/twa/_components/screens/OrdersScreen.tsx");
-    expect(twa).toContain("KeyCreateForm");
-    expect(twa).toContain('action: "create-gamepass-by-key"');
-    expect(twa).toContain('type="password"');
-    expect(twa).toContain("canKey={isKeyable}");
+  it("TWA: форма ключа — тоже общий компонент", () => {
+    const tools = read(twaTools);
+    expect(tools).toContain("export function KeyCreateForm");
+    expect(tools).toContain('action: "create-gamepass-by-key"');
+    expect(tools).toContain('type="password"');
   });
 
   it("оба интерфейса сначала проверяют ключ, а потом создают", () => {
-    for (const file of ["src/components/admin/orders/order-dossier.tsx", "src/app/twa/_components/screens/OrdersScreen.tsx"]) {
+    for (const file of [siteTools, twaTools]) {
       const source = read(file);
       expect(source).toContain("dryRun: true");
       expect(source).toContain("Проверить ключ");
       expect(source).toContain("Создать и привязать");
+    }
+  });
+
+  it("предусловия берутся из общего модуля, а не переписываются в экране", () => {
+    for (const file of ["src/components/admin/orders/order-dossier.tsx", "src/app/twa/_components/screens/OrdersScreen.tsx"]) {
+      expect(read(file)).toMatch(/gamepass-tools/);
     }
   });
 });

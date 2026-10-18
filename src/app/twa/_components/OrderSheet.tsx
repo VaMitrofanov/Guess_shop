@@ -4,6 +4,8 @@ import { C, MONO } from "./theme";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
 import BottomSheet from "./BottomSheet";
+import { GamepassToolRows, KeyCreateForm } from "./GamepassTools";
+import type { GamepassToolId } from "@/lib/gamepass-tools";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    OrderSheet — один лист заказа: и создание, и правка.
@@ -263,6 +265,13 @@ export default function OrderSheet({
   const [gpSearchMsg, setGpSearchMsg] = useState("");
   /** Источник заказа в режиме правки (в создании он выводится из кода). */
   const [source, setSource] = useState<string>(initialTarget?.orderSource ?? "WB");
+  /* 🎮 Инструменты геймпасса — те же, что в карточке заказа и на сайте.
+     До 19.10.2026 лист заказа знал только поле ссылки и поиск по нику: ключ
+     покупателя, которым заказ закрывается за минуту, здесь было не вставить,
+     хотя правят заказ чаще всего именно отсюда (владелец, 19.10.2026). */
+  const [tool, setTool] = useState<GamepassToolId | null>(null);
+  const nickRef = useRef<HTMLInputElement | null>(null);
+  const gpRef = useRef<HTMLInputElement | null>(null);
   const [dup, setDup] = useState<{ wbCode: string; status: string } | null>(null);
   /** Совпадения, которые менеджер осознанно проигнорировал: «всё равно создать». */
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
@@ -896,6 +905,7 @@ export default function OrderSheet({
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", gap: 6 }}>
               <input
+                ref={nickRef}
                 value={nick}
                 onChange={e => { setNick(e.target.value); setGpFound([]); setGpSearchMsg(""); setSelectedDirectPass(null); }}
                 placeholder={isDirect ? "Ник Roblox — сначала найди геймпасс" : "Ник Roblox или ссылка на профиль"}
@@ -954,9 +964,60 @@ export default function OrderSheet({
             )}
           </div>
 
+          {/* ── 🎮 Геймпасс заказа: одно меню на всех поверхностях ──────────
+              Список, имена и предусловия — из `@/lib/gamepass-tools`, того же
+              модуля, что рисует это меню в карточке TWA и на сайте. «Ссылка» и
+              «Пассы ника» здесь — это поля ниже, поэтому инструмент просто
+              переводит на них курсор; разбивка живёт в карточке заказа, и
+              строки для неё тут нет (её обработчик не передан). */}
+          {editing && target && !frozen && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <GamepassToolRows
+                order={{
+                  id: target.orderId,
+                  wbCode: target.wbCode,
+                  amount: target.amount,
+                  status: target.status,
+                  heldAt: target.heldAt,
+                  isDirectOrder: target.isDirectOrder,
+                  unpaidDirect: target.unpaidDirect,
+                  robloxUsername: target.robloxUsername,
+                }}
+                active={tool}
+                compact
+                handlers={{ key: true, link: true, nick: true }}
+                onPick={id => {
+                  if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+                  setTool(null);
+                  if (id === "link") { gpRef.current?.focus(); gpRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }
+                  if (id === "nick") {
+                    nickRef.current?.focus();
+                    nickRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+                    if (nick.trim().length >= 2) void searchPassesByNick();
+                  }
+                }}
+              />
+              {tool === "key" && (
+                <KeyCreateForm
+                  order={{
+                    id: target.orderId,
+                    wbCode: target.wbCode,
+                    amount: target.amount,
+                    status: target.status,
+                    robloxUsername: target.robloxUsername,
+                  }}
+                  token={token}
+                  onDone={() => { setTool(null); onDone(); }}
+                  onClose={() => setTool(null)}
+                />
+              )}
+            </div>
+          )}
+
           {/* Геймпасс */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <input
+              ref={gpRef}
               value={gpInput}
               onChange={e => { setGpInput(e.target.value); if (isDirect) setSelectedDirectPass(null); }}
               readOnly={isDirect && !editing}

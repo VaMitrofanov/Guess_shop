@@ -12,16 +12,17 @@
    через мост, а карточку открывают в основном не за пассами.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { classifyGamepasses, type FitPass, type PickerPass, type SplitPartLike } from "@/lib/gamepass-fit";
 import { expectedGamepassPrice } from "@/lib/purchase-guard";
+import { gamepassTool } from "@/lib/gamepass-tools";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
 
 const robux = (value: number) => value.toLocaleString("ru-RU");
 
 export default function NickGamepasses({
-  orderId, wbCode, orderAmount, currentId, parts, splittable, token, onChanged, onSplitWith,
+  orderId, wbCode, orderAmount, currentId, parts, splittable, token, autoOpen = false, onChanged, onSplitWith,
 }: {
   orderId: string;
   wbCode: string;
@@ -31,6 +32,12 @@ export default function NickGamepasses({
   /** Можно ли вообще разбивать этот заказ — от статуса. */
   splittable: boolean;
   token: string;
+  /**
+   * Список открыт сразу и грузится сам. Так блок ведёт себя, когда его позвали
+   * из меню инструментов геймпасса: человек уже выбрал «Пассы ника», и просить
+   * у него второе нажатие по той же кнопке — лишний шаг.
+   */
+  autoOpen?: boolean;
   onChanged: () => void;
   /** Открыть разбиение с этим пассом уже выбранным. */
   onSplitWith: (gamepassId: string) => void;
@@ -105,6 +112,15 @@ export default function NickGamepasses({
     finally { setBusyId(null); }
   }
 
+  /* `autoOpen` — список грузится сам, один раз. Ref, а не только `open`:
+     перерисовка карточки не должна отправлять второй запрос к Roblox. */
+  const autoLoaded = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoLoaded.current) return;
+    autoLoaded.current = true;
+    void load();
+  }, [autoOpen, load]);
+
   if (!open) {
     return (
       <button
@@ -113,7 +129,7 @@ export default function NickGamepasses({
         disabled={loading}
         onClick={() => { haptic.select(); void load(); }}
       >
-        {loading ? "Ищем пассы ника…" : "🎮 Ещё пассы ника"}
+        {loading ? "Ищем пассы ника…" : `${gamepassTool("nick").icon} ${gamepassTool("nick").label}`}
       </button>
     );
   }

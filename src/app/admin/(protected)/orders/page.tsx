@@ -42,6 +42,10 @@ export default async function AdminOrdersPage({
       initialOrderId={/^[a-z0-9_-]{8,40}$/i.test(pick("order")) ? pick("order") : null}
       initialQuery={pick("q").slice(0, 120)}
       initialEdit={pick("edit") === "1"}
+      /* `?tool=nick|split` — ссылка «открыть этот инструмент на этом заказе».
+         Ею в рабочее место ведёт полная карточка: меню инструментов одно и то
+         же везде, а их интерфейсу нужна лента. */
+      initialTool={["nick", "split"].includes(pick("tool")) ? (pick("tool") as "nick" | "split") : null}
     />
   );
 }

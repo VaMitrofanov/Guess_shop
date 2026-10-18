@@ -765,3 +765,26 @@
 .keyPlan { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--o-line); border-radius: 12px; background: rgba(0, 0, 0, .18); font-size: 13.5px; }
 .keyPlanRow { display: flex; gap: 10px; align-items: center; }
 .keyPlanRow b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 500; }
+
+/* ── 🎮 Меню «настройка геймпассов» (19.10.2026) ──────────────────────────
+   Один список инструментов на все разделы админки: та же раскладка, что в TWA,
+   и те же слова (`@/lib/gamepass-tools`). Строка — значок, имя, зачем нужен:
+   подпись обязательна, иначе «🔎 Пассы ника» и «🧩 Разбить» для нового админа
+   выглядят одинаково «про пассы». */
+
+.gpTools { display: grid; gap: 7px; margin-top: 10px; }
+.gpTool {
+  display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 12px;
+  border: 1px solid var(--o-line); border-radius: 12px; background: rgba(0, 0, 0, .16);
+  color: #e4e4e8; font: inherit; text-align: left; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.gpTool:hover { border-color: var(--o-line-2); background: var(--o-surface-2); }
+.gpToolOn { border-color: color-mix(in srgb, var(--o-accent) 55%, transparent); background: color-mix(in srgb, var(--o-accent) 10%, transparent); }
+.gpTool b { display: block; font-size: 13.5px; font-weight: 600; }
+.gpTool em { display: block; font-size: 12.5px; font-style: normal; color: var(--o-muted); }
+.gpToolIcon { font-size: 17px; line-height: 1; }
+
+/* Блок инструментов на полной карточке заказа: тот же список, но без ленты —
+   поэтому он занимает всю ширину панели и не прижимается к краю. */
+.detailTools { display: grid; gap: 8px; }

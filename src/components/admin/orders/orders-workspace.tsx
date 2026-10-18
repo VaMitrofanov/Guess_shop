@@ -51,6 +51,8 @@ export interface WorkspaceProps {
   initialQuery: string;
   /** `?edit=1` — открыть правку заказа сразу: этой ссылкой её зовёт «Обзор». */
   initialEdit?: boolean;
+  /** `?tool=nick|split` — какой инструмент геймпасса раскрыть на этом заказе. */
+  initialTool?: "nick" | "split" | null;
 }
 
 type Mode = "table" | "split";
@@ -72,7 +74,7 @@ interface Toast {
 }
 
 export default function OrdersWorkspace({
-  initialSlice, initialMode, initialOrderId, initialQuery, initialEdit,
+  initialSlice, initialMode, initialOrderId, initialQuery, initialEdit, initialTool,
 }: WorkspaceProps) {
   const router = useRouter();
 
@@ -105,7 +107,9 @@ export default function OrdersWorkspace({
   const [helpOpen, setHelpOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   /** Заказ, у которого открыт лист разбиения (id, а не объект: список перезагружается). */
-  const [splitId, setSplitId] = useState<string | null>(null);
+  const [splitId, setSplitId] = useState<string | null>(
+    initialTool === "split" ? initialOrderId : null,
+  );
   /** Пасс, с которым открыли разбиение из списка пассов ника в досье. */
   const [splitSeed, setSplitSeed] = useState<string | null>(null);
   /** Заказ, у которого открыт универсальный редактор. Тоже по id: после
@@ -952,6 +956,7 @@ export default function OrdersWorkspace({
             onEdit={() => setEditId(openOrder.id)}
             onToast={(text, error) => showToast({ text, error })}
             onChanged={() => void load(1, false)}
+            initialTool={initialTool === "nick" && openOrder.id === initialOrderId ? "nick" : null}
           />
         )}
 
@@ -1120,6 +1125,13 @@ export default function OrdersWorkspace({
             void refreshCounts();
           }}
           onToast={(text, error) => showToast({ text, error })}
+          /* Пассы ника и разбивка живут в досье — правка их только открывает,
+             чтобы меню инструментов было одним и тем же везде. */
+          onTool={id => {
+            setOpenId(editOrder.id);
+            setMode("split");
+            if (id === "split") setSplitId(editOrder.id);
+          }}
         />
       )}
 

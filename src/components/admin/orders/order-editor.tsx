@@ -27,6 +27,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { grossOf } from "@/lib/order-presentation";
 import { AdminOrder, copyText, gamepassIdOf, num } from "./types";
+import { GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
+import type { GamepassToolId } from "@/lib/gamepass-tools";
 import styles from "./orders.module.css";
 
 /** Статусы, в которых сервер принимает `edit-order`. */
@@ -78,13 +80,19 @@ function machineNote(note: string | null): string[] {
 }
 
 export default function OrderEditor({
-  order, onClose, onSaved, onToast,
+  order, onClose, onSaved, onToast, onTool,
 }: {
   order: AdminOrder;
   onClose: () => void;
   /** Правка применена: лента и счётчики перечитываются. */
   onSaved: (result: { changes: string[]; notified: string | null }) => void;
   onToast: (text: string, error?: boolean) => void;
+  /**
+   * Инструмент, который живёт не в этом окне (пассы ника и разбивка — они в
+   * досье): окно закрывается, и его открывает рабочее место. Без этого меню
+   * инструментов в правке обещало бы то, чего из неё не видно.
+   */
+  onTool?: (id: Extract<GamepassToolId, "nick" | "split">) => void;
 }) {
   const editable = EDITABLE.includes(order.status) && !order.heldAt;
 
@@ -98,6 +106,9 @@ export default function OrderEditor({
   const [check, setCheck] = useState<GpCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Раскрытый инструмент геймпасса. Здесь это только ключ: остальное — поля. */
+  const [tool, setTool] = useState<GamepassToolId | null>(null);
+  const gamepassRef = useRef<HTMLInputElement | null>(null);
 
   const machine = useMemo(() => machineNote(order.adminNote), [order.adminNote]);
   const gpId = parseGamepass(gamepass);
@@ -214,6 +225,45 @@ export default function OrderEditor({
           </p>
         )}
 
+        {/* ── 🎮 Настройка геймпассов — то же меню, что в досье и в TWA ─────
+            «Ссылка или ID» — поле ниже (инструмент просто ставит в него
+            курсор), ключ раскрывается здесь же, а пассы ника и разбивка живут
+            в досье: окно закроется и откроет их там. Одинаковые имена важнее
+            одинаковой вёрстки — админ ищет глазами «🔑 Ключ покупателя», а не
+            вспоминает, как он назван в этом разделе. */}
+        {editable && (
+          <div style={{ marginBottom: 12 }}>
+            <GamepassToolRows
+              order={order}
+              active={tool}
+              handlers={{ key: true, link: true, nick: Boolean(onTool), split: Boolean(onTool) }}
+              onPick={id => {
+                if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+                setTool(null);
+                if (id === "link") { gamepassRef.current?.focus(); gamepassRef.current?.select(); return; }
+                if (onTool && (id === "nick" || id === "split")) { onClose(); onTool(id); }
+              }}
+            />
+            {tool === "key" && (
+              <KeyCreateBox
+                order={order}
+                post={async payload => {
+                  const response = await fetch("/api/admin/orders", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...payload, orderId: order.id }),
+                  });
+                  const body = await response.json().catch(() => ({}));
+                  if (!response.ok) throw new Error(body?.error ?? `Сервер ответил ${response.status}`);
+                  return body;
+                }}
+                onToast={onToast}
+                onChanged={() => onSaved({ changes: ["геймпасс по ключу"], notified: null })}
+              />
+            )}
+          </div>
+        )}
+
         <div style={{ display: "grid", gap: 10, opacity: editable ? 1 : 0.5, pointerEvents: editable ? "auto" : "none" }}>
           <label style={{ display: "grid", gap: 5 }}>
             <span className={styles.kvKey}>Ник Roblox</span>
@@ -234,6 +284,7 @@ export default function OrderEditor({
             <span className={styles.kvKey}>Геймпасс — ID или ссылка</span>
             <input
               autoFocus
+              ref={gamepassRef}
               value={gamepass}
               onChange={event => setGamepass(event.target.value)}
               placeholder="1613331528 или roblox.com/game-pass/1613331528"

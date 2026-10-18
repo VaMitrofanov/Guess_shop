@@ -715,6 +715,12 @@ export async function getAdminOrderDetail(id: string) {
       robloxUsername: true,
       probableNick: true,
       gamepassUrl: true,
+      /* Признаки, без которых полная карточка не может решить, что с геймпассом
+         вообще можно делать (заморозка и неоплаченный прямой запрещают всё). */
+      heldAt: true,
+      heldReason: true,
+      isDirectOrder: true,
+      paidAt: true,
       pendingAt: true,
       completedAt: true,
       createdAt: true,

@@ -13,6 +13,8 @@ import {
   primaryActionFor, robuxUnlockAt,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
+import { GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
+import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
 
@@ -20,11 +22,8 @@ type Tab = "overview" | "events" | "payment" | "audit";
 
 interface EventRow { id: string; type: string; payload: unknown; createdAt: string }
 
-/** Статусы, в которых сервер разрешает менять разбиение (`set-gamepass-split`). */
-const SPLITTABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
-
-/** Статусы, в которых сервер принимает ключ покупателя (`create-gamepass-by-key`). */
-const KEYABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
+/* Статусы инструментов геймпасса больше не копируются сюда: и «разбить», и
+   «ключ» решает общий `@/lib/gamepass-tools` (он же — у TWA и у правки). */
 
 /** Дата и время события — там, где «сколько прошло» не отвечает на вопрос. */
 function fmtWhen(iso: string): string {
@@ -47,6 +46,7 @@ const EVENT_LABELS: Record<string, string> = {
 
 export default function OrderDossier({
   order, live, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onEdit, onToast, onChanged,
+  initialTool = null,
 }: {
   order: AdminOrder;
   live?: LiveCheck;
@@ -62,6 +62,8 @@ export default function OrderDossier({
   onEdit: () => void;
   onToast: (text: string, error?: boolean) => void;
   onChanged: () => void;
+  /** Инструмент, раскрытый сразу: ссылкой `?tool=` сюда ведёт полная карточка. */
+  initialTool?: GamepassToolId | null;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [events, setEvents] = useState<EventRow[] | null>(null);
@@ -77,13 +79,22 @@ export default function OrderDossier({
   const [pickerNote, setPickerNote] = useState<string | null>(null);
   const [showRest, setShowRest] = useState(false);
   const [attaching, setAttaching] = useState<string | null>(null);
+  /** Какой инструмент геймпасса раскрыт — один переключатель на все четыре. */
+  const [tool, setTool] = useState<GamepassToolId | null>(initialTool);
 
   useEffect(() => {
     setTab("overview"); setEvents(null); setAudit(null); setNote(order.adminNote ?? "");
     // Список принадлежит заказу: при переходе на соседний он обязан исчезнуть,
     // иначе пассы чужого ника выглядят как пассы этого.
-    setPicker(null); setPickerNote(null); setShowRest(false);
-  }, [order.id, order.adminNote]);
+    setPicker(null); setPickerNote(null); setShowRest(false); setTool(initialTool);
+  }, [order.id, order.adminNote, initialTool]);
+
+  /* Пришли по ссылке `?tool=nick` — список пассов грузим сразу: человек уже
+     выбрал инструмент на другой странице, второе нажатие здесь лишнее. */
+  useEffect(() => {
+    if (initialTool === "nick" && !picker && !pickerBusy) void loadPicker();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTool, order.id]);
 
   const post = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/admin/orders", {
@@ -238,7 +249,7 @@ export default function OrderDossier({
               {order.priorityAt ? "⚡ Вернуть в очередь" : "⚡ Вперёд очереди"} <kbd>P</kbd>
             </button>
           )}
-          {SPLITTABLE.includes(order.status) && (
+          {hasGamepassTool(order, "split") && (
             <button type="button" className={styles.btn} onClick={() => onSplit()}>
               🧩 {parts.length > 0 ? `Разбивка ${parts.filter(part => part.purchasedAt).length}/${parts.length}` : "Разбить выкуп"} <kbd>S</kbd>
             </button>
@@ -354,50 +365,65 @@ export default function OrderDossier({
               ) : null}
               {flag && <div style={{ marginTop: 9, color: TONE_COLOR[flag.tone], fontSize: 13.5 }}>{flag.text}</div>}
 
-              {/* ── Чем ещё можно закрыть заказ ──────────────────────────────
-                  Кнопка, а не автозагрузка: поиск ходит в Roblox через мост,
-                  а досье открывают в основном не за пассами. */}
-              <div className={styles.gpMoreBar}>
-                <button type="button" className={styles.btnSm} onClick={() => (picker ? setPicker(null) : void loadPicker())} disabled={pickerBusy}>
-                  {pickerBusy ? "Ищем пассы…" : picker ? "Скрыть пассы ника" : "Ещё пассы ника"}
-                </button>
-              </div>
+              {/* ── 🎮 Настройка геймпассов — одно меню ──────────────────────
+                  Инструментов четыре, и до 19.10.2026 они лежали в четырёх
+                  разных местах экрана со своими названиями: привязка внутри
+                  «✎ Правки», пассы ника кнопкой здесь, разбивка кнопкой в
+                  шапке, ключ — отдельным блоком ниже. Список и слова теперь
+                  общие с TWA (`@/lib/gamepass-tools`), а раскрывается ровно
+                  то, что выбрали. */}
+              <GamepassToolRows
+                order={order}
+                active={tool}
+                handlers={{ key: true, link: true, nick: true, split: true }}
+                onPick={id => {
+                  if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+                  if (id === "link") { setTool(null); onEdit(); return; }
+                  if (id === "split") { setTool(null); onSplit(); return; }
+                  // «Пассы ника» — список грузится по нажатию: поиск ходит в
+                  // Roblox через мост, и держать его на открытии досье дорого.
+                  setTool("nick");
+                  if (!picker) void loadPicker();
+                }}
+              />
 
-              {picker && (
-                <GamepassPicker
-                  groups={classifyGamepasses({
-                    passes: picker.passes,
-                    orderAmount: order.amount,
-                    currentId: singleId,
-                    parts,
-                  })}
-                  nick={picker.nick}
-                  expected={grossOf(order.amount)}
-                  emptyNote={pickerNote}
-                  busyId={attaching}
-                  splittable={SPLITTABLE.includes(order.status)}
-                  showRest={showRest}
-                  onToggleRest={() => setShowRest(value => !value)}
-                  onRefresh={() => void loadPicker()}
-                  onAttach={pass => void attachPass(pass)}
-                  onSplitWith={pass => onSplit(pass.gamepassId)}
-                  onCopy={id => { copyText(id); onToast(`⧉ ${id}`); }}
-                />
+              {tool === "key" && (
+                <KeyCreateBox order={order} post={post} onToast={onToast} onChanged={onChanged} />
+              )}
+
+              {tool === "nick" && (
+                <>
+                  <div className={styles.gpMoreBar}>
+                    <button type="button" className={styles.btnSm} onClick={() => void loadPicker()} disabled={pickerBusy}>
+                      {pickerBusy ? "Ищем пассы…" : "Обновить список"}
+                    </button>
+                    <button type="button" className={styles.btnSm} onClick={() => { setTool(null); setPicker(null); }}>Скрыть</button>
+                  </div>
+                  {picker && (
+                    <GamepassPicker
+                      groups={classifyGamepasses({
+                        passes: picker.passes,
+                        orderAmount: order.amount,
+                        currentId: singleId,
+                        parts,
+                      })}
+                      nick={picker.nick}
+                      expected={grossOf(order.amount)}
+                      emptyNote={pickerNote}
+                      busyId={attaching}
+                      splittable={hasGamepassTool(order, "split")}
+                      showRest={showRest}
+                      onToggleRest={() => setShowRest(value => !value)}
+                      onRefresh={() => void loadPicker()}
+                      onAttach={pass => void attachPass(pass)}
+                      onSplitWith={pass => onSplit(pass.gamepassId)}
+                      onCopy={id => { copyText(id); onToast(`⧉ ${id}`); }}
+                    />
+                  )}
+                </>
               )}
             </div>
 
-            {/* ── 🔑 Ключ покупателя ────────────────────────────────────────
-                Владелец, 18.10.2026: ключ присылают менеджеру в чат чаще, чем
-                боту. Блок виден там, где он имеет смысл: заказ ещё не выкуплен
-                и не заморожен. */}
-            {!order.heldAt && KEYABLE.includes(order.status) && (
-              <KeyCreateBox
-                order={order}
-                post={post}
-                onToast={onToast}
-                onChanged={onChanged}
-              />
-            )}
 
             <div className={styles.box}>
               <div className={styles.boxHead}>Заметка</div>
@@ -594,207 +620,6 @@ function GamepassPicker({
             </>
           )}
         </>
-      )}
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   🔑 «Ключ покупателя» — админ вставляет Open Cloud ключ за него.
-
-   Владелец, 18.10.2026: «очень часто они кидают ключ нам, а не боту, проще
-   самим его вставить в заказ и сделать все за них».
-
-   Два шага, а не одна кнопка: сначала ключ проверяется мостом и экран
-   показывает, НА КАКОМ аккаунте и КАКИЕ пассы будут созданы, и только потом
-   создание. Подтверждать такое вслепую нельзя: пассы ложатся на чужой аккаунт
-   и стоят живых робуксов при выкупе.
-
-   Ключ живёт только в этом поле: `type=password`, без автозаполнения, в ответах
-   сервера его нет ни при каком исходе, после создания поле очищается.
-   ───────────────────────────────────────────────────────────────────────── */
-function KeyCreateBox({
-  order, post, onToast, onChanged,
-}: {
-  order: AdminOrder;
-  post: (payload: Record<string, unknown>) => Promise<any>;
-  onToast: (text: string, error?: boolean) => void;
-  onChanged: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [key, setKey] = useState("");
-  const [nick, setNick] = useState(order.robloxUsername ?? order.probableNick ?? "");
-  const [gameRef, setGameRef] = useState("");
-  const [needsGameLink, setNeedsGameLink] = useState(false);
-  const [busy, setBusy] = useState<"verify" | "create" | "save" | null>(null);
-  const [plan, setPlan] = useState<{ nick: string; targets: { price: number; amount: number }[]; hasGamepass: boolean } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ created: { gamepassId: string; price: number; live: { price: number | null; isForSale: boolean } | null }[]; complete: boolean; notified: string | null; needsHands: boolean } | null>(null);
-
-  useEffect(() => {
-    // Ключ принадлежит ОДНОМУ заказу: при переходе на соседний поле обязано
-    // очиститься, иначе ключ одного покупателя уедет в заказ другого.
-    setOpen(false); setKey(""); setGameRef(""); setPlan(null); setError(null); setDone(null);
-    setNeedsGameLink(false);
-    setNick(order.robloxUsername ?? order.probableNick ?? "");
-  }, [order.id, order.robloxUsername, order.probableNick]);
-
-  const call = async (payload: Record<string, unknown>, mode: "verify" | "create" | "save") => {
-    setBusy(mode); setError(null);
-    try {
-      return await post({ action: "create-gamepass-by-key", key, nick, gameRef: gameRef || undefined, ...payload });
-    } catch (err) {
-      const message = (err as Error).message;
-      setError(message);
-      // «Не видим твою игру» / «это не ссылка на игру» — чинится ссылкой, а не
-      // новым ключом: показываем поле, ключ вводить заново не нужно.
-      if (/игр[уы]/i.test(message)) setNeedsGameLink(true);
-      return null;
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  async function verify() {
-    const data = await call({ dryRun: true }, "verify");
-    if (!data) return;
-    setPlan({ nick: data.nick, targets: data.targets ?? [], hasGamepass: Boolean(data.hasGamepass) });
-  }
-
-  async function create() {
-    const data = await call({ replace: plan?.hasGamepass === true }, "create");
-    if (!data) return;
-    setKey("");
-    setDone({ created: data.created ?? [], complete: Boolean(data.complete), notified: data.notified ?? null, needsHands: Boolean(data.needsHands) });
-    onToast(data.complete
-      ? `Пасс${(data.created ?? []).length > 1 ? "ы" : ""} созданы — заказ ${order.wbCode} в очереди выкупа`
-      : `Создано ${(data.created ?? []).length} из набора — заказ ещё не полный`, !data.complete);
-    onChanged();
-  }
-
-  async function saveOnly() {
-    const data = await call({ saveOnly: true }, "save");
-    if (!data) return;
-    setKey("");
-    onToast(`Ключ сохранён за покупателем (${data.nick}) — сработает на следующем заказе`);
-  }
-
-  return (
-    <div className={styles.box}>
-      <div className={styles.boxHead}>
-        🔑 Ключ покупателя
-        <em style={{ color: "var(--o-muted)" }}>когда ключ прислали нам, а не боту</em>
-      </div>
-
-      {!open && !done && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", color: "var(--o-muted)", fontSize: 13.5 }}>
-          Создадим геймпассы сами — покупателю ничего делать не нужно.
-          <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => setOpen(true)}>
-            Вставить ключ
-          </button>
-        </div>
-      )}
-
-      {open && !done && (
-        <div className={styles.keyForm}>
-          <label>
-            <span className={styles.kvKey}>Ключ Open Cloud</span>
-            <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={key}
-              onChange={event => { setKey(event.target.value); setPlan(null); }}
-              placeholder="одна длинная строка из Creator Hub"
-            />
-          </label>
-          <label>
-            <span className={styles.kvKey}>Ник Roblox покупателя</span>
-            <input value={nick} onChange={event => { setNick(event.target.value); setPlan(null); }} placeholder="Anastasia_M" />
-          </label>
-          {needsGameLink && (
-            <label>
-              <span className={styles.kvKey}>Ссылка на игру — Roblox не видит игры этого аккаунта</span>
-              <input value={gameRef} onChange={event => setGameRef(event.target.value)} placeholder="roblox.com/.../experiences/123456" />
-            </label>
-          )}
-
-          {plan && (
-            <div className={styles.keyPlan}>
-              <div className={styles.keyPlanRow}>✅ Ключ рабочий · аккаунт <b>{plan.nick}</b></div>
-              {plan.targets.map((target, index) => (
-                <div key={`${target.price}-${index}`} className={styles.keyPlanRow}>
-                  Создадим пасс <b>{num(target.price)} R$</b>
-                  <span style={{ color: "var(--o-muted)" }}>→ {num(target.amount)} R$ чистыми</span>
-                </div>
-              ))}
-              {plan.hasGamepass && (
-                <div className={styles.keyPlanRow} style={{ color: "#ffd60a" }}>
-                  ⚠️ У заказа уже есть геймпасс — он будет заменён созданным.
-                </div>
-              )}
-            </div>
-          )}
-
-          {error && <div style={{ color: "#ffc0ba", fontSize: 13.5 }}>{error}</div>}
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button type="button" className={styles.btn} onClick={() => { setOpen(false); setKey(""); setPlan(null); setError(null); }}>
-              Отмена
-            </button>
-            <button type="button" className={styles.btn} onClick={() => void saveOnly()} disabled={!key || busy !== null}>
-              {busy === "save" ? "Сохраняем…" : "Только сохранить ключ"}
-            </button>
-            {!plan ? (
-              <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => void verify()} disabled={!key || !nick || busy !== null}>
-                {busy === "verify" ? "Проверяем ключ…" : "Проверить ключ"}
-              </button>
-            ) : (
-              <button type="button" className={`${styles.btn} ${styles.btnGreen}`} onClick={() => void create()} disabled={busy !== null}>
-                {busy === "create" ? "Создаём пассы…" : "Создать и привязать"}
-              </button>
-            )}
-          </div>
-
-          <p className={styles.hint}>
-            Ключ сохраняется за покупателем в зашифрованном виде: следующий его заказ закроется сам.
-            В ответах, логах и карточках ключа нет.
-          </p>
-        </div>
-      )}
-
-      {done && (
-        <div className={styles.keyPlan}>
-          {done.created.map(pass => (
-            <div key={pass.gamepassId} className={styles.keyPlanRow}>
-              <b>{pass.gamepassId}</b>
-              <span>{num(pass.price)} R$</span>
-              <span style={{ color: !pass.live ? "var(--o-muted)" : pass.live.isForSale === false ? "var(--o-red)" : "var(--o-green)" }}>
-                {!pass.live
-                  ? "Roblox не ответил — проверь руками"
-                  : pass.live.isForSale === false
-                    ? "НЕ в продаже"
-                    : pass.live.price != null && Math.abs(pass.live.price - pass.price) > 2
-                      ? `цена ${num(pass.live.price)} R$ вместо ${num(pass.price)} R$`
-                      : "в продаже, цена сходится"}
-              </span>
-              <a style={{ marginLeft: "auto", color: "#b9aaff" }} href={`https://www.roblox.com/game-pass/${pass.gamepassId}`} target="_blank" rel="noreferrer">открыть ↗</a>
-            </div>
-          ))}
-          <div className={styles.keyPlanRow} style={{ color: done.complete ? "var(--o-green)" : "#ffd60a" }}>
-            {done.complete ? "📎 Привязано, заказ в очереди выкупа" : "📎 Набор неполный — дособери заказ руками"}
-          </div>
-          <div className={styles.keyPlanRow} style={{ color: "var(--o-muted)" }}>
-            {done.notified
-              ? `Покупателю написали (${done.notified.toUpperCase()})`
-              : done.complete
-                ? "Покупателю НЕ дошло — напиши ему сам"
-                : "Покупателю не писали: заказ ещё не готов"}
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="button" className={styles.btnSm} onClick={() => { setDone(null); setPlan(null); setOpen(false); }}>Закрыть</button>
-          </div>
-        </div>
       )}
     </div>
   );
