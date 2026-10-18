@@ -131,7 +131,13 @@ describe("контракт разбитого выкупа", () => {
   describe("разбиение на сайте", () => {
     it("лист есть и доступен из досье, клавиатуры и палитры", () => {
       expect(deskWorkspace).toContain("SplitDialog");
-      expect(deskDossier).toContain("Разбить выкуп");
+      /* С 19.10.2026 строку «🧩 Разбить выкуп» в досье рисует общее меню
+         инструментов (`@/lib/gamepass-tools`), поэтому её текста в файле досье
+         больше нет — проверяем сам путь: инструмент есть в меню и зовёт
+         `onSplit`, который и открывает лист. */
+      expect(deskDossier).toContain("GamepassToolRows");
+      expect(deskDossier).toContain('if (id === "split") { setTool(null); onSplit(); return; }');
+      expect(readFileSync(path.join(ROOT, "src/lib/gamepass-tools.ts"), "utf8")).toContain('label: "Разбить выкуп"');
       // Клавиша S и команда палитры — иначе лист есть, но до него не дойти.
       expect(deskWorkspace).toContain('key === "s"');
       expect(deskWorkspace).toContain('command === "split"');

@@ -32,11 +32,13 @@ import styles from "./orders.module.css";
  * должна обещать то, что из неё не открывается.
  */
 export function GamepassToolRows({
-  order, active, handlers, onPick,
+  order, active, handlers, hints, onPick,
 }: {
   order: GamepassToolOrder;
   active?: GamepassToolId | null;
   handlers: Partial<Record<GamepassToolId, boolean>>;
+  /** Подсказка по факту заказа вместо общей (прогресс разбивки и т.п.). */
+  hints?: Partial<Record<GamepassToolId, string>>;
   onPick: (id: GamepassToolId) => void;
 }) {
   const allowed = gamepassToolsFor(order);
@@ -61,7 +63,7 @@ export function GamepassToolRows({
           <span className={styles.gpToolIcon}>{tool.icon}</span>
           <span>
             <b>{tool.label}</b>
-            <em>{tool.hint}</em>
+            <em>{hints?.[tool.id] ?? tool.hint}</em>
           </span>
         </button>
       ))}

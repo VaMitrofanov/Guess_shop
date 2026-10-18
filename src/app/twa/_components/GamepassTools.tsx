@@ -335,7 +335,7 @@ export function KeyCreateForm({ order, token, onDone, onClose }: {
    разбивку там, откуда её негде открыть.
    ───────────────────────────────────────────────────────────────────────── */
 export function GamepassToolRows({
-  order, active, onPick, handlers, compact = false,
+  order, active, onPick, handlers, hints, compact = false,
 }: {
   order: ToolOrder;
   /** Открытый инструмент — его строка подсвечена. */
@@ -343,6 +343,9 @@ export function GamepassToolRows({
   onPick: (id: GamepassToolId) => void;
   /** Какие инструменты эта поверхность умеет открыть. */
   handlers: Partial<Record<GamepassToolId, boolean>>;
+  /** Подсказка вместо общей — там, где у заказа есть что сказать по факту
+   *  (например «2/3 частей выкуплено» вместо описания разбивки). */
+  hints?: Partial<Record<GamepassToolId, string>>;
   compact?: boolean;
 }) {
   const allowed = gamepassToolsFor(order);
@@ -375,7 +378,7 @@ export function GamepassToolRows({
           <span style={{ fontSize: 17 }}>{tool.icon}</span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: C.textPrimary }}>{tool.label}</span>
-            <span style={{ display: "block", fontSize: 12.5, color: C.textTertiary }}>{tool.hint}</span>
+            <span style={{ display: "block", fontSize: 12.5, color: C.textTertiary }}>{hints?.[tool.id] ?? tool.hint}</span>
           </span>
         </button>
       ))}

@@ -2852,6 +2852,9 @@ function OrderCard({
             order={order}
             active={tool}
             handlers={{ key: true, link: true, nick: true, split: true }}
+            hints={split.length > 0
+              ? { split: `выкуплено ${split.filter(part => part.purchasedAt).length} из ${split.length}` }
+              : undefined}
             onPick={id => {
               if (id === "split") { setTool(null); setSplitOpen(true); return; }
               setTool(prev => (prev === id ? null : id));

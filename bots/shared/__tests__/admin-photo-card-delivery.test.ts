@@ -10,6 +10,9 @@
  */
 export {};
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 const tgSend = jest.fn();
 const tgSendPhoto = jest.fn();
 const orderUpdate = jest.fn();
@@ -33,6 +36,15 @@ jest.mock("../wb-order-source", () => ({
   wbOrderSourceLabel: () => "WB",
 }));
 jest.mock("../twa-link", () => ({ twaLaunchUrl: () => "https://robloxbank.ru/twa" }));
+/* 19.10.2026: `downloadPhoto` не был замокан, и тест реально ходил на CDN VK
+   (`sun9.userapi.com`) — то есть проверял не наш код, а доступность чужого
+   хоста. Пока CDN отвечал ошибкой сразу, тест зеленел; как только он начал
+   отвечать 301, ветка «фото скачалось» менялась, прогон длился 25 секунд и
+   пять проверок падали на чистом дереве. Байты фото подкладываем сами. */
+const downloadPhoto = jest.fn();
+jest.mock("../telegram-photo", () => ({
+  downloadPhoto: (...args: unknown[]) => downloadPhoto(...args),
+}));
 
 type Admin = typeof import("../admin");
 let sendAdminReviewCard: Admin["sendAdminReviewCard"];
@@ -46,6 +58,9 @@ beforeAll(async () => {
 beforeEach(() => {
   tgSend.mockReset();
   tgSendPhoto.mockReset();
+  // По умолчанию байты скачались: именно так ведёт себя живой CDN, когда он
+  // отдаёт картинку, и этот путь тесты и проверяют.
+  downloadPhoto.mockReset().mockResolvedValue(Buffer.from("fake-jpeg"));
   orderUpdate.mockReset();
   orderFindUnique.mockReset();
   orderFindUnique.mockResolvedValue({ wbCode: "62KL4GZ", adminNote: null });
@@ -134,8 +149,9 @@ describe("доставка карточки со скриншотом", () => {
  * значит вернуть и баг, а поймать его можно только руками на живом фолбэке.
  */
 describe("решение по карточке видно на экране", () => {
-  const handlers = require("node:fs").readFileSync(
-    require("node:path").join(process.cwd(), "bots/tg/handlers.ts"), "utf8");
+  // `import`, а не `require`: два `require` здесь были единственными ошибками
+  // eslint на всём репозитории и держали гейт `lint` красным (19.10.2026).
+  const handlers = readFileSync(join(process.cwd(), "bots/tg/handlers.ts"), "utf8");
 
   it("обработчики решений закрывают карточку через closeAdminCard", () => {
     for (const marker of ["payOkCaption", "❌ Оплата отклонена", "🎁 Бонус начислен"]) {

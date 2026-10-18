@@ -7,7 +7,7 @@
    подряд — три вкладки рядом с очередью.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ageBasis, ageTone, fmtAge, fmtUnlockDate, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
   primaryActionFor, robuxUnlockAt,
@@ -89,12 +89,6 @@ export default function OrderDossier({
     setPicker(null); setPickerNote(null); setShowRest(false); setTool(initialTool);
   }, [order.id, order.adminNote, initialTool]);
 
-  /* Пришли по ссылке `?tool=nick` — список пассов грузим сразу: человек уже
-     выбрал инструмент на другой странице, второе нажатие здесь лишнее. */
-  useEffect(() => {
-    if (initialTool === "nick" && !picker && !pickerBusy) void loadPicker();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialTool, order.id]);
 
   const post = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/admin/orders", {
@@ -164,6 +158,19 @@ export default function OrderDossier({
     } catch (error) { onToast((error as Error).message, true); }
     finally { setPickerBusy(false); }
   }, [post, onToast]);
+
+  /* Пришли по ссылке `?tool=nick` — список пассов грузим сразу: человек уже
+     выбрал инструмент на другой странице, второе нажатие здесь лишнее. Ref, а
+     не флаг состояния: перерисовка досье не должна слать второй запрос к
+     Roblox, а честный список зависимостей обязателен — без него React Compiler
+     отказывается оптимизировать весь компонент. */
+  const autoPicked = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialTool !== "nick") return;
+    if (autoPicked.current === order.id) return;
+    autoPicked.current = order.id;
+    void loadPicker();
+  }, [initialTool, order.id, loadPicker]);
 
   /**
    * Поставить пасс на заказ. Идёт тем же `edit-order`, что и «Правка», —
@@ -247,11 +254,6 @@ export default function OrderDossier({
           {!order.heldAt && (
             <button type="button" className={`${styles.btn} ${order.priorityAt ? styles.btnPrio : ""}`} onClick={onPriority}>
               {order.priorityAt ? "⚡ Вернуть в очередь" : "⚡ Вперёд очереди"} <kbd>P</kbd>
-            </button>
-          )}
-          {hasGamepassTool(order, "split") && (
-            <button type="button" className={styles.btn} onClick={() => onSplit()}>
-              🧩 {parts.length > 0 ? `Разбивка ${parts.filter(part => part.purchasedAt).length}/${parts.length}` : "Разбить выкуп"} <kbd>S</kbd>
             </button>
           )}
           {["PENDING", "IN_PROGRESS"].includes(order.status) && (
@@ -376,6 +378,9 @@ export default function OrderDossier({
                 order={order}
                 active={tool}
                 handlers={{ key: true, link: true, nick: true, split: true }}
+                hints={parts.length > 0
+                  ? { split: `выкуплено ${parts.filter(part => part.purchasedAt).length} из ${parts.length}` }
+                  : undefined}
                 onPick={id => {
                   if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
                   if (id === "link") { setTool(null); onEdit(); return; }
