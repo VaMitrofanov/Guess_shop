@@ -69,7 +69,7 @@ function Field({
     <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, minHeight: 40 }}>
       <span style={{ fontSize: 14 }}>
         {label}
-        {hint && <small style={{ display: "block", fontSize: 11, color: C.textTertiary, marginTop: 1 }}>{hint}</small>}
+        {hint && <small style={{ display: "block", fontSize: 14, color: C.textTertiary, marginTop: 1 }}>{hint}</small>}
       </span>
       <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
         <input
@@ -81,7 +81,7 @@ function Field({
             outline: "none", WebkitAppearance: "none", ...tabular,
           }}
         />
-        {suffix && <span style={{ fontSize: 13, color: C.textSecondary, width: 34 }}>{suffix}</span>}
+        {suffix && <span style={{ fontSize: 14, color: C.textSecondary, width: 34 }}>{suffix}</span>}
       </span>
     </label>
   );
@@ -98,7 +98,7 @@ function Pills<T extends string | number>({
           onClick={() => { haptic.select(); onChange(it.id); }}
           style={{
             flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
-            fontSize: 13, whiteSpace: "nowrap", fontFamily: "inherit",
+            fontSize: 14, whiteSpace: "nowrap", fontFamily: "inherit",
             fontWeight: value === it.id ? 600 : 400,
             background: value === it.id ? C.bgElevated : "transparent",
             color: value === it.id ? C.textPrimary : C.textSecondary,
@@ -116,7 +116,7 @@ function Card({ children, pad = 16 }: { children: React.ReactNode; pad?: number 
 function Tile({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div style={{ background: C.card, borderRadius: RADIUS.md, padding: "12px 14px" }}>
-      <div style={{ fontSize: 12, color: C.textSecondary }}>{label}</div>
+      <div style={{ fontSize: 14, color: C.textSecondary }}>{label}</div>
       <div style={{ fontSize: 19, fontWeight: 700, marginTop: 2, color: tone ?? C.textPrimary, ...tabular }}>{value}</div>
     </div>
   );
@@ -316,14 +316,14 @@ export default function EconomicsScreen({ token }: { token: string }) {
 
       {/* Итог */}
       <Card pad={18}>
-        <div style={{ fontSize: 12, color: C.textSecondary }}>Заработано (выручка − себестоимость)</div>
+        <div style={{ fontSize: 14, color: C.textSecondary }}>Заработано (выручка − себестоимость)</div>
         <div style={{
           fontSize: 32, fontWeight: 700, marginTop: 4, ...tabular,
           color: totals.withRevenue === 0 ? C.textTertiary : profitKop >= 0 ? C.green : C.red,
         }}>
           {totals.withRevenue === 0 ? "—" : rubKop(profitKop)}
         </div>
-        <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 5, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 5, lineHeight: 1.5 }}>
           {totals.withRevenue === 0
             ? "нет заказов с известной ценой"
             : <>получили {rubKop(totals.revenueKop)} · робуксы −{rubKop(knownCostKop)} · эквайринг −{rubKop(totals.acquiringKop)} · налог −{rubKop(totals.usnKop)}
@@ -341,7 +341,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
 
       {totals.bonus > 0 && (
         <Card pad={14}>
-          <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.55 }}>
+          <div style={{ fontSize: 14, color: C.textSecondary, lineHeight: 1.55 }}>
             Бонусные <b style={{ color: C.yellow }}>{rbx(totals.bonus)}</b> обошлись нам в{" "}
             <b style={{ color: C.textPrimary }}>{rubKop(totals.bonusCostKop)}</b> —{" "}
             {pct(totals.bonusCostKop, totals.revenueKop || 1)}% выручки. За деньги продано{" "}
@@ -358,7 +358,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
             type="button" onClick={resetRates}
             style={{
               display: "flex", alignItems: "center", gap: 5, background: "none", border: "none",
-              color: C.accent, fontSize: 13, cursor: "pointer", padding: 0, fontFamily: "inherit",
+              color: C.accent, fontSize: 14, cursor: "pointer", padding: 0, fontFamily: "inherit",
             }}
           ><RotateCcw size={13} /> Сброс</button>
         </div>
@@ -377,13 +377,13 @@ export default function EconomicsScreen({ token }: { token: string }) {
         </div>
 
         {!valid ? (
-          <div style={{ marginTop: 12, fontSize: 13, color: C.red }}>
+          <div style={{ marginTop: 12, fontSize: 14, color: C.red }}>
             Проверь значения: курс и ставка должны быть больше нуля, комиссия — от 0 до 99%.
           </div>
         ) : (
           <div style={{
             marginTop: 12, padding: "11px 13px", borderRadius: RADIUS.md,
-            background: C.elevated, fontSize: 12.5, color: C.textSecondary, lineHeight: 1.7,
+            background: C.elevated, fontSize: 14, color: C.textSecondary, lineHeight: 1.7,
           }}>
             <div>грязные R$ = выдано ÷ {(1 - tax / 100).toFixed(2)} <span style={{ color: C.muted }}>(комиссия {tax}%)</span></div>
             <div>себестоимость = грязные ÷ 1000 × {rate} $ × {usd} ₽</div>
@@ -396,7 +396,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
         )}
 
         {data.defaults.purchaseRateUsdPer1k !== null && (
-          <div style={{ marginTop: 10, fontSize: 12, color: C.textTertiary, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 10, fontSize: 14, color: C.textTertiary, lineHeight: 1.5 }}>
             В Настройках сейчас: {data.defaults.usdToRub} ₽/$ и {data.defaults.purchaseRateUsdPer1k} $/1k —
             этим считаются снапшоты новых выкупов.
           </div>
@@ -419,7 +419,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
       {totals.snapshotCount > 0 && Math.abs(totals.snapshotCostKop - knownCostKop) >= 100 && (
         <div style={{
           background: tint(C.yellow, 0.12), border: `1px solid ${tint(C.yellow, 0.3)}`,
-          borderRadius: RADIUS.md, padding: "12px 14px", fontSize: 13, lineHeight: 1.55,
+          borderRadius: RADIUS.md, padding: "12px 14px", fontSize: 14, lineHeight: 1.55,
         }}>
           <b style={{ color: C.yellow }}>Снапшоты в базе не сходятся с этой формулой.</b> По {totals.snapshotCount}{" "}
           заказам записано {rubKop(totals.snapshotCostKop)} себестоимости, по текущим курсам выходит{" "}
@@ -432,7 +432,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
       {totals.orders - totals.withRevenue > 0 && (
         <div style={{
           background: tint(C.orange, 0.12), border: `1px solid ${tint(C.orange, 0.3)}`,
-          borderRadius: RADIUS.md, padding: "12px 14px", fontSize: 13, lineHeight: 1.55,
+          borderRadius: RADIUS.md, padding: "12px 14px", fontSize: 14, lineHeight: 1.55,
         }}>
           <b style={{ color: C.orange }}>Без цены: {totals.orders - totals.withRevenue} из {totals.orders}.</b>{" "}
           Робуксов на них ушло на {rubKop(totals.costNoRevenueKop)}, но сколько за них заплатили — в базе
@@ -446,7 +446,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
           Заказы <span style={{ color: C.textTertiary, fontWeight: 400 }}>· {rows.length}</span>
         </div>
         {rows.length === 0 && (
-          <div style={{ padding: "0 16px 16px", fontSize: 13, color: C.textSecondary }}>
+          <div style={{ padding: "0 16px 16px", fontSize: 14, color: C.textSecondary }}>
             За этот период ничего нет
           </div>
         )}
@@ -465,7 +465,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, ...tabular }}>{o.wbCode}</div>
-                  <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
+                  <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2 }}>
                     {shortDate(o.completedAt ?? o.createdAt)} · {SOURCE_LABEL[o.source]} · {o.platform} · {rbx(o.robuxDelivered)}
                     {o.bonusRobux > 0 && <span style={{ color: C.yellow }}> (+{o.bonusRobux} бонус)</span>}
                   </div>
@@ -475,7 +475,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
                     fontSize: 15, fontWeight: 600, ...tabular,
                     color: profitKop == null ? C.textTertiary : profitKop >= 0 ? C.green : C.red,
                   }}>{profitKop == null ? "—" : rubKop(profitKop)}</div>
-                  <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2, ...tabular }}>
+                  <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2, ...tabular }}>
                     {o.revenueKopecks == null ? "цена ?" : rubKop(o.revenueKopecks)}
                   </div>
                 </div>
@@ -486,7 +486,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
               </button>
 
               {open && (
-                <div style={{ padding: "0 16px 14px", fontSize: 12.5, color: C.textSecondary, lineHeight: 1.75 }}>
+                <div style={{ padding: "0 16px 14px", fontSize: 14, color: C.textSecondary, lineHeight: 1.75 }}>
                   <div style={{ padding: "10px 12px", background: C.elevated, borderRadius: RADIUS.md }}>
                     <Line k="Ник Roblox" v={o.robloxUsername ?? "—"} />
                     <Line k="Оплачено клиентом" v={o.revenueKopecks == null ? "неизвестно" : rubKop2(o.revenueKopecks)}
@@ -530,7 +530,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: 15 }}>Наши цены</div>
-            <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
+            <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2 }}>
               маржа по каждому паку · цены можно менять
             </div>
           </div>
@@ -542,7 +542,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
           <div style={{ padding: "0 16px 16px" }}>
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 84px 1fr 52px", gap: "0 8px",
-              fontSize: 11, color: C.textTertiary, paddingBottom: 6,
+              fontSize: 14, color: C.textTertiary, paddingBottom: 6,
               borderBottom: `1px solid ${C.hairline}`,
             }}>
               <span>пак</span><span style={{ textAlign: "right" }}>цена ₽</span>
@@ -557,7 +557,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
                 <div key={pack} style={{
                   display: "grid", gridTemplateColumns: "1fr 84px 1fr 52px", gap: "0 8px",
                   alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${C.hairline}`,
-                  fontSize: 13, ...tabular,
+                  fontSize: 14, ...tabular,
                 }}>
                   <span>{pack.toLocaleString("ru-RU")}</span>
                   <input
@@ -574,7 +574,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
                 </div>
               );
             })}
-            <div style={{ fontSize: 11.5, color: C.textTertiary, marginTop: 10, lineHeight: 1.55 }}>
+            <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 10, lineHeight: 1.55 }}>
               Себестоимость пака = ceil(пак ÷ {(1 - tax / 100).toFixed(2)}) ÷ 1000 × {rate} $ × {usd} ₽.
               Правки цен живут только в этом экране — в боте и на сайте прайс не меняется.
             </div>
@@ -585,7 +585,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
       {/* Что было бы по этим ценам */}
       {valid && totals.orders > 0 && (
         <Card pad={14}>
-          <div style={{ fontSize: 13, lineHeight: 1.6, color: C.textSecondary }}>
+          <div style={{ fontSize: 14, lineHeight: 1.6, color: C.textSecondary }}>
             <b style={{ color: C.textPrimary }}>По вашему прайсу</b> эти же {totals.orders} заказов дали бы{" "}
             {rubKop(totals.modelRevenueKop)} выручки и <b style={{
               color: modelProfitKop >= profitKop ? C.green : C.orange,
@@ -600,7 +600,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
         </Card>
       )}
 
-      <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.55, padding: "0 2px" }}>
+      <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.55, padding: "0 2px" }}>
         WB-коридор сюда не входит: там платит Wildberries, и выручки заказа в базе нет.
         {data.truncated && " Показаны последние 2000 заказов."}
       </div>
@@ -614,7 +614,7 @@ function Line({ k, v, note, strong }: { k: string; v: string; note?: string; str
       <span>{k}</span>
       <span style={{ color: strong ? C.textPrimary : C.textSecondary, fontWeight: strong ? 600 : 400, textAlign: "right", ...tabular }}>
         {v}
-        {note && <small style={{ display: "block", fontSize: 11, color: C.muted }}>{note}</small>}
+        {note && <small style={{ display: "block", fontSize: 14, color: C.muted }}>{note}</small>}
       </span>
     </div>
   );

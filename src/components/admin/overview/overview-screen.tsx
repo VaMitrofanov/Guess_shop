@@ -711,12 +711,14 @@ export default function OverviewScreen({
           <header className={cn(styles.laneHead, styles.toneAccent)}>
             <i aria-hidden="true" />
             <strong>Дожать</strong>
-            <b>{link.stale}</b>
+            {/* То же число, что у среза «Дожать» в рабочем месте: до 20.10 здесь
+                стояли висяки (118) под тем же словом, что у среза со 143. */}
+            <b>{link.orders}</b>
           </header>
           <div className={styles.laneMeta}>
-            <span>{plural(link.stale, "висяк", "висяка", "висяков")} без ссылки дольше двух недель</span>
-            {link.silent > 0 && <span>бот отмолчал <b>{link.silent}</b></span>}
-            {link.unreached > 0 && <span>без единого сообщения <b>{link.unreached}</b></span>}
+            <span>ждут ссылку на геймпасс</span>
+            {link.silent > 0 && <span>🫥 молчат <b>{link.silent}</b></span>}
+            {link.unreached > 0 && <span>📵 не дошло <b>{link.unreached}</b></span>}
           </div>
           <div className={styles.laneRows}>
             <div className={styles.laneRow}>
@@ -724,12 +726,12 @@ export default function OverviewScreen({
               <b className={TONE_CLASS[ageTone(link.age.oldestAt)]}>{fmtAge(link.age.oldestAt)}</b>
             </div>
             <div className={styles.laneRow}>
-              <span>Живая часть очереди</span>
-              <b>{Math.max(0, link.orders - link.stale)}</b>
+              <span>Бот ещё пишет</span>
+              <b>{Math.max(0, link.orders - link.silent)}</b>
             </div>
           </div>
           <footer className={styles.laneFoot}>
-            <Link className={cn(styles.btn, styles.btnSm)} href="/admin/orders?slice=STALE_LINK">Открыть висяки</Link>
+            <Link className={cn(styles.btn, styles.btnSm)} href="/admin/orders?slice=STALE_LINK">Открыть «Молчат»</Link>
           </footer>
         </article>
 
@@ -839,8 +841,6 @@ function DiffPanel({
 
   const diff = data.diff;
   const feed = data.feed ?? [];
-  const dbs = data.dbs;
-  const link = data.slices.slices.AWAITING_LINK;
 
   /* Нити: те же события, сгруппированные по заказу. Одна нить — это история
      «что с ним происходило», и она отвечает на вопрос, которого нет ни у
@@ -872,43 +872,6 @@ function DiffPanel({
   }, [feed]);
 
   const queueDelta = diff.queueBefore - diff.queueNow;
-  const stuck = [
-    dbs && dbs.unclosed > 0
-      ? {
-        key: "dbs",
-        icon: "⏰",
-        title: `${dbs.unclosed} ${plural(dbs.unclosed, "заказ WB ждёт", "заказа WB ждут", "заказов WB ждут")} закрытия доставки`,
-        hint: dbs.overdue > 0
-          ? `${dbs.overdue} ${plural(dbs.overdue, "просрочен", "просрочены", "просрочены")} по сроку WB · автонапоминаний на код нет`
-          : "ход за покупателем — ждём код получения",
-        href: "/admin/wildberries/delivery",
-        label: "Доставка →",
-      }
-      : null,
-    dbs && dbs.funnel.notActivated > 0
-      ? {
-        key: "gate",
-        icon: "📮",
-        title: `${dbs.funnel.notActivated} ${plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")} покупателями`,
-        hint: [
-          dbs.funnel.notActivatedNudged > 0 ? `напоминания кончились у ${dbs.funnel.notActivatedNudged}` : null,
-          dbs.funnel.notActivatedOldestAt ? `старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}` : null,
-        ].filter(Boolean).join(" · "),
-        href: "/admin/wildberries/delivery?focus=notActivated",
-        label: "Разобрать",
-      }
-      : null,
-    link.stale > 0
-      ? {
-        key: "stale",
-        icon: "🧷",
-        title: `${link.stale} ${plural(link.stale, "висяк", "висяка", "висяков")} без ссылки дольше двух недель`,
-        hint: `из ${link.orders} ждущих ссылку · бот молчит после трёх напоминаний`,
-        href: "/admin/orders?slice=STALE_LINK",
-        label: "Висяки →",
-      }
-      : null,
-  ].filter(Boolean) as { key: string; icon: string; title: string; hint: string; href: string; label: string }[];
 
   const calm = [
     diff.errors === 0 ? "ошибок выкупа нет" : null,
@@ -957,7 +920,7 @@ function DiffPanel({
               </small>
             </div>
             <div className={styles.diffTile}>
-              <span>Ушло с доноров</span>
+              <span>Ушло на выкуп</span>
               <strong>{num(diff.doneGross)} <em>R$</em></strong>
               <small>
                 {diff.done > 0
@@ -1032,21 +995,8 @@ function DiffPanel({
               </>
             )}
 
-            {stuck.length > 0 && (
-              <>
-                <div className={cn(styles.diffGroupKey, styles.toneRed)}>
-                  Не сдвинулось · {stuck.length} {plural(stuck.length, "очаг", "очага", "очагов")}
-                </div>
-                {stuck.map(item => (
-                  <div className={cn(styles.diffLine, styles.diffLineAlert)} key={item.key}>
-                    <i>{item.icon}</i>
-                    <span><b>{item.title}</b>{item.hint && <small>{item.hint}</small>}</span>
-                    <Link className={cn(styles.btn, styles.btnSm)} href={item.href}>{item.label}</Link>
-                  </div>
-                ))}
-              </>
-            )}
-
+            {/* «Не сдвинулось» убрано 20.10: те же очаги стоят на дорожках выше
+                со своими кнопками («11 кодов» — WB Доставка, «молчат» — Дожать). */}
             {calm && (
               <>
                 <div className={styles.diffGroupKey}>Тихо</div>

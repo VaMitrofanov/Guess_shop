@@ -18,7 +18,7 @@ import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
 import { directPatchForSource, isDirectSource } from "@/lib/order-direct";
-import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL, isUnpaidDirect } from "@/lib/buyout-queue";
+import { PAID_BUYOUT_SCOPE, isUnpaidDirect } from "@/lib/buyout-queue";
 import {
   assertSplitCoversOrder,
   buildSplitParts,
@@ -31,12 +31,12 @@ import {
   type StoredPart,
 } from "@/lib/order-gamepass-split";
 import {
-  ATTENTION_BUYOUT_HOURS, ATTENTION_LINK_DAYS, NEW_CUTOFF_HOURS, STALE_LINK_DAYS,
+  TAB_SQL,
   buildTabWhere, isGamepassExportTab, loadGamepassExport, orderByForTab,
   type FilterTab,
 } from "@/lib/order-queue";
 import {
-  NOT_HELD_SQL, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
+  assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
 } from "@/lib/order-hold";
 import { isRevokedCode } from "@/lib/wb-code-revocation";
 import {
@@ -469,42 +469,18 @@ export async function GET(req: NextRequest) {
           const intentsPromise: Promise<number> = (prisma as any).directIntent.count({
             where: { status: "PENDING", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } },
           }).catch(() => 0);
+          // Все предикаты — из `TAB_SQL` (order-queue.ts): одно правило на ленту,
+          // «Выкуп», значок и шапку среза.
+          const countable = ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"] as const;
+          const summable = ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const;
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
-              COUNT(*) FILTER (WHERE "isFavorite" = false AND ${NOT_HELD_SQL} AND (
-                status = 'ERROR'
-                OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO')
-                OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
-              ))::int AS "WORK",
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE ${PAID_BUYOUT_SQL} AND ${NOT_HELD_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW'))))::int AS "BUYOUT",
-              COUNT(*) FILTER (WHERE "isDirectOrder" = true AND ${NOT_HELD_SQL} AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
-              COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND ${NOT_HELD_SQL} AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
-              COUNT(*) FILTER (WHERE status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false)::int AS "ERROR",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days' AND "isFavorite" = false)::int AS "STALE_LINK",
-              COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
-              COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED",
-              COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
-              COUNT(*) FILTER (WHERE "isFavorite" = false AND ${NOT_HELD_SQL} AND (
-                status = 'ERROR'
-                OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
-                OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
-                OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${ATTENTION_LINK_DAYS} days')
-              ))::int AS "ATTENTION",
-              COUNT(*) FILTER (WHERE "heldAt" IS NOT NULL)::int AS "HELD",
-              COALESCE(SUM(amount) FILTER (WHERE ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW')))), 0)::int AS "SUM_BUYOUT",
-              COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
-              COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days' AND "isFavorite" = false), 0)::int AS "SUM_STALE_LINK",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false), 0)::int AS "SUM_NEW",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false), 0)::int AS "SUM_ERROR",
-              COALESCE(SUM(amount) FILTER (WHERE "heldAt" IS NOT NULL), 0)::int AS "SUM_HELD",
-              MIN("pendingAt") FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false) AS "OLDEST_BUYOUT",
-              MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false) AS "OLDEST_AWAITING_LINK",
-              MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days' AND "isFavorite" = false) AS "OLDEST_STALE_LINK"
+              ${countable.map(k => `COUNT(*) FILTER (WHERE ${TAB_SQL[k]})::int AS "${k}"`).join(",\n              ")},
+              ${summable.map(k => `COALESCE(SUM(amount) FILTER (WHERE ${TAB_SQL[k]}), 0)::int AS "SUM_${k}"`).join(",\n              ")},
+              MIN("pendingAt") FILTER (WHERE ${TAB_SQL.BUYOUT}) AS "OLDEST_BUYOUT",
+              MIN("createdAt") FILTER (WHERE ${TAB_SQL.AWAITING_LINK}) AS "OLDEST_AWAITING_LINK",
+              MIN("createdAt") FILTER (WHERE ${TAB_SQL.STALE_LINK}) AS "OLDEST_STALE_LINK"
             FROM "WbOrder"
             WHERE "isTest" = false
           `);
@@ -1662,6 +1638,7 @@ export async function POST(req: NextRequest) {
       Object.assign(data, buildOrderProfitSnapshot(order, settings ?? {}, Math.ceil(order.amount / 0.7)) ?? {});
     }
     if (target === "REJECTED") data.rejectionReason = note;
+    if (target === "DONE" || target === "REJECTED") { data.priorityAt = null; data.priorityBy = null; }
     if (target !== "ERROR") data.buyoutErrorCode = null;
     if (target === "AWAITING_LINK" || target === "NEW") data.pendingAt = null;
     if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO")
@@ -1690,7 +1667,8 @@ export async function POST(req: NextRequest) {
     await (prisma as any).$transaction([
       (prisma as any).wbOrder.update({
         where: { id: orderId },
-        data:  { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
+        // ⚡ живёт, пока заказ в очереди: закрытый заказ «первым» не бывает.
+        data:  { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, completedAt: new Date(), priorityAt: null, priorityBy: null, ...(money ?? {}) },
       }),
       // Ручное «Выкуплено» закрывает и оставшиеся части: заказ не может быть
       // выполнен, пока в нём висят невыкупленные куски — иначе карточка
@@ -1839,7 +1817,7 @@ export async function POST(req: NextRequest) {
     const rejectionReason = String(reason ?? "не указана");
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "REJECTED", buyoutErrorCode: null, rejectionReason },
+      data:  { status: "REJECTED", buyoutErrorCode: null, rejectionReason, priorityAt: null, priorityBy: null },
     });
     await recordOrderStatusChange({
       orderId, from: order.status, to: "REJECTED", actor: `admin:${actor.displayName}`,
@@ -2069,7 +2047,7 @@ export async function POST(req: NextRequest) {
       const money = buildOrderProfitSnapshot(order, settings ?? {}, totalCharged);
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-        data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
+        data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), priorityAt: null, priorityBy: null, ...(money ?? {}) },
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});

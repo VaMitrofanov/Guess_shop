@@ -151,7 +151,7 @@ export interface PrimaryAction {
   tone: Tone;
 }
 
-export function primaryActionFor(order: PresentableOrder): PrimaryAction | null {
+export function primaryActionFor(order: PresentableOrder, live?: GpLive | null): PrimaryAction | null {
   // ❄️ У замороженного заказа кнопок выкупа нет вовсе — не серых и
   // продавливаемых, а отсутствующих. Единственный выход — снять заморозку.
   if (order.heldAt) return { kind: "action", action: "unhold", icon: "❄", label: "Разморозить", tone: "ice" };
@@ -175,6 +175,12 @@ export function primaryActionFor(order: PresentableOrder): PrimaryAction | null 
   // купив не всё», и клиент получил бы меньше оплаченного.
   if (split.length > 0 && split.some(part => !part.purchasedAt)) return null;
   if (!hasGamepass) return null;
+  /* Живая проверка говорит «этот пасс не купить»: он уже выкуплен по другому
+     заказу или снят с продажи. До 20.10 рядом с красным флагом стояла зелёная
+     «Выкуплено» — кнопка звала сделать то, что флаг запрещал. Теперь главное
+     действие — написать покупателю за новым пассом; «Выкуплено» остаётся в меню. */
+  if (live?.reusedIn || live?.isForSale === false)
+    return { kind: "contact", icon: "✉", label: "Написать", labelLong: "Написать за новым пассом", tone: "blue" };
   return { kind: "action", action: "complete", icon: "✓", label: "Выкуплено", tone: "green" };
 }
 
@@ -283,6 +289,11 @@ export const SOURCE_LABEL: Readonly<Record<string, string>> = {
   SITE: "Сайт",
   AVITO: "Авито",
   MANUAL: "Ручной",
+};
+
+/** Коротко — для тесных мест (таблица «Выкупа»): те же слова, что у полос ленты. */
+export const SOURCE_SHORT: Readonly<Record<string, string>> = {
+  WB: "ВБ", WB_DBS: "DBS", DIRECT: "Прямой", SITE: "Сайт", AVITO: "Авито", MANUAL: "Ручной",
 };
 
 export const sourceLabel = (source: string | null | undefined): string =>

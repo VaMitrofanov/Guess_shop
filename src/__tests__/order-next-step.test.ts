@@ -1,4 +1,4 @@
-import { nextStepFor, sourceLabel, statusLabel, type PresentableOrder } from "@/lib/order-presentation";
+import { nextStepFor, primaryActionFor, sourceLabel, statusLabel, type PresentableOrder } from "@/lib/order-presentation";
 
 const base: PresentableOrder = {
   amount: 800, status: "PENDING", wbCode: "TEST1", gamepassUrl: "https://www.roblox.com/game-pass/1",
@@ -39,5 +39,16 @@ describe("слова вместо enum", () => {
     expect(sourceLabel("WB_DBS")).toMatch(/DBS/);
     expect(sourceLabel("WB_DBS")).not.toBe("WB_DBS");
     expect(statusLabel("НЕЧТО")).toBe("НЕЧТО");
+  });
+});
+
+describe("главное действие и живая проверка пасса (20.10)", () => {
+  test("пасс выкуплен в другом заказе — не «Выкуплено», а «Написать»", () => {
+    expect(primaryActionFor(base, { reusedIn: "OTHER1" })?.kind).toBe("contact");
+    expect(primaryActionFor(base, { isForSale: false })?.kind).toBe("contact");
+  });
+  test("без живой проверки или при годном пассе — «Выкуплено»", () => {
+    expect(primaryActionFor(base)?.action).toBe("complete");
+    expect(primaryActionFor(base, { isForSale: true, priceMismatch: false })?.action).toBe("complete");
   });
 });

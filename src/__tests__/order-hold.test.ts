@@ -8,7 +8,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { buildTabWhere, orderByForTab, type FilterTab } from "@/lib/order-queue";
+import { TAB_SQL, buildTabWhere, orderByForTab, type FilterTab } from "@/lib/order-queue";
 import {
   HOLD_NOTE_MARK, NOT_HELD, NOT_HELD_SQL, UNHOLD_NOTE_MARK,
   hasHoldNoteFor, heldRefusal, normalizeHoldCode, normalizeHoldReason, parseAdminNote,
@@ -55,14 +55,13 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
   });
 
   it("рабочие счётчики фильтруют заморозку", () => {
-    for (const tab of ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION"]) {
-      const line = route.split("\n").find((l) => l.includes(`AS "${tab}"`) || l.includes(`))::int AS "${tab}"`));
-      expect(line).toBeDefined();
+    // С 20.10.2026 предикаты счётчиков живут в `TAB_SQL` (order-queue.ts), а
+    // роут собирает из них SELECT — проверяем словарь и то, что роут им пользуется.
+    for (const tab of WORK_TABS) {
+      if (tab === "ALL" || tab === "DONE" || tab === "REJECTED" || tab === "FAVORITES" || tab === "HELD") continue;
+      expect(TAB_SQL[tab as Exclude<FilterTab, "ALL">]).toContain(NOT_HELD_SQL);
     }
-    // Каждая рабочая ветка SQL несёт ${NOT_HELD_SQL}; их ровно столько же,
-    // сколько рабочих вкладок (+2 суммы: SUM_ERROR и SUM_HELD не в счёт).
-    const occurrences = route.match(/\$\{NOT_HELD_SQL\}/g) ?? [];
-    expect(occurrences.length).toBeGreaterThanOrEqual(WORK_TABS.length);
+    expect(route).toContain("TAB_SQL[k]");
   });
 
   it("создание заказа на замороженном коде отклоняется", () => {
@@ -87,7 +86,8 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
   });
 
   it("счётчик «Заморожены» существует", () => {
-    expect(route).toContain(`COUNT(*) FILTER (WHERE "heldAt" IS NOT NULL)::int AS "HELD"`);
+    expect(TAB_SQL.HELD).toBe(`"heldAt" IS NOT NULL`);
+    expect(route).toMatch(/"HELD"/);
   });
 });
 

@@ -60,7 +60,7 @@ export const GAMEPASS_TOOLS: readonly GamepassTool[] = [
     id: "split",
     icon: "🧩",
     label: "Разбить выкуп",
-    hint: "набор пассов под номинал — заказ больше донора",
+    hint: "набор пассов под номинал — заказ не влезает в один аккаунт",
   },
 ] as const;
 

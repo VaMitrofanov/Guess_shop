@@ -141,7 +141,7 @@ export default function CodesScreen({ token }: { token: string }) {
                   { label: "За 7 дней",         val: data.usedWeek,  accent: false },
                 ].map(c => (
                   <div key={c.label} style={{ background: C.card, borderRadius: 14, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 5 }}>{c.label}</div>
+                    <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 5 }}>{c.label}</div>
                     <div style={{ fontSize: 24, fontWeight: 700, color: c.accent ? C.accent : "#fff" }}>{c.val}</div>
                   </div>
                 ))}
@@ -156,7 +156,7 @@ export default function CodesScreen({ token }: { token: string }) {
                     <XAxis dataKey="date" tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
                     <Tooltip
-                      contentStyle={{ background: C.elevated, border: "none", borderRadius: 8, fontSize: 12 }}
+                      contentStyle={{ background: C.elevated, border: "none", borderRadius: 8, fontSize: 14 }}
                       labelStyle={{ color: "#fff" }}
                     />
                     <Bar dataKey="count" name="Активаций" fill={C.accent} radius={[4, 4, 0, 0]} />
@@ -168,11 +168,11 @@ export default function CodesScreen({ token }: { token: string }) {
               <div style={{ background: C.card, borderRadius: 14, padding: "14px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <span style={{ fontWeight: 600, fontSize: 14 }}>Остатки кодов</span>
-                  <span style={{ color: C.textSecondary, fontSize: 13 }}>Всего: {total} шт</span>
+                  <span style={{ color: C.textSecondary, fontSize: 14 }}>Всего: {total} шт</span>
                 </div>
 
                 {data.inventory.length === 0 ? (
-                  <div style={{ color: C.red, fontSize: 13, textAlign: "center" as const, padding: "8px 0" }}>⚠️ Нет кодов!</div>
+                  <div style={{ color: C.red, fontSize: 14, textAlign: "center" as const, padding: "8px 0" }}>⚠️ Нет кодов!</div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {data.inventory.map(c => {
@@ -182,7 +182,7 @@ export default function CodesScreen({ token }: { token: string }) {
                         <div key={c.denom}>
                           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                             <span style={{ color: C.accent, fontWeight: 600, fontSize: 15 }}>{c.denom} R$</span>
-                            <span style={{ color, fontWeight: 600, fontSize: 13 }}>{c.count} шт</span>
+                            <span style={{ color, fontWeight: 600, fontSize: 14 }}>{c.count} шт</span>
                           </div>
                           <div style={{ background: C.elevated, borderRadius: 4, height: 5 }}>
                             <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 4 }} />
@@ -257,7 +257,7 @@ function SearchBar({
                 padding: "6px 12px", borderRadius: 999, border: "none", cursor: "pointer",
                 background:  active ? C.accent          : C.card,
                 color:       active ? "#fff"            : C.textSecondary,
-                fontSize:    12.5, fontWeight: active ? 600 : 500,
+                fontSize: 14, fontWeight: active ? 600 : 500,
                 whiteSpace:  "nowrap",
                 flexShrink:  0,
                 transition:  "all 0.15s",
@@ -292,7 +292,7 @@ function SearchResults({ data, loading }: { data: SearchData | null; loading: bo
       <div style={{ padding: 40, textAlign: "center" as const, color: C.textSecondary }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
         <div style={{ fontSize: 14 }}>Ничего не нашлось</div>
-        <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 4 }}>
+        <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>
           Поменяй запрос или фильтр статуса
         </div>
       </div>
@@ -300,7 +300,7 @@ function SearchResults({ data, loading }: { data: SearchData | null; loading: bo
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ color: C.textSecondary, fontSize: 12.5, padding: "2px 4px" }}>
+      <div style={{ color: C.textSecondary, fontSize: 14, padding: "2px 4px" }}>
         Найдено: <span style={{ color: C.textPrimary, fontWeight: 600 }}>{data.total}</span>
         {data.total > data.codes.length && (
           <span style={{ color: C.textTertiary }}> · показано {data.codes.length}</span>
@@ -381,7 +381,7 @@ function CodeRow({ c }: { c: WbCodeRow }) {
         )}
         {c.batch && (
           <span style={{
-            color: C.textTertiary, fontSize: 11,
+            color: C.textTertiary, fontSize: 14,
           }}>
             батч: {c.batch}
           </span>
@@ -391,32 +391,32 @@ function CodeRow({ c }: { c: WbCodeRow }) {
       {(userLabel || c.order || reservedActive) && (
         <div style={{ borderTop: `1px solid ${C.hairline}`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
           {userLabel && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: C.textPrimary }}>
-              <span style={{ color: C.textTertiary, fontSize: 11.5, letterSpacing: 0.3, textTransform: "uppercase" as const, fontWeight: 600 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: C.textPrimary }}>
+              <span style={{ color: C.textTertiary, fontSize: 14, letterSpacing: 0.3, textTransform: "uppercase" as const, fontWeight: 600 }}>
                 Юзер
               </span>
               <span>{userLabel}</span>
             </div>
           )}
           {c.order && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: C.textPrimary }}>
-              <span style={{ color: C.textTertiary, fontSize: 11.5, letterSpacing: 0.3, textTransform: "uppercase" as const, fontWeight: 600 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: C.textPrimary }}>
+              <span style={{ color: C.textTertiary, fontSize: 14, letterSpacing: 0.3, textTransform: "uppercase" as const, fontWeight: 600 }}>
                 Заказ
               </span>
-              <span style={{ color: C.textSecondary, fontSize: 12 }}>
+              <span style={{ color: C.textSecondary, fontSize: 14 }}>
                 {c.order.status} · {c.order.amount} R$
               </span>
             </div>
           )}
           {reservedActive && c.reservedUntil && (
-            <div style={{ fontSize: 12, color: C.yellow }}>
+            <div style={{ fontSize: 14, color: C.yellow }}>
               ⏳ Резерв до {new Date(c.reservedUntil).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
             </div>
           )}
         </div>
       )}
 
-      <div style={{ color: C.textTertiary, fontSize: 11 }}>
+      <div style={{ color: C.textTertiary, fontSize: 14 }}>
         Обновлён: {dateStr}
       </div>
     </div>

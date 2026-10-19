@@ -66,6 +66,8 @@ export interface LiveCheck {
   priceMismatch?: boolean | null;
   expected?: number | null;
   sellerName?: string | null;
+  /** Код заказа, в котором этот пасс уже выкуплен. */
+  reusedIn?: string | null;
   checkedAt?: number;
 }
 
@@ -104,7 +106,7 @@ export const EXTRA_TABS: { key: string; label: string }[] = [
   { key: "AVITO", label: "Авито" },
   { key: "FAVORITES", label: "Избранное" },
   { key: "ATTENTION", label: "Требуют внимания" },
-  { key: "STALE_LINK", label: "Висяки" },
+  { key: "STALE_LINK", label: "🫥 Молчат" },
   { key: "HELD", label: "Заморожены" },
   { key: "REJECTED", label: "Отменены" },
 ];

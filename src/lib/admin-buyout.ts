@@ -1,8 +1,7 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { type GamepassExportTab, loadGamepassExport } from "@/lib/order-queue";
+import { TAB_SQL, type GamepassExportTab, loadGamepassExport } from "@/lib/order-queue";
 import { logAdminTiming } from "@/lib/admin-performance";
 
 type BuyoutCountRow = {
@@ -15,53 +14,11 @@ type BuyoutCountRow = {
 };
 
 async function loadBuyoutCounts() {
-  const workCutoff = new Date(Date.now() - 40 * 60 * 60 * 1000);
-  const buyoutOverdue = new Date(Date.now() - 12 * 60 * 60 * 1000);
-  const linkOverdue = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
-  const rows = await prisma.$queryRaw<BuyoutCountRow[]>(Prisma.sql`
-    SELECT
-      COUNT(*) FILTER (
-        WHERE "isFavorite" = false
-          AND "orderSource"::text <> 'AVITO'
-          AND NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
-          AND (
-            "status"::text IN ('PENDING', 'IN_PROGRESS')
-            OR ("status"::text = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE', 'ROBLOX_PLUS_FLOW'))
-          )
-      ) AS "BUYOUT",
-      COUNT(*) FILTER (
-        WHERE "isFavorite" = false AND "isDirectOrder" = true
-          AND "status"::text IN ('PENDING', 'IN_PROGRESS', 'AWAITING_PAYMENT', 'PAYMENT_PENDING', 'ERROR')
-      ) AS "DIRECT",
-      COUNT(*) FILTER (
-        WHERE "isFavorite" = false AND "orderSource"::text = 'AVITO'
-          AND "status"::text IN ('PENDING', 'IN_PROGRESS', 'AWAITING_GAMEPASS', 'ERROR')
-      ) AS "AVITO",
-      COUNT(*) FILTER (
-        WHERE "isFavorite" = false AND (
-          "status"::text = 'ERROR'
-          OR (
-            "status"::text IN ('PENDING', 'IN_PROGRESS')
-            AND "orderSource"::text <> 'AVITO'
-            AND NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
-          )
-          OR ("status"::text = 'AWAITING_GAMEPASS' AND "createdAt" <= ${workCutoff})
-        )
-      ) AS "WORK",
-      COUNT(*) FILTER (WHERE "isFavorite" = false AND "status"::text = 'ERROR') AS "ERROR",
-      COUNT(*) FILTER (
-        WHERE "isFavorite" = false AND (
-          "status"::text = 'ERROR'
-          OR (
-            "status"::text IN ('PENDING', 'IN_PROGRESS')
-            AND "orderSource"::text <> 'AVITO'
-            AND NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
-            AND "pendingAt" <= ${buyoutOverdue}
-          )
-          OR ("isDirectOrder" = true AND "status"::text IN ('AWAITING_PAYMENT', 'PAYMENT_PENDING'))
-          OR ("status"::text = 'AWAITING_GAMEPASS' AND "createdAt" <= ${linkOverdue})
-        )
-      ) AS "ATTENTION"
+  /* Те же правила, что у ленты (`TAB_SQL`). Своя копия до 20.10 не знала о
+     заморозке: «К выкупу 41» здесь против «Выкупить 25» в рабочем месте. */
+  const tabs = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
+  const rows = await prisma.$queryRawUnsafe<BuyoutCountRow[]>(`
+    SELECT ${tabs.map(tab => `COUNT(*) FILTER (WHERE ${TAB_SQL[tab]}) AS "${tab}"`).join(", ")}
     FROM "WbOrder"
     WHERE "isTest" = false
   `);

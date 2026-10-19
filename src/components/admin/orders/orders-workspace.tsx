@@ -19,6 +19,7 @@
       и в пачку он не попадает даже через «выделить все».
    ───────────────────────────────────────────────────────────────────────── */
 
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -40,6 +41,8 @@ import {
 import styles from "./orders.module.css";
 
 const PAGE_SIZE = 50;
+/** Закрытый заказ: у него нет места в очереди — ни ⚡, ни кнопки поднять. */
+const isClosed = (order: { status: string }) => order.status === "COMPLETED" || order.status === "REJECTED";
 /** Статусы, в которых сервер разрешает менять разбиение (`set-gamepass-split`). */
 const SPLITTABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
 /** Живая проверка пасса идёт пачками по 30 — столько принимает роут. */
@@ -125,6 +128,13 @@ export default function OrdersWorkspace({
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  /* Досье первого заказа — сразу (20.10.2026). В режиме «Список» на широком
+     экране правая половина стояла пустой («Выберите заказ»), пока не кликнешь.
+     Открываем один раз на срез: закрытое досье само не возвращается. */
+  const autoOpenedFor = useRef<string | null>(null);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
 
   const undoRef = useRef<null | (() => void)>(null);
   const lastClickedIndex = useRef<number | null>(null);
@@ -214,12 +224,17 @@ export default function OrdersWorkspace({
       if (data.slices) setSlices(data.slices);
       setLoadedAt(Date.now());
       if (!append) setCursor(0);
+      if (!append && data.orders.length > 0 && modeRef.current === "split" && autoOpenedFor.current !== slice
+          && !window.matchMedia("(max-width: 1050px)").matches) {
+        autoOpenedFor.current = slice;
+        setOpenId(prev => prev ?? data.orders[0].id);
+      }
     } catch (error) {
       if (seq === requestSeq.current) showToast({ text: (error as Error).message, error: true });
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [buildParams]);
+  }, [buildParams, slice]);
 
   useEffect(() => {
     void load(1, false);
@@ -481,7 +496,7 @@ export default function OrdersWorkspace({
 
   /** Главное действие строки — одно на состояние заказа. */
   const runPrimary = useCallback(async (order: AdminOrder) => {
-    const action = primaryActionFor(order);
+    const action = primaryActionFor(order, live[order.id]);
     if (!action) return;
     if (action.kind === "contact") {
       const href = contactHref(order);
@@ -492,7 +507,7 @@ export default function OrdersWorkspace({
     if (action.action === "complete") { await complete(order); return; }
     if (action.action === "restore-to-buyout") { await restore(order); return; }
     if (action.action === "unhold") { await toggleHold(order); return; }
-  }, [complete, restore, toggleHold, showToast]);
+  }, [complete, restore, toggleHold, showToast, live]);
 
   /* ── Выделение ────────────────────────────────────────────────────────── */
 
@@ -820,7 +835,7 @@ export default function OrdersWorkspace({
         <span className={styles.spacer} />
 
         <button type="button" className={styles.chip} onClick={() => setPaletteOpen(true)}>
-          🔍 Поиск и команды <kbd>⌘K</kbd>
+          🔍 Поиск <kbd>⌘K</kbd>
         </button>
         <button
           type="button"
@@ -831,7 +846,7 @@ export default function OrdersWorkspace({
         </button>
         <div className={`${styles.seg} ${styles.barDesktopOnly}`} role="group" aria-label="Режим списка">
           <button type="button" className={mode === "table" ? styles.segOn : ""} onClick={() => setMode("table")}>Таблица</button>
-          <button type="button" className={mode === "split" ? styles.segOn : ""} onClick={() => setMode("split")}>Список + досье</button>
+          <button type="button" className={mode === "split" ? styles.segOn : ""} onClick={() => setMode("split")} title="Список слева, досье заказа справа">Список</button>
         </div>
         <button
           type="button"
@@ -1003,7 +1018,7 @@ export default function OrdersWorkspace({
           <span className={styles.bulkSum}>{num(selectedGross)} R$ грязными · готовы к выкупу {completableSelected.length}</span>
           <span className={styles.spacer} />
           <button type="button" className={styles.mini} onClick={copySelectedIds}>⧉ ID пассов</button>
-          <button type="button" className={styles.mini} onClick={() => void selectFitDonor()}>Набрать под баланс</button>
+          {DONOR_ENABLED && <button type="button" className={styles.mini} onClick={() => void selectFitDonor()}>Набрать под баланс</button>}
           <button type="button" className={styles.mini} onClick={() => void bulkHold()}>❄ Заморозить</button>
           <button type="button" className={styles.mini} onClick={() => void bulkError()}>⚠ В «Починить»</button>
           <button
@@ -1063,7 +1078,8 @@ export default function OrdersWorkspace({
             <h3>Фильтры</h3>
             <p>Всё, что не является ежедневной работой. Выбор заменяет срез.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {EXTRA_TABS.map(tab => (
+              {/* Авито закрыт: пустую кнопку не показываем. */}
+              {EXTRA_TABS.filter(tab => tab.key !== "AVITO" || (counts[tab.key] ?? 0) > 0).map(tab => (
                 <button
                   key={tab.key}
                   type="button"
@@ -1259,7 +1275,6 @@ function SliceStrip({
                 📵 {slice.unreached} не достучались
               </button>
             )}
-            {slice.stale > 0 && <span className={styles.tag}>{slice.stale} старше 2 недель</span>}
           </div>
         </div>
       ) : (
@@ -1352,7 +1367,7 @@ function OrderRow({
 }) {
   const lane = laneOf(order);
   const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
-  const action = primaryActionFor(order);
+  const action = primaryActionFor(order, live);
   const basis = ageBasis(order);
   const ids = gamepassIdOf(order);
   const parts = order.splitGamepasses ?? [];
@@ -1384,7 +1399,7 @@ function OrderRow({
       <button type="button" className={styles.code} onClick={onOpen}>
         {/* ⚡ стоит у кода, а не в конце строки: место в очереди — свойство
             заказа, и искать его глазами по правому краю неудобно. */}
-        {order.priorityAt && <i className={styles.prio} title="Выкупать первым">⚡</i>}
+        {order.priorityAt && !isClosed(order) && <i className={styles.prio} title="Выкупать первым">⚡</i>}
         {order.wbCode}
       </button>
       <button type="button" className={`${styles.nick} ${!order.robloxUsername && order.probableNick ? styles.nickProbable : ""}`} onClick={onOpen}>
@@ -1411,7 +1426,7 @@ function OrderRow({
         {(ids || parts.length > 0) && (
           <button type="button" className={`${styles.mini} ${styles.miniQuiet}`} onClick={onCopyIds} aria-label="Скопировать ID геймпасса">⧉</button>
         )}
-        {!isHeld(order) && (
+        {!isHeld(order) && !isClosed(order) && (
           <button
             type="button"
             className={`${styles.mini} ${order.priorityAt ? styles.miniPrio : styles.miniQuiet}`}
@@ -1459,7 +1474,7 @@ function QueueCard({
   const lane = laneOf(order);
   const badge = orderBadge(order);
   const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
-  const action = primaryActionFor(order);
+  const action = primaryActionFor(order, live);
   const basis = ageBasis(order);
 
   return (
@@ -1477,7 +1492,7 @@ function QueueCard({
     >
       <button type="button" className={styles.cardTop} onClick={onOpen} style={{ width: "100%" }}>
         <span style={{ color: TONE_COLOR[LANE_META[lane].tone] }}>{LANE_META[lane].label}</span>
-        {order.priorityAt && <span className={styles.prioTag}>⚡ первый</span>}
+        {order.priorityAt && !isClosed(order) && <span className={styles.prioTag}>⚡ первый</span>}
         <span className={styles.age} style={{ color: TONE_COLOR[ageTone(basis)] }}>{fmtAge(basis)}</span>
         {badge && <span style={{ color: TONE_COLOR[badge.tone] }}>{badge.label}</span>}
         <span className={styles.code} style={{ marginLeft: "auto" }}>{order.wbCode}</span>
@@ -1507,7 +1522,7 @@ function QueueCard({
             </button>
           )}
           <button type="button" className={styles.mini} onClick={onOpen}>Досье</button>
-          {!isHeld(order) && (
+          {!isHeld(order) && !isClosed(order) && (
             <button
               type="button"
               className={`${styles.mini} ${order.priorityAt ? styles.miniPrio : ""}`}

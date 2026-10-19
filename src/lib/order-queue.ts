@@ -44,6 +44,15 @@ export const ATTENTION_LINK_DAYS = 5;
 export const STALE_LINK_DAYS = 14;
 
 /**
+ * «Молчат» (20.10.2026): бот отправил все три напоминания (3 ч / 24 ч / 72 ч) и
+ * больше не напишет — заказ сам не сдвинется никогда. Раньше это же место
+ * занимали «висяки» (ждут ссылку дольше двух недель): возрастной отбор, у
+ * которого не было своего действия, и пятое слово для одной и той же тишины.
+ * Вкладка `STALE_LINK` теперь значит именно это.
+ */
+export const SILENT_REMINDERS = 3;
+
+/**
  * Ветка `BUYOUT` из `buildTabWhere`, но для сырых SQL-счётчиков.
  *
  * До 30.08.2026 главная и вкладка «К выкупу» считали очередь по-разному: вкладка
@@ -76,6 +85,56 @@ export const BUYOUT_LANE_SQL = `
     ELSE 'WB'
   END
 `;
+
+/**
+ * Те же вкладки, что `buildTabWhere`, — для сырых счётчиков (`COUNT(*) FILTER`).
+ *
+ * До 20.10.2026 счётчики жили в трёх копиях (лента, страница «Выкуп», значок
+ * TWA), и копии разъехались: «Выкуп» и значок не знали о заморозке, поэтому
+ * одна и та же очередь была 25, 41 и 43 на соседних экранах. Теперь любое
+ * число вкладки берётся отсюда; `order-tab-sql.test.ts` следит, чтобы копий
+ * не появилось снова.
+ */
+export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
+  WORK: `"isFavorite" = false AND ${NOT_HELD_SQL} AND (
+    status = 'ERROR'
+    OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" <> 'AVITO')
+    OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
+  )`,
+  BUYOUT: BUYOUT_QUEUE_SQL,
+  DIRECT: `"isDirectOrder" = true AND ${NOT_HELD_SQL} AND "isFavorite" = false
+    AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR')`,
+  AVITO: `"orderSource" = 'AVITO' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+    AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR')`,
+  NEW: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+    AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`,
+  ERROR: `status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false`,
+  AWAITING_LINK: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+    AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`,
+  STALE_LINK: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+    AND "remindersSent" >= ${SILENT_REMINDERS}`,
+  DONE: `status = 'COMPLETED'`,
+  REJECTED: `status = 'REJECTED'`,
+  FAVORITES: `"isFavorite" = true`,
+  /* «Требуют внимания» — только то, что держим МЫ: ошибка, выкуп дольше 12 ч,
+     прямой заказ, ждущий подтверждения оплаты. «Ждут ссылку дольше 5 дней»
+     отсюда убраны 20.10: они превращали срез в 90 % всей очереди (150 из 168),
+     и он ничего не выделял. Тишину покупателя показывает «Молчат». */
+  ATTENTION: `"isFavorite" = false AND ${NOT_HELD_SQL} AND (
+    status = 'ERROR'
+    OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" <> 'AVITO'
+        AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
+    OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
+  )`,
+  HELD: `"heldAt" IS NOT NULL`,
+};
+
+/**
+ * Значок «Заказы» в TWA: то, что требует рук прямо сейчас — «Выкупить» +
+ * «Починить». До 20.10 он считал все PENDING/IN_PROGRESS/AWAITING_PAYMENT своим
+ * SQL, с заморозками, и показывал 43 при очереди 25.
+ */
+export const URGENT_SQL = `((${TAB_SQL.BUYOUT}) OR (${TAB_SQL.ERROR}))`;
 
 export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
   const cutoff = new Date(Date.now() - NEW_CUTOFF_HOURS * 3600_000);
@@ -118,7 +177,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
     case "STALE_LINK":
       return {
         status: "AWAITING_GAMEPASS",
-        createdAt: { lte: new Date(Date.now() - STALE_LINK_DAYS * 24 * 3600_000) },
+        remindersSent: { gte: SILENT_REMINDERS },
         isFavorite: false,
         ...NOT_HELD,
       };
@@ -133,7 +192,6 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
       return { heldAt: { not: null } };
     case "ATTENTION": {
       const buyoutOverdue = new Date(Date.now() - ATTENTION_BUYOUT_HOURS * 3600_000);
-      const linkOverdue = new Date(Date.now() - ATTENTION_LINK_DAYS * 24 * 3600_000);
       return {
         isFavorite: false,
         ...NOT_HELD,
@@ -141,7 +199,6 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
           { status: "ERROR" },
           { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
           { isDirectOrder: true, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
-          { status: "AWAITING_GAMEPASS", createdAt: { lte: linkOverdue } },
         ],
       };
     }

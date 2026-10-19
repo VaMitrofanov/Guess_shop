@@ -173,7 +173,7 @@ function ActionRow({ icon, label, hint, tone = "plain", onClick, disabled }: {
       <span style={{ fontSize: 15, flexShrink: 0 }}>{icon}</span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", fontSize: 14, fontWeight: 600 }}>{label}</span>
-        {hint && <span style={{ display: "block", fontSize: 11.5, color: C.textTertiary, marginTop: 1 }}>{hint}</span>}
+        {hint && <span style={{ display: "block", fontSize: 14, color: C.textTertiary, marginTop: 1 }}>{hint}</span>}
       </span>
       <span style={{ color: C.textTertiary, fontSize: 16, flexShrink: 0 }}>›</span>
     </button>
@@ -191,16 +191,16 @@ function MatchCard({ found, title, tone, children }: {
     /* Совпадение приходит через 500 мс после ввода и раздвигает шторку. Без
        проявления это читается как рывок; с ним — как ответ формы. */
     <div className="twa-fade-up" style={{ border: `1px solid ${border}`, background: bg, borderRadius: 13, padding: "10px 11px" }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: tone === "warn" ? C.orange : C.blue }}>{title}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: tone === "warn" ? C.orange : C.blue }}>{title}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{found.wbCode}</span>
+        <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{found.wbCode}</span>
         <span style={{
           fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
           background: `${meta.color}2a`, color: meta.color,
         }}>{meta.label}</span>
-        <span style={{ fontSize: 12, color: C.textSecondary }}>{found.amount.toLocaleString("ru-RU")} R$</span>
+        <span style={{ fontSize: 14, color: C.textSecondary }}>{found.amount.toLocaleString("ru-RU")} R$</span>
       </div>
-      <div style={{ fontSize: 11.5, color: C.textTertiary, marginTop: 3 }}>
+      <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 3 }}>
         {[found.robloxUsername, found.client].filter(Boolean).join(" · ") || "клиент не привязан"}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 9 }}>{children}</div>
@@ -549,7 +549,7 @@ export default function OrderSheet({
   }
 
   const warn = (text: string, color: string = C.orange) => (
-    <div style={{ fontSize: 13, color, lineHeight: 1.35 }}>{text}</div>
+    <div style={{ fontSize: 14, color, lineHeight: 1.35 }}>{text}</div>
   );
 
   /* Кнопки живут в закреплённом футере шторки: при открытой клавиатуре они
@@ -579,7 +579,7 @@ export default function OrderSheet({
       </div>
       {/* Кнопка объясняет, почему она серая: раньше она просто гасла. */}
       {!canSubmit && !busy && (
-        <div style={{ fontSize: 11.5, color: C.textTertiary, textAlign: "center" }}>
+        <div style={{ fontSize: 14, color: C.textTertiary, textAlign: "center" }}>
           {frozen ? "заказ заморожен — сначала сними заморозку"
             : editing ? "измени номинал, ник или геймпасс"
               : `не хватает: ${missing.join(", ")}`}
@@ -601,7 +601,7 @@ export default function OrderSheet({
               ещё и «＋ Новый заказ», и одно и то же было написано дважды. */}
           <div style={{
             display: "flex", alignItems: "center", gap: 8,
-            padding: "8px 11px", borderRadius: 11, fontSize: 12.5,
+            padding: "8px 11px", borderRadius: 11, fontSize: 14,
             background: frozen ? "rgba(100,210,255,0.12)" : editing ? "rgba(10,132,255,0.14)" : "rgba(255,255,255,0.05)",
             border: `1px solid ${frozen ? "rgba(100,210,255,0.3)" : editing ? "rgba(10,132,255,0.32)" : "transparent"}`,
             color: frozen ? C.ice : editing ? "#8ac4ff" : C.textSecondary,
@@ -612,7 +612,7 @@ export default function OrderSheet({
                 <span>{frozen ? "Заморожен" : "Правлю"} <b style={{ fontFamily: MONO }}>{target.wbCode}</b> · {statusMeta(target.status).label}</span>
                 {!initialTarget && (
                   <button type="button" onClick={backToCreate}
-                    style={{ marginLeft: "auto", background: "transparent", border: "none", color: C.textTertiary, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                    style={{ marginLeft: "auto", background: "transparent", border: "none", color: C.textTertiary, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
                     ✕ к новому
                   </button>
                 )}
@@ -621,13 +621,13 @@ export default function OrderSheet({
               <>
                 <span>＋</span>
                 <span>Новый заказ</span>
-                <span style={{ marginLeft: "auto", color: C.textTertiary, fontSize: 11 }}>цель</span>
+                <span style={{ marginLeft: "auto", color: C.textTertiary, fontSize: 14 }}>цель</span>
               </>
             )}
           </div>
 
           {!editing && (
-            <div style={{ fontSize: 12.5, color: C.textTertiary, lineHeight: 1.35 }}>
+            <div style={{ fontSize: 14, color: C.textTertiary, lineHeight: 1.35 }}>
               {isDirect
                 ? "Найди геймпасс по нику и выбери юзера, с которым общался."
                 : "Введи код, ник или ссылку. Если это уже существующий заказ — предложу открыть его."}
@@ -642,11 +642,11 @@ export default function OrderSheet({
               border: `1px solid ${C.ice}55`, background: `${C.ice}14`,
               borderRadius: 13, padding: "10px 11px",
             }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.ice }}>Заморожен — правка выключена</div>
-              <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 4, lineHeight: 1.35 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.ice }}>Заморожен — правка выключена</div>
+              <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 4, lineHeight: 1.35 }}>
                 {target.heldReason ?? "причина не указана"}
               </div>
-              <div style={{ fontSize: 11.5, color: C.textTertiary, marginTop: 6 }}>
+              <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 6 }}>
                 Снять заморозку можно в карточке заказа — там же видно, кто и когда её поставил.
               </div>
             </div>
@@ -697,10 +697,10 @@ export default function OrderSheet({
           {/* Ник — не ключ: совпадений может быть несколько, поэтому список. */}
           {nickMatches.length > 0 && (
             <div className="twa-fade-up" style={{ border: "1px solid rgba(10,132,255,0.3)", background: "rgba(10,132,255,0.09)", borderRadius: 13, padding: "10px 11px" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.blue }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.blue }}>
                 У ника {nickMatches.length === 1 ? "есть заказ" : `${nickMatches.length} заказа`}
               </div>
-              <div style={{ fontSize: 11.5, color: C.textTertiary, marginTop: 3 }}>Выбери, если правишь один из них</div>
+              <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 3 }}>Выбери, если правишь один из них</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
                 {nickMatches.map(match => {
                   const meta = statusMeta(match.status);
@@ -714,9 +714,9 @@ export default function OrderSheet({
                         background: "rgba(255,255,255,0.06)", textAlign: "left", fontFamily: "inherit",
                         opacity: match.editable ? 1 : 0.5,
                       }}>
-                      <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: C.textPrimary }}>{match.wbCode}</span>
+                      <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{match.wbCode}</span>
                       <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 6px", borderRadius: 999, background: `${meta.color}2a`, color: meta.color }}>{meta.label}</span>
-                      <span style={{ marginLeft: "auto", fontSize: 12, color: C.textSecondary }}>{match.amount.toLocaleString("ru-RU")}</span>
+                      <span style={{ marginLeft: "auto", fontSize: 14, color: C.textSecondary }}>{match.amount.toLocaleString("ru-RU")}</span>
                     </button>
                   );
                 })}
@@ -739,7 +739,7 @@ export default function OrderSheet({
               />
               {valid.wbOrder?.error && !valid.wbOrder.existing && warn(`✖ ${valid.wbOrder.error}`, C.red)}
               {valid.wbOrder && !valid.wbOrder.error && valid.wbOrder.gateCode && (
-                <div style={{ fontSize: 13, color: C.green, lineHeight: 1.35 }}>
+                <div style={{ fontSize: 14, color: C.green, lineHeight: 1.35 }}>
                   ✓ {valid.wbOrder.buyerName ?? "покупатель без имени"} · номинал <b>{valid.wbOrder.denomination} R$</b>
                   <span style={{ color: C.textTertiary }}> · код <b style={{ fontFamily: MONO }}>{valid.wbOrder.gateCode}</b></span>
                 </div>
@@ -778,7 +778,7 @@ export default function OrderSheet({
               />
               {codeState && !codeState.ok && !codeState.existing && warn(`✖ ${codeState.error}`, codeState.frozen ? C.ice : C.red)}
               {codeState?.ok && (
-                <div style={{ fontSize: 13, color: C.green }}>
+                <div style={{ fontSize: 14, color: C.green }}>
                   ✓ Номинал <b>{codeState.denomination} R$</b>
                   {codeState.claimedBy && (
                     <span style={{ color: C.textTertiary }}>{" · активирован: "}{userLabel(codeState.claimedBy).name}</span>
@@ -797,7 +797,7 @@ export default function OrderSheet({
           ) : client ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: "9px 12px" }}>
               <span style={{
-                fontSize: 11, fontWeight: 800, color: "#fff",
+                fontSize: 14, fontWeight: 800, color: "#fff",
                 background: userLabel(client).platform === "TG" ? "#229ED9" : "#0077FF",
                 borderRadius: 4, padding: "3px 6px", flexShrink: 0,
               }}>{userLabel(client).platform}</span>
@@ -814,19 +814,19 @@ export default function OrderSheet({
                 placeholder={isDirect ? "Юзер: @username, имя или ID" : "Клиент (опц.): @username, имя, ID"}
                 style={inputStyle}
               />
-              {searching && <div style={{ fontSize: 13, color: C.textTertiary }}>Поиск…</div>}
+              {searching && <div style={{ fontSize: 14, color: C.textTertiary }}>Поиск…</div>}
               {!newClientOpen && (
                 <button type="button" className="twa-press-sm" onClick={() => { haptic.select(); setNewClientOpen(true); }}
                   style={{
                     alignSelf: "flex-start", background: "transparent", border: "none", padding: "2px 0",
-                    color: C.accent, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                    color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                   }}>
                   ＋ Клиента нет в базе — завести по TG / VK ID
                 </button>
               )}
               {newClientOpen && (
                 <div className="twa-fade-up" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 11px", borderRadius: 12, background: "rgba(167,139,250,0.09)", border: `1px solid ${C.accent}44` }}>
-                  <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.35 }}>
+                  <div style={{ fontSize: 14, color: C.textSecondary, lineHeight: 1.35 }}>
                     Заказ без клиента вешается на служебного юзера — уведомления такому «клиенту» не уйдут.
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -838,14 +838,14 @@ export default function OrderSheet({
                   <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Имя (опц.)" style={inputStyle} />
                   <div style={{ display: "flex", gap: 6 }}>
                     <button type="button" className="twa-press-sm" onClick={() => { setNewClientOpen(false); }}
-                      style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
                       Отмена
                     </button>
                     <button type="button" className="twa-press-sm" onClick={() => void createClient()}
                       disabled={busy || (!newTg && !newVk)}
                       style={{
                         flex: 2, padding: "9px", borderRadius: 9, border: "none", background: C.accent, color: "#fff",
-                        fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                        fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                         opacity: busy || (!newTg && !newVk) ? 0.45 : 1,
                       }}>
                       Завести клиента
@@ -866,13 +866,13 @@ export default function OrderSheet({
                           background: "rgba(255,255,255,0.06)", textAlign: "left",
                         }}>
                         <span style={{
-                          fontSize: 11, fontWeight: 800, color: "#fff",
+                          fontSize: 14, fontWeight: 800, color: "#fff",
                           background: lbl.platform === "TG" ? "#229ED9" : lbl.platform === "VK" ? "#0077FF" : C.elevated,
                           borderRadius: 4, padding: "3px 6px", flexShrink: 0,
                         }}>{lbl.platform}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lbl.name}</div>
-                          {u.robloxUsername && <div style={{ fontSize: 12, color: C.textTertiary }}>🎮 {u.robloxUsername}</div>}
+                          {u.robloxUsername && <div style={{ fontSize: 14, color: C.textTertiary }}>🎮 {u.robloxUsername}</div>}
                         </div>
                       </button>
                     );
@@ -929,7 +929,7 @@ export default function OrderSheet({
                 {gpSearching ? "…" : "🔍"}
               </button>
             </div>
-            {gpSearchMsg && <div style={{ fontSize: 13, color: C.textTertiary }}>{gpSearchMsg}</div>}
+            {gpSearchMsg && <div style={{ fontSize: 14, color: C.textTertiary }}>{gpSearchMsg}</div>}
             {gpFound.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 170, overflowY: "auto" }}>
                 {gpFound.map(gp => {
@@ -951,7 +951,7 @@ export default function OrderSheet({
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{gp.name}</div>
                         {gp.existingOrder && (
-                          <div style={{ fontSize: 12, color: C.orange }}>📦 уже в заказе {gp.existingOrder.wbCode}</div>
+                          <div style={{ fontSize: 14, color: C.orange }}>📦 уже в заказе {gp.existingOrder.wbCode}</div>
                         )}
                       </div>
                       <span style={{ flexShrink: 0, fontSize: 14, fontWeight: 600, color: priceOk ? C.green : C.textSecondary }}>
@@ -1030,7 +1030,7 @@ export default function OrderSheet({
             {gpState && !gpState.error && (
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 {gpState.livePrice != null && (
-                  <div style={{ fontSize: 13, color: gpState.priceMismatch ? C.orange : C.green }}>
+                  <div style={{ fontSize: 14, color: gpState.priceMismatch ? C.orange : C.green }}>
                     {gpState.priceMismatch
                       ? `⚠️ Цена ГП ${gpState.livePrice} R$ ≠ расчётной ${gpState.expected} R$`
                       : `✓ Цена ГП ${gpState.livePrice} R$${gpState.expected ? ` (ожидается ${gpState.expected})` : ""}`}
@@ -1043,9 +1043,9 @@ export default function OrderSheet({
             )}
             {/* Место под строку проверки зарезервировано: иначе она появляется и
                 исчезает на каждом нажатии клавиши и трясёт всю шторку. */}
-            <div style={{ minHeight: 15, fontSize: 12, color: C.textTertiary }}>{checking ? "Проверяю…" : ""}</div>
+            <div style={{ minHeight: 15, fontSize: 14, color: C.textTertiary }}>{checking ? "Проверяю…" : ""}</div>
             {isDirect && !editing && selectedDirectPass && (
-              <div style={{ fontSize: 13, color: C.green }}>
+              <div style={{ fontSize: 14, color: C.green }}>
                 ✓ Клиенту: <b>{amount} R$</b> · цена пасса {selectedDirectPass.price.toLocaleString("ru-RU")} R$
               </div>
             )}
@@ -1062,7 +1062,7 @@ export default function OrderSheet({
             style={{ ...inputStyle, opacity: frozen ? 0.5 : 1 }}
           />
           {editing && humanNoteOf(target?.adminNote) !== (target?.adminNote ?? "").trim() && (
-            <div style={{ fontSize: 12, color: C.textTertiary, marginTop: -4 }}>
+            <div style={{ fontSize: 14, color: C.textTertiary, marginTop: -4 }}>
               Машинный аудит заметки сохранится
             </div>
           )}
@@ -1070,7 +1070,7 @@ export default function OrderSheet({
           {/* Источник — поле карточки, а не отдельная операция. */}
           {editing && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 12, color: C.textTertiary }}>Источник заказа</span>
+              <span style={{ fontSize: 14, color: C.textTertiary }}>Источник заказа</span>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {SOURCE_OPTIONS.map(([id, label]) => (
                   <button
@@ -1091,7 +1091,7 @@ export default function OrderSheet({
                 ))}
               </div>
               {source === "DIRECT" && !target?.isDirectOrder && (
-                <span style={{ fontSize: 13, color: C.textTertiary }}>
+                <span style={{ fontSize: 14, color: C.textTertiary }}>
                   Станет прямым: встанет первым в «К выкупу», оплата считается подтверждённой
                 </span>
               )}
@@ -1107,7 +1107,7 @@ export default function OrderSheet({
           )}
 
           {dup && (
-            <div style={{ padding: "9px 12px", background: `${C.orange}18`, borderRadius: 10, fontSize: 13, color: C.orange, lineHeight: 1.4 }}>
+            <div style={{ padding: "9px 12px", background: `${C.orange}18`, borderRadius: 10, fontSize: 14, color: C.orange, lineHeight: 1.4 }}>
               ⚠️ На этот геймпасс уже есть активный заказ <b style={{ fontFamily: MONO }}>{dup.wbCode}</b> ({dup.status}).
               Нажми «{editing ? "Сохранить всё равно" : "Создать всё равно"}», если это осознанный повтор.
             </div>

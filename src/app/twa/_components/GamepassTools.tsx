@@ -136,7 +136,7 @@ export function AttachGamepassForm({ order, token, onDone, onClose }: {
         }}
       />
       {(hint || passId) && (
-        <div style={{ fontSize: 13, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ fontSize: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {passId && <span style={{ color: C.textSecondary, fontFamily: MONO }}>{passId}</span>}
           {hint && <span style={{ color: hint.color, fontWeight: 600 }}>{hint.text}</span>}
         </div>
@@ -256,7 +256,7 @@ export function KeyCreateForm({ order, token, onDone, onClose }: {
       display: "flex", flexDirection: "column", gap: 9,
     }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: C.green }}>🔑 Ключ покупателя</div>
-      <div style={{ fontSize: 13, color: C.textSecondary }}>
+      <div style={{ fontSize: 14, color: C.textSecondary }}>
         Создадим геймпассы сами — покупателю делать ничего не нужно.
       </div>
       <input
@@ -287,7 +287,7 @@ export function KeyCreateForm({ order, token, onDone, onClose }: {
       )}
 
       {plan && (
-        <div style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ fontSize: 14, display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ color: C.green, fontWeight: 600 }}>✅ Ключ рабочий · аккаунт {plan.nick}</span>
           {plan.targets.map((t, i) => (
             <span key={`${t.price}-${i}`} style={{ color: C.textSecondary }}>
@@ -300,7 +300,7 @@ export function KeyCreateForm({ order, token, onDone, onClose }: {
         </div>
       )}
 
-      {error && <div style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
+      {error && <div style={{ fontSize: 14, color: C.red, fontWeight: 600 }}>{error}</div>}
 
       <div style={{ display: "flex", gap: 8 }}>
         <button className="twa-press" onClick={onClose} disabled={busy !== null}
@@ -320,7 +320,7 @@ export function KeyCreateForm({ order, token, onDone, onClose }: {
         )}
       </div>
       <button className="twa-press-sm" onClick={saveOnly} disabled={busy !== null || !key || !nick}
-        style={{ padding: "10px", borderRadius: 10, border: `1px solid ${C.hairline}`, background: "transparent", color: C.textSecondary, fontSize: 13.5, cursor: "pointer" }}>
+        style={{ padding: "10px", borderRadius: 10, border: `1px solid ${C.hairline}`, background: "transparent", color: C.textSecondary, fontSize: 14, cursor: "pointer" }}>
         {busy === "save" ? "Сохраняю…" : "Только сохранить ключ — сработает на следующем заказе"}
       </button>
     </div>
@@ -356,7 +356,7 @@ export function GamepassToolRows({
 
   if (rows.length === 0) {
     return refusal ? (
-      <div style={{ fontSize: 13, color: C.textTertiary, padding: compact ? "2px 0" : "6px 0" }}>{refusal}</div>
+      <div style={{ fontSize: 14, color: C.textTertiary, padding: compact ? "2px 0" : "6px 0" }}>{refusal}</div>
     ) : null;
   }
 
@@ -378,7 +378,7 @@ export function GamepassToolRows({
           <span style={{ fontSize: 17 }}>{tool.icon}</span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: C.textPrimary }}>{tool.label}</span>
-            <span style={{ display: "block", fontSize: 12.5, color: C.textTertiary }}>{hints?.[tool.id] ?? tool.hint}</span>
+            <span style={{ display: "block", fontSize: 14, color: C.textTertiary }}>{hints?.[tool.id] ?? tool.hint}</span>
           </span>
         </button>
       ))}

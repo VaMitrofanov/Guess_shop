@@ -87,6 +87,9 @@ const LANE_META: Record<Lane["id"], { label: string; color: string }> = {
 const LIVE_POLL_MS = 30_000;
 
 /** Этап DBS → вкладка очереди доставки, которую открывает тап по нему. */
+/** Этапы DBS, у которых на главной своя строка — чипом их не дублируем. */
+const QUIET_STAGES = new Set(["in_bot", "stalled"]);
+
 const STAGE_FOCUS: Record<string, WbDeliveryFocus> = {
   attention: "attention",
   waiting_code: "waitingCode",
@@ -544,10 +547,12 @@ export default function Dashboard({
             )}
           </div>
 
-          {/* Этапы DBS отдельной лентой: каждый открывает ровно свою очередь. */}
-          {dbs && dbs.stages.length > 0 && (
+          {/* Этапы DBS отдельной лентой: каждый открывает ровно свою очередь.
+              «В нашем боте» и «Покупатель пропал» здесь не повторяем — у них
+              есть свои строки ниже, с подробностями (20.10: три повтора на экран). */}
+          {dbs && dbs.stages.some(stage => !QUIET_STAGES.has(stage.stage)) && (
             <div className="twa-stage-strip twa-no-scrollbar">
-              {dbs.stages.map(stage => (
+              {dbs.stages.filter(stage => !QUIET_STAGES.has(stage.stage)).map(stage => (
                 <button
                   key={stage.stage}
                   type="button"
@@ -599,8 +604,8 @@ export default function Dashboard({
           <button type="button" className="twa-quiet-row is-loud twa-press-sm" onClick={() => openOrders("STALE_LINK")}>
             <Clock3 size={16} />
             <span>
-              <b>{awaitingLink.stale} {plural(awaitingLink.stale, "висяк", "висяка", "висяков")}</b> без ссылки дольше двух недель
-              <small>напоминания бота кончились · старейшему {fmtAge(awaitingLink.staleOldestAt)}</small>
+              <b>{awaitingLink.stale} {plural(awaitingLink.stale, "молчит", "молчат", "молчат")}</b> — дожать вручную
+              <small>бот отправил 3 из 3 напоминаний · старейшему {fmtAge(awaitingLink.staleOldestAt)}</small>
             </span>
             <ChevronRight size={17} />
           </button>
@@ -613,7 +618,7 @@ export default function Dashboard({
             <Clock3 size={16} />
             <span>
               {awaitingLink.stale > 0
-                ? `Ещё ${awaitingLink.total - awaitingLink.stale} ждут ссылку · вся очередь ${awaitingLink.total}`
+                ? `Ещё ${awaitingLink.total - awaitingLink.stale} ждут ссылку, бот ещё пишет · всего ${awaitingLink.total}`
                 : `${awaitingLink.total} ждут ссылку · старейшая ${fmtAge(awaitingLink.oldestAt)}`}
             </span>
             <ChevronRight size={17} />
@@ -639,7 +644,7 @@ export default function Dashboard({
           трёх (нити на 390 px читаются хуже ленты) и никаких таблиц. Окно —
           от прошлого захода ЭТОГО админа, общее с сайтом: заход с ноутбука и
           с телефона — одна смена одного человека. */}
-      {data.shift && <ShiftBlock shift={data.shift} dbs={dbs} stale={awaitingLink.stale} liveAge={liveAge} />}
+      {data.shift && <ShiftBlock shift={data.shift} liveAge={liveAge} />}
 
       <button type="button" className="twa-primary-row twa-press" onClick={() => { haptic.select(); onCreateOrder?.("manual"); }}>
         <Plus size={19} /> Новый заказ
@@ -680,43 +685,15 @@ const ACTOR: Record<OverviewFeedRow["actor"], { mark: string; color: string }> =
    его не видел вовсе. Здесь тот же диф и та же лента, но в формате телефона:
    итог тремя числами, очаги застрявшего строками и лента с временем. */
 function ShiftBlock({
-  shift, dbs, stale, liveAge,
+  shift, liveAge,
 }: {
   shift: NonNullable<DashData["shift"]>;
-  dbs: DbsSnapshot | null;
-  stale: number;
   liveAge: number;
 }) {
   const [tab, setTab] = useState<"sum" | "feed">("sum");
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const { diff, feed } = shift;
   const queueDelta = diff.queueBefore - diff.queueNow;
-
-  const stuck: { key: string; icon: string; text: string; hint: string }[] = [];
-  if (dbs && dbs.unclosed > 0) {
-    stuck.push({
-      key: "dbs",
-      icon: "⏰",
-      text: `${dbs.unclosed} ${plural(dbs.unclosed, "заказ WB ждёт", "заказа WB ждут", "заказов WB ждут")} закрытия доставки`,
-      hint: dbs.overdue > 0 ? `${dbs.overdue} просрочено по сроку WB` : "ход за покупателем — ждём код",
-    });
-  }
-  if (dbs && dbs.funnel.notActivated > 0) {
-    stuck.push({
-      key: "gate",
-      icon: "📮",
-      text: `${dbs.funnel.notActivated} ${plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")}`,
-      hint: dbs.funnel.notActivatedOldestAt ? `старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}` : "напоминания кончились",
-    });
-  }
-  if (stale > 0) {
-    stuck.push({
-      key: "stale",
-      icon: "🧷",
-      text: `${stale} ${plural(stale, "висяк", "висяка", "висяков")} без ссылки`,
-      hint: "дольше двух недель · бот отмолчал",
-    });
-  }
 
   return (
     <section className="twa-shift">
@@ -746,7 +723,7 @@ function ShiftBlock({
               </strong>
             </div>
             <div>
-              <span>Ушло с доноров</span>
+              <span>Ушло на выкуп</span>
               <strong>{robux(diff.doneGross)}<small>R$</small></strong>
             </div>
             <div>
@@ -793,18 +770,8 @@ function ShiftBlock({
             </div>
           )}
 
-          {stuck.length > 0 && (
-            <>
-              <div className="twa-shift-key">Не сдвинулось · {stuck.length}</div>
-              {stuck.map(item => (
-                <div className="twa-shift-row is-alert" key={item.key}>
-                  <i>{item.icon}</i>
-                  <span><b>{item.text}</b><small>{item.hint}</small></span>
-                </div>
-              ))}
-            </>
-          )}
-
+          {/* «Не сдвинулось» убрано 20.10: оно повторяло строки «Требует
+              решения» выше; сводка смены показывает только то, что изменилось. */}
           {diff.errors === 0 && diff.wbCancelled === 0 && (
             <div className="twa-shift-row">
               <i style={{ color: C.green }}>✓</i>
@@ -854,7 +821,13 @@ function ShiftBlock({
 }
 
 function Skeleton() {
-  return <div className="twa-liquid-dashboard">{[49, 210, 150, 96].map((height, index) => <div key={index} className="twa-liquid-skeleton" style={{ height, opacity: 0.82 - index * 0.1 }} />)}</div>;
+  // Подпись в заглушке: без неё пустые серые блоки читались как «сломалось».
+  return (
+    <div className="twa-liquid-dashboard" aria-busy="true">
+      <div style={{ color: C.textTertiary, fontSize: 14, padding: "2px 4px" }}>Считаем очередь и смену…</div>
+      {[49, 210, 150, 96].map((height, index) => <div key={index} className="twa-liquid-skeleton" style={{ height, opacity: 0.82 - index * 0.1 }} />)}
+    </div>
+  );
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {

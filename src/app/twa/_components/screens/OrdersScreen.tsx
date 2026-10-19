@@ -1,4 +1,5 @@
 "use client";
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { RefreshCw } from "lucide-react";
 import { C, SHADOW, tabular, MONO } from "../theme";
@@ -205,7 +206,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   NEW:           { label: "Новые",          color: C.accent },
   ERROR:         { label: "Ошибка",         color: C.red },
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
-  STALE_LINK:    { label: "Висяки",          color: C.orange },
+  STALE_LINK:    { label: "Молчат",          color: C.orange },
   DONE:          { label: "Готово",          color: C.green },
   REJECTED:      { label: "Отменены",        color: C.red },
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
@@ -273,8 +274,8 @@ interface CardAction {
   tone: CardActionTone;
 }
 
-function primaryActionFor(order: Order): CardAction | null {
-  const action = sharedPrimaryAction(order as never);
+function primaryActionFor(order: Order, live?: GpLiveInfo): CardAction | null {
+  const action = sharedPrimaryAction(order as never, live);
   return action ? { ...action, tone: action.tone as CardActionTone } : null;
 }
 
@@ -417,7 +418,7 @@ function GamepassExportSheet({ token, tab, tabLabel, onClose }: {
             />
 
             {(data.skippedUnpaid > 0 || data.skippedNoGamepass > 0 || data.truncated) && (
-              <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, color: C.textSecondary, lineHeight: 1.5 }}>
                 {data.skippedUnpaid > 0 && <div>· не вошли неоплаченные прямые: {data.skippedUnpaid}</div>}
                 {data.skippedNoGamepass > 0 && <div>· без ссылки на геймпасс: {data.skippedNoGamepass}</div>}
                 {data.truncated && <div>· показаны первые 500 заказов очереди</div>}
@@ -585,7 +586,7 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
               }}>
                 {line.tag && (
                   <span style={{
-                    display: "block", marginBottom: 2, fontFamily: MONO, fontSize: 11,
+                    display: "block", marginBottom: 2, fontFamily: MONO, fontSize: 14,
                     letterSpacing: ".03em",
                     color: frozen ? ICE : C.textTertiary,
                     fontWeight: frozen ? 600 : 400,
@@ -616,7 +617,7 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
           style={{
             alignSelf: "flex-start", padding: "6px 12px", borderRadius: 8,
             border: `1px dashed ${C.border}`, background: "transparent",
-            color: C.textTertiary, fontSize: 13, fontWeight: 600, cursor: "pointer",
+            color: C.textTertiary, fontSize: 14, fontWeight: 600, cursor: "pointer",
           }}
         >
           ✎ Править текстом
@@ -775,7 +776,9 @@ function ActionPanel({
         </button>
       )}
       <div style={{ display: "flex", gap: 8 }}>
-      {hasGamepass && (
+      {/* «Выкупить» — автовыкуп с донора. Стоял рядом с «Выкуплено» (одна буква
+          разницы) и звал в мёртвый браузерный сервис; спрятан с донором. */}
+      {hasGamepass && DONOR_ENABLED && (
         <button className="twa-press" onClick={doPurchase} disabled={loading}
           style={{ flex: 2, padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
           {loading
@@ -941,7 +944,7 @@ function HoldModal({ order, onHold, onClose }: {
       display: "flex", flexDirection: "column", gap: 10,
     }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: ICE }}>❄️ Заморозить заказ</div>
-      <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: MONO }}>
+      <div style={{ fontSize: 14, color: C.textSecondary, fontFamily: MONO }}>
         {order.wbCode} · {order.robloxUsername ?? order.probableNick ?? "ник не указан"} · {order.amount.toLocaleString("ru-RU")} R$
       </div>
 
@@ -953,7 +956,7 @@ function HoldModal({ order, onHold, onClose }: {
               border: reason === preset ? `1px solid ${ICE}66` : "1px solid transparent",
               background: reason === preset ? `${ICE}29` : "rgba(255,255,255,0.08)",
               color: reason === preset ? ICE : C.textSecondary,
-              fontSize: 13, fontWeight: 600,
+              fontSize: 14, fontWeight: 600,
             }}>
             {preset}
           </button>
@@ -976,7 +979,7 @@ function HoldModal({ order, onHold, onClose }: {
       <div style={{
         display: "flex", gap: 9, padding: "11px 13px", borderRadius: 11,
         background: `${C.accent}1a`, border: `1px solid ${C.accent}42`,
-        fontSize: 13, lineHeight: 1.45, color: C.textSecondary,
+        fontSize: 14, lineHeight: 1.45, color: C.textSecondary,
       }}>
         <span>💡</span>
         <span>
@@ -1157,7 +1160,7 @@ function RebindModal({ order, token, onDone, onClose }: {
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>
         🔄 Перепривязать {order.wbCode}
       </div>
-      <div style={{ fontSize: 13, color: C.textTertiary }}>
+      <div style={{ fontSize: 14, color: C.textTertiary }}>
         Сейчас: {currentOwner} ({currentPlatform})
       </div>
       <input
@@ -1170,7 +1173,7 @@ function RebindModal({ order, token, onDone, onClose }: {
           color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
         }}
       />
-      {searching && <div style={{ fontSize: 13, color: C.textTertiary }}>Поиск…</div>}
+      {searching && <div style={{ fontSize: 14, color: C.textTertiary }}>Поиск…</div>}
       {results.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 200, overflowY: "auto" }}>
           {results.map(u => {
@@ -1183,7 +1186,7 @@ function RebindModal({ order, token, onDone, onClose }: {
                   background: "rgba(255,255,255,0.06)", textAlign: "left",
                 }}>
                 <span style={{
-                  fontSize: 11, fontWeight: 800, color: "#fff",
+                  fontSize: 14, fontWeight: 800, color: "#fff",
                   background: lbl.platform === "TG" ? "#229ED9" : lbl.platform === "VK" ? "#0077FF" : C.elevated,
                   borderRadius: 4, padding: "3px 6px", flexShrink: 0,
                 }}>{lbl.platform}</span>
@@ -1192,7 +1195,7 @@ function RebindModal({ order, token, onDone, onClose }: {
                     {lbl.name}
                   </div>
                   {u.robloxUsername && (
-                    <div style={{ fontSize: 13, color: C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ fontSize: 14, color: C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       🎮 {u.robloxUsername}
                     </div>
                   )}
@@ -1203,7 +1206,7 @@ function RebindModal({ order, token, onDone, onClose }: {
         </div>
       )}
       {query.trim().length >= 2 && !searching && results.length === 0 && (
-        <div style={{ fontSize: 13, color: C.textTertiary }}>Никого не найдено</div>
+        <div style={{ fontSize: 14, color: C.textTertiary }}>Никого не найдено</div>
       )}
       <button className="twa-press" onClick={onClose}
         style={{ padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
@@ -1323,12 +1326,12 @@ function DoneAccordion({ group, token, onRunAction, onSaveNote, onPurchaseDone, 
           <span style={{ fontSize: 15, fontWeight: 700, color: C.orange, ...tabular }}>
             − {group.totalDirty.toLocaleString("ru-RU")} R$
           </span>
-          <span style={{ fontSize: 13, color: C.textTertiary }}>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>
             {pluralPurchases(group.orders.length)}
           </span>
         </div>
         <span style={{
-          fontSize: 13, color: C.textTertiary, flexShrink: 0,
+          fontSize: 14, color: C.textTertiary, flexShrink: 0,
           transform: open ? "rotate(90deg)" : "none",
           transition: "transform 0.2s",
         }}>▶</span>
@@ -1409,15 +1412,15 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5ea" }}>🧾 След покупателя</span>
           <button className="twa-press-sm" onClick={() => setOpen(false)}
-            style={{ marginLeft: "auto", border: "none", background: "transparent", color: C.textTertiary, fontSize: 13, cursor: "pointer" }}>
+            style={{ marginLeft: "auto", border: "none", background: "transparent", color: C.textTertiary, fontSize: 14, cursor: "pointer" }}>
             свернуть
           </button>
         </div>
 
-        {loading && <div style={{ fontSize: 13, color: C.textTertiary }}>Загружаю…</div>}
+        {loading && <div style={{ fontSize: 14, color: C.textTertiary }}>Загружаю…</div>}
 
         {!loading && data && data.events.length === 0 && (
-          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: C.textTertiary }}>
+          <div style={{ fontSize: 14, lineHeight: 1.5, color: C.textTertiary }}>
             Записей нет — заказ старше, чем сам механизм (введён 28.08.2026).
             Косвенные доказательства: подтверждённый ник и владелец выкупленного пасса ниже.
           </div>
@@ -1431,7 +1434,7 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
           const isAuto = e.type === "AUDIT_GAMEPASS_AUTOCREATED";
           const subject = String(isNick ? p.nick ?? "" : p.gamepassId ?? "");
           return (
-            <div key={e.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
+            <div key={e.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 14 }}>
               <span style={{ flexShrink: 0 }}>{isNick ? "⌨️" : isAuto ? "🔑" : "🎮"}</span>
               <span style={{ minWidth: 0, flex: 1 }}>
                 <b style={{ color: "#e5e5ea", wordBreak: "break-all" }}>{subject}</b>
@@ -1442,7 +1445,7 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
                   {p.via ? ` · ${String(p.via)}` : ""}
                 </span>
               </span>
-              <span style={{ flexShrink: 0, fontSize: 11.5, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ flexShrink: 0, fontSize: 14, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
                 {fmt(e.createdAt)}
               </span>
             </div>
@@ -1450,7 +1453,7 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
         })}
 
         {!loading && data && (
-          <div style={{ paddingTop: 8, borderTop: `1px solid ${C.border}`, fontSize: 12.5, lineHeight: 1.5, color: C.textTertiary }}>
+          <div style={{ paddingTop: 8, borderTop: `1px solid ${C.border}`, fontSize: 14, lineHeight: 1.5, color: C.textTertiary }}>
             {/* Вторая половина доказательства: эти два поля заполняет Roblox,
                 а не покупатель — напечатать в них что-либо невозможно. */}
             Подтверждённый ник заказа: <b style={{ color: C.textSecondary }}>{data.confirmedNick ?? "—"}</b>.
@@ -1587,12 +1590,12 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
       <div style={{ background: C.card, borderRadius: 18, width: "100%", maxWidth: 400, maxHeight: "84vh", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "18px 20px 10px" }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>🧩 Разбить выкуп</div>
-          <div style={{ fontSize: 13, color: C.textTertiary, marginTop: 4 }}>
+          <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>
             Заказ на <b style={{ color: C.textSecondary }}>{order.amount.toLocaleString("ru-RU")} R$</b>
             {nick ? <> · пассы <b style={{ color: C.textSecondary }}>{nick}</b></> : null}
           </div>
           {!hasPurchased && (
-            <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 6, lineHeight: 1.35 }}>
+            <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 6, lineHeight: 1.35 }}>
               Тап по пассу добавляет часть. Один и тот же пасс можно взять
               несколько раз — «−» убирает одну.
             </div>
@@ -1600,7 +1603,7 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
         </div>
 
         {hasPurchased && (
-          <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.yellow}14`, color: C.yellow, fontSize: 13, fontWeight: 600 }}>
+          <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.yellow}14`, color: C.yellow, fontSize: 14, fontWeight: 600 }}>
             Часть уже выкуплена — менять состав нельзя, только снять разбиение целиком.
           </div>
         )}
@@ -1608,7 +1611,7 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
         {/* Повтор законен, но исполняется руками: тот же донор второй раз
             получит AlreadyOwned и спишет робуксы впустую. */}
         {repeated.length > 0 && !hasPurchased && (
-          <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.orange}14`, color: C.orange, fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 }}>
+          <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.orange}14`, color: C.orange, fontSize: 14, fontWeight: 600, lineHeight: 1.4 }}>
             Пасс взят несколько раз ({repeated.map(id => `${id} ×${chosen.filter(x => x === id).length}`).join(", ")}).
             Каждый повтор выкупай с <b>другого донора</b> — тому же аккаунту Roblox
             ответит AlreadyOwned.
@@ -1651,12 +1654,12 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
                     padding: on ? "0 6px" : 0, flexShrink: 0, borderRadius: 7,
                     display: "grid", placeItems: "center",
                     background: on ? C.accent : "transparent", border: on ? "none" : `1px solid ${C.border}`,
-                    color: "#fff", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums",
+                    color: "#fff", fontSize: 14, fontWeight: 800, fontVariantNumeric: "tabular-nums",
                   }}>{on ? `×${count}` : ""}</span>
                   <span style={{ minWidth: 0, flex: 1 }}>
                     <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                     <span style={{
-                      display: "block", fontSize: 12, color: C.textTertiary, fontVariantNumeric: "tabular-nums",
+                      display: "block", fontSize: 14, color: C.textTertiary, fontVariantNumeric: "tabular-nums",
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>
                       {/* Без слова «пасс»: в списке пассов оно лишнее, а места
@@ -1778,7 +1781,7 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
           Разбит на {ordered.length} {ordered.length === 1 ? "пасс" : ordered.length < 5 ? "пасса" : "пассов"}
         </span>
         <span style={{
-          marginLeft: "auto", padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800,
+          marginLeft: "auto", padding: "2px 8px", borderRadius: 999, fontSize: 14, fontWeight: 800,
           background: allDone ? `${C.green}22` : `${C.blue}1f`,
           color: allDone ? C.green : C.blue,
           fontVariantNumeric: "tabular-nums",
@@ -1828,7 +1831,7 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
                 {bought ? "✓" : ""}
               </button>
               <span style={{
-                fontSize: 13, fontWeight: 700, color: bought ? C.textTertiary : "#e5e5ea",
+                fontSize: 14, fontWeight: 700, color: bought ? C.textTertiary : "#e5e5ea",
                 fontVariantNumeric: "tabular-nums", minWidth: 66,
               }}>
                 {p.amount.toLocaleString("ru-RU")} R$
@@ -1851,13 +1854,13 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
                   padding: "3px 7px", marginLeft: -3, borderRadius: 7, border: "none", cursor: "pointer",
                   background: copiedId === p.gamepassId ? `${C.green}26` : "transparent",
                   color: copiedId === p.gamepassId ? C.green : C.blue,
-                  fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+                  fontSize: 14, fontWeight: 600, fontFamily: "inherit",
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
                 {copiedId === p.gamepassId ? "✓ скопирован" : p.gamepassId}
               </button>
-              <span style={{ marginLeft: "auto", fontSize: 12, color: bought ? C.green : C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ marginLeft: "auto", fontSize: 14, color: bought ? C.green : C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
                 {bought ? `−${(p.chargedPrice ?? 0).toLocaleString("ru-RU")} R$` : `ждёт ${Math.ceil(p.amount / 0.7).toLocaleString("ru-RU")} R$`}
               </span>
             </div>
@@ -1865,20 +1868,20 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
         })}
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 14, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
         <span>Сумма частей: <b style={{ color: mismatch ? C.red : C.textSecondary }}>{sum.toLocaleString("ru-RU")} R$</b> из {orderAmount.toLocaleString("ru-RU")} R$</span>
         {spent > 0 && <span>Списано: <b style={{ color: C.textSecondary }}>{spent.toLocaleString("ru-RU")} R$</b></span>}
       </div>
 
       {mismatch && (
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.red }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.red }}>
           ⚠️ Сумма частей ≠ номиналу заказа — сервер заблокирует выкуп, поправь разбиение
         </div>
       )}
 
       {/* Разница между галочкой и «Выкуплено» — это разница между «мы видим» и
           «клиент знает». Её нужно назвать прямо, иначе её узнают методом проб. */}
-      <div style={{ fontSize: 11.5, lineHeight: 1.45, color: C.textTertiary }}>
+      <div style={{ fontSize: 14, lineHeight: 1.45, color: C.textTertiary }}>
         {allDone
           ? "Все части отмечены. Клиент узнает только после «Выкуплено»."
           : "Галочка — отметка для нас, клиенту ничего не уходит. Уведомление шлёт «Выкуплено»."}
@@ -1923,7 +1926,7 @@ function RejectModal({ order, onReject, onClose }: {
       background: "rgba(0,0,0,0.15)", display: "flex", flexDirection: "column", gap: 10,
     }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: C.red }}>✕ Отменить заказ</div>
-      <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: MONO }}>
+      <div style={{ fontSize: 14, color: C.textSecondary, fontFamily: MONO }}>
         {order.wbCode} · {order.robloxUsername ?? order.probableNick ?? "ник не указан"} · {order.amount.toLocaleString("ru-RU")} R$
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
@@ -1933,7 +1936,7 @@ function RejectModal({ order, onReject, onClose }: {
               padding: "8px 13px", borderRadius: 999, cursor: "pointer",
               border: reason === preset ? `1px solid ${C.red}66` : "1px solid transparent",
               background: reason === preset ? `${C.red}29` : "rgba(255,255,255,0.08)",
-              color: reason === preset ? C.red : C.textSecondary, fontSize: 13, fontWeight: 600,
+              color: reason === preset ? C.red : C.textSecondary, fontSize: 14, fontWeight: 600,
             }}>
             {preset}
           </button>
@@ -2024,7 +2027,7 @@ function OrderMenuSheet({
       {gamepassLink && copyRow("⧉", "Ссылку на геймпасс", gamepassLink, `game-pass/${passId}`)}
       {splitIds.length > 1 && copyRow("⧉", "ID всех частей", splitIds.join("\n"), `${splitIds.length} шт.`)}
       {nick && copyRow("⧉", "Ник Roblox", nick, nick)}
-      {oneLine && copyRow("⧉", "Всё одной строкой", oneLine, "для донора")}
+      {oneLine && copyRow("⧉", "Всё одной строкой", oneLine, "для закупки")}
 
       <div className="twa-oc-menu-group">Правка</div>
       {/* 🎮 Настройка геймпассов — ОДИН список на все админки
@@ -2057,7 +2060,7 @@ function OrderMenuSheet({
         && row("reject", "✕", "Отменить заказ", undefined, "red")}
 
       <div className="twa-oc-menu-group">Редко</div>
-      {canPurchase && row("purchase", "🛒", "Выкупить автоматом (донор)", undefined, "dim")}
+      {canPurchase && DONOR_ENABLED && row("purchase", "🛒", "Выкупить автоматом (донор)", undefined, "dim")}
       {canRefund && row("refund", "↩️", "Оформить возврат", "T-Bank", "dim")}
       {row("trace", "🕵", "След покупателя", undefined, "dim")}
     </BottomSheet>
@@ -2294,7 +2297,7 @@ function OrderCard({
   const splitIds = split.map(part => part.gamepassId);
   const isDoneState = order.status === "COMPLETED" || order.status === "REJECTED";
   const railColor = order.heldAt ? ICE : order.status === "ERROR" ? C.red : null;
-  const primary = primaryActionFor(order);
+  const primary = primaryActionFor(order, live);
   const reminders = order.remindersSent ?? 0;
   const showBell = order.status === "AWAITING_GAMEPASS" && reminders > 0;
   // Ник жёлтым, если он вероятный, а не подтверждённый: выкупать по нему —
@@ -2308,7 +2311,7 @@ function OrderCard({
   const copySlot: { text: string; label: string; hint?: boolean } | null =
     splitIds.length > 0 ? { text: splitIds.join("\n"), label: `${splitIds.length} ID пассов` }
       : passId ? { text: passId, label: passId }
-        : showGpWatch ? { text: "", label: "Найти ГП по нику", hint: true }
+        : showGpWatch ? { text: "", label: "Найти пасс по нику", hint: true }
           : null;
 
   async function runPrimary() {
@@ -2455,8 +2458,8 @@ function OrderCard({
               else void copyPassAndVerify(copySlot.text, "ID пасса");
             }}
           >
-            <i>{copySlot.hint ? "👁" : copied === "pass" ? "✓" : "⧉"}</i>
-            <span>{copySlot.hint && gpwLoading ? "Ищу ГП…" : copySlot.label}</span>
+            <i>{copySlot.hint ? "🔎" : copied === "pass" ? "✓" : "⧉"}</i>
+            <span>{copySlot.hint && gpwLoading ? "Ищу пасс…" : copySlot.label}</span>
           </button>
         ) : <span style={{ flex: 1 }} />}
         <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
@@ -2542,7 +2545,7 @@ function OrderCard({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
             <span style={{
-              fontSize: 12, fontWeight: 800, color: "#fff",
+              fontSize: 14, fontWeight: 800, color: "#fff",
               background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
               borderRadius: 5, padding: "4px 8px", flexShrink: 0,
             }}>
@@ -2559,7 +2562,7 @@ function OrderCard({
             </span>
             {tabBadge && (
               <span style={{
-                fontSize: 12, fontWeight: 600, color: tabBadge.color,
+                fontSize: 14, fontWeight: 600, color: tabBadge.color,
                 background: `${tabBadge.color}1c`, padding: "4px 9px",
                 borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
               }}>
@@ -2571,7 +2574,7 @@ function OrderCard({
               if (!sb) return null;
               return (
                 <span style={{
-                  fontSize: 11, fontWeight: 600, color: sb.color,
+                  fontSize: 14, fontWeight: 600, color: sb.color,
                   background: `${sb.color}1c`, padding: "3px 8px",
                   borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
                 }}>
@@ -2618,36 +2621,24 @@ function OrderCard({
           ) : null;
         })()}
 
-        {/* Time + amount row */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 16, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
-            ⏱ {fmtAge(timeRef)}
+        {/* Возраст: сумма, ник и код уже стоят в шапке шторки — здесь только
+            время (20.10: раньше сумма повторялась трижды). Второй таймер —
+            лишь когда заказ стоит в очереди меньше, чем живёт, и с подписью. */}
+        <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 12 }}>
+          <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
+            ⏱ {fmtAge(timeRef)} {inBuyoutQueue ? "с создания" : "ждёт"}
           </span>
-          {inBuyoutQueue && (
-            <span
-              title="В очереди «К выкупу»"
-              style={{ fontSize: 16, fontWeight: 500, color: ageColor(order.pendingAt!), ...tabular }}>
-              🛒 {fmtAge(order.pendingAt!)}
+          {inBuyoutQueue && fmtAge(order.pendingAt!) !== fmtAge(timeRef) && (
+            <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(order.pendingAt!), ...tabular }}>
+              🛒 {fmtAge(order.pendingAt!)} в очереди
             </span>
           )}
-          {/* Бот шлёт три напоминания (3 ч / 24 ч / 72 ч) и замолкает навсегда.
-              «3/3» значит, что автоматика своё отработала и дальше заказ либо
-              дожимают руками, либо он висяк — раньше это было видно только в БД. */}
+          {/* Бот шлёт три напоминания (3 ч / 24 ч / 72 ч) и замолкает навсегда. */}
           {order.status === "AWAITING_GAMEPASS" && (order.remindersSent ?? 0) > 0 && (
             <span
               title="Напоминаний отправлено"
-              style={{ fontSize: 14, fontWeight: 600, color: (order.remindersSent ?? 0) >= 3 ? C.orange : C.textTertiary, ...tabular }}>
-              🔔 {order.remindersSent}/3
-            </span>
-          )}
-          <span style={{ fontSize: 14, color: C.textTertiary }}>—</span>
-          <span style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, ...tabular }}>
-            {displayAmount.toLocaleString("ru-RU")}
-          </span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: C.accent }}>R$</span>
-          {showCleanHint && (
-            <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>
-              ({order.amount.toLocaleString("ru-RU")})
+              style={{ fontSize: 15, fontWeight: 600, color: (order.remindersSent ?? 0) >= 3 ? C.orange : C.textTertiary, ...tabular }}>
+              🔔 {order.remindersSent} из 3
             </span>
           )}
         </div>
@@ -2669,7 +2660,7 @@ function OrderCard({
             <span style={{ fontSize: 15, color: C.textPrimary, lineHeight: 1.4 }}>
               {order.heldReason || "причина не указана"}
             </span>
-            <span style={{ fontSize: 11, color: C.textTertiary, fontFamily: MONO }}>
+            <span style={{ fontSize: 14, color: C.textTertiary, fontFamily: MONO }}>
               {order.heldBy ?? "—"} · {fmtAge(order.heldAt)} назад
             </span>
           </div>
@@ -2686,7 +2677,7 @@ function OrderCard({
         {!order.robloxUsername && order.probableNick && (
           <DataRow icon="👁" copyText={order.probableNick}>
             <span style={{ fontWeight: 600, color: C.yellow }}>{order.probableNick}</span>
-            <span style={{ fontSize: 13, color: C.textTertiary }}> · вероятный ник</span>
+            <span style={{ fontSize: 14, color: C.textTertiary }}> · вероятный ник</span>
           </DataRow>
         )}
         {/* Разбитый выкуп: список частей вместо одной ссылки. Без него
@@ -2771,7 +2762,7 @@ function OrderCard({
             return (
               <DataRow icon="📸">
                 <span style={{ color: C.yellow, fontWeight: 600 }}>Ждёт отзыв</span>
-                <span style={{ fontSize: 13, color: C.textTertiary }}> · скрин = +100 R$</span>
+                <span style={{ fontSize: 14, color: C.textTertiary }}> · скрин = +100 R$</span>
               </DataRow>
             );
           }
@@ -2781,7 +2772,7 @@ function OrderCard({
             return (
               <DataRow icon="✅">
                 <span style={{ color: C.green, fontWeight: 600 }}>+100 R$ начислен</span>
-                <span style={{ fontSize: 13, color: C.textTertiary }}>
+                <span style={{ fontSize: 14, color: C.textTertiary }}>
                   {" · "}баланс {bal} R$ до {expiry.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
                 </span>
               </DataRow>
@@ -2833,7 +2824,7 @@ function OrderCard({
                 href={`https://www.roblox.com/game-pass/${gpwPassId}`}
                 target="_blank" rel="noreferrer"
                 onClick={e => e.stopPropagation()}
-                style={{ color: C.blue, fontSize: 13 }}
+                style={{ color: C.blue, fontSize: 14 }}
               >
                 game-pass/{gpwPassId}
               </a>
@@ -2847,7 +2838,7 @@ function OrderCard({
               background: "transparent", color: gpwPassId ? C.textSecondary : C.yellow,
               fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: gpwLoading ? 0.5 : 1,
             }}>
-            {gpwLoading ? "Ищу ГП на Roblox…" : gpwPassId ? "📣 Оповестить клиента ещё раз" : "👁 Найти ГП по нику и оповестить"}
+            {gpwLoading ? "Ищу пасс на Roblox…" : gpwPassId ? "📣 Оповестить клиента ещё раз" : "🔎 Найти пасс по нику и оповестить"}
           </button>
         </div>
       )}
@@ -2914,7 +2905,7 @@ function OrderCard({
           display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
         }}>
           <span style={{ fontWeight: 600 }}>❌ Клиент сказал: не его ник</span>
-          <span style={{ fontSize: 13, color: C.textTertiary }}>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>
             {new Date(order.gpWatchDeclinedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
             {" · "}ждём правильный ник — дожать вручную
           </span>
@@ -2934,7 +2925,7 @@ function OrderCard({
               на гейт. «Выкуплено» уходит туда автоматически — говорим это
               здесь, чтобы красная плашка не читалась как тупик. */}
           {order.orderSource === "WB_DBS" && (
-            <span style={{ color: C.textSecondary, fontSize: 13 }}>
+            <span style={{ color: C.textSecondary, fontSize: 14 }}>
               — о выкупе скажем в чат WB
             </span>
           )}
@@ -2942,7 +2933,7 @@ function OrderCard({
             href={`https://vk.com/id${order.user.vkId}`}
             target="_blank" rel="noreferrer"
             onClick={e => e.stopPropagation()}
-            style={{ color: C.blue, fontSize: 13, fontWeight: 600 }}
+            style={{ color: C.blue, fontSize: 14, fontWeight: 600 }}
           >
             профиль VK — писать с личного
           </a>
@@ -3132,7 +3123,7 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
           style={{
             background: "rgba(255,255,255,0.18)", border: "none",
             width: 22, height: 22, borderRadius: 11,
-            color: C.bg, fontSize: 12, fontWeight: 700,
+            color: C.bg, fontSize: 14, fontWeight: 700,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0, lineHeight: 1,
           }}
@@ -3222,7 +3213,7 @@ function SearchProfileCard({ user, orders }: {
           }}>
             {shortName}
           </div>
-          <div style={{ fontSize: 13, color: C.textSecondary, display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 14, color: C.textSecondary, display: "flex", alignItems: "center", gap: 8 }}>
             <span>{platform === "tg" ? "Telegram" : platform === "vk" ? "VK" : "—"}</span>
             <span style={{ color: C.green }}>· {orders.length} {pluralOrders(orders.length).split(" ").pop()}</span>
           </div>
@@ -3233,13 +3224,13 @@ function SearchProfileCard({ user, orders }: {
           style={{
             padding: "8px 14px", borderRadius: 10, border: "none",
             background: `${C.blue}22`, color: C.blue,
-            fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+            fontSize: 14, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
           }}
         >
           Написать
         </button>
       </div>
-      <div style={{ display: "flex", gap: 16, fontSize: 13, color: C.textSecondary, paddingTop: 6, borderTop: `1px solid ${C.hairline}` }}>
+      <div style={{ display: "flex", gap: 16, fontSize: 14, color: C.textSecondary, paddingTop: 6, borderTop: `1px solid ${C.hairline}` }}>
         <span>Всего <span style={{ fontWeight: 700, color: C.textPrimary, ...tabular }}>{totalR.toLocaleString("ru-RU")} R$</span></span>
         <span>Клиент с <span style={{ fontWeight: 700, color: C.textPrimary }}>
           {new Date(oldest).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
@@ -3292,7 +3283,20 @@ export default function OrdersScreen({
   const [narrow, setNarrow] = useState<OrderNarrow>({});
   // Шапка среза свёрнута? Помним по срезу: в «Выкупить» её открывают каждый
   // раз, в «Историю» заходят за лентой.
-  const [tillCollapsed, setTillCollapsed] = useState<Record<string, boolean>>({});
+  /* Сводка среза на телефоне по умолчанию свёрнута в строку (20.10.2026):
+     развёрнутая она занимала весь экран 430×932, и первый заказ начинался у
+     нижней панели. Сводка нужна раз в смену, карточки — каждые полминуты.
+     Раскрытые срезы запоминаются на устройстве. */
+  const [tillOpen, setTillOpen] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem("twa_till_open") ?? "{}") ?? {}; } catch { return {}; }
+  });
+  const toggleTill = useCallback((key: string) => {
+    setTillOpen(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem("twa_till_open", JSON.stringify(next)); } catch { /* приватный режим */ }
+      return next;
+    });
+  }, []);
   const [tillAt, setTillAt] = useState<number | null>(null);
   useEffect(() => {
     if (initialQuery || initialTab || initialCreate) onInitialQueryConsumed?.();
@@ -3382,7 +3386,8 @@ export default function OrdersScreen({
     if (narrow.amount) out.push({ key: "amount", label: `${narrow.amount} R$` });
     if (narrow.blocked) out.push({
       key: "blocked",
-      label: narrow.blocked === "regional" ? "рег. цена" : narrow.blocked === "split" ? "разбитые" : "без пасса",
+      label: narrow.blocked === "regional" ? "рег. цена" : narrow.blocked === "split" ? "разбитые"
+        : narrow.blocked === "silent" ? "молчат" : narrow.blocked === "unreached" ? "не дошло" : "без пасса",
     });
     if (narrow.age && activeSlice) {
       const bucket = activeSlice.age.buckets.find(b => b.id === narrow.age);
@@ -4028,8 +4033,8 @@ export default function OrdersScreen({
               onNarrow={patch => setNarrow(n => ({ ...n, ...patch }))}
               onExport={EXPORTABLE_TABS.has(filter) ? () => setExportOpen(true) : undefined}
               exportable={EXPORTABLE_TABS.has(filter)}
-              collapsed={!!tillCollapsed[activeSlice.key]}
-              onToggleCollapsed={() => setTillCollapsed(v => ({ ...v, [activeSlice.key]: !v[activeSlice.key] }))}
+              collapsed={!tillOpen[activeSlice.key]}
+              onToggleCollapsed={() => { haptic.select(); toggleTill(activeSlice.key); }}
               onRefresh={() => { setPage(1); void fetchOrders(serverTab, query, 1, false); }}
               refreshing={loading}
               updatedAt={tillAt}
@@ -4177,7 +4182,7 @@ export default function OrdersScreen({
                             {chip.label}
                             {cnt > 0 && (
                               <span style={{
-                                fontSize: 12, fontWeight: 700,
+                                fontSize: 14, fontWeight: 700,
                                 background: isActive ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.12)",
                                 color: "#fff", padding: "2px 7px", borderRadius: 999,
                                 ...tabular,
@@ -4210,7 +4215,7 @@ export default function OrdersScreen({
                   {filter === "AWAITING_LINK" && !query && idx === AWAITING_LINK_HEAD && (
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "2px 2px" }}>
                       <div style={{ flex: 1, height: 1, background: C.hairline }} />
-                      <span style={{ fontSize: 13, color: C.textTertiary, whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 14, color: C.textTertiary, whiteSpace: "nowrap" }}>
                         ⬆ свежие · ниже — с самых старых
                       </span>
                       <div style={{ flex: 1, height: 1, background: C.hairline }} />
@@ -4373,7 +4378,7 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
       <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <span style={{
-            fontSize: 12, fontWeight: 800, color: "#fff",
+            fontSize: 14, fontWeight: 800, color: "#fff",
             background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
             borderRadius: 5, padding: "4px 8px", flexShrink: 0,
           }}>
@@ -4389,7 +4394,7 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
             {userShortName(intent.user)}
           </span>
           <span style={{
-            fontSize: 12, fontWeight: 600, color: C.blue,
+            fontSize: 14, fontWeight: 600, color: C.blue,
             background: `${C.blue}1c`, padding: "4px 9px",
             borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
           }}>
@@ -4397,7 +4402,7 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
           </span>
           {intent.prevOrders > 0 && (
             <span style={{
-              fontSize: 11, fontWeight: 600, color: C.green,
+              fontSize: 14, fontWeight: 600, color: C.green,
               background: `${C.green}1c`, padding: "3px 8px",
               borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
             }}>
@@ -4419,7 +4424,7 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
             → {intent.rublePrice.toLocaleString("ru-RU")} ₽
           </span>
           {intent.bonus > 0 && (
-            <span style={{ fontSize: 13, color: C.yellow }}>🎁 +{intent.bonus}</span>
+            <span style={{ fontSize: 14, color: C.yellow }}>🎁 +{intent.bonus}</span>
           )}
         </div>
       </div>
@@ -4440,12 +4445,12 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
         </DataRow>
         {intent.parts && intent.parts.length > 1 ? (
           // Набор: каждая часть — отдельный выкуп со своей ценой пасса.
-          <div style={{ fontSize: 13, color: C.textTertiary, padding: "2px 0 0 26px" }}>
+          <div style={{ fontSize: 14, color: C.textTertiary, padding: "2px 0 0 26px" }}>
             🧩 набор {intent.parts.map((part) => part.amount.toLocaleString("ru-RU")).join(" + ")} R$ ·{" "}
             {intent.parts.map((part) => `#${part.gamepassId}`).join(", ")} · выдать {intent.totalAmount.toLocaleString("ru-RU")} R$
           </div>
         ) : (
-          <div style={{ fontSize: 13, color: C.textTertiary, padding: "2px 0 0 26px" }}>
+          <div style={{ fontSize: 14, color: C.textTertiary, padding: "2px 0 0 26px" }}>
             геймпасс ≈ {expectedPass.toLocaleString("ru-RU")} R$ · выдать {intent.totalAmount.toLocaleString("ru-RU")} R$
           </div>
         )}
@@ -4597,6 +4602,8 @@ function FiltersSheet({ open, active, attention, counts, onPick, onAttention, on
       {SHEET_FILTERS.map(id => {
         const meta = TAB_META[id];
         const count = (counts[id] ?? 0) + (id === "DIRECT" ? (counts.INTENTS ?? 0) : 0);
+        // Авито закрыт: пустую строку не показываем (как и самоуходящий чип).
+        if (id === "AVITO" && count === 0) return null;
         return (
           <button
             key={id}
@@ -4694,7 +4701,7 @@ function SliceTill({
   const lanes = slice.lanes.filter(lane => lane.orders > 0);
   const blockers: { id: "regional" | "split" | "nogp"; tone: string; text: string }[] = [];
   if (slice.blocked.regional > 0)
-    blockers.push({ id: "regional", tone: "is-red", text: `⛔ ${slice.blocked.regional} рег. цена на доноре` });
+    blockers.push({ id: "regional", tone: "is-red", text: `⛔ ${slice.blocked.regional} рег. цена при выкупе` });
   if (slice.blocked.splitPartial > 0)
     blockers.push({ id: "split", tone: "is-mute", text: `🧩 ${slice.blocked.splitPartial} разбит — куплены не все части` });
   if (slice.blocked.noGamepass > 0)
@@ -4709,7 +4716,11 @@ function SliceTill({
         <button type="button" className="twa-slice-head-main twa-press-sm" onClick={onToggleCollapsed}>
           <span>{label}</span>
           <b>{count} {pluralOrders(count)}</b>
-          {updatedAt && <em>обновлено {new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</em>}
+          {collapsed
+            ? <em>{isLink
+                ? `${slice.stale} ${plural(slice.stale, "молчит", "молчат", "молчат")}${slice.unreached > 0 ? ` · ${slice.unreached} не дошло` : ""} `
+                : slice.key !== "DONE" && slice.gross > 0 ? `${slice.gross.toLocaleString("ru-RU")} R$ · ` : ""}{!isLink && slice.age.oldestAt ? `старейший ${fmtAge(slice.age.oldestAt)} ` : ""}▾</em>
+            : updatedAt && <em>обновлено {new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} ▴</em>}
         </button>
         <button
           type="button"
@@ -4731,17 +4742,23 @@ function SliceTill({
               <span>сегодня на <b>{today.doneSum.toLocaleString("ru-RU")} R$</b> чистыми</span>
             </div>
           ) : isLink ? (
-            <div className="twa-slice-figure">
-              <strong>{slice.stale}<small>{plural(slice.stale, "висяк", "висяка", "висяков")}</small></strong>
+            /* Число «молчат» — вход в работу: тап оставляет в ленте только их
+               (раньше они лежали в хвосте «свежие сверху» и до них не доходили). */
+            <button
+              type="button"
+              className={`twa-slice-figure twa-press-sm${narrow.blocked === "silent" ? " is-on" : ""}`}
+              onClick={() => { haptic.select(); onNarrow({ blocked: narrow.blocked === "silent" ? null : "silent" }); }}
+              style={{ background: "none", border: "none", padding: 0, textAlign: "left", color: "inherit", font: "inherit", cursor: "pointer" }}
+            >
+              <strong>{slice.stale}<small>{plural(slice.stale, "молчит", "молчат", "молчат")} ›</small></strong>
               <span>
-                из <b>{slice.orders}</b> ждущих ссылку
-                {slice.silent > 0 && <> · <b>{slice.silent}</b> бот отмолчал 3/3</>}
+                из <b>{slice.orders}</b> ждущих ссылку · бот отправил 3 из 3
                 {/* Ноль напоминаний — не «ещё не время», а «не дошло ни одно»:
                     крон откатывает уровень при недоставке, и у недостижимого
                     покупателя счётчик стоит на нуле неделями. */}
-                {slice.unreached > 0 && <> · <b style={{ color: C.red }}>{slice.unreached}</b> без единого сообщения</>}
+                {slice.unreached > 0 && <> · <b style={{ color: C.red }}>{slice.unreached}</b> не дошло ни одно</>}
               </span>
-            </div>
+            </button>
           ) : (
             <div className="twa-slice-figure">
               <strong>{slice.gross.toLocaleString("ru-RU")}<small>R$</small></strong>
@@ -4946,7 +4963,7 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     NEW: "Нет новых заказов",
     ERROR: "Нет ошибок",
     AWAITING_LINK: "Все оформили заказы",
-    STALE_LINK: "Висяков нет — очередь ссылок живая",
+    STALE_LINK: "Никто не молчит — бот ещё пишет всем, кто ждёт ссылку",
     DONE: "Нет выкупленных заказов",
     REJECTED: "Нет отменённых заказов",
     FAVORITES: "Нет избранных",

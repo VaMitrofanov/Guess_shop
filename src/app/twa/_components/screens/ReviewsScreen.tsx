@@ -96,7 +96,7 @@ export default function ReviewsScreen({ token }: { token: string }) {
             { label: "Вопросы",     val: data.unansweredQuestions, color: C.accent },
           ].map(c => (
             <div key={c.label}>
-              <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 4 }}>{c.label}</div>
+              <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 4 }}>{c.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: c.color }}>{c.val}</div>
             </div>
           ))}
@@ -115,7 +115,7 @@ export default function ReviewsScreen({ token }: { token: string }) {
             onClick={() => { haptic.select(); setFilter(f.id); }}
             style={{
               padding: "6px 14px", border: "none", borderRadius: 8,
-              fontSize: 13, fontWeight: filter === f.id ? 600 : 400, cursor: "pointer",
+              fontSize: 14, fontWeight: filter === f.id ? 600 : 400, cursor: "pointer",
               background: filter === f.id ? C.accent : C.card,
               color: filter === f.id ? "#fff" : C.textSecondary,
               transition: "all 0.15s",
@@ -129,7 +129,7 @@ export default function ReviewsScreen({ token }: { token: string }) {
           onClick={() => { haptic.select(); load(); }}
           style={{
             padding: "6px 12px", border: "none", borderRadius: 8,
-            fontSize: 13, cursor: "pointer",
+            fontSize: 14, cursor: "pointer",
             background: C.card, color: C.textSecondary,
           }}
         >
@@ -153,14 +153,14 @@ export default function ReviewsScreen({ token }: { token: string }) {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 12, color: item.type === "feedback" ? C.yellow : C.accent, fontWeight: 600 }}>
+                <span style={{ fontSize: 14, color: item.type === "feedback" ? C.yellow : C.accent, fontWeight: 600 }}>
                   {item.type === "feedback" ? "⭐ Отзыв" : "❓ Вопрос"}
                 </span>
                 {item.article && (
-                  <span style={{ fontSize: 11, color: C.textSecondary }}>· {item.article}</span>
+                  <span style={{ fontSize: 14, color: C.textSecondary }}>· {item.article}</span>
                 )}
               </div>
-              <span style={{ fontSize: 11, color: C.textSecondary }}>{relDate(item.date)}</span>
+              <span style={{ fontSize: 14, color: C.textSecondary }}>{relDate(item.date)}</span>
             </div>
 
             {item.type === "feedback" && item.rating != null && (
@@ -177,7 +177,7 @@ export default function ReviewsScreen({ token }: { token: string }) {
             </div>
 
             {item.answered && (
-              <div style={{ marginTop: 8, fontSize: 11, color: C.green, fontWeight: 600 }}>
+              <div style={{ marginTop: 8, fontSize: 14, color: C.green, fontWeight: 600 }}>
                 ✅ Ответ опубликован
               </div>
             )}

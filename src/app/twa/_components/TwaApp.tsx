@@ -1,4 +1,5 @@
 "use client";
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import BottomNav from "./BottomNav";
@@ -18,7 +19,7 @@ const EconomicsScreen = dynamic(() => import("./screens/EconomicsScreen"), { ssr
 
 function ScreenSkeleton() {
   return (
-    <div style={{ padding: "32px 16px", color: C.textSecondary, fontSize: 13, textAlign: "center" }}>
+    <div style={{ padding: "32px 16px", color: C.textSecondary, fontSize: 14, textAlign: "center" }}>
       Загружаем экран…
     </div>
   );
@@ -61,7 +62,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
   orders:     "Заказы",
   wb:         "Wildberries",
   delivery:   "WB Доставка",
-  account:    "Аккаунт",
+  account:    DONOR_ENABLED ? "Аккаунт" : "Антон",
   settings:   "Настройки",
   system:     "Система",
   economics:  "Экономика",
@@ -125,7 +126,7 @@ export default function TwaApp() {
       return "";
     }
 
-    async function doAuth(payload: Record<string, unknown>) {
+    async function doAuth(payload: Record<string, unknown>, opts: { quiet?: boolean } = {}): Promise<boolean> {
       // platform (ios/android/macos/tdesktop…) — для серверного лога
       // [twa-auth]: инструментирование риска #1 (наличие initData).
       payload.platform = window.Telegram?.WebApp?.platform ?? "unknown";
@@ -136,19 +137,21 @@ export default function TwaApp() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        if (opts.quiet) return false;
         if (!cancelled) {
           setDebugMsg(`HTTP ${res.status}: ${body.error ?? "unknown"}`);
           setAuth("error");
         }
-        return;
+        return false;
       }
       const data = await res.json();
       localStorage.setItem("twa_token", data.token);
-      if (cancelled) return;
+      if (cancelled) return true;
       setToken(data.token);
       setAuth("ok");
       window.Telegram?.WebApp?.ready();
       window.Telegram?.WebApp?.expand();
+      return true;
     }
 
     (async () => {
@@ -184,6 +187,15 @@ export default function TwaApp() {
         doAuth({ initData: initDataEarly });
         return;
       }
+
+      // Подписанная ботом ссылка `?k=` — такой же пропуск, как initData. Раньше её
+      // пробовали ПОСЛЕ трёхсекундного ожидания initData, и на iOS 9.6+ (где
+      // initData не приходит) каждый холодный запуск стоял 3 с на заглушках.
+      const earlyLinkToken = new URLSearchParams(window.location.search).get("k");
+      // Протухшая ссылка не должна ломать вход, который дал бы initData:
+      // при отказе идём обычным путём.
+      if (earlyLinkToken && await doAuth({ linkToken: earlyLinkToken }, { quiet: true }).catch(() => false)) return;
+      if (cancelled) return;
 
       // Poll — SDK may still be hydrating after async beforeInteractive load.
       const initData = await waitForInitData();
@@ -308,8 +320,8 @@ export default function TwaApp() {
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
-          <div style={{ color: "#8e8e93", fontSize: 13 }}>Открывайте из Telegram-бота</div>
-          {debugMsg && <div style={{ color: "#ff9f0a", fontSize: 11, marginTop: 12, fontFamily: "monospace" }}>{debugMsg}</div>}
+          <div style={{ color: "#8e8e93", fontSize: 14 }}>Открывайте из Telegram-бота</div>
+          {debugMsg && <div style={{ color: "#ff9f0a", fontSize: 14, marginTop: 12, fontFamily: "monospace" }}>{debugMsg}</div>}
         </div>
       </div>
     );
@@ -351,7 +363,7 @@ export default function TwaApp() {
           }
           return (
             <>
-              <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 1 }}>
+              <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 1 }}>
                 {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
               </div>
               <div className="twa-liquid-title">{SCREEN_TITLES[screen]}</div>

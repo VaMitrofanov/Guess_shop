@@ -1,5 +1,6 @@
 "use client";
 
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useState } from "react";
 import {
   CircleUserRound,
@@ -73,7 +74,9 @@ export default function BottomNav({
           </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("account")}>
             <span className="twa-more-icon"><CircleUserRound size={19} /></span>
-            <span><strong>Аккаунт</strong><small>Донор, автобай и выкуп</small></span>
+            {DONOR_ENABLED
+              ? <span><strong>Аккаунт</strong><small>Донор, автобай и выкуп</small></span>
+              : <span><strong>Антон</strong><small>Партнёр: задачи, баланс, сверка</small></span>}
             <span aria-hidden="true">›</span>
           </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("settings")}>
@@ -87,7 +90,9 @@ export default function BottomNav({
       <nav className="twa-liquid-tabbar" aria-label="Основная навигация">
         {MAIN_TABS.map(({ id, label, Icon }) => {
           const selected = active === id;
-          const badge = id === "orders" && ordersBadge > 0 ? ordersBadge : 0;
+          /* Счётчик доставок — на «Доставке». До 20.10 он висел на «Ещё»: остался
+             с тех пор, как «Доставка» жила в этом меню. */
+          const badge = id === "orders" ? ordersBadge : id === "delivery" ? dbsBadge : 0;
           return (
             <button
               key={id}
@@ -98,7 +103,7 @@ export default function BottomNav({
             >
               <span className="twa-tab-icon">
                 <Icon size={21} strokeWidth={selected ? 2.2 : 1.8} />
-                {badge > 0 && <b style={{ background: C.red }}>{badge > 99 ? "99+" : badge}</b>}
+                {badge > 0 && <b style={{ background: id === "delivery" ? C.accent : C.red }}>{badge > 99 ? "99+" : badge}</b>}
               </span>
               <span>{label}</span>
             </button>
@@ -112,7 +117,6 @@ export default function BottomNav({
         >
           <span className="twa-tab-icon">
             <Ellipsis size={22} />
-            {dbsBadge > 0 && <b style={{ background: C.accent }}>{dbsBadge > 99 ? "99+" : dbsBadge}</b>}
           </span>
           <span>Ещё</span>
         </button>

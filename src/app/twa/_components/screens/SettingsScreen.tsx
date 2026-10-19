@@ -1,4 +1,5 @@
 "use client";
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { C } from "../theme";
 import { useEffect, useState, useCallback } from "react";
 import { haptic } from "../haptics";
@@ -14,7 +15,7 @@ interface Settings {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
+    <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
       {title}
     </div>
   );
@@ -113,10 +114,10 @@ function StatusPill({ enabled, bestRate, targetRate, pending }: {
         boxShadow: enabled ? `0 0 6px ${conditionMet ? C.green : C.accent}` : "none",
       }} />
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, color: "#e5e5ea", fontWeight: 500 }}>
+        <div style={{ fontSize: 14, color: "#e5e5ea", fontWeight: 500 }}>
           {!enabled ? "Автобай выключен" : conditionMet ? "Условие выполнено — выкупает" : "Ожидание подходящего курса"}
         </div>
-        <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
+        <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2 }}>
           {bestRate
             ? `Лучший: $${bestRate.rateUSD}/1K · ${bestRate.provider} · ${bestRate.inventory.toLocaleString("ru-RU")} R$`
             : "Нет данных о рыночном курсе"}
@@ -184,7 +185,7 @@ function TestCodesSection({ token }: { token: string }) {
       <SectionHeader title="Тестовые коды" />
       <Card>
         {codes === null && (
-          <div style={{ padding: "14px 16px", fontSize: 13, color: C.textSecondary }}>Загрузка…</div>
+          <div style={{ padding: "14px 16px", fontSize: 14, color: C.textSecondary }}>Загрузка…</div>
         )}
         {codes?.map((c, i) => {
           const meta = c.status ? TC_STATUS[c.status] : null;
@@ -203,11 +204,11 @@ function TestCodesSection({ token }: { token: string }) {
                 >
                   {copied === c.code ? `✓ ${c.code}` : c.code}
                 </button>
-                <span style={{ flex: 1, fontSize: 12, color: C.textSecondary, whiteSpace: "nowrap" }}>
+                <span style={{ flex: 1, fontSize: 14, color: C.textSecondary, whiteSpace: "nowrap" }}>
                   {c.denomination} → {c.passPrice} R$
                 </span>
                 <span style={{
-                  fontSize: 11, fontWeight: 600,
+                  fontSize: 14, fontWeight: 600,
                   color: meta?.color ?? C.muted,
                   background: `${meta?.color ?? C.muted}1f`,
                   borderRadius: 7, padding: "3px 8px", whiteSpace: "nowrap",
@@ -221,7 +222,8 @@ function TestCodesSection({ token }: { token: string }) {
                   title="Сбросить этот код"
                   style={{
                     background: "transparent", border: "none", cursor: busy ? "default" : "pointer",
-                    fontSize: 17, lineHeight: 1, color: C.textSecondary, padding: "2px 4px",
+                    fontSize: 18, lineHeight: 1, color: C.textSecondary, padding: 0,
+                    minWidth: 44, minHeight: 44,
                     opacity: busy === c.code ? 0.4 : 1,
                   }}
                 >
@@ -245,7 +247,7 @@ function TestCodesSection({ token }: { token: string }) {
       >
         {busy === "__ALL__" ? "Сбрасываю…" : "↻ Сбросить все тестовые коды"}
       </button>
-      <div style={{ fontSize: 11, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
+      <div style={{ fontSize: 14, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
         Сброс → код снова свободен (AVAILABLE), его заявка удаляется. Тестовые коды (isTest) в статистику и остатки не попадают. Тапни код, чтобы скопировать.
       </div>
     </section>
@@ -310,8 +312,8 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
   return (
     <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
 
-      {/* AutoBuy status */}
-      <section>
+      {/* AutoBuy status — донорский автобай, спрятан вместе с донором (donor-mode.ts). */}
+      {DONOR_ENABLED && <section>
         <SectionHeader title="Автобай" />
         <StatusPill
           enabled={autoBuyEnabled}
@@ -329,10 +331,10 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
             </SettingRow>
           </Card>
         </div>
-        <div style={{ fontSize: 11, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
+        <div style={{ fontSize: 14, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
           buyer.py проверяет рынок каждые 60 сек. Выкупает когда курс ≤ целевого.
         </div>
-      </section>
+      </section>}
 
       {/* Rates */}
       <section>
@@ -346,7 +348,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
           </SettingRow>
         </Card>
         {settings.purchaseRate === null && (
-          <div style={{ fontSize: 11, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
+          <div style={{ fontSize: 14, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
             Курс закупа не задан — используется рыночный
           </div>
         )}
@@ -356,7 +358,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
       <SaveBtn onSave={save} saving={saving} saved={saved} />
 
       {saveErr && (
-        <div style={{ background: C.red + "22", color: C.red, borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+        <div style={{ background: C.red + "22", color: C.red, borderRadius: 10, padding: "10px 14px", fontSize: 14 }}>
           ❌ {saveErr}
         </div>
       )}
@@ -378,7 +380,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
             <span style={{ fontSize: 22 }}>🖥</span>
             <div style={{ flex: 1, textAlign: "left" }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>Состояние системы</div>
-              <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>Серверы, БД, сервисы</div>
+              <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2 }}>Серверы, БД, сервисы</div>
             </div>
             <span style={{ color: C.muted, fontSize: 18 }}>›</span>
           </button>

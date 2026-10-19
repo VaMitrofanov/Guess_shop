@@ -253,8 +253,19 @@ export interface TwaStats30d {
   sales:  z.infer<typeof SaleSchema>[];
 }
 
+/* Устаревший кэш отдаётся сразу, обновление идёт в фоне (20.10.2026). Холодный
+   путь — заказы, пауза 2 с против лимита WB, продажи — стоял на критическом пути
+   главной TWA раз в 5 минут и делал её ответ 3,6 с. Один запрос в полёте на всех. */
+let statsInflight: Promise<TwaStats30d | null> | null = null;
+
 export async function getStats30d(): Promise<TwaStats30d | null> {
   if (cache.stats && Date.now() - cache.stats.ts < TTL) return cache.stats.data;
+  statsInflight ??= loadStats30d().finally(() => { statsInflight = null; });
+  if (cache.stats) return cache.stats.data;
+  return statsInflight;
+}
+
+async function loadStats30d(): Promise<TwaStats30d | null> {
 
   const dateFrom = new Date(Date.now() - 30 * 864e5).toISOString().split(".")[0] + "Z";
   const orders = await fetchWb(
@@ -686,8 +697,17 @@ function feedbackText(f: { text: string; pros?: string; cons?: string }): string
   return parts.join("\n") || "";
 }
 
+let feedbackInflight: Promise<FeedbackSummary | null> | null = null;
+
+/** То же правило, что у `getStats30d`: устаревшее — сразу, свежее — в фоне. */
 export async function getFeedbackSummary(): Promise<FeedbackSummary | null> {
   if (cache.feedback && Date.now() - cache.feedback.ts < FEEDBACK_TTL) return cache.feedback.data;
+  feedbackInflight ??= loadFeedbackSummary().finally(() => { feedbackInflight = null; });
+  if (cache.feedback) return cache.feedback.data;
+  return feedbackInflight;
+}
+
+async function loadFeedbackSummary(): Promise<FeedbackSummary | null> {
   const token = getWbToken();
   if (!token) return null;
   try {

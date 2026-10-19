@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { NOT_HELD_SQL } from "@/lib/order-hold";
 import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW } from "@/lib/purchase-guard";
-import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, NEW_CUTOFF_HOURS, STALE_LINK_DAYS, type FilterTab } from "@/lib/order-queue";
+import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, NEW_CUTOFF_HOURS, SILENT_REMINDERS, type FilterTab } from "@/lib/order-queue";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Срез = работа, а не статус. Шапка среза отвечает на четыре вопроса подряд:
@@ -87,7 +87,7 @@ export interface OrderSlice {
    * не попадали никогда, и молчание не видел никто.
    */
   unreached: number;
-  /** «Дожать»: ждут дольше двух недель. */
+  /** «Молчат»: бот отправил 3 из 3 напоминаний (= вкладка STALE_LINK). */
   stale: number;
   /** «Починить»: разбивка по причинам ошибки. */
   reasons: { id: string; label: string; count: number }[];
@@ -215,13 +215,16 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
     const where = SLICE_SQL[key];
     parts.push(`COUNT(*) FILTER (WHERE ${where})::int AS "${key}_N"`);
     parts.push(`COALESCE(SUM(amount) FILTER (WHERE ${where}), 0)::int AS "${key}_CLEAN"`);
+    // Грязные — по каждому заказу отдельно: Roblox берёт цену за каждый пасс, и
+    // округление общей суммы давало 32 001 против 32 013 на главной TWA и в «Выкупе».
+    parts.push(`COALESCE(SUM(CEIL(amount / 0.7)) FILTER (WHERE ${where}), 0)::int AS "${key}_GROSS"`);
     parts.push(`COUNT(*) FILTER (WHERE ${where} AND "gamepassUrl" IS NOT NULL)::int AS "${key}_GP"`);
     parts.push(`COUNT(*) FILTER (WHERE ${where} AND "buyoutErrorCode" = '${BUYOUT_ERROR_REGIONAL_PRICE}')::int AS "${key}_REGIONAL"`);
     parts.push(`MIN(${ageExpr(key)}) FILTER (WHERE ${where}) AS "${key}_OLDEST"`);
     parts.push(`(array_agg("wbCode" ORDER BY ${ageExpr(key)} ASC) FILTER (WHERE ${where}))[1] AS "${key}_OLDEST_CODE"`);
     for (const lane of ["WB", "WB_DBS", "DIRECT"] as const) {
       parts.push(`COUNT(*) FILTER (WHERE ${where} AND ${BUYOUT_LANE_SQL} = '${lane}')::int AS "${key}_LANE_${lane}_N"`);
-      parts.push(`COALESCE(SUM(amount) FILTER (WHERE ${where} AND ${BUYOUT_LANE_SQL} = '${lane}'), 0)::int AS "${key}_LANE_${lane}_S"`);
+      parts.push(`COALESCE(SUM(CEIL(amount / 0.7)) FILTER (WHERE ${where} AND ${BUYOUT_LANE_SQL} = '${lane}'), 0)::int AS "${key}_LANE_${lane}_G"`);
     }
     for (const bucket of ageBucketsFor(key as FilterTab)) {
       parts.push(`COUNT(*) FILTER (WHERE ${where} AND ${bucketSql(key, bucket)})::int AS "${key}_AGE_${bucket.id}"`);
@@ -233,7 +236,8 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
   }
   parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "remindersSent" >= 3)::int AS "LINK_SILENT"`);
   parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "remindersSent" = 0 AND "createdAt" <= NOW() - INTERVAL '24 hours')::int AS "LINK_UNREACHED"`);
-  parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days')::int AS "LINK_STALE"`);
+  // `stale` с 20.10 = «Молчат» (бот отправил 3 из 3), как вкладка STALE_LINK.
+  parts.push(`COUNT(*) FILTER (WHERE ${LINK_SLICE_SQL} AND "remindersSent" >= ${SILENT_REMINDERS})::int AS "LINK_STALE"`);
   parts.push(`COUNT(*) FILTER (WHERE status = 'COMPLETED' AND COALESCE("completedAt", "updatedAt") >= ${dayStart})::int AS "TODAY_DONE"`);
   parts.push(`COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED' AND COALESCE("completedAt", "updatedAt") >= ${dayStart}), 0)::int AS "TODAY_DONE_SUM"`);
   parts.push(`COUNT(*) FILTER (WHERE "pendingAt" >= ${dayStart})::int AS "TODAY_IN"`);
@@ -266,7 +270,7 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
   const buildSlice = (key: Exclude<SliceKey, "DONE">): OrderSlice => {
     const orders = num(r[`${key}_N`]);
     const clean = num(r[`${key}_CLEAN`]);
-    const gross = grossOf(clean);
+    const gross = num(r[`${key}_GROSS`]);
     const withGamepass = num(r[`${key}_GP`]);
     const regional = num(r[`${key}_REGIONAL`]);
     // «Разбит, но не докуплен» — только у очереди выкупа: в остальных срезах
@@ -284,7 +288,7 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
     const lanes: SliceLane[] = (["WB", "WB_DBS", "DIRECT"] as const).map(lane => ({
       id: lane,
       orders: num(r[`${key}_LANE_${lane}_N`]),
-      gross: grossOf(num(r[`${key}_LANE_${lane}_S`])),
+      gross: num(r[`${key}_LANE_${lane}_G`]),
     }));
 
     return {

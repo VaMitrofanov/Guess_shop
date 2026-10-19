@@ -123,7 +123,7 @@ export default function OrderDossier({
   const lane = laneOf(order);
   const badge = orderBadge(order);
   const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
-  const action = primaryActionFor(order);
+  const action = primaryActionFor(order, live);
   const [moreActions, setMoreActions] = useState(false);
   const next = nextStepFor(order, live);
   /* Флаг под пассом — только то, чего не сказали заголовок блока и строка

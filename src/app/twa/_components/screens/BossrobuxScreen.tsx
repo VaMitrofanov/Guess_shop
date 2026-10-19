@@ -1,4 +1,5 @@
 "use client";
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { C, MONO, SHADOW, tabular, tint } from "../theme";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
@@ -454,7 +455,7 @@ function GamepassCard({
           {gp.isManagedPricing && <span style={{ color: C.orange }}> · MP</span>}
         </div>
         {gp.existingOrder && (
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.orange, marginTop: 3 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.orange, marginTop: 3 }}>
             📦 уже в заказе {gp.existingOrder.wbCode} · {ORDER_STATUS_RU[gp.existingOrder.status] ?? gp.existingOrder.status}
             {/* Прайс-гард (Ш3): цена ≠ ожидаемой по номиналу заказа — сервер такой выкуп заблокирует */}
             {gp.existingOrder.expectedPrice != null && gp.existingOrder.expectedPrice !== gp.price && (
@@ -716,7 +717,7 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
             {gp.image && <img src={gp.image} alt="" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }} />}
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{gp.name}</div>
-              <div style={{ fontSize: 13, color: C.textTertiary }}>{gp.price.toLocaleString("ru-RU")} R$ · {gp.sellerName}</div>
+              <div style={{ fontSize: 14, color: C.textTertiary }}>{gp.price.toLocaleString("ru-RU")} R$ · {gp.sellerName}</div>
             </div>
           </div>
         </div>
@@ -766,15 +767,15 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 7, width: "100%" }}>
                     <span style={{
-                      fontSize: 11, fontWeight: 800, color: "#fff",
+                      fontSize: 14, fontWeight: 800, color: "#fff",
                       background: o.user.tgId ? "#229ED9" : o.user.vkId ? "#0077FF" : C.elevated,
                       borderRadius: 4, padding: "2px 6px", flexShrink: 0,
                     }}>{o.user.tgId ? "T" : o.user.vkId ? "V" : "—"}</span>
                     <span style={{ fontSize: 15, fontWeight: 600, color: "#7ec5ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{nick}</span>
                     {sb && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: sb.color, background: `${sb.color}1c`, padding: "2px 7px", borderRadius: 999, flexShrink: 0 }}>{sb.label}</span>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: sb.color, background: `${sb.color}1c`, padding: "2px 7px", borderRadius: 999, flexShrink: 0 }}>{sb.label}</span>
                     )}
-                    <span style={{ fontSize: 13, color: ageColor(o.createdAt), marginLeft: "auto", flexShrink: 0, ...tabular }}>⏱ {fmtAge(o.createdAt)}</span>
+                    <span style={{ fontSize: 14, color: ageColor(o.createdAt), marginLeft: "auto", flexShrink: 0, ...tabular }}>⏱ {fmtAge(o.createdAt)}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                     <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1, fontSize: 14 }}>{o.wbCode}</span>
@@ -782,7 +783,7 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
                       {match ? "✓" : "⚠️"} нужно {needed.toLocaleString("ru-RU")} R$
                     </span>
                   </div>
-                  {isSel && <span style={{ fontSize: 12, color: C.textTertiary }}>({o.amount.toLocaleString("ru-RU")} чистых · заказ от {new Date(o.createdAt).toLocaleDateString("ru-RU")})</span>}
+                  {isSel && <span style={{ fontSize: 14, color: C.textTertiary }}>({o.amount.toLocaleString("ru-RU")} чистых · заказ от {new Date(o.createdAt).toLocaleDateString("ru-RU")})</span>}
                 </button>
               </div>
             );
@@ -794,7 +795,7 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
         {/* Footer */}
         <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
           {priceMismatch && selected && (
-            <div style={{ background: `${C.orange}18`, borderRadius: 10, padding: "8px 12px", fontSize: 13, color: C.orange }}>
+            <div style={{ background: `${C.orange}18`, borderRadius: 10, padding: "8px 12px", fontSize: 14, color: C.orange }}>
               ⚠️ Цена ГП {gp.price.toLocaleString("ru-RU")} R$ ≠ требуемой {neededPrice?.toLocaleString("ru-RU")} R$ — проверь перед выкупом
             </div>
           )}
@@ -960,13 +961,13 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
           <span style={{ fontSize: 15, fontWeight: 700, color: C.orange, ...tabular }}>
             − {group.totalDirty.toLocaleString("ru-RU")} R$
           </span>
-          <span style={{ fontSize: 13, color: C.textTertiary }}>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>
             {pluralPurchases(group.orders.length)}
             {group.drainTotal > 0 && <> · <span style={{ color: C.blue }}>💧 {group.drainTotal.toLocaleString("ru-RU")}</span></>}
           </span>
         </div>
         <span style={{
-          fontSize: 13, color: C.textTertiary, flexShrink: 0,
+          fontSize: 14, color: C.textTertiary, flexShrink: 0,
           transform: open ? "rotate(90deg)" : "none",
           transition: "transform 0.2s",
         }}>▶</span>
@@ -981,7 +982,7 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
               {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
               <div style={{ padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>{fmtTxDate(d.createdAt)}</span>
-                <span style={{ fontSize: 13, color: C.blue }}>
+                <span style={{ fontSize: 14, color: C.blue }}>
                   💧 Слив → {d.drainName ?? "приёмник"}
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 600, color: C.blue, ...tabular }}>
@@ -1025,20 +1026,20 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
                       </span>
                     )}
                     {tx.robloxUsername && (
-                      <span style={{ fontSize: 13, color: C.accent, fontWeight: 500 }}>
+                      <span style={{ fontSize: 14, color: C.accent, fontWeight: 500 }}>
                         → {tx.robloxUsername}
                       </span>
                     )}
                     <span style={{
-                      fontSize: 11, fontWeight: 800, color: "#fff",
+                      fontSize: 14, fontWeight: 800, color: "#fff",
                       background: platformColor, borderRadius: 4, padding: "2px 5px",
                       lineHeight: "15px",
                     }}>{platform}</span>
                     <span style={{
-                      fontSize: 13, color: C.textTertiary,
+                      fontSize: 14, color: C.textTertiary,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>{nick}</span>
-                    <span style={{ fontSize: 13, color: C.textTertiary, fontFamily: MONO, letterSpacing: 0.3, marginLeft: "auto", flexShrink: 0 }}>
+                    <span style={{ fontSize: 14, color: C.textTertiary, fontFamily: MONO, letterSpacing: 0.3, marginLeft: "auto", flexShrink: 0 }}>
                       {tx.wbCode}
                     </span>
                   </div>
@@ -1117,7 +1118,7 @@ function TransactionHistory({ token, onReady }: { token: string; onReady?: () =>
                 onClick={() => { haptic.select(); setSourceFilter(chip.id); }}
                 style={{
                   padding: "6px 12px", border: "none", borderRadius: 999, cursor: "pointer",
-                  fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                  fontSize: 14, fontWeight: 600, fontFamily: "inherit",
                   display: "flex", alignItems: "center", gap: 5,
                   background: isActive ? chip.color : C.elevated,
                   color: isActive ? "#fff" : chip.color,
@@ -1143,7 +1144,7 @@ function TransactionHistory({ token, onReady }: { token: string; onReady?: () =>
           <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, ...tabular }}>
             {profitSummary.exactCount > 0 ? `${profitSummary.kopecks >= 0 ? "+" : ""}${(profitSummary.kopecks / 100).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽` : "Точных данных нет"}
           </span>
-          <span style={{ fontSize: 11, color: C.textTertiary }}>точная прибыль · {profitSummary.exactCount} заказов</span>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>точная прибыль · {profitSummary.exactCount} заказов</span>
         </span>
       </div>
 
@@ -1514,7 +1515,7 @@ function BuyoutOrderCard({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
           <span style={{
-            fontSize: 12, fontWeight: 800, color: "#fff",
+            fontSize: 14, fontWeight: 800, color: "#fff",
             background: order.user.tgId ? "#229ED9" : order.user.vkId ? "#0077FF" : C.elevated,
             borderRadius: 5, padding: "4px 8px", flexShrink: 0,
           }}>
@@ -1526,13 +1527,13 @@ function BuyoutOrderCard({
           }}>{nick}</span>
           {order.orderSource === "AVITO" ? (
             <span style={{
-              fontSize: 12, fontWeight: 600, color: C.orange,
+              fontSize: 14, fontWeight: 600, color: C.orange,
               background: `${C.orange}1c`, padding: "4px 9px",
               borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
             }}>Авито</span>
           ) : order.isDirectOrder && (
             <span style={{
-              fontSize: 12, fontWeight: 600, color: C.blue,
+              fontSize: 14, fontWeight: 600, color: C.blue,
               background: `${C.blue}1c`, padding: "4px 9px",
               borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
             }}>Прямой</span>
@@ -1582,27 +1583,27 @@ function BuyoutOrderCard({
 
       {/* П5: честная карточка — фактическая живая цена ГП и «уже выкупался» */}
       {live?.priceMismatch && live.livePrice != null && (
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.orange }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>
           ⚠️ Фактическая цена пасса {live.livePrice.toLocaleString("ru-RU")} R$ ≠ расчётной {live.expected.toLocaleString("ru-RU")} R$
         </div>
       )}
       {live?.robloxPlusDiscountPercent && live.livePrice != null && live.basePrice != null && (
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.green }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.green }}>
           ✨ Roblox Plus −{live.robloxPlusDiscountPercent}%: списание {live.livePrice.toLocaleString("ru-RU")} R$, база продавца {live.basePrice.toLocaleString("ru-RU")} R$
         </div>
       )}
       {live?.hasUnsafeBuyerPrice && (
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.red }}>
           ⛔ Неизвестная/региональная buyer-цена — сервер заблокирует покупку
         </div>
       )}
       {live?.isForSale === false && (
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.red }}>
           ⛔ Геймпасс сейчас не на продаже
         </div>
       )}
       {live?.reusedIn && (
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.red }}>
           ♻️ Уже выкупался в {live.reusedIn} — донор может им владеть
         </div>
       )}
@@ -1636,7 +1637,7 @@ function renderGroupedOrders(
     <div key={g.label}>
       {gi > 0 && <div style={{ height: 2, background: C.border, margin: "6px 0" }} />}
       {multiGroup && (
-        <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: g.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <div style={{ padding: "10px 16px 4px", fontSize: 14, fontWeight: 700, color: g.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
           {g.label} · {g.items.length}
         </div>
       )}
@@ -1945,7 +1946,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>
                   Выкупаю {bulkProgress?.done ?? 0}/{bulkProgress?.total ?? 0}…
                 </div>
-                <div style={{ fontSize: 13, color: C.green, marginTop: 2, ...tabular }}>
+                <div style={{ fontSize: 14, color: C.green, marginTop: 2, ...tabular }}>
                   ✅ {bulkProgress?.ok ?? 0} успешно
                 </div>
               </div>
@@ -1966,7 +1967,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       {/* Selected — ready to buy */}
       {plan.selected.length > 0 && (
         <Card>
-          <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          <div style={{ padding: "10px 16px 4px", fontSize: 14, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: 0.5 }}>
             Выкупить · {plan.selected.length}
           </div>
           {renderGroupedOrders(plan.selected, buying, doPurchase, false, liveMap)}
@@ -1976,7 +1977,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       {/* Waiting — not enough balance */}
       {plan.waiting.length > 0 && (
         <Card>
-          <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          <div style={{ padding: "10px 16px 4px", fontSize: 14, fontWeight: 700, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5 }}>
             Ожидают баланс · {plan.waiting.length}
           </div>
           {renderGroupedOrders(plan.waiting, buying, doPurchase, true, liveMap)}
@@ -2009,13 +2010,13 @@ function AwaitingPaySection({ orders, liveMap }: { orders: BuyoutOrder[]; liveMa
           textAlign: "left", fontFamily: "inherit",
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: C.yellow, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: C.yellow, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>
           💳 Ждём оплату · {orders.length}
         </span>
-        <span style={{ fontSize: 13, color: C.textTertiary, ...tabular }}>
+        <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>
           {totalDirty.toLocaleString("ru-RU")} R$
         </span>
-        <span style={{ fontSize: 12, color: C.textTertiary, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>
+        <span style={{ fontSize: 14, color: C.textTertiary, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>
       </button>
       {open && orders.map(o => (
         <div key={o.id}>
@@ -2024,7 +2025,7 @@ function AwaitingPaySection({ orders, liveMap }: { orders: BuyoutOrder[]; liveMa
         </div>
       ))}
       {open && (
-        <div style={{ padding: "4px 16px 12px", fontSize: 12, color: C.textTertiary }}>
+        <div style={{ padding: "4px 16px 12px", fontSize: 14, color: C.textTertiary }}>
           Прямые заказы без подтверждённой оплаты — в очередь выкупа попадут после «✅ Оплата пришла» в TG-карточке.
         </div>
       )}
@@ -2044,9 +2045,9 @@ function BulkReport({ report, onClose }: {
         <div style={{ padding: "18px 20px 12px" }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", marginBottom: 8 }}>🧾 Отчёт выкупа</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: C.green, background: `${C.green}1c`, padding: "4px 10px", borderRadius: 999 }}>✅ {report.ok}</span>
-            {report.fail > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: C.red, background: `${C.red}1c`, padding: "4px 10px", borderRadius: 999 }}>❌ {report.fail}</span>}
-            <span style={{ fontSize: 13, fontWeight: 600, color: C.accent, background: `${C.accent}1c`, padding: "4px 10px", borderRadius: 999, ...tabular }}>− {report.total.toLocaleString("ru-RU")} R$</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.green, background: `${C.green}1c`, padding: "4px 10px", borderRadius: 999 }}>✅ {report.ok}</span>
+            {report.fail > 0 && <span style={{ fontSize: 14, fontWeight: 600, color: C.red, background: `${C.red}1c`, padding: "4px 10px", borderRadius: 999 }}>❌ {report.fail}</span>}
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.accent, background: `${C.accent}1c`, padding: "4px 10px", borderRadius: 999, ...tabular }}>− {report.total.toLocaleString("ru-RU")} R$</span>
           </div>
         </div>
         <div style={{ height: 1, background: C.border }} />
@@ -2056,7 +2057,7 @@ function BulkReport({ report, onClose }: {
               <span style={{ fontSize: 15, flexShrink: 0 }}>{it.ok ? "✅" : "❌"}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.nick}</div>
-                <div style={{ fontSize: 12, color: C.textTertiary, fontFamily: MONO }}>{it.wbCode}{!it.ok && it.reason ? ` · ${it.reason}` : ""}</div>
+                <div style={{ fontSize: 14, color: C.textTertiary, fontFamily: MONO }}>{it.wbCode}{!it.ok && it.reason ? ` · ${it.reason}` : ""}</div>
               </div>
               <span style={{ fontSize: 14, fontWeight: 600, color: it.ok ? C.orange : C.textTertiary, flexShrink: 0, ...tabular }}>
                 {it.ok ? `− ${it.gross.toLocaleString("ru-RU")}` : "—"}
@@ -2070,7 +2071,7 @@ function BulkReport({ report, onClose }: {
             style={{ width: "100%", padding: "13px", border: "none", borderRadius: 12, background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
             Готово
           </button>
-          <div style={{ fontSize: 12, color: C.textTertiary, textAlign: "center", marginTop: 8 }}>
+          <div style={{ fontSize: 14, color: C.textTertiary, textAlign: "center", marginTop: 8 }}>
             Отчёт сохранён и отправлен в Telegram
           </div>
         </div>
@@ -2118,7 +2119,7 @@ function DrainConfirm({ target, drainName, donorName, draining, onConfirm, onCan
             <span>Приёмник</span><span>{drainName ?? "—"}</span>
           </div>
         </div>
-        <div style={{ background: `${C.orange}18`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.orange }}>
+        <div style={{ background: `${C.orange}18`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: C.orange }}>
           Цена геймпасса приёмника станет {target.toLocaleString("ru-RU")} R$, донор его купит на весь баланс. Займёт ~15–30 c.
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -2226,7 +2227,7 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
             <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
               <StatusDot valid={d.drain.cookieValid !== false} />
               <span style={{ fontSize: 17, fontWeight: 600, color: "#e5e5ea" }}>{d.drain.accountName ?? "Приёмник"}</span>
-              {d.drain.cookieValid === false && <span style={{ fontSize: 13, color: C.red }}>Cookie истёк</span>}
+              {d.drain.cookieValid === false && <span style={{ fontSize: 14, color: C.red }}>Cookie истёк</span>}
             </div>
             <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
             <InfoRow label="Баланс приёмника" value={d.drain.balance !== null ? `${d.drain.balance.toLocaleString("ru-RU")} R$` : "—"} />
@@ -2272,7 +2273,7 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
         <Card>
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
             <div>
-              <div style={{ fontSize: 13, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>Cookie аккаунта-приёмника (.ROBLOSECURITY)</div>
+              <div style={{ fontSize: 14, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>Cookie аккаунта-приёмника (.ROBLOSECURITY)</div>
               <textarea value={cookieInput} onChange={e => setCookieInput(e.target.value)} placeholder=".ROBLOSECURITY значение…" rows={3}
                 style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", resize: "vertical", outline: "none", fontFamily: "monospace", lineHeight: 1.4, boxSizing: "border-box" }} />
               <button className="twa-press" onClick={() => { haptic.impact("medium"); saveCookie(); }} disabled={savingCookie || !cookieInput.trim()}
@@ -2282,7 +2283,7 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
             </div>
             <div style={{ height: 1, background: C.border }} />
             <div>
-              <div style={{ fontSize: 13, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>ID / URL геймпасса на аккаунте-приёмнике</div>
+              <div style={{ fontSize: 14, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>ID / URL геймпасса на аккаунте-приёмнике</div>
               <input value={gpInput} onChange={e => setGpInput(e.target.value)} placeholder="ID или URL геймпасса…"
                 style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
               <button className="twa-press" onClick={() => { haptic.impact("medium"); saveGp(); }} disabled={savingGp || !gpInput.trim()}
@@ -2292,7 +2293,7 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
 
               {d?.gamepasses && d.gamepasses.length > 0 && (
                 <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 12, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>
+                  <div style={{ fontSize: 14, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>
                     или выберите свой геймпасс:
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
@@ -2311,7 +2312,7 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
                           <span style={{ fontSize: 14, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                             {selected ? "✓ " : ""}{gp.name}
                           </span>
-                          <span style={{ fontSize: 13, color: gp.isForSale ? C.accent : C.textTertiary, flexShrink: 0, ...tabular }}>
+                          <span style={{ fontSize: 14, color: gp.isForSale ? C.accent : C.textTertiary, flexShrink: 0, ...tabular }}>
                             {gp.price != null ? `${gp.price.toLocaleString("ru-RU")} R$` : "—"}{gp.isForSale ? "" : " · off"}
                           </span>
                         </button>
@@ -2996,7 +2997,7 @@ function PartnerRateSheet({ busy, currentRate, purchaseRate, rateBasis, robloxFe
           <span>Закупка</span>
           <span style={{ fontWeight: 700, color: C.textPrimary, ...tabular }}>{fmtRate(purchaseRate)} USDT / 1000 грязных R$</span>
         </div>
-        <div style={{ fontSize: 13, color: C.textTertiary, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 14, color: C.textTertiary, lineHeight: 1.4 }}>
           Комиссия Roblox {fmtRate(robloxFeePct)}% оплачивается нами. В TWA меняется только ставка Антона; полная политика редактируется в веб-админке.
         </div>
         <input value={rateInput} onChange={e => setRateInput(e.target.value)} inputMode="decimal"
@@ -3543,7 +3544,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         <Card>
           <div style={{ padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ color: C.red, fontSize: 15, fontWeight: 700 }}>{loadError}</div>
-            <div style={{ color: C.textSecondary, fontSize: 13, lineHeight: 1.35 }}>
+            <div style={{ color: C.textSecondary, fontSize: 14, lineHeight: 1.35 }}>
               Данные Антона не загружены, операции временно недоступны.
             </div>
             <button className="twa-press" onClick={() => { haptic.impact("medium"); void load(); }} disabled={loading}
@@ -3708,7 +3709,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
               )}
             </div>
             {(latestRun?.error || latestSyncResult?.error || latestSyncResult?.message || latestSyncResult?.errors?.[0]) && (
-              <div style={{ color: latestRun?.status === "FAILED" || latestSyncResult?.status === "failed" ? C.red : C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>
+              <div style={{ color: latestRun?.status === "FAILED" || latestSyncResult?.status === "failed" ? C.red : C.textTertiary, fontSize: 14, lineHeight: 1.35 }}>
                 {latestRun?.error || latestSyncResult?.errors?.[0] || latestSyncResult?.error || latestSyncResult?.message}
               </div>
             )}
@@ -3953,7 +3954,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                   style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: C.accent, fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
                   Загрузить XLSX
                 </button>
-                <div style={{ color: C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>Ожидаемые колонки: GP/ГП, Ник, Номинал.</div>
+                <div style={{ color: C.textTertiary, fontSize: 14, lineHeight: 1.35 }}>Ожидаемые колонки: GP/ГП, Ник, Номинал.</div>
                 {importResult && (
                   <div style={{ background: C.elevated, borderRadius: 10, overflow: "hidden" }}>
                     <InfoRow label="Строк" value={importResult.totalRows} />
@@ -3962,10 +3963,10 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                     <InfoRow label="Ошибки" value={importResult.failed} last />
                     {importResult.items.slice(0, 6).map((item) => (
                       <div key={`${item.row}-${item.gamepassId ?? item.message}`} style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}` }}>
-                        <div style={{ color: "#e5e5ea", fontSize: 13, fontWeight: 700 }}>
+                        <div style={{ color: "#e5e5ea", fontSize: 14, fontWeight: 700 }}>
                           Row {item.row}{item.gamepassId ? ` · GP ${item.gamepassId}` : ""}
                         </div>
-                        <div style={{ color: item.status === "failed" ? C.red : item.status === "skipped" ? C.orange : C.textTertiary, fontSize: 12, marginTop: 3 }}>
+                        <div style={{ color: item.status === "failed" ? C.red : item.status === "skipped" ? C.orange : C.textTertiary, fontSize: 14, marginTop: 3 }}>
                           {item.message}
                         </div>
                       </div>
@@ -4340,7 +4341,21 @@ function AccountHero({
 // ═════════════════════════════════════════════════════════════════════════════
 // Main Screen
 // ═════════════════════════════════════════════════════════════════════════════
-export default function BossrobuxScreen({ token, onOpenErrors }: { token: string; onOpenErrors?: () => void }) {
+/* Без донора (donor-mode.ts) экран «Аккаунт» — это партнёр «Антон»: режим
+   «Свои» целиком донорский (баланс, cookie, автовыкуп очереди, слив). Донорский
+   экран не удалён — он вернётся вместе с флагом. */
+export default function BossrobuxScreen(props: { token: string; onOpenErrors?: () => void }) {
+  if (!DONOR_ENABLED) {
+    return (
+      <div className="twa-account-calm" style={{ padding: "10px 16px 32px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", height: "100%" }}>
+        <PartnerAntonSection token={props.token} accountName={null} />
+      </div>
+    );
+  }
+  return <DonorAccountScreen {...props} />;
+}
+
+function DonorAccountScreen({ token, onOpenErrors }: { token: string; onOpenErrors?: () => void }) {
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -4938,7 +4953,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
               потому, что «проверка» всегда падала. Прямого пути больше нет —
               значит и баланса при лежащем сервисе нет, и текст говорит об этом. */}
           {(!cookieReady || info?.browserUnavailable) && (
-            <div style={{ marginTop: 8, padding: "0 4px", fontSize: 13, color: C.textTertiary }}>
+            <div style={{ marginTop: 8, padding: "0 4px", fontSize: 14, color: C.textTertiary }}>
               {info?.browserUnavailable
                 ? "⚠️ Браузерный сервис недоступен — cookie не проверить и баланс не обновить, выкуп временно недоступен. Поиск работает."
                 : "🔑 Cookie не задан или истёк — поиск работает, выкуп недоступен"}

@@ -31,7 +31,7 @@ interface SystemData {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10, paddingLeft: 4 }}>
+    <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10, paddingLeft: 4 }}>
       {title}
     </div>
   );
@@ -58,7 +58,7 @@ function ServiceRow({ svc, last }: { svc: ServiceCheck; last: boolean }) {
     }}>
       <Pulse ok={svc.ok} />
       <span style={{ fontSize: 15, color: "#e5e5ea", flex: 1 }}>{svc.name}</span>
-      <span style={{ fontSize: 13, color: svc.ok ? C.green : C.red, fontVariantNumeric: "tabular-nums" }}>
+      <span style={{ fontSize: 14, color: svc.ok ? C.green : C.red, fontVariantNumeric: "tabular-nums" }}>
         {svc.ok ? `${svc.ms}ms` : "offline"}
       </span>
     </div>
@@ -78,7 +78,7 @@ function HetznerCard({ provider }: { provider: ServerProvider }) {
           <div style={{ fontSize: 14, fontWeight: 600, color: warn ? C.orange : "#e5e5ea" }}>
             €{provider.monthlyEur?.toFixed(2)}/мес
           </div>
-          <div style={{ fontSize: 11, color: warn ? C.orange : C.textSecondary }}>
+          <div style={{ fontSize: 14, color: warn ? C.orange : C.textSecondary }}>
             оплата через {provider.daysUntilBill}д{warn ? " ⚠️" : ""}
           </div>
         </div>
@@ -91,9 +91,9 @@ function HetznerCard({ provider }: { provider: ServerProvider }) {
           <Pulse ok={srv.status === "running"} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: "#e5e5ea", fontWeight: 500 }}>{srv.name}</div>
-            <div style={{ fontSize: 11, color: C.textSecondary }}>{srv.city} · {srv.cores}vCPU · {srv.memory}GB</div>
+            <div style={{ fontSize: 14, color: C.textSecondary }}>{srv.city} · {srv.cores}vCPU · {srv.memory}GB</div>
           </div>
-          <span style={{ fontSize: 12, color: C.textSecondary }}>€{srv.monthlyEur.toFixed(2)}</span>
+          <span style={{ fontSize: 14, color: C.textSecondary }}>€{srv.monthlyEur.toFixed(2)}</span>
         </div>
       ))}
     </div>
@@ -114,7 +114,7 @@ function VdsinaCard({ provider }: { provider: ServerProvider }) {
             {provider.balance?.toFixed(0)}{provider.currency}
           </div>
           {provider.daysLeft != null && (
-            <div style={{ fontSize: 11, color: warn ? C.orange : C.textSecondary }}>
+            <div style={{ fontSize: 14, color: warn ? C.orange : C.textSecondary }}>
               ~{provider.daysLeft}д до конца{warn ? " ⚠️" : ""}
             </div>
           )}
@@ -134,7 +134,7 @@ function NeonCard({ neon }: { neon: NeonStats }) {
           <span style={{ fontSize: 15 }}>🐘</span>
           <span style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>Neon Postgres</span>
         </div>
-        <div style={{ fontSize: 12, color: warn ? C.orange : C.textSecondary }}>
+        <div style={{ fontSize: 14, color: warn ? C.orange : C.textSecondary }}>
           оплата {neon.nextBillDate}{warn ? " ⚠️" : ""}
         </div>
       </div>
@@ -202,7 +202,7 @@ export default function SystemScreen({ token }: { token: string }) {
               {allOk ? "Все системы работают" : "Есть проблемы"}
             </div>
             {data.lastOrderMinAgo != null && (
-              <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
+              <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2 }}>
                 Последний заказ: {data.lastOrderMinAgo < 60 ? `${data.lastOrderMinAgo} мин назад` : `${Math.floor(data.lastOrderMinAgo / 60)}ч назад`}
               </div>
             )}

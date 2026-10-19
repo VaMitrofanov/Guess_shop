@@ -1,5 +1,7 @@
 "use client";
 
+import { SOURCE_SHORT, statusLabel } from "@/lib/order-presentation";
+import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check, CheckCheck, ClipboardCheck, Copy, Download, ExternalLink, Loader2,
@@ -594,7 +596,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
 
           <div style={{ padding: "14px 19px 0" }}>
             <div className={styles.toolbar}>
-              {TABS.map((t) => (
+              {TABS.filter((t) => t !== "AVITO" || (data?.counts?.[t] ?? 0) > 0 || tab === t).map((t) => (
                 <button
                   key={t} type="button" disabled={running || loading}
                   className={cn(styles.chip, tab === t && styles.chipActive)}
@@ -649,7 +651,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                   <button type="button" className={styles.primaryButton} onClick={pickForBalance} disabled={running || !(balance > 0)}>
                     Набрать под баланс
                   </button>
-                  {donor?.balance != null && (
+                  {DONOR_ENABLED && donor?.balance != null && (
                     <button
                       type="button" className={styles.ghostButton} disabled={running}
                       onClick={() => setBalance(donor.balance as number)}
@@ -745,7 +747,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                       )}
                       <td data-label="Код">
                         <span className={cn(styles.tablePrimary, styles.nowrap)}>{i.wbCode}</span>
-                        <small className={styles.tableSecondary}>{i.orderSource} · {i.status}</small>
+                        <small className={styles.tableSecondary}>{SOURCE_SHORT[i.orderSource] ?? i.orderSource} · {statusLabel(i.status)}</small>
                       </td>
                       <td data-label="ID геймпасса">
                         <a className={cn(styles.orderLink, styles.nowrap)} href={i.gamepassUrl || `https://www.roblox.com/game-pass/${i.gamepassId}`} target="_blank" rel="noreferrer">
@@ -769,6 +771,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                           {state.kind === "failed" && <span className={styles.bad} title={state.reason}>{state.reason}</span>}
                           {state.kind === "idle" && (
                             <>
+                              {DONOR_ENABLED && <>
                               <button
                                 type="button" className={cn(styles.ghostButton, styles.iconButton)} disabled={running}
                                 onClick={() => void copyScript(i)}
@@ -785,6 +788,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                               >
                                 <ShoppingBasket />
                               </button>
+                              </>}
                               <button
                                 type="button" className={styles.buyButton} disabled={running}
                                 onClick={() => void markOne(i)}
@@ -812,7 +816,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
           {items.length > 0 && (
             <div style={{ padding: "0 19px 19px" }}>
               <div className={styles.detailRow} style={{ marginBottom: 12 }}>
-                <span>Ожидаемое списание с донора (сумма цен пассов)</span>
+                <span>Спишется с аккаунтов выкупа (сумма цен пассов)</span>
                 <strong className={styles.numeric}>{rbx(data?.export.totalGrossRobux ?? 0)}</strong>
               </div>
               <textarea className={styles.copyArea} readOnly value={idList} spellCheck={false} />
@@ -827,7 +831,8 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
 
         {/* ── Правая колонка ── */}
         <div className={styles.stack}>
-          <section className={styles.panel}>
+          {/* Донор, история пачек автовыкупа и сливы — спрятаны с донором (donor-mode.ts). */}
+          {DONOR_ENABLED && <section className={styles.panel}>
             <div className={styles.donorCard}>
               <div className={styles.donorHead}>
                 <div>
@@ -870,7 +875,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                 <div className={styles.noteWarn}><TriangleAlert /><div>{donor.problem}</div></div>
               )}
             </div>
-          </section>
+          </section>}
 
           {/* Пачка: основное действие — закрыть заказы, выкупленные вручную */}
           {buyable && (selected.size > 0 || running) && (
@@ -938,6 +943,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                       Для заказов, которые уже выкуплены руками по выгрузке: закроет их и
                       уведомит клиентов.
                     </p>
+                    {DONOR_ENABLED && <>
                     <div className={styles.divider} />
                     <div className={styles.detailRow}>
                       <span>Спишется с донора при авто-выкупе</span>
@@ -954,13 +960,14 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                     <button type="button" className={styles.ghostButton} onClick={() => setConfirming("buy")}>
                       <ShoppingBasket /> Выкупить автоматически ({selected.size})
                     </button>
+                    </>}
                   </>
                 )}
               </div>
             </section>
           )}
 
-          <section className={styles.panel}>
+          {DONOR_ENABLED && <section className={styles.panel}>
             <div className={styles.panelHeader}><strong>История пачек</strong><span>последние {data?.batches.length ?? 0}</span></div>
             <div className={styles.logList}>
               {(data?.batches ?? []).map((b) => (
@@ -983,9 +990,9 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
               ))}
               {(data?.batches.length ?? 0) === 0 && <div className={styles.empty}>Пачек ещё не было</div>}
             </div>
-          </section>
+          </section>}
 
-          {(data?.drains.length ?? 0) > 0 && (
+          {DONOR_ENABLED && (data?.drains.length ?? 0) > 0 && (
             <section className={styles.panel}>
               <div className={styles.panelHeader}><strong>Сливы остатка</strong></div>
               <div className={styles.logList}>

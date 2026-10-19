@@ -47,7 +47,7 @@
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: 13.5px;
   letter-spacing: .05em;
   color: #cdbcff;
 }
@@ -62,7 +62,7 @@
   flex-wrap: wrap;
   gap: 6px 12px;
   color: var(--o-muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 .head h1 {
   margin: 0;
@@ -84,7 +84,7 @@
   border-radius: 10px;
   color: #a9a9b2;
   background: var(--o-surface);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 650;
 }
 .refresh:hover { color: #fff; border-color: var(--o-line-2); }
@@ -129,7 +129,7 @@
 .heroRule { width: 1px; align-self: stretch; background: var(--o-line); }
 .heroSide { display: flex; flex-direction: column; gap: 9px; }
 .heroCount { font-size: 27px; font-weight: 730; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-.heroCount small { margin-left: 6px; font-size: 13px; font-weight: 650; color: var(--o-muted); letter-spacing: 0; }
+.heroCount small { margin-left: 6px; font-size: 13.5px; font-weight: 650; color: var(--o-muted); letter-spacing: 0; }
 .ageChip {
   display: inline-flex;
   align-items: center;
@@ -155,7 +155,7 @@
   border-radius: 11px;
   color: #d2d2d9;
   background: rgba(255, 255, 255, .045);
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -170,7 +170,7 @@
 .btnPrimary:hover { color: #fff; }
 .btnGood { color: #b6f0cd; border-color: rgba(64, 212, 126, .34); background: rgba(64, 212, 126, .12); }
 .btnGood:hover { color: #dcffe9; border-color: rgba(64, 212, 126, .5); }
-.btnSm { min-height: 27px; padding: 0 10px; font-size: 12px; border-radius: 9px; }
+.btnSm { min-height: 27px; padding: 0 10px; font-size: 13.5px; border-radius: 9px; }
 
 /* ── Секции ──────────────────────────────────────────────────────────────── */
 
@@ -189,7 +189,7 @@
   text-transform: uppercase;
   color: #79797f;
 }
-.sectionHead .note { color: var(--o-muted); font-size: 12.5px; }
+.sectionHead .note { color: var(--o-muted); font-size: 13.5px; }
 .sectionHead .spacer { margin-left: auto; }
 
 .seg { display: flex; border: 1px solid var(--o-line); border-radius: 10px; overflow: hidden; }
@@ -198,7 +198,7 @@
   padding: 0 11px;
   color: #9a9aa2;
   background: var(--o-surface);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 650;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -220,7 +220,7 @@
   padding: 5px 6px;
   border-radius: 8px;
   background: rgba(255, 255, 255, .028);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 .oldestRow:hover { background: rgba(255, 255, 255, .05); }
 .oldestRowBusy { opacity: .45; pointer-events: none; }
@@ -268,7 +268,7 @@
 .firstHead .note {
   letter-spacing: 0;
   text-transform: none;
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--o-muted);
 }
@@ -285,7 +285,7 @@
   padding: 5px 6px;
   border-radius: 9px;
   background: rgba(255, 255, 255, .03);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 .firstRow:hover { background: rgba(255, 255, 255, .055); }
 .firstRowBusy { opacity: .45; pointer-events: none; }
@@ -295,7 +295,7 @@
   gap: 4px;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -320,7 +320,7 @@
   border-radius: 8px;
   color: #b9b9c2;
   background: rgba(255, 255, 255, .03);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -336,7 +336,7 @@
   border-radius: 7px;
   color: #c9c9d2;
   background: transparent;
-  font-size: 12.5px;
+  font-size: 13.5px;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -353,7 +353,7 @@
   color: #fff;
   background: rgba(0, 0, 0, .35);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 .firstNoteInput:focus { outline: none; border-color: var(--o-yellow); }
 
@@ -372,7 +372,7 @@
   border-radius: 8px;
   color: #ffe58a;
   background: rgba(255, 214, 10, .1);
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
@@ -405,7 +405,7 @@
 .laneHead i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: currentColor; }
 .laneHead strong { flex: 1; font-size: 13.5px; font-weight: 700; color: #f0f0f4; }
 .laneHead b { font-size: 20px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.laneMeta { display: flex; flex-wrap: wrap; gap: 3px 11px; color: var(--o-muted); font-size: 12.5px; }
+.laneMeta { display: flex; flex-wrap: wrap; gap: 3px 11px; color: var(--o-muted); font-size: 13.5px; }
 .laneMeta b { color: #e4e4e8; font-weight: 650; font-variant-numeric: tabular-nums; }
 .laneRows { display: flex; flex-direction: column; gap: 1px; }
 .laneRow {
@@ -415,12 +415,12 @@
   padding: 5px 7px;
   border-radius: 7px;
   background: rgba(255, 255, 255, .028);
-  font-size: 12px;
+  font-size: 13.5px;
   color: #bcbcc4;
 }
 .laneRow b { margin-left: auto; color: #e8e8ec; font-weight: 700; font-variant-numeric: tabular-nums; }
 .laneFoot { display: flex; align-items: center; gap: 9px; margin-top: auto; }
-.laneFoot .note { color: var(--o-muted); font-size: 12px; }
+.laneFoot .note { color: var(--o-muted); font-size: 13.5px; }
 
 /* ── Дорожка WB Доставки: поимённо, срок и воронка ────────────────────────
    Рублей здесь нет намеренно (решение О6 от 03.09.2026): цена в нашей базе —
@@ -438,22 +438,22 @@
   background: rgba(255, 255, 255, .022);
 }
 .dbsRowHot { border-color: rgba(255, 107, 96, .26); background: rgba(255, 107, 96, .06); }
-.dbsRowTop { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12.5px; }
+.dbsRowTop { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13.5px; }
 .dbsStage { flex: none; }
-.dbsRowWhy { min-width: 0; font-size: 12.5px; }
+.dbsRowWhy { min-width: 0; font-size: 13.5px; }
 .dbsRowWhy b { font-weight: 650; }
-.dbsRowWhy small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 12px; }
+.dbsRowWhy small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 13.5px; }
 .dbsRemind { align-self: center; white-space: nowrap; }
 .dbsAsk {
   grid-column: 1 / -1;
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
   margin-top: 4px; padding-top: 7px; border-top: 1px solid var(--o-line);
-  color: var(--o-muted); font-size: 12.5px;
+  color: var(--o-muted); font-size: 13.5px;
 }
 
 .dbsSplit { display: flex; gap: 2px; height: 7px; border-radius: 4px; overflow: hidden; }
 .dbsSplit i { display: block; }
-.dbsLegend { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 12px; color: var(--o-muted); }
+.dbsLegend { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 13.5px; color: var(--o-muted); }
 .dbsLegend span { display: inline-flex; align-items: center; gap: 6px; }
 .dbsLegend i { width: 8px; height: 8px; border-radius: 2px; }
 .dbsLegend b { color: #e4e4e8; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -466,7 +466,7 @@
 .dbsLost:hover { background: rgba(255, 107, 96, .13); }
 .dbsLost b { color: #ffc0ba; font-weight: 650; }
 
-.dbsSync { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--o-muted); font-size: 11.5px; white-space: nowrap; }
+.dbsSync { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--o-muted); font-size: 12.5px; white-space: nowrap; }
 .dbsSync i { width: 6px; height: 6px; border-radius: 50%; background: var(--o-green); }
 .dbsSyncStale { color: var(--o-orange); }
 .dbsSyncStale i { background: var(--o-orange); }
@@ -479,7 +479,7 @@
   border: 1px dashed var(--o-line);
   border-radius: 12px;
   color: var(--o-muted);
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 /* ── Пока вас не было ────────────────────────────────────────────────────── */
@@ -493,19 +493,19 @@
   border-bottom: 1px solid var(--o-line);
   background: rgba(255, 255, 255, .025);
 }
-.diffHead strong { font-size: 13px; font-weight: 700; }
-.diffHead span { color: var(--o-muted); font-size: 12.5px; }
+.diffHead strong { font-size: 13.5px; font-weight: 700; }
+.diffHead span { color: var(--o-muted); font-size: 13.5px; }
 .diffHead .spacer { margin-left: auto; }
-.diffEmpty { padding: 18px 15px; color: var(--o-muted); font-size: 13px; text-align: center; }
+.diffEmpty { padding: 18px 15px; color: var(--o-muted); font-size: 13.5px; text-align: center; }
 .diffHead strong { font-size: 15px; }
-.diffWindow { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
+.diffWindow { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
 
 /* Живой значок: точка бьётся, пока лента обновляется сама. */
 .diffLive {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 9px; border: 0; border-radius: 999px;
   background: rgba(64, 212, 126, .12); color: #7ce0a2;
-  font-size: 11.5px; font-weight: 650; cursor: pointer;
+  font-size: 12.5px; font-weight: 650; cursor: pointer;
 }
 .diffLive i { width: 6px; height: 6px; border-radius: 50%; background: var(--o-green); animation: beat 2.4s ease-in-out infinite; }
 @keyframes beat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
@@ -513,7 +513,7 @@
 .diffTabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: rgba(0, 0, 0, .3); }
 .diffTabs button {
   border: 0; border-radius: 8px; padding: 5px 11px; background: transparent;
-  color: var(--o-muted); font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer;
+  color: var(--o-muted); font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer;
 }
 .diffTabs button[aria-selected="true"] { background: rgba(167, 139, 250, .2); color: #d5c6ff; }
 
@@ -523,27 +523,27 @@
 .diffTile > strong { font-size: 24px; font-weight: 730; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
 .diffTile > strong em { font-style: normal; font-size: 15px; font-weight: 600; color: var(--o-muted); }
 .diffTile > strong b { margin-left: 6px; font-size: 15px; font-weight: 700; }
-.diffTile > small { font-size: 12.5px; color: var(--o-muted); }
+.diffTile > small { font-size: 13.5px; color: var(--o-muted); }
 .diffTile > small b { color: #dcdce2; font-weight: 650; }
 
 .diffGroups { display: flex; flex-direction: column; padding-bottom: 8px; }
-.diffGroupKey { padding: 12px 15px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--o-muted); }
+.diffGroupKey { padding: 12px 15px 4px; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--o-muted); }
 .diffLine { display: flex; align-items: center; gap: 11px; padding: 8px 15px; font-size: 13.5px; }
 .diffLine > i { flex: none; width: 20px; text-align: center; font-style: normal; }
 .diffLine > span { flex: 1; min-width: 0; }
 .diffLine > span b { font-weight: 650; color: #f2f2f6; }
-.diffLine > span small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 12.5px; }
-.diffLine > time { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
+.diffLine > span small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 13.5px; }
+.diffLine > time { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
 .diffLineAlert { background: rgba(255, 107, 96, .06); }
 
 /* Лента */
 .feed { display: flex; flex-direction: column; padding: 4px 0 8px; }
 .feedRow { display: flex; align-items: flex-start; gap: 11px; padding: 6px 15px; font-size: 13.5px; }
 .feedRow:hover { background: rgba(255, 255, 255, .022); }
-.feedRow > time { flex: none; width: 40px; padding-top: 1px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
+.feedRow > time { flex: none; width: 40px; padding-top: 1px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
 .feedRow > span:last-child { flex: 1; min-width: 0; }
-.feedRow small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 12.5px; }
-.actor { flex: none; width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 800; }
+.feedRow small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 13.5px; }
+.actor { flex: none; width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 800; }
 .actorUs { background: rgba(64, 212, 126, .16); color: #6ee58d; }
 .actorBuyer { background: rgba(125, 156, 255, .18); color: #a8bcff; }
 .actorBot { background: rgba(167, 139, 250, .18); color: #cbb6ff; }
@@ -555,25 +555,25 @@
 }
 .feedFold:hover { background: rgba(255, 255, 255, .055); }
 .feedFold > span:nth-child(2) { flex: 1; }
-.feedFold time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
+.feedFold time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
 .feedChev { color: var(--o-muted); transition: transform .18s ease; }
 .feedChevOpen { transform: rotate(90deg); }
 .feedGroupBody { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 12px; padding: 6px 15px 10px 41px; }
-.feedGroupBody span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
+.feedGroupBody span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; color: var(--o-muted); font-variant-numeric: tabular-nums; }
 .feedGroupBody span b { color: #dcdce2; font-weight: 600; }
 
 /* Нити */
 .threads { display: flex; flex-direction: column; padding: 4px 0 8px; }
 .thread { padding: 9px 15px; border-top: 1px solid rgba(255, 255, 255, .045); }
 .thread:first-child { border-top: 0; }
-.threadHead { display: flex; align-items: baseline; gap: 9px; font-size: 13px; }
+.threadHead { display: flex; align-items: baseline; gap: 9px; font-size: 13.5px; }
 .threadSteps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .threadStep {
   display: inline-flex; align-items: baseline; gap: 6px;
   padding: 3px 9px; border-radius: 8px; background: rgba(255, 255, 255, .04);
-  font-size: 12.5px; color: #d2d2d8;
+  font-size: 13.5px; color: #d2d2d8;
 }
-.threadStep em { font-style: normal; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--o-muted); }
+.threadStep em { font-style: normal; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--o-muted); }
 
 /* ── Тихая строка и витрина ──────────────────────────────────────────────── */
 
@@ -586,7 +586,7 @@
   align-items: center;
   gap: 11px;
   padding: 11px 15px;
-  font-size: 13px;
+  font-size: 13.5px;
   color: #a8a8b1;
 }
 .strip summary::-webkit-details-marker { display: none; }
@@ -599,7 +599,7 @@
   gap: 8px 22px;
   padding: 0 15px 14px;
   color: var(--o-muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 .stripBody b { color: #e6e6ea; font-weight: 650; font-variant-numeric: tabular-nums; }
 
@@ -613,13 +613,13 @@
   border-radius: 12px;
   background: rgba(255, 255, 255, .022);
   color: var(--o-muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 .showcase b { color: #e6e6ea; font-weight: 650; font-variant-numeric: tabular-nums; }
 .showcase svg { flex: none; }
-.sparkNote { font-size: 11.5px; line-height: 1.35; color: #75757d; }
+.sparkNote { font-size: 12.5px; line-height: 1.35; color: #75757d; }
 .showcase .spacer { margin-left: auto; }
-.showLink { color: #b3a4f0; font-size: 12.5px; font-weight: 650; }
+.showLink { color: #b3a4f0; font-size: 13.5px; font-weight: 650; }
 .showLink:hover { color: #d6cbff; }
 
 /* ── Тост ────────────────────────────────────────────────────────────────── */

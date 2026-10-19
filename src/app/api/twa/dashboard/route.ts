@@ -3,7 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { getFeedbackSummary, getStats30d } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
 import { getBrowserSession } from "@/lib/browser-purchase";
-import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, STALE_LINK_DAYS } from "@/lib/order-queue";
+import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, SILENT_REMINDERS } from "@/lib/order-queue";
 import { NOT_HELD_SQL } from "@/lib/order-hold";
 import { loadFirstInLine } from "@/lib/first-in-line";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
@@ -67,6 +67,16 @@ async function getDonorSnapshot() {
   };
 }
 
+const PENDING = Symbol("pending");
+
+/** Ждём не дольше `ms`; не успел — `PENDING`, а не «недоступен»: это разные вещи. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof PENDING> {
+  return Promise.race([
+    promise,
+    new Promise<typeof PENDING>(resolve => setTimeout(() => resolve(PENDING), ms)),
+  ]);
+}
+
 export async function GET(req: NextRequest) {
   const twaUser = await extractTwaUser(req);
   if (!twaUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -92,8 +102,10 @@ export async function GET(req: NextRequest) {
       displayName: twaUser.firstName || `TG ${twaUser.userId}`,
     }).catch(() => null);
 
-  const [stats, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedback, donor, dbs, firstInLine, shiftData] = await Promise.all([
-    getStats30d(),
+  const [statsRaw, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedbackRaw, donor, dbs, firstInLine, shiftData] = await Promise.all([
+    // WB API — внешний и медленный; главная его не ждёт дольше 400 мс (кэш
+    // прогреется в фоне, данные придут со следующим опросом через 30 с).
+    withTimeout(getStats30d().catch(() => null), 400),
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
 
     // Очередь выкупа по происхождению. `amount` в БД — чистые робуксы (то, что
@@ -120,10 +132,10 @@ export async function GET(req: NextRequest) {
     prisma.$queryRawUnsafe<LinkRow[]>(`
       SELECT
         COUNT(*)::int AS "total",
-        COUNT(*) FILTER (WHERE "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days')::int AS "stale",
+        COUNT(*) FILTER (WHERE "remindersSent" >= ${SILENT_REMINDERS})::int AS "stale",
         COUNT(*) FILTER (WHERE "remindersSent" >= 3)::int AS "remindersDone",
         MIN("createdAt") AS "oldestAt",
-        MIN("createdAt") FILTER (WHERE "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days') AS "staleOldestAt"
+        MIN("createdAt") FILTER (WHERE "remindersSent" >= ${SILENT_REMINDERS}) AS "staleOldestAt"
       FROM "WbOrder"
       WHERE "isTest" = false AND "isFavorite" = false AND ${NOT_HELD_SQL}
         AND status = 'AWAITING_GAMEPASS'
@@ -153,7 +165,7 @@ export async function GET(req: NextRequest) {
       select: { wbCode: true },
     }),
 
-    getFeedbackSummary(),
+    withTimeout(getFeedbackSummary().catch(() => null), 400),
     withDonor ? getDonorSnapshot() : Promise.resolve({ available: false, accountName: null, balance: null }),
     loadWbDeliveryQueueSnapshot().catch(() => null),
     // ⚡ Первым делом: поднятые руками и прямые заказы. Тот же загрузчик, что у
@@ -171,6 +183,10 @@ export async function GET(req: NextRequest) {
       ])
       : Promise.resolve(null),
   ]);
+
+  const statsPending = statsRaw === PENDING;
+  const stats = statsRaw === PENDING ? null : statsRaw;
+  const feedback = feedbackRaw === PENDING ? null : feedbackRaw;
 
   const LANES = ["WB", "WB_DBS", "DIRECT"] as const;
   const lanes = LANES.map((id) => {
@@ -277,7 +293,9 @@ export async function GET(req: NextRequest) {
     donorCoverage,
     inbox,
     dbs,
-    apiAvailable: !!stats,
+    // Пока WB догружается в фоне (холодный кэш), плашку «недоступен» не
+    // показываем: данные придут со следующим опросом.
+    apiAvailable: statsPending || !!stats,
     tokenPresent: !!(process.env.WB_API_TOKEN),
   });
 }
