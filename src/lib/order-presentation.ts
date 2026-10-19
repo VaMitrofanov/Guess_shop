@@ -255,3 +255,93 @@ export const isHeld = (order: Pick<PresentableOrder, "heldAt">): boolean => orde
 export function canComplete(order: PresentableOrder): boolean {
   return primaryActionFor(order)?.action === "complete";
 }
+
+/* ── Слова вместо enum ───────────────────────────────────────────────────────
+   До 19.10.2026 полная карточка `/admin/orders/<id>` печатала `PENDING` и
+   `WB_DBS` как есть, а рядом лежал неиспользуемый второй словарь
+   (`admin-order-presentation.ts`) со своими словами. Теперь словарь один, и
+   слова — те же, что во вкладках ленты и на бейджах.
+   ────────────────────────────────────────────────────────────────────────── */
+
+export const STATUS_LABEL: Readonly<Record<string, string>> = {
+  AWAITING_PAYMENT: "Ждёт оплаты",
+  PAYMENT_PENDING: "Оплата проверяется",
+  AWAITING_GAMEPASS: "Ждёт ссылку",
+  PENDING: "К выкупу",
+  IN_PROGRESS: "Выкупается",
+  COMPLETED: "Готово",
+  REJECTED: "Отменено",
+  ERROR: "Ошибка",
+};
+
+export const statusLabel = (status: string): string => STATUS_LABEL[status] ?? status;
+
+export const SOURCE_LABEL: Readonly<Record<string, string>> = {
+  WB: "ВБ · карта",
+  WB_DBS: "ВБ · доставка (DBS)",
+  DIRECT: "Прямой",
+  SITE: "Сайт",
+  AVITO: "Авито",
+  MANUAL: "Ручной",
+};
+
+export const sourceLabel = (source: string | null | undefined): string =>
+  source ? SOURCE_LABEL[source] ?? source : "—";
+
+export const PLATFORM_LABEL: Readonly<Record<string, string>> = { TG: "Telegram", VK: "VK", WEB: "сайт", SITE: "сайт" };
+
+/* ── «Дальше: …» ─────────────────────────────────────────────────────────────
+   Одна строка «что от НАС дальше» — как «👉 От тебя» у покупателя в боте.
+   Раньше админ собирал вывод сам из статуса, возраста и флага. Порядок веток —
+   порядок срочности, как у `orderFlag`; строка одна.
+   ────────────────────────────────────────────────────────────────────────── */
+
+export function nextStepFor(
+  order: PresentableOrder,
+  live?: GpLive | null,
+  reminders = order.remindersSent ?? 0,
+): { text: string; tone: Tone } | null {
+  if (order.heldAt) return { text: "снять заморозку, когда причина отпадёт — до этого не выкупать", tone: "ice" };
+  if (order.status === "COMPLETED" || order.status === "REJECTED") return null;
+  if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING")
+    return { text: "ждём оплату — выкупать нельзя", tone: "muted" };
+
+  const split = order.splitGamepasses ?? [];
+  const hasGamepass = !!order.gamepassUrl || split.length > 0;
+
+  if (order.status === "ERROR") {
+    if (order.buyoutErrorCode === "REGIONAL_PRICE")
+      return { text: "найти замену пасса по нику или написать покупателю — у донора рег. цена", tone: "red" };
+    return hasGamepass
+      ? { text: "разобраться с ошибкой и вернуть к выкупу", tone: "red" }
+      : { text: "привязать пасс — без него к выкупу не вернуть", tone: "red" };
+  }
+
+  if (order.status === "AWAITING_GAMEPASS") {
+    if (order.vkUnreachable === true && order.user?.vkId)
+      return { text: "написать покупателю с личного — бот в VK до него не достаёт", tone: "red" };
+    if (order.gpWatchDeclinedAt && !order.robloxUsername)
+      return { text: "уточнить ник — покупатель отклонил найденный", tone: "orange" };
+    if (reminders >= 3)
+      return { text: "дожать вручную: ключ или пасс по нику — бот отправил все 3 напоминания и замолчал", tone: "orange" };
+    return {
+      text: reminders > 0 ? `ждём пасс от покупателя · напоминаний ${reminders} из 3` : "ждём пасс от покупателя",
+      tone: "muted",
+    };
+  }
+
+  // PENDING / IN_PROGRESS
+  if (live?.isForSale === false) return { text: "попросить покупателя вернуть пасс в продажу", tone: "red" };
+  if (live?.reusedIn) return { text: `нужен новый пасс — этот уже выкуплен в ${live.reusedIn}`, tone: "red" };
+  if (live?.priceMismatch && live.livePrice != null)
+    return {
+      text: `проверить цену: пасс ${live.livePrice.toLocaleString("ru-RU")} R$, нужен ${(live.expected ?? grossOf(order.amount)).toLocaleString("ru-RU")} R$`,
+      tone: "orange",
+    };
+  if (!hasGamepass) return { text: "привязать пасс", tone: "orange" };
+  if (split.length > 0 && split.some(p => !p.purchasedAt)) {
+    const left = split.filter(p => !p.purchasedAt).length;
+    return { text: `выкупить оставшиеся части: ${left} из ${split.length}`, tone: "green" };
+  }
+  return { text: `выкупить пасс за ${grossOf(order.amount).toLocaleString("ru-RU")} R$`, tone: "green" };
+}

@@ -15,7 +15,9 @@
    акцентом, иначе состояние заказа читается как выделение.
    ───────────────────────────────────────────────────────────────────────── */
 
-.workspace {
+/* `.paletteScope` — те же токены для ⌘K, открытой вне рабочего места. */
+.workspace,
+.paletteScope {
   --o-green: #40d47e;
   --o-yellow: #ffd60a;
   --o-orange: #ff9f0a;
@@ -29,7 +31,10 @@
   --o-surface: rgba(255, 255, 255, .035);
   --o-surface-2: rgba(255, 255, 255, .06);
   --o-row: 46px;
+}
+.paletteScope button { text-align: left; }
 
+.workspace {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
@@ -788,3 +793,14 @@
 /* Блок инструментов на полной карточке заказа: тот же список, но без ленты —
    поэтому он занимает всю ширину панели и не прижимается к краю. */
 .detailTools { display: grid; gap: 8px; }
+/* «👉 Дальше: …» — одна строка «что от нас дальше» (P1.1, 19.10.2026). */
+.nextStep { margin-top: 8px; font-size: 13.5px; font-weight: 600; line-height: 1.35; }
+.nextStep span { color: var(--o-muted); font-weight: 500; margin-right: 4px; }
+
+/* Досье на телефоне (P1.3): вторичные действия — под «··· Ещё». */
+.actionMoreToggle { display: none !important; }
+@media (max-width: 767px) {
+  .actions .actionMore { display: none; }
+  .actionsOpen .actionMore { display: inline-flex; }
+  .actionMoreToggle { display: inline-flex !important; }
+}

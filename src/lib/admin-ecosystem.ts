@@ -724,6 +724,11 @@ export async function getAdminOrderDetail(id: string) {
       pendingAt: true,
       completedAt: true,
       createdAt: true,
+      /* Для строки «Дальше: …» — то же правило, что в досье и TWA. */
+      buyoutErrorCode: true,
+      remindersSent: true,
+      gpWatchDeclinedAt: true,
+      priorityAt: true,
       receiptEmail: true,
       gamepassId: true,
       paymentAmountKopecks: true,

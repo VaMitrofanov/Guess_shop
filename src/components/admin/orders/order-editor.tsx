@@ -333,6 +333,12 @@ export default function OrderEditor({
             <select value={source} onChange={event => setSource(event.target.value)}>
               {SOURCES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
+            {source === "DIRECT" && !order.isDirectOrder && (
+              <span className={styles.hint}>Станет прямым: встанет первым в «К выкупу», оплата считается подтверждённой</span>
+            )}
+            {source !== "DIRECT" && order.orderSource === "DIRECT" && (
+              <span className={styles.hint}>Перестанет быть прямым и уйдёт из первых строк очереди</span>
+            )}
           </label>
 
           <label style={{ display: "grid", gap: 5 }}>

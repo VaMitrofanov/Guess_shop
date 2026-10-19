@@ -963,3 +963,25 @@
     transition-duration: .01ms !important;
   }
 }
+
+/* ⌘K: поиск заказа с любой страницы (P1.4, 19.10.2026). */
+.searchButton {
+  margin: 4px 0 6px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .04);
+  color: #b7b7bd;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.searchButton:hover { color: #fff; background: rgba(255, 255, 255, .07); }
+.searchButton kbd {
+  margin-left: auto;
+  font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #8e8e97;
+}

@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ageBasis, ageTone, fmtAge, fmtUnlockDate, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
-  primaryActionFor, robuxUnlockAt,
+  primaryActionFor, robuxUnlockAt, nextStepFor, sourceLabel,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
@@ -124,6 +124,11 @@ export default function OrderDossier({
   const badge = orderBadge(order);
   const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
   const action = primaryActionFor(order);
+  const [moreActions, setMoreActions] = useState(false);
+  const next = nextStepFor(order, live);
+  /* Флаг под пассом — только то, чего не сказали заголовок блока и строка
+     цены: «цена не сходится» и «продаётся, цена сходится» там уже есть. */
+  const flagShown = flag && !(live?.priceMismatch && flag.tone === "orange") && flag.tone !== "green" ? flag : null;
   const ids = gamepassIdsOf(order);
   const singleId = gamepassIdOf(order);
   const payment = order.paymentAttempts?.[0];
@@ -224,8 +229,13 @@ export default function OrderDossier({
           {!order.robloxUsername && order.probableNick && " (вероятный)"} · {clientLabel(order)}
           {href && <> · <a href={href} target="_blank" rel="noreferrer">написать</a></>}
         </div>
+        {next && (
+          <div className={styles.nextStep} style={{ color: TONE_COLOR[next.tone] }}>
+            <span>👉 Дальше:</span> {next.text}
+          </div>
+        )}
 
-        <div className={styles.actions}>
+        <div className={`${styles.actions} ${moreActions ? styles.actionsOpen : ""}`}>
           {action && (
             <button type="button" className={`${styles.btn} ${action.tone === "green" ? styles.btnGreen : styles.btnPrimary}`} onClick={onPrimary}>
               {action.icon} {action.labelLong ?? action.label}
@@ -245,22 +255,27 @@ export default function OrderDossier({
           {/* Правка — рядом с главным действием: чаще всего в досье приходят
               именно дописать ник или ID пасса, которого не нашёл поиск. */}
           <button type="button" className={styles.btn} onClick={onEdit}>✎ Правка <kbd>I</kbd></button>
-          <button type="button" className={styles.btn} onClick={onHold}>
+          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onHold}>
             {order.heldAt ? "❄ Разморозить" : "❄ Заморозить"} <kbd>F</kbd>
           </button>
-          <button type="button" className={styles.btn} onClick={onFavorite}>{order.isFavorite ? "★ Из избранного" : "★ В избранное"}</button>
+          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onFavorite}>{order.isFavorite ? "★ Из избранного" : "★ В избранное"}</button>
           {/* ⚡ Место в очереди. У замороженного заказа очереди нет — кнопки
               тоже: сервер такой заказ поднимать откажется. */}
           {!order.heldAt && (
-            <button type="button" className={`${styles.btn} ${order.priorityAt ? styles.btnPrio : ""}`} onClick={onPriority}>
+            <button type="button" className={`${styles.btn} ${styles.actionMore} ${order.priorityAt ? styles.btnPrio : ""}`} onClick={onPriority}>
               {order.priorityAt ? "⚡ Вернуть в очередь" : "⚡ Вперёд очереди"} <kbd>P</kbd>
             </button>
           )}
           {["PENDING", "IN_PROGRESS"].includes(order.status) && (
-            <button type="button" className={styles.btn} onClick={onError}>⚠ Пометить ошибкой <kbd>E</kbd></button>
+            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onError}>⚠ Пометить ошибкой <kbd>E</kbd></button>
           )}
-          <button type="button" className={styles.btn} onClick={onCancel} style={{ color: "#ffc0ba" }}>✕ Отменить заказ</button>
-          <a className={styles.btn} href={`/admin/orders/${order.id}`}>Полная карточка ↗</a>
+          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>✕ Отменить заказ</button>
+          <a className={`${styles.btn} ${styles.actionMore}`} href={`/admin/orders/${order.id}`}>Полная карточка ↗</a>
+          {/* На телефоне ряд из девяти кнопок занимал два-три экрана: сверху
+              остаются главное действие, ID и правка, остальное — здесь. */}
+          <button type="button" className={`${styles.btn} ${styles.actionMoreToggle}`} onClick={() => setMoreActions(v => !v)} aria-expanded={moreActions}>
+            {moreActions ? "Скрыть" : "··· Ещё"}
+          </button>
         </div>
       </div>
 
@@ -322,14 +337,14 @@ export default function OrderDossier({
                   </div>
                 </div>
               )}
-              <div><div className={styles.kvKey}>Источник</div><div className={styles.kvValue}>{order.orderSource}</div></div>
+              <div><div className={styles.kvKey}>Источник</div><div className={styles.kvValue}>{sourceLabel(order.orderSource)}</div></div>
             </div>
 
             <div className={styles.box}>
               <div className={styles.boxHead}>
                 Геймпасс
                 {live && <em style={{ color: live.isForSale === false ? "var(--o-red)" : live.priceMismatch ? "var(--o-orange)" : "var(--o-green)" }}>
-                  {live.isForSale === false ? "снят с продажи" : live.priceMismatch ? `цена ${num(live.livePrice ?? 0)} R$` : "продаётся, цена сходится"}
+                  {live.isForSale === false ? "снят с продажи" : live.priceMismatch ? "цена не сходится" : "продаётся, цена сходится"}
                 </em>}
               </div>
               {ids.length === 0 && (
@@ -360,12 +375,16 @@ export default function OrderDossier({
               ) : singleId ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 15 }}>{singleId}</span>
-                  <span style={{ color: "var(--o-muted)" }}>ожидаемая цена {num(grossOf(order.amount))} R$</span>
+                  {/* Одна строка с ценой: раньше рядом стояли «ожидаемая 1143» и
+                      флаг «⚠ цена 1000 ≠ 1143» — две цифры про одно и то же. */}
+                  {live?.priceMismatch && live.livePrice != null
+                    ? <span style={{ color: "var(--o-orange)" }}>пасс {num(live.livePrice)} R$ · нужен {num(live.expected ?? grossOf(order.amount))} R$</span>
+                    : <span style={{ color: "var(--o-muted)" }}>нужен пасс за {num(grossOf(order.amount))} R$</span>}
                   {live?.sellerName && <span style={{ color: "var(--o-muted)" }}>продавец {live.sellerName}</span>}
                   <a style={{ marginLeft: "auto", color: "#b9aaff" }} href={`https://www.roblox.com/game-pass/${singleId}`} target="_blank" rel="noreferrer">открыть на Roblox ↗</a>
                 </div>
               ) : null}
-              {flag && <div style={{ marginTop: 9, color: TONE_COLOR[flag.tone], fontSize: 13.5 }}>{flag.text}</div>}
+              {flagShown && <div style={{ marginTop: 9, color: TONE_COLOR[flagShown.tone], fontSize: 13.5 }}>{flagShown.text}</div>}
 
               {/* ── 🎮 Настройка геймпассов — одно меню ──────────────────────
                   Инструментов четыре, и до 19.10.2026 они лежали в четырёх

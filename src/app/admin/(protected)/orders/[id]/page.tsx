@@ -1,11 +1,17 @@
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, ShoppingBag, Smartphone } from "lucide-react";
+import { ArrowLeft, ExternalLink, LayoutList, Smartphone } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getAdminOrderDetail } from "@/lib/admin-ecosystem";
 import OutboxReplayButton from "@/components/admin/outbox-replay-button";
 import OrderDetailTools from "@/components/admin/orders/order-detail-tools";
 import styles from "@/components/admin/admin-shell.module.css";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
+import { PLATFORM_LABEL, nextStepFor, sourceLabel, statusLabel } from "@/lib/order-presentation";
+
+/* Тон строки «Дальше» — те же цвета, что у флагов в рабочем месте. */
+const NEXT_TONE: Record<string, string> = {
+  green: "#5fd38a", red: "#ff8a80", orange: "#ffb357", ice: "#8fd3ff", muted: "#b7b7bd",
+};
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -38,6 +44,16 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
   const salePrice = order.priceQuote?.finalAmountKopecks ?? order.saleAmountKopecks;
   const discountKopecks = order.priceQuote?.discountKopecks ?? order.discountAppliedKopecks;
   const bonusRobux = order.priceQuote?.bonusRobux ?? order.bonusAppliedRobux;
+  const iso = (value: Date | null | undefined) => (value ? value.toISOString() : null);
+  const next = nextStepFor({
+    amount: order.amount, status: order.status, wbCode: order.wbCode, gamepassUrl: order.gamepassUrl,
+    heldAt: iso(order.heldAt), heldReason: order.heldReason, isDirectOrder: order.isDirectOrder,
+    orderSource: order.orderSource, buyoutErrorCode: order.buyoutErrorCode, createdAt: order.createdAt.toISOString(),
+    pendingAt: iso(order.pendingAt), robloxUsername: order.robloxUsername,
+    gpWatchDeclinedAt: iso(order.gpWatchDeclinedAt), remindersSent: order.remindersSent,
+    user: { vkId: order.user.vkId },
+  });
+  const sourceLine = `${sourceLabel(order.orderSource)} · ${PLATFORM_LABEL[order.platform] ?? order.platform}`;
 
   return (
     <div className={styles.page}>
@@ -45,22 +61,23 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
         <div>
           <Link className={styles.eyebrow} href="/admin/orders"><ArrowLeft size={12} style={{ display: "inline", marginRight: 6 }} />Все заказы</Link>
           <h1>{code}</h1>
-          <p>{order.orderSource} · {order.status} · создан {dateTime(order.createdAt)}</p>
+          <p>{statusLabel(order.status)} · {sourceLine} · создан {dateTime(order.createdAt)}{order.priorityAt ? " · ⚡ выкупать первым" : ""}</p>
+          {next && <p style={{ color: NEXT_TONE[next.tone] ?? NEXT_TONE.muted, fontWeight: 600 }}>👉 Дальше: {next.text}</p>}
         </div>
+        {/* «Выкупить» отсюда раньше уводило в мобильную TWA — с десктопа в
+            телефонный интерфейс. Выкуп и все действия — в рабочем месте. */}
         <div className={styles.headerActions}>
           {order.gamepassUrl && <a className={styles.secondaryButton} href={order.gamepassUrl} target="_blank" rel="noreferrer">Roblox <ExternalLink size={14} /></a>}
-          {order.gamepassId && order.status === "PENDING" && (
-            <Link className={styles.secondaryButton} href={`/twa?screen=account&buyout=${order.id}`} target="_blank"><ShoppingBag size={14} /> Выкупить</Link>
-          )}
-          <Link className={styles.primaryButton} href={`/twa?q=${encodeURIComponent(order.wbCode)}`} target="_blank"><Smartphone size={15} /> Открыть в TWA</Link>
+          <Link className={styles.secondaryButton} href={`/twa?q=${encodeURIComponent(order.wbCode)}`} target="_blank"><Smartphone size={14} /> В TWA</Link>
+          <Link className={styles.primaryButton} href={`/admin/orders?order=${order.id}`}><LayoutList size={15} /> В рабочем месте</Link>
         </div>
       </header>
 
       <div className={styles.detailGrid}>
         <section className={`${styles.panel} ${styles.detailPanel}`}>
           <h2>Заказ</h2><div className={styles.detailRows}>
-            <DetailRow label="Источник" value={`${order.orderSource} / ${order.platform}`} />
-            <DetailRow label="Статус" value={order.status} />
+            <DetailRow label="Источник" value={sourceLine} />
+            <DetailRow label="Статус" value={statusLabel(order.status)} />
             <DetailRow label="Номинал" value={`${order.amount.toLocaleString("ru-RU")} R$`} />
             <DetailRow label="Roblox" value={order.robloxUsername ?? order.probableNick ?? "Не подтверждён"} />
             <DetailRow label="Геймпасс" value={order.gamepassUrl ?? "Не привязан"} />

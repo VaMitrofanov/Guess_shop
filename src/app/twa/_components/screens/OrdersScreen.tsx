@@ -16,6 +16,7 @@ import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
 import {
   orderBadge as sharedOrderBadge,
   orderFlag as sharedOrderFlag,
+  nextStepFor as sharedNextStep,
   primaryActionFor as sharedPrimaryAction,
   fmtUnlockDate,
   robuxUnlockAt,
@@ -2606,6 +2607,16 @@ function OrderCard({
             {order.isFavorite ? "★" : "☆"}
           </button>
         </div>
+
+        {/* 👉 «Дальше» — то же правило, что в досье сайта (`nextStepFor`). */}
+        {(() => {
+          const next = sharedNextStep(order as never, live, order.remindersSent ?? 0);
+          return next ? (
+            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.35, color: TONE[next.tone] }}>
+              <span style={{ color: C.textTertiary, fontWeight: 500 }}>👉 Дальше: </span>{next.text}
+            </div>
+          ) : null;
+        })()}
 
         {/* Time + amount row */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>

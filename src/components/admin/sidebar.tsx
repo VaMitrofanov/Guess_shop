@@ -1,5 +1,6 @@
 "use client";
 
+import GlobalOrderSearch from "@/components/admin/global-order-search";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -85,6 +86,7 @@ export default function AdminSidebar({ user }: { user: { name?: string | null; v
           <div className={styles.brandMark}><Shield size={18} /></div>
           <div><strong>RobloxBank</strong><small>Control Center</small></div>
         </div>
+        <GlobalOrderSearch className={styles.searchButton} />
         <div className={styles.sectionLabel}>Управление</div>
         <nav className={styles.nav} aria-label="Разделы админки">
           {NAV.map(({ href, icon: Icon, label }) => {

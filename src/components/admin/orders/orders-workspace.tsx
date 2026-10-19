@@ -29,6 +29,7 @@ import type { LaneId } from "@/lib/order-presentation";
 import type { OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 import OrderDossier from "./order-dossier";
 import CommandPalette from "./command-palette";
+import { OPEN_PALETTE_EVENT } from "@/components/admin/global-order-search";
 import NewOrderDialog from "./new-order-dialog";
 import OrderEditor from "./order-editor";
 import SplitDialog from "./split-dialog";
@@ -632,6 +633,13 @@ export default function OrdersWorkspace({
 
   const chord = useRef<string | null>(null);
 
+  /* Кнопка «Найти заказ» в боковой панели открывает палитру рабочего места. */
+  useEffect(() => {
+    const open = () => setPaletteOpen(true);
+    window.addEventListener(OPEN_PALETTE_EVENT, open);
+    return () => window.removeEventListener(OPEN_PALETTE_EVENT, open);
+  }, []);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -770,7 +778,10 @@ export default function OrdersWorkspace({
     }
     if (narrow.amount) chips.push({ label: `${num(narrow.amount)} R$`, clear: () => setNarrow(n => ({ ...n, amount: null })) });
     if (narrow.blocked) {
-      const labels: Record<string, string> = { regional: "рег. цена", split: "разбитые", nogp: "без геймпасса" };
+      const labels: Record<string, string> = {
+        regional: "рег. цена", split: "разбитые", nogp: "без геймпасса",
+        silent: "молчат: бот отправил 3 из 3", unreached: "не достучались",
+      };
       chips.push({ label: labels[narrow.blocked] ?? narrow.blocked, clear: () => setNarrow(n => ({ ...n, blocked: null })) });
     }
     return chips;
@@ -880,10 +891,25 @@ export default function OrdersWorkspace({
           {loading && orders.length === 0 && <div className={styles.loading}>Загружаем очередь…</div>}
 
           {!loading && orders.length === 0 && (
-            <div className={styles.empty}>
-              <strong>{slice === "BUYOUT" ? "Очередь выкупа пуста" : "В этом срезе пусто"}</strong>
-              {slices?.today ? `Сегодня выкуплено ${slices.today.done} на ${num(slices.today.doneSum)} R$` : "Ничего не ждёт разбора"}
-            </div>
+            /* Пустой экран — место, где человек решает «сломалось или пусто».
+               При поиске или сужении «срез пуст» было бы неправдой. */
+            narrowChips.length > 0 ? (
+              <div className={styles.empty}>
+                <strong>По этому отбору заказов нет</strong>
+                {`Отбор: ${narrowChips.map(chip => chip.label).join(", ")}. В самом срезе заказы могут быть.`}
+                <button
+                  type="button"
+                  className={`${styles.btn} ${styles.btnPrimary}`}
+                  style={{ marginTop: 10 }}
+                  onClick={() => { setNarrow({}); setQuery(""); }}
+                >Снять отбор</button>
+              </div>
+            ) : (
+              <div className={styles.empty}>
+                <strong>{slice === "BUYOUT" ? "Очередь выкупа пуста" : "В этом срезе пусто"}</strong>
+                {slices?.today ? `Сегодня выкуплено ${slices.today.done} на ${num(slices.today.doneSum)} R$` : "Ничего не ждёт разбора"}
+              </div>
+            )
           )}
 
           {!asCards
@@ -1218,6 +1244,25 @@ function SliceStrip({
         </div>
       </div>
 
+      {sliceKey === "AWAITING_LINK" ? (
+        /* «Ждут ссылку» держит не сервер, а тишина. Что важно здесь — где бот
+           уже сдался: дальше заказ сам не сдвинется никогда (P1.2, 19.10). */
+        <div className={styles.cell}>
+          <div className={styles.cellKey}>Кого дожимать руками</div>
+          <div className={styles.cellBig}>{num(slice.silent + slice.unreached)}<small>из {num(slice.orders)}</small></div>
+          <div className={styles.tags}>
+            <button type="button" className={`${styles.tag} ${styles.tagAmber} ${narrow.blocked === "silent" ? styles.tagOn : ""}`} onClick={() => onNarrow({ blocked: "silent" })} title="Бот отправил все три напоминания и замолчал">
+              🫥 {slice.silent} молчат
+            </button>
+            {slice.unreached > 0 && (
+              <button type="button" className={`${styles.tag} ${styles.tagRed} ${narrow.blocked === "unreached" ? styles.tagOn : ""}`} onClick={() => onNarrow({ blocked: "unreached" })} title="За сутки не ушло ни одного напоминания — покупатель недостижим">
+                📵 {slice.unreached} не достучались
+              </button>
+            )}
+            {slice.stale > 0 && <span className={styles.tag}>{slice.stale} старше 2 недель</span>}
+          </div>
+        </div>
+      ) : (
       <div className={styles.cell}>
         <div className={styles.cellKey}>Что мешает</div>
         <div className={styles.cellBig}>{num(slice.ready)}<small>готовы из {num(slice.orders)}</small></div>
@@ -1242,6 +1287,7 @@ function SliceStrip({
           )}
         </div>
       </div>
+      )}
 
       <div className={styles.cell}>
         <div className={styles.cellKey}>Что горит</div>

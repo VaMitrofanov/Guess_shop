@@ -17,7 +17,7 @@ const faq = read("components/admin/faq-list.tsx");
 const overview = read("components/admin/overview/overview-screen.tsx");
 const overviewCss = read("components/admin/overview/overview.module.css");
 const overviewPage = read("app/admin/(protected)/page.tsx");
-const orderPresentation = read("lib/admin-order-presentation.ts");
+const orderPresentation = read("lib/order-presentation.ts");
 const adminTime = read("lib/admin-time.ts");
 
 describe("мобильный контракт Control Center", () => {
@@ -81,8 +81,8 @@ describe("мобильный контракт Control Center", () => {
     expect(overview).toContain("styles.oldest");
     expect(overview).toContain('action: "complete"');
     expect(overview).not.toContain("Последние заказы");
-    expect(orderPresentation).toContain('PENDING: "В работе"');
-    expect(orderPresentation).toContain('COMPLETED: "Выполнен"');
+    expect(orderPresentation).toContain('PENDING: "К выкупу"');
+    expect(orderPresentation).toContain('COMPLETED: "Готово"');
     expect(css).toContain("--admin-mobile-label: #a9abb8");
     expect(css).toMatch(/\.responsiveTable td::before\s*\{[^}]*text-transform:\s*none/);
   });

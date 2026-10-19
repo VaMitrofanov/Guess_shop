@@ -1090,6 +1090,11 @@ export default function OrderSheet({
                   </button>
                 ))}
               </div>
+              {source === "DIRECT" && !target?.isDirectOrder && (
+                <span style={{ fontSize: 13, color: C.textTertiary }}>
+                  Станет прямым: встанет первым в «К выкупу», оплата считается подтверждённой
+                </span>
+              )}
             </div>
           )}
           {!editing && !isDirect && client && (

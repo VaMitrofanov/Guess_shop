@@ -355,8 +355,11 @@ export interface OrderNarrow {
   lane?: LaneId | null;
   age?: string | null;
   amount?: number | null;
-  blocked?: "regional" | "split" | "nogp" | null;
+  /** `silent` — бот отправил все 3 напоминания; `unreached` — не ушло ни одного. */
+  blocked?: "regional" | "split" | "nogp" | "silent" | "unreached" | null;
 }
+
+const NARROW_BLOCKED = ["regional", "split", "nogp", "silent", "unreached"] as const;
 
 const LANE_WHERE: Record<LaneId, Prisma.WbOrderWhereInput> = {
   WB_DBS: { orderSource: "WB_DBS" },
@@ -373,7 +376,7 @@ export function parseNarrow(params: URLSearchParams): OrderNarrow {
     lane: lane === "WB" || lane === "WB_DBS" || lane === "DIRECT" ? lane : null,
     age: params.get("age"),
     amount: Number.isFinite(amount) && amount > 0 ? amount : null,
-    blocked: blocked === "regional" || blocked === "split" || blocked === "nogp" ? blocked : null,
+    blocked: (NARROW_BLOCKED as readonly string[]).includes(blocked ?? "") ? blocked as OrderNarrow["blocked"] : null,
   };
 }
 
@@ -405,6 +408,10 @@ export function buildNarrowWhere(tab: FilterTab, narrow: OrderNarrow): Prisma.Wb
   if (narrow.blocked === "regional") and.push({ buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE });
   if (narrow.blocked === "split") and.push({ splitGamepasses: { some: { purchasedAt: null } } });
   if (narrow.blocked === "nogp") and.push({ gamepassUrl: null, splitGamepasses: { none: {} } });
+  // Те же предикаты, что у счётчиков LINK_SILENT / LINK_UNREACHED выше.
+  if (narrow.blocked === "silent") and.push({ remindersSent: { gte: 3 } });
+  if (narrow.blocked === "unreached")
+    and.push({ remindersSent: 0, createdAt: { lte: new Date(Date.now() - 24 * 3600_000) } });
 
   return and.length === 0 ? {} : { AND: and };
 }

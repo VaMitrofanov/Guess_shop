@@ -17,6 +17,7 @@ import { recordCompletedNotice } from "@/lib/notice-delivery";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
+import { directPatchForSource, isDirectSource } from "@/lib/order-direct";
 import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL, isUnpaidDirect } from "@/lib/buyout-queue";
 import {
   assertSplitCoversOrder,
@@ -2236,6 +2237,15 @@ export async function POST(req: NextRequest) {
       if (src !== order.orderSource) {
         data.orderSource = src;
         changes.push(`источник ${order.orderSource}→${src}`);
+        // Источник и признак «прямой» меняются вместе — иначе фильтр «Прямые»
+        // видит заказ, а очередь выкупа не поднимает его наверх (19.10).
+        const direct = directPatchForSource(order, src, {
+          now: new Date(), actor: actor.displayName,
+          directSaleKopecks: directPrice(data.amount ?? order.amount) * 100,
+        });
+        Object.assign(data, direct);
+        if (direct.isDirectOrder === true) changes.push(direct.paidAt ? "прямой, оплата подтверждена" : "прямой");
+        if (direct.isDirectOrder === false) changes.push("больше не прямой");
       }
     }
 
@@ -2301,10 +2311,17 @@ export async function POST(req: NextRequest) {
     const src = body.source as string;
     if (!["WB", "DIRECT", "AVITO", "MANUAL"].includes(src))
       return NextResponse.json({ error: "Invalid source" }, { status: 400 });
+    if (unpaidDirect && !isDirectSource(src)) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data: { orderSource: src },
+      data: {
+        orderSource: src,
+        ...directPatchForSource(order, src, {
+          now: new Date(), actor: actor.displayName, directSaleKopecks: directPrice(order.amount) * 100,
+        }),
+      },
     });
+    cachedCounts = null;
     return NextResponse.json({ ok: true });
   }
 
