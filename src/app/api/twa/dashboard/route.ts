@@ -77,35 +77,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof PEN
   ]);
 }
 
-export async function GET(req: NextRequest) {
-  const twaUser = await extractTwaUser(req);
-  if (!twaUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+/* ── Ядро главной: очереди, DBS, «первым делом» ────────────────────────────
+   ~16 запросов к Neon в Сингапуре (~210 мс каждый) через пул из 5 соединений —
+   3–3,6 с на каждый заход и каждый 30-секундный опрос каждого админа (20.10.2026).
+   Ядро одно на всех: свежее 15 с отдаётся как есть, до 2 минут — сразу, с
+   обновлением в фоне; старше — ждём. «Пока вас не было» считается отдельно:
+   оно своё у каждого админа. */
+const CORE_FRESH_MS = 15_000;
+const CORE_STALE_MS = 120_000;
+let coreCache: { data: Awaited<ReturnType<typeof loadCore>>; ts: number } | null = null;
+let coreInflight: Promise<Awaited<ReturnType<typeof loadCore>>> | null = null;
 
-  const withDonor = req.nextUrl.searchParams.get("donor") === "1";
-
-  /* ── Смена: «Пока вас не было» ──────────────────────────────────────────
-     Отметка присутствия ставится РОВНО ОДИН РАЗ — на первой загрузке экрана,
-     когда клиент ещё не знает своего окна. Дальше он присылает `shiftSince`
-     сам, и живой опрос раз в 30 секунд окно не двигает: иначе блок схлопывался
-     бы в ноль ровно тогда, когда его читают (та же причина, что на сайте).
-     Пропуск TWA выдаётся только Telegram-админу из `ADMIN_IDS`, поэтому
-     присутствие пишется на тот же Telegram ID, что и на сайте: заходы с
-     телефона и с ноутбука — это одна смена одного человека. */
-  const sinceParam = req.nextUrl.searchParams.get("shiftSince");
-  const sinceDate = sinceParam ? new Date(sinceParam) : null;
-  const shiftWindow = sinceDate && Number.isFinite(sinceDate.getTime())
-    ? { windowStartAt: sinceDate, firstVisit: false }
-    : await touchAdminPresence({
-      via: "telegram",
-      telegramId: String(twaUser.userId),
-      userId: null,
-      displayName: twaUser.firstName || `TG ${twaUser.userId}`,
-    }).catch(() => null);
-
-  const [statsRaw, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedbackRaw, donor, dbs, firstInLine, shiftData] = await Promise.all([
-    // WB API — внешний и медленный; главная его не ждёт дольше 400 мс (кэш
-    // прогреется в фоне, данные придут со следующим опросом через 30 с).
-    withTimeout(getStats30d().catch(() => null), 400),
+async function loadCore() {
+  const [codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine] = await Promise.all([
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
 
     // Очередь выкупа по происхождению. `amount` в БД — чистые робуксы (то, что
@@ -165,14 +149,59 @@ export async function GET(req: NextRequest) {
       select: { wbCode: true },
     }),
 
-    withTimeout(getFeedbackSummary().catch(() => null), 400),
-    withDonor ? getDonorSnapshot() : Promise.resolve({ available: false, accountName: null, balance: null }),
     loadWbDeliveryQueueSnapshot().catch(() => null),
     // ⚡ Первым делом: поднятые руками и прямые заказы. Тот же загрузчик, что у
     // «Обзора» на сайте — иначе две главные показывали бы разные списки того,
     // что «выкупать первым».
     loadFirstInLine().catch(() => null),
 
+  ]);
+  return { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine };
+}
+
+function loadCoreCached() {
+  const age = coreCache ? Date.now() - coreCache.ts : Infinity;
+  if (coreCache && age < CORE_FRESH_MS) return Promise.resolve(coreCache.data);
+  coreInflight ??= loadCore()
+    .then(data => { coreCache = { data, ts: Date.now() }; return data; })
+    .finally(() => { coreInflight = null; });
+  if (coreCache && age < CORE_STALE_MS) return Promise.resolve(coreCache.data);
+  return coreInflight;
+}
+
+export async function GET(req: NextRequest) {
+  const twaUser = await extractTwaUser(req);
+  if (!twaUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const withDonor = req.nextUrl.searchParams.get("donor") === "1";
+
+  /* ── Смена: «Пока вас не было» ──────────────────────────────────────────
+     Отметка присутствия ставится РОВНО ОДИН РАЗ — на первой загрузке экрана,
+     когда клиент ещё не знает своего окна. Дальше он присылает `shiftSince`
+     сам, и живой опрос раз в 30 секунд окно не двигает: иначе блок схлопывался
+     бы в ноль ровно тогда, когда его читают (та же причина, что на сайте).
+     Пропуск TWA выдаётся только Telegram-админу из `ADMIN_IDS`, поэтому
+     присутствие пишется на тот же Telegram ID, что и на сайте: заходы с
+     телефона и с ноутбука — это одна смена одного человека. */
+  const sinceParam = req.nextUrl.searchParams.get("shiftSince");
+  const sinceDate = sinceParam ? new Date(sinceParam) : null;
+  const shiftWindow = sinceDate && Number.isFinite(sinceDate.getTime())
+    ? { windowStartAt: sinceDate, firstVisit: false }
+    : await touchAdminPresence({
+      via: "telegram",
+      telegramId: String(twaUser.userId),
+      userId: null,
+      displayName: twaUser.firstName || `TG ${twaUser.userId}`,
+    }).catch(() => null);
+
+  const [statsRaw, core, feedbackRaw, donor, shiftData] = await Promise.all([
+    // WB API — внешний и медленный; главная его не ждёт дольше 400 мс (кэш
+    // прогреется в фоне, данные придут со следующим опросом через 30 с).
+    withTimeout(getStats30d().catch(() => null), 400),
+    // Очереди, DBS и «первым делом» — из общего кэша (см. `loadCoreCached`).
+    loadCoreCached(),
+    withTimeout(getFeedbackSummary().catch(() => null), 400),
+    withDonor ? getDonorSnapshot() : Promise.resolve({ available: false, accountName: null, balance: null }),
     // Смена: диф и лента считаются теми же загрузчиками, что на сайте. Телефон
     // и ноутбук обязаны показывать одну и ту же смену — расхождение здесь
     // читалось бы как «на сайте видно больше».
@@ -183,6 +212,7 @@ export async function GET(req: NextRequest) {
       ])
       : Promise.resolve(null),
   ]);
+  const { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine } = core;
 
   const statsPending = statsRaw === PENDING;
   const stats = statsRaw === PENDING ? null : statsRaw;

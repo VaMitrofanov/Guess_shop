@@ -795,7 +795,7 @@ export default function OrdersWorkspace({
     if (narrow.blocked) {
       const labels: Record<string, string> = {
         regional: "рег. цена", split: "разбитые", nogp: "без геймпасса",
-        silent: "молчат: бот отправил 3 из 3", unreached: "не достучались",
+        silent: "молчат: бот отправил 3 из 3", unreached: "не дошло ни одно напоминание",
       };
       chips.push({ label: labels[narrow.blocked] ?? narrow.blocked, clear: () => setNarrow(n => ({ ...n, blocked: null })) });
     }
@@ -1272,7 +1272,7 @@ function SliceStrip({
             </button>
             {slice.unreached > 0 && (
               <button type="button" className={`${styles.tag} ${styles.tagRed} ${narrow.blocked === "unreached" ? styles.tagOn : ""}`} onClick={() => onNarrow({ blocked: "unreached" })} title="За сутки не ушло ни одного напоминания — покупатель недостижим">
-                📵 {slice.unreached} не достучались
+                📵 {slice.unreached} не дошло
               </button>
             )}
           </div>

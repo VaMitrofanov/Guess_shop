@@ -38,3 +38,14 @@ describe("счётчики вкладок — одно правило на вс�
     expect(JSON.stringify(buildTabWhere("ATTENTION"))).not.toContain("AWAITING_GAMEPASS");
   });
 });
+
+describe("главная TWA не держит админа на базе (20.10.2026)", () => {
+  test("ядро сводки — общий кэш со свежестью 15 с, WB — не дольше 400 мс", () => {
+    const route = read("app/api/twa/dashboard/route.ts");
+    expect(route).toContain("loadCoreCached()");
+    expect(route).toMatch(/CORE_FRESH_MS = 15_000/);
+    expect(route).toContain("withTimeout(getStats30d()");
+    // Плашка «WB недоступен» не загорается, пока WB просто догружается.
+    expect(route).toContain("apiAvailable: statsPending || !!stats");
+  });
+});

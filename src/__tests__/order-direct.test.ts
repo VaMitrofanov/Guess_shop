@@ -48,7 +48,7 @@ describe("прямой заказ: источник и признак меняю
   });
 });
 
-describe("сужение «молчат / не достучались»", () => {
+describe("сужение «молчат / не дошло»", () => {
   test("parseNarrow принимает новые значения и отсекает мусор", async () => {
     const { parseNarrow, buildNarrowWhere } = await import("@/lib/order-slices");
     expect(parseNarrow(new URLSearchParams("blocked=silent")).blocked).toBe("silent");
