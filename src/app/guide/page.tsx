@@ -71,7 +71,12 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   // проверки ника рисовать не на чем, и открывать их снаружи незачем.
   // `passid` (20.10.2026) — «📨 Попросить ссылку» из админки: человек с уже
   // созданным пассом попадает прямо в поле Pass ID, без экрана выбора способа.
-  const initialStage = stage === "key" ? ("key" as const) : stage === "passid" ? ("passid" as const) : undefined;
+  // `place` (20.10.2026) — «📸 Шаги с картинками» из ботов после «нет игры»:
+  // раздел «создай плейс в Studio» открыт сразу, до проверки ника.
+  const initialStage = stage === "key" ? ("key" as const)
+    : stage === "passid" ? ("passid" as const)
+      : stage === "place" ? ("place" as const)
+        : undefined;
 
   return (
     <>

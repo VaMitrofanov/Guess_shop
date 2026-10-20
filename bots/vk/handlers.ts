@@ -12,7 +12,7 @@
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
-import { vkGetName, vkSend, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
+import { vkGetName, vkSend, vkSendPhoto, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState, getQuestPlan, setQuestPlan, clearQuestPlan, heldGameKeys } from "./session";
 import {
   MAX_KEY_MISSES,
@@ -66,6 +66,8 @@ import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shar
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
+import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
+import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 
 /** Узкие представления `db` для шага геймпасса — без `any`. */
@@ -3545,6 +3547,7 @@ async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Prom
       }
     }
     await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), "VK/quest-keyfail", showResult);
+    if (verdict.placeHelp) await sendPlaceHelpVk(ctx, vkUserId, verdict.placeHelp, { wbCode: quest.wbCode, denomination: quest.denomination, nick: quest.nick });
     return;
   }
   await showResult(`✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`);
@@ -3601,6 +3604,51 @@ async function handleQuestKey(ctx: MessageContext, vkUserId: number): Promise<vo
     // Сообщество ВК не может удалить сообщение человека — просим его самого.
     deleteBy: "user",
   }), "VK/quest-key");
+}
+
+/**
+ * Ключ годный, а игры нет (или не видна) — почти всегда новый аккаунт без
+ * плейса (20.10.2026). Экран отказа это уже сказал; здесь кадры Studio фото,
+ * шаги текстом и карточка админам. Зеркало `sendPlaceHelpTg`.
+ */
+async function sendPlaceHelpVk(
+  ctx: MessageContext,
+  vkUserId: number,
+  verdict: string,
+  info: { wbCode: string | null; denomination: number | null; nick: string | null },
+): Promise<void> {
+  const shown = { via: "vk-bot" as const, verdict, ...info, buyer: `vk.com/id${vkUserId}` };
+  void recordPlaceHelp(db as unknown as PlaceHelpClient, shown);
+  if (shouldNotifyPlaceHelp(`vk:${vkUserId}`)) {
+    const card = placeHelpAdminText(shown);
+    void Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, card)));
+  }
+  // VK не берёт фото по ссылке: качаем свой же кадр и загружаем. Не вышло —
+  // шаги текстом с кнопками уходят всё равно.
+  for (const step of PLACE_STEPS) {
+    try {
+      const res = await fetch(step.image);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await vkSendPhoto(vkUserId, Buffer.from(await res.arrayBuffer()), step.caption);
+    } catch (err: unknown) {
+      console.warn("[VK/no-place] кадр не ушёл:", errText(err));
+      break;
+    }
+  }
+  // Ключ ждём снова: после публикации плейса человек пришлёт тот же ключ.
+  if (info.wbCode && info.nick && info.denomination && getState(vkUserId)?.type !== "AWAITING_API_KEY") {
+    setState(vkUserId, { type: "AWAITING_API_KEY", wbCode: info.wbCode, denomination: info.denomination, nick: info.nick });
+  }
+  await ctx.reply({
+    message: plainText(placeStepsText()),
+    keyboard: Keyboard.builder()
+      .urlButton({ label: "⬇️ Скачать Roblox Studio", url: STUDIO_DOWNLOAD_URL })
+      .row()
+      .urlButton({ label: "📸 Шаги с картинками", url: placeGuideUrl(info.wbCode, info.nick) })
+      .row()
+      .textButton({ label: "💬 Компьютера нет — помогите", payload: { command: "support", context: "no_place" }, color: "secondary" })
+      .inline(),
+  });
 }
 
 /**
@@ -3810,6 +3858,7 @@ async function handleVkApiKeyInput(
     "VK/quest-keyfail",
     showResult,
   );
+  if (verdict.placeHelp) await sendPlaceHelpVk(ctx, vkUserId, verdict.placeHelp, { wbCode: pending.wbCode, denomination: pending.denomination, nick: pending.nick });
 }
 
 /** User tapped a "💎 ${name} · ${price} R$" button → run the canonical flow. */
@@ -4529,6 +4578,7 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
     if (verdict.needsGameLink) heldGameKeys.hold(vkUserId, key);
     else heldGameKeys.drop(vkUserId);
     await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: st.robloxUsername }), "VK/direct-key-fail");
+    if (verdict.placeHelp) await sendPlaceHelpVk(ctx, vkUserId, verdict.placeHelp, { wbCode: null, denomination: null, nick: st.robloxUsername });
     return;
   }
   heldGameKeys.drop(vkUserId);

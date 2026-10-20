@@ -23,6 +23,7 @@ import {
   type CreateTarget,
 } from "./gamepass-plan";
 import type { GamesVisibility } from "./roblox-owned-games";
+import { placeGuideUrl, placeHelpInfo, STUDIO_DOWNLOAD_URL } from "./no-place";
 
 /**
  * Идентификаторы действий. Часть из них — уже живущие в ботах callback'и
@@ -388,12 +389,18 @@ export function questKeyWorkingText(prices: number[]): string {
  * (`gamepass-create-messages.ts`), здесь только кнопки под чат.
  */
 export function questKeyFailScreen(opts: {
-  verdict: { title: string; text: string; retry: boolean; needsGameLink?: boolean };
+  verdict: { title: string; text: string; retry: boolean; needsGameLink?: boolean; placeHelp?: string };
   wbCode: string;
   nick?: string;
 }): QuestScreen {
   const { verdict, wbCode, nick } = opts;
   const rows: QuestButton[][] = [];
+  // Игры не видно — почти всегда новый аккаунт без плейса: сразу ведём в
+  // Studio (20.10.2026). Кадры шагов бот присылает следом альбомом.
+  if (verdict.placeHelp) {
+    rows.push([{ id: "url", label: "⬇️ Скачать Roblox Studio", url: STUDIO_DOWNLOAD_URL }]);
+    rows.push([{ id: "url", label: "📸 Как создать плейс", url: placeGuideUrl(wbCode, nick) }]);
+  }
   // Ключ годный, нужна только ссылка на игру: кнопка «другой ключ» спорила бы
   // с текстом, который прямо говорит «ключ вводить заново не нужно».
   if (!verdict.needsGameLink) {
@@ -407,7 +414,12 @@ export function questKeyFailScreen(opts: {
   rows.push([{ id: QUEST.fork, label: "↩️ Другой способ", tone: "secondary" }]);
 
   const text = [`❌ <b>${verdict.title}</b>`, "", verdict.text];
-  if (verdict.needsGameLink) text.push("", "👇 Пришли ссылку на игру следующим сообщением — ключ мы помним 15 минут.");
+  if (verdict.placeHelp) {
+    text.push("", `🆕 ${placeHelpInfo(verdict.placeHelp)}`);
+    text.push("", "Игра у тебя всё-таки есть? Пришли ссылку на неё следующим сообщением — ключ мы помним 15 минут.");
+  } else if (verdict.needsGameLink) {
+    text.push("", "👇 Пришли ссылку на игру следующим сообщением — ключ мы помним 15 минут.");
+  }
   return { text: text.join("\n"), rows };
 }
 

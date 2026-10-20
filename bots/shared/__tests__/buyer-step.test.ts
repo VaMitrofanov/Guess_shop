@@ -53,8 +53,8 @@ describe("что прислал покупатель — без знания ш�
 describe("сообщение «попросить у покупателя»", () => {
   const order = { wbCode: "AB12CD3", amount: 500, robloxUsername: "lox23_limon" };
 
-  it("пять вариантов, у каждого значок, имя и подсказка", () => {
-    expect(BUYER_STEP_OPTIONS.map((o) => o.kind)).toEqual(["link", "key", "nick", "create", "custom"]);
+  it("шесть вариантов, у каждого значок, имя и подсказка", () => {
+    expect(BUYER_STEP_OPTIONS.map((o) => o.kind)).toEqual(["link", "key", "nick", "create", "place", "custom"]);
     for (const option of BUYER_STEP_OPTIONS) {
       expect(option.icon.length).toBeGreaterThan(0);
       expect(option.hint.length).toBeGreaterThan(10);
@@ -139,6 +139,8 @@ describe("события заказа", () => {
   it("строки для карточки — человеческие", () => {
     expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "key", channel: "tg" })).toContain("в Telegram");
     expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "link", channel: null })).toContain("не доставлено");
+    // «Pass ID» не превращается в «pass id» (хвост 20.10).
+    expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "link", channel: "tg" })).toContain("Pass ID");
     expect(buyerStepEventText(BUYER_STEP_EVENT.DEAD_END, { reason: "key_format" })).toContain("ключ");
     expect(buyerStepEventText("ORDER_CREATED", {})).toBeNull();
   });

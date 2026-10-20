@@ -70,6 +70,8 @@ import {
 import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
+import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
+import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 
 /** Узкие представления `db` для шага геймпасса — без `any`. */
@@ -3302,6 +3304,49 @@ async function handleStrayApiKey(bot: Telegraf, ctx: Parameters<typeof handleApi
   await handleApiKeyInput(bot, ctx, raw);
 }
 
+/**
+ * Ключ годный, а игры нет (или не видна) — почти всегда новый аккаунт без
+ * плейса (20.10.2026). Экран отказа уже сказал это и дал кнопки; здесь кадры
+ * Studio альбомом, шаги текстом и карточка админам. Ключ ждём снова.
+ */
+async function sendPlaceHelpTg(
+  ctx: Parameters<typeof handleApiKeyInput>[1],
+  verdict: string,
+  info: { wbCode: string | null; denomination: number | null; nick: string | null },
+): Promise<void> {
+  const tgIdNum = ctx.from.id;
+  const shown = {
+    via: "tg-bot" as const,
+    verdict,
+    ...info,
+    buyer: `${ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? ""} (ID: ${tgIdNum})`,
+  };
+  void recordPlaceHelp(db as unknown as PlaceHelpClient, shown);
+  if (shouldNotifyPlaceHelp(`tg:${tgIdNum}`)) {
+    const card = placeHelpAdminText(shown);
+    void Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, card)));
+  }
+  // Пометки нарисованы на кадрах. Альбом не ушёл — шаги текстом всё равно ниже.
+  try {
+    await ctx.replyWithMediaGroup(PLACE_STEPS.map((step) => ({ type: "photo" as const, media: step.image, caption: step.caption })));
+  } catch (err: unknown) {
+    console.warn("[TG/no-place] альбом не ушёл:", errText(err));
+  }
+  // Ключ ждём снова: после публикации плейса человек пришлёт тот же ключ.
+  if (info.wbCode && !pendingApiKey.has(tgIdNum) && info.nick && info.denomination) {
+    pendingApiKey.set(tgIdNum, { wbCode: info.wbCode, denomination: info.denomination, nick: info.nick });
+  }
+  await ctx.reply(placeStepsText(), {
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+    ...Markup.inlineKeyboard([
+      [Markup.button.url("⬇️ Скачать Roblox Studio", STUDIO_DOWNLOAD_URL)],
+      [Markup.button.url("📸 Шаги с картинками", placeGuideUrl(info.wbCode, info.nick))],
+      [supportBtn("💬 Компьютера нет — помогите", "no_place")],
+    ]),
+  });
+}
+
 async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
   const pending = pendingApiKey.get(ctx.from.id);
   if (!pending) return;
@@ -3402,6 +3447,7 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
   if (verdict.needsGameLink && outcome.created.length === 0) heldGameKeys.hold(ctx.from.id, key);
   else heldGameKeys.drop(ctx.from.id);
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }), edit);
+  if (verdict.placeHelp) await sendPlaceHelpTg(ctx, verdict.placeHelp, { wbCode: pending.wbCode, denomination: pending.denomination, nick: pending.nick });
 }
 
 /**
@@ -3476,6 +3522,7 @@ async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Pr
   if (verdict.needsGameLink) heldGameKeys.hold(ctx.from.id, key);
   else heldGameKeys.drop(ctx.from.id);
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: pending.nick }), edit);
+  if (verdict.placeHelp) await sendPlaceHelpTg(ctx, verdict.placeHelp, { wbCode: null, denomination: null, nick: pending.nick });
 }
 
 /**
@@ -5427,6 +5474,7 @@ export function registerCallbacks(bot: Telegraf): void {
           }
         }
         await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: quest.wbCode, nick: quest.nick }), edit);
+        if (verdict.placeHelp) await sendPlaceHelpTg(ctx, verdict.placeHelp, { wbCode: quest.wbCode, denomination: quest.denomination, nick: quest.nick });
         return;
       }
       await edit(

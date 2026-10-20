@@ -30,6 +30,8 @@ import {
 } from "@/lib/device-platform";
 import type { CreateTarget, OwnedPass } from "@/lib/gamepass-plan";
 import { keyCreateSuccessText, keyCreateVerdict } from "@/lib/gamepass-create-messages";
+import { placeHelpInfo, showsPlaceHelp } from "../../../bots/shared/no-place";
+import PlaceSteps from "./PlaceSteps";
 
 /** Шагов выпуска ключа — столько же, сколько экранов у Roblox на этом пути. */
 const KEY_STEPS = 5;
@@ -127,8 +129,18 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
         );
         return;
       }
-      setError(data?.error ?? "roblox_error");
+      const failCode = data?.error ?? "roblox_error";
+      setError(failCode);
       setPhase("done");
+      // Нет игры — почти всегда новый аккаунт без плейса: зовём админов
+      // (20.10.2026). Шаги Studio страница покажет сама.
+      if (showsPlaceHelp(failCode)) {
+        void fetch("/api/wb-code/place-help", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code, nick, verdict: failCode }),
+        }).catch(() => {});
+      }
     } catch {
       setError("network");
       setPhase("done");
@@ -474,11 +486,20 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
           <div className="wbi-warn">
             <b>{verdict.title}.</b> {verdict.text}
           </div>
-          {/* Игры по нику не видны, а ключ годный: просим только ссылку на игру.
-              Ключ остаётся в поле выше — вводить его заново не нужно. */}
+          {/* Игры нет — почти всегда новый аккаунт без плейса (20.10.2026):
+              пояснение и шаги Studio сразу, без вопросов. Поле ссылки ниже
+              остаётся — на случай, если игра всё-таки есть, но скрыта. */}
+          {showsPlaceHelp(error) && (
+            <div style={{ marginTop: 12 }}>
+              <div className="wbi-ok">🆕 {placeHelpInfo(error)}</div>
+              <div style={{ marginTop: 12 }}>
+                <PlaceSteps onDone={() => { setPhase("idle"); setError(null); }} />
+              </div>
+            </div>
+          )}
           {verdict.needsGameLink && apiKey.trim() && (
             <div className="wbi-keyfield" style={{ marginTop: 12 }}>
-              <label htmlFor="rb-gameref">Ссылка на твою игру</label>
+              <label htmlFor="rb-gameref">{showsPlaceHelp(error) ? "Игра всё-таки есть? Вставь ссылку на неё" : "Ссылка на твою игру"}</label>
               <input
                 id="rb-gameref"
                 className="wbi-sinput"

@@ -24,6 +24,7 @@
 
 import { parseGamepassUrl } from "./gamepass-id";
 import { parseExperienceRef } from "./roblox-owned-games";
+import { PLACE_HELP_EVENT, placeGuideUrl, placeHelpInfo, STUDIO_DOWNLOAD_URL } from "./no-place";
 
 /* ── 1. Что прислал покупатель ─────────────────────────────────────────── */
 
@@ -74,7 +75,7 @@ export function classifyBuyerInput(raw: string): BuyerInput {
 
 /* ── 2. Что админка просит у покупателя ───────────────────────────────── */
 
-export type BuyerStepKind = "nick" | "link" | "key" | "create" | "custom";
+export type BuyerStepKind = "nick" | "link" | "key" | "create" | "place" | "custom";
 
 export interface BuyerStepOption {
   kind: BuyerStepKind;
@@ -91,6 +92,7 @@ export const BUYER_STEP_OPTIONS: readonly BuyerStepOption[] = [
   { kind: "key", icon: "🔑", label: "Прислать ключ", hint: "создадим пасс сами — ссылка на шаги с картинками" },
   { kind: "nick", icon: "🔎", label: "Прислать ник Roblox", hint: "посмотрим аккаунт и соберём заказ" },
   { kind: "create", icon: "📖", label: "Создать пасс по инструкции", hint: "личная инструкция с его кодом" },
+  { kind: "place", icon: "🆕", label: "Создать плейс (новый аккаунт)", hint: "нет игры — шаги Roblox Studio с картинками" },
   { kind: "custom", icon: "✍️", label: "Свой текст", hint: "ваши слова + кнопки инструкции и ссылки" },
 ] as const;
 
@@ -203,6 +205,19 @@ export function buyerStepMessage(kind: BuyerStepKind, order: BuyerStepOrder, cus
           `${priceLine}\nКогда создашь — пришли сюда ник Roblox или ссылку на геймпасс.`,
         buttons: [[guide], [{ label: "🔎 Пасс готов — ввести ник", action: "nick" }]],
       };
+    case "place":
+      return {
+        html:
+          `${head}🆕 ${placeHelpInfo("no_universe")}\n\n` +
+          `1️⃣ Скачай <b>Roblox Studio</b> (только компьютер: Windows или Mac).\n` +
+          `2️⃣ Войди в свой аккаунт и нажми <b>New Experience</b>.\n` +
+          `3️⃣ Сверху <b>File → Publish to Roblox</b>, название любое, <b>Create</b>.\n\n` +
+          `Готово — пришли сюда ключ или ник Roblox, дальше сделаем мы.`,
+        buttons: [
+          [{ label: "⬇️ Скачать Roblox Studio", url: STUDIO_DOWNLOAD_URL }],
+          [{ label: "📸 Шаги с картинками", url: placeGuideUrl(corridor ? code : null, order.robloxUsername ?? order.probableNick) }],
+        ],
+      };
     case "custom": {
       const body = esc((customText ?? "").trim());
       return {
@@ -308,7 +323,13 @@ export function buyerStepEventText(type: string, payload: unknown): string | nul
   if (type === BUYER_STEP_EVENT.SENT) {
     const option = BUYER_STEP_OPTIONS.find((item) => item.kind === p.kind);
     const channel = p.channel === "tg" ? "в Telegram" : p.channel === "vk" ? "во ВКонтакте" : "— не доставлено";
-    return `📨 Попросили у покупателя: ${option?.label.toLowerCase() ?? String(p.kind)} ${channel}`;
+    // Только первая буква строчная: «Pass ID» и «Roblox» остаются как есть.
+    const what = option ? option.label.charAt(0).toLowerCase() + option.label.slice(1) : String(p.kind);
+    return `📨 Попросили у покупателя: ${what} ${channel}`;
+  }
+  if (type === PLACE_HELP_EVENT) {
+    const via = p.via === "site" ? "на сайте" : p.via === "vk-bot" ? "во ВКонтакте" : "в Telegram";
+    return `🆕 Нет плейса (скорее всего новый аккаунт) — инструкция по Studio показана ${via}`;
   }
   if (type === BUYER_STEP_EVENT.DEAD_END) {
     const reason = DEAD_END_REASONS[p.reason as DeadEndReason] ?? String(p.reason);

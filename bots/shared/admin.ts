@@ -72,6 +72,7 @@ export function generateDirectCode(): string {
 
 const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   code_not_found: "Код не найден",
+  no_place:       "Новый аккаунт без плейса — нет компьютера для Studio",
   code_mine:      "Код уже активирован (повторный вход)",
   code_claimed:   "Код активирован другим пользователем",
   pass_format:    "Не распознан формат геймпасса",

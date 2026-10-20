@@ -53,6 +53,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { notifyAdminsKeyCreated, passNeedsHands } from "@/lib/gamepass-key-admin-notify";
 import { notifyBuyerStep, notifyGamepassCreatedForBuyer } from "@/lib/twa-notify";
 import { BUYER_STEP_EVENT, buyerStepEventText, isBuyerStepKind } from "../../../../../bots/shared/buyer-step";
+import { PLACE_HELP_EVENT } from "../../../../../bots/shared/no-place";
 import { BUYER_STEP_STATUSES } from "@/lib/gamepass-tools";
 import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
 import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
@@ -2725,7 +2726,7 @@ export async function POST(req: NextRequest) {
     const events = await (prisma as any).orderEvent.findMany({
       // + где бот покупателя не понял и что у него просили (20.10.2026):
       // спор «я присылал ссылку» разбирается по этим же строкам.
-      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED", "AUDIT_GAMEPASS_AUTOCREATED", BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END] } },
+      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED", "AUDIT_GAMEPASS_AUTOCREATED", BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END, PLACE_HELP_EVENT] } },
       orderBy: { createdAt: "asc" },
       select: { id: true, type: true, payload: true, createdAt: true },
     });
@@ -3049,7 +3050,7 @@ export async function POST(req: NextRequest) {
      типа, и грузятся они по открытию формы, а не на каждую карточку. */
   if (action === "buyer-step-trail") {
     const events = await prisma.orderEvent.findMany({
-      where: { orderId, type: { in: [BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END] } },
+      where: { orderId, type: { in: [BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END, PLACE_HELP_EVENT] } },
       orderBy: { createdAt: "desc" },
       take: 8,
       select: { type: true, payload: true, createdAt: true },

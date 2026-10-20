@@ -25,6 +25,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { getOrInitSessionId } from "@/lib/wb-session";
 import { tgBotHref, vkBotHref } from "@/lib/bot-links";
 import { parseGamepassRef } from "@/lib/gamepass-id";
+import PlaceSteps from "./PlaceSteps";
 import {
   coveredRobux,
   createTargetsFor,
@@ -87,7 +88,7 @@ export default function GamepassCheck({
   /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE). */
   keyAutoEnabled?: boolean;
   /** `?stage=key` — человек пришёл по ссылке, которая ключ и просит. */
-  initialStage?: "key" | "passid";
+  initialStage?: "key" | "passid" | "place";
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
@@ -511,6 +512,11 @@ export default function GamepassCheck({
               {!isSite && <ThemeToggle compact />}
             </div>
           </div>
+
+          {/* ── «Создай плейс» по ссылке из бота (`?stage=place`) ──────────
+              Статичные шаги: проверка ника им не нужна, поэтому раздел стоит
+              сверху сразу. Ниже — обычная проверка, чтобы вставить ключ. */}
+          {initialStage === "place" && <PlaceSteps />}
 
           {/* ── Пройденное: строкой сверху, а не экраном ─────────────────── */}
           {phase === "result" && (
