@@ -70,6 +70,11 @@ import {
 import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
+import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
+
+/** Узкие представления `db` для шага геймпасса — без `any`. */
+const stepDb = db as unknown as BuyerStepClient;
+const strayKeyDb = db as unknown as StrayKeyDb;
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
 import { countPreviousOrders } from "../shared/order-loyalty";
 import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
@@ -2008,7 +2013,8 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   } else if (order.status === "PAYMENT_PENDING") {
     note = "\n\n💳 <i>Пришли скриншот оплаты сюда (фотографией, не файлом).</i>";
   } else if (order.status === "AWAITING_GAMEPASS") {
-    note = "\n\n⚠️ <i>Пройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎</i>";
+    note = "\n\n⚠️ <i>Пройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎</i>" +
+      "\n💡 <i>Ник, ссылку на геймпасс или ключ можно прислать прямо сюда — одним сообщением.</i>";
   } else if (order.status === "PENDING") {
     note = `\n\n💬 <i>${stage!.note}</i>`;
     if (pendingOver120) {
@@ -2105,6 +2111,8 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
     keyboard = Markup.inlineKeyboard([
       [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", guideUrl)],
       [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+      // Пасс уже создан, а поиск по нику его не видит (скрытый плейс) — вход по ссылке.
+      [gpLinkBtn()],
       refreshRow,
       menuRow,
     ]);
@@ -2353,11 +2361,26 @@ export function registerText(bot: Telegraf): void {
       const sweep = await sweepStaleOrderState(ctx, keyState.wbCode, text);
       if (sweep === "replied") return;
       if (sweep === "valid") {
+        // Ждали ключ, а прислали ссылку на пасс или ник — это ответ на тот же
+        // вопрос «чем закрыть заказ», а не ошибка формата (20.10.2026: человек
+        // передумал, нашёл пасс и получал «это не похоже на ключ», а его
+        // сообщение со ссылкой бот ещё и удалял).
+        const routed = await routeOffKeyInput(bot, ctx, keyState, text);
+        if (routed) return;
         await handleApiKeyInput(bot, ctx, text);
         return;
       }
       // "cleared" — прислали валидный код ВБ: падаем дальше, к штатному маршруту.
       pendingApiKey.delete(ctx.from.id);
+    }
+
+    // 1y'. Ключ ВНЕ шага ключа: человек пропустил кнопку «Сделайте за меня»,
+    // бот перезапустился или поддержка сказала «пришли ключ боту». Раньше ключ
+    // уходил в разбор ника/ссылки и получал формат-ошибку, а сам оставался
+    // висеть в чате. Теперь заказ берётся из базы, и ключ принимается.
+    if (!isAdmin && !pendingDirectFlow.has(ctx.from.id) && classifyBuyerInput(text).kind === "api_key") {
+      await handleStrayApiKey(bot, ctx, text);
+      return;
     }
 
     // 1z. USER ROBLOX-NICK input (item 7 — "find gamepass by nick")
@@ -2702,6 +2725,7 @@ export function registerText(bot: Telegraf): void {
       }
       const fc = getFailCounts(ctx.from.id);
       fc.formatError++;
+      void recordBuyerDeadEnd(stepDb, { wbCode: state.wbCode, via: "tg-bot", reason: "link_format", sentLength: text.length });
       const fmtGuideUrl = state.wbCode.startsWith("DIR-")
         ? `https://robloxbank.ru/guide?source=direct`
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
@@ -3012,6 +3036,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
 
   const nick = raw.trim().replace(/^@/, "");
   if (!ROBLOX_NICK_RE.test(nick)) {
+    void recordBuyerDeadEnd(stepDb, { wbCode: state.wbCode, via: "tg-bot", reason: "nick_format", sentLength: nick.length });
     await ctx.reply(
       "⚠️ Ник не похож на ник Roblox.\n\n" +
       "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
@@ -3157,6 +3182,126 @@ async function handleQuestConfirm(bot: Telegraf, ctx: any): Promise<void> {
  * остаётся висеть в переписке. Дальше ключ живёт только в памяти этого вызова
  * и в шифрованном хранилище; в лог он не попадает ни при одном исходе.
  */
+/**
+ * Бот ждёт ключ, а пришла ссылка на пасс или ник. Отвечаем на то, что
+ * прислано: ссылку — в приём геймпасса, ник — в поиск. `true` = обработано.
+ */
+async function routeOffKeyInput(
+  bot: Telegraf,
+  ctx: Parameters<typeof handleApiKeyInput>[1],
+  keyState: { wbCode: string; denomination: number; nick: string },
+  text: string,
+): Promise<boolean> {
+  const tgIdNum = ctx.from.id;
+  const input = classifyBuyerInput(text);
+  const state: LinkState = { wbCode: keyState.wbCode, denomination: keyState.denomination };
+  if (input.kind === "gamepass") {
+    pendingApiKey.delete(tgIdNum);
+    heldGameKeys.drop(tgIdNum);
+    pendingLink.set(tgIdNum, { ...state, viaManualLink: true });
+    await processGamepassSubmission(bot, ctx, state, input.passId, { viaManualLink: true });
+    return true;
+  }
+  // Ник — только пока ключ не ждёт ссылку на игру и строка не похожа на ключ.
+  const nick = text.trim().replace(/^@/, "");
+  if (!heldGameKeys.get(tgIdNum) && !looksLikeApiKey(nick) && ROBLOX_NICK_RE.test(nick)) {
+    pendingApiKey.delete(tgIdNum);
+    pendingRobloxNick.set(tgIdNum, state);
+    await handleRobloxNickInput(bot, ctx, nick);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Ключ пришёл вне шага ключа. Заказ и ник — из базы; план аккаунта
+ * собирается тем же поиском, что и в шаге ника, и дальше работает
+ * обычный приём ключа (`handleApiKeyInput`).
+ */
+async function handleStrayApiKey(bot: Telegraf, ctx: Parameters<typeof handleApiKeyInput>[1], raw: string): Promise<void> {
+  const tgIdNum = ctx.from.id;
+  // Ключ — креденшл: убираем из чата первым делом, что бы ни было дальше.
+  try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* нет прав — не беда */ }
+
+  if (!gamepassAutocreateEnabled()) {
+    await ctx.reply(
+      "Ключ получили и убрали из чата, но этот способ сейчас выключен. Создай геймпасс по инструкции — кнопка «📦 Мой заказ».",
+      menuReplyKb(),
+    );
+    return;
+  }
+
+  const user = await strayKeyDb.user.findUnique({ where: { tgId: String(tgIdNum) }, select: { id: true, robloxUsername: true } });
+  const orders = user
+    ? await strayKeyDb.wbOrder.findMany({
+        where: { userId: user.id, status: { in: STRAY_KEY_STATUSES }, heldAt: null },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+  const pinned = pendingRobloxNick.get(tgIdNum)?.wbCode ?? pendingLink.get(tgIdNum)?.wbCode;
+  const order = orders.find((o) => o.wbCode === pinned) ?? (orders.length === 1 ? orders[0] : null);
+  if (!order) {
+    if (orders.length > 1) {
+      const picker = buildOrderPicker(orders);
+      await ctx.reply(
+        "🔑 Ключ получили и убрали из чата. У тебя несколько заказов — выбери, для какого он, и пришли ключ ещё раз.",
+      );
+      await ctx.reply(picker.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...picker.keyboard });
+      return;
+    }
+    await ctx.reply(
+      "🔑 Ключ получили и убрали из чата, но сейчас нет заказа, который ждёт геймпасс. Если это ошибка — напиши в поддержку.",
+      withSupportKb(undefined, "stray_key"),
+    );
+    return;
+  }
+
+  const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+  const nick = (order.robloxUsername ?? order.probableNick ?? user?.robloxUsername ?? "").trim();
+  if (!nick) {
+    void recordBuyerDeadEnd(stepDb, { orderId: order.id, via: "tg-bot", reason: "key_no_nick" });
+    pendingApiKey.delete(tgIdNum);
+    pendingLink.set(tgIdNum, state);
+    pendingRobloxNick.set(tgIdNum, state);
+    await ctx.reply(
+      "🔑 Ключ получили и убрали из чата. Чтобы создать пасс на нужный аккаунт, сначала пришли свой <b>ник в Roblox</b> — а потом ключ ещё раз.",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const working = await ctx.reply(`🔑 Ключ получили и убрали из чата. Смотрю аккаунт <b>${nick}</b>…`, { parse_mode: "HTML" });
+  let owned: OwnedPass[] = [];
+  try {
+    const outcome = await searchGamepassesByNick(nick, Math.ceil(order.amount / 0.7));
+    if (outcome.status === "user_not_found") {
+      pendingLink.set(tgIdNum, state);
+      pendingRobloxNick.set(tgIdNum, state);
+      await ctx.reply(`Аккаунта <b>${nick}</b> нет на Roblox. Пришли свой ник ещё раз — потом ключ.`, { parse_mode: "HTML" });
+      return;
+    }
+    owned = outcome.status === "no_gamepasses" ? [] : ownedFromSearch(outcome.all);
+  } catch (err: unknown) {
+    console.error("[TG/stray-key] поиск по нику упал:", errText(err));
+    await ctx.reply("⚠️ Roblox сейчас не отвечает. Пришли ключ ещё раз через минуту.");
+    return;
+  } finally {
+    try { await bot.telegram.deleteMessage(ctx.chat.id, working.message_id); } catch {}
+  }
+
+  const plan = planFromOwned(order.amount, owned);
+  questPlans.set(tgIdNum, { wbCode: order.wbCode, denomination: order.amount, nick, plan, owned });
+  if (targetsToCreate(plan).length === 0) {
+    // Создавать нечего — на аккаунте уже есть подходящие пассы: показываем план.
+    await showQuestPlan(ctx, { wbCode: order.wbCode, denomination: order.amount, nick, owned });
+    return;
+  }
+  pendingLink.delete(tgIdNum);
+  pendingRobloxNick.delete(tgIdNum);
+  pendingApiKey.set(tgIdNum, { wbCode: order.wbCode, denomination: order.amount, nick });
+  await handleApiKeyInput(bot, ctx, raw);
+}
+
 async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
   const pending = pendingApiKey.get(ctx.from.id);
   if (!pending) return;
@@ -3174,6 +3319,7 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
   }
 
   if (!game && !looksLikeApiKey(key)) {
+    void recordBuyerDeadEnd(stepDb, { wbCode: pending.wbCode, via: "tg-bot", reason: "key_format", sentLength: key.length });
     await ctx.reply(
       heldKey
         ? `Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`

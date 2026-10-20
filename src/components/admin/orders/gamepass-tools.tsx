@@ -24,6 +24,7 @@ import {
   type GamepassToolId,
   type GamepassToolOrder,
 } from "@/lib/gamepass-tools";
+import { BUYER_STEP_OPTIONS, type BuyerStepKind } from "../../../../bots/shared/buyer-step";
 import { num } from "./types";
 import styles from "./orders.module.css";
 
@@ -279,6 +280,115 @@ export function KeyCreateBox({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+/* ─────────────────────────────────────────────────────────────────────────────
+   📨 «Попросить у покупателя» — бот присылает ему нужный шаг с кнопками.
+
+   Жалоба поддержки 20.10.2026: покупатель ткнул не туда или пропустил шаг, и
+   теперь не может вставить ссылку или ключ. Поддержка всё объяснила словами, а
+   где в боте нужная кнопка — он не находит. Отсюда бот пишет ему НОВОЕ
+   сообщение ровно с этим шагом. Тексты и кнопки — `bots/shared/buyer-step`,
+   общие с ботами; ответ бот примет и без кнопки.
+
+   Над выбором — след: что уже просили и где бот покупателя не понял. Это и
+   есть ответ на «почему он застрял», без раскопок в переписке.
+   ───────────────────────────────────────────────────────────────────────── */
+export function AskBuyerBox({
+  orderId, post, onToast,
+}: {
+  orderId: string;
+  post: (payload: Record<string, unknown>) => Promise<{ trail?: { at: string; type: string; text: string }[]; channel?: string | null }>;
+  onToast: (text: string, error?: boolean) => void;
+}) {
+  const [trail, setTrail] = useState<{ at: string; type: string; text: string }[] | null>(null);
+  const [custom, setCustom] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState<BuyerStepKind | null>(null);
+
+  const loadTrail = useCallback(async () => {
+    try {
+      const data = await post({ action: "buyer-step-trail" });
+      setTrail(data.trail ?? []);
+    } catch { setTrail([]); }
+  }, [post]);
+
+  // Форма живёт ключом `orderId` у родителя: на соседнем заказе она
+  // монтируется заново, и сбрасывать поля руками не нужно.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await post({ action: "buyer-step-trail" });
+        if (alive) setTrail(data.trail ?? []);
+      } catch { if (alive) setTrail([]); }
+    })();
+    return () => { alive = false; };
+  }, [orderId, post]);
+
+  async function send(kind: BuyerStepKind) {
+    if (busy) return;
+    if (kind === "custom" && !custom) { setCustom(true); return; }
+    setBusy(kind);
+    try {
+      const data = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
+      onToast(`📨 Отправлено покупателю (${String(data.channel).toUpperCase()})`);
+      setCustom(false); setText("");
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Не отправилось", true);
+    } finally {
+      setBusy(null);
+      void loadTrail();
+    }
+  }
+
+  return (
+    <div className={styles.keyForm}>
+      {trail && trail.length > 0 && (
+        <div className={styles.keyPlan}>
+          {trail.slice(0, 5).map((row, index) => (
+            <div key={`${row.at}-${index}`} className={styles.keyPlanRow}>
+              <span style={{ color: "var(--o-muted)", minWidth: 92 }}>
+                {new Date(row.at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+              </span>
+              <span style={{ color: row.type === "BOT_DEAD_END" ? "#ffd60a" : undefined }}>{row.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className={styles.gpTools}>
+        {BUYER_STEP_OPTIONS.map(option => (
+          <button
+            key={option.kind}
+            type="button"
+            className={`${styles.gpTool}${option.kind === "custom" && custom ? ` ${styles.gpToolOn}` : ""}`}
+            onClick={() => void send(option.kind)}
+            disabled={busy !== null}
+          >
+            <span className={styles.gpToolIcon}>{option.icon}</span>
+            <span>
+              <b>{busy === option.kind ? "Отправляем…" : option.label}</b>
+              <em>{option.hint}</em>
+            </span>
+          </button>
+        ))}
+      </div>
+      {custom && (
+        <>
+          <label>
+            <span className={styles.kvKey}>Текст покупателю — к нему добавятся кнопки инструкции и ссылки</span>
+            <textarea value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={1000} placeholder="Например: пасс скрыт — пришли, пожалуйста, его Pass ID" />
+          </label>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" className={styles.btn} onClick={() => { setCustom(false); setText(""); }}>Отмена</button>
+            <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => void send("custom")} disabled={!text.trim() || busy !== null}>
+              {busy === "custom" ? "Отправляем…" : "Отправить"}
+            </button>
+          </div>
+        </>
+      )}
+      <p className={styles.hint}>Бот напишет покупателю новым сообщением. Ник, ссылку, Pass ID или ключ он примет и без кнопки.</p>
     </div>
   );
 }

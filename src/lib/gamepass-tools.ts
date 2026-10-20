@@ -24,7 +24,7 @@
    то, что роут разрешает (ровно так ключ и пропал с четырёх поверхностей).
    ───────────────────────────────────────────────────────────────────────── */
 
-export type GamepassToolId = "key" | "link" | "nick" | "split";
+export type GamepassToolId = "key" | "link" | "nick" | "ask" | "split";
 
 export interface GamepassTool {
   id: GamepassToolId;
@@ -57,6 +57,14 @@ export const GAMEPASS_TOOLS: readonly GamepassTool[] = [
     hint: "посмотреть, что выставлено на аккаунте",
   },
   {
+    // 20.10.2026: поддержка объясняла словами, а нужную кнопку в боте
+    // покупатель не находил. Бот присылает ему новое сообщение с ней.
+    id: "ask",
+    icon: "📨",
+    label: "Попросить у покупателя",
+    hint: "бот пришлёт ему нужный шаг с кнопками",
+  },
+  {
     id: "split",
     icon: "🧩",
     label: "Разбить выкуп",
@@ -87,6 +95,8 @@ export interface GamepassToolOrder {
 
 /** Статусы, в которых сервер принимает ключ и привязку (`attach-gamepass`). */
 export const GAMEPASS_ATTACHABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
+/** Статусы, в которых сервер шлёт покупателю шаг (`send-step`): ход за ним. */
+export const BUYER_STEP_STATUSES = ["AWAITING_GAMEPASS", "REJECTED"];
 /** Статусы, в которых сервер принимает разбивку (`set-gamepass-split`). */
 export const GAMEPASS_SPLITTABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
 
@@ -116,6 +126,8 @@ export function gamepassToolsFor(order: GamepassToolOrder): GamepassTool[] {
         return Boolean(nick) && GAMEPASS_SPLITTABLE_STATUSES.includes(order.status);
       case "split":
         return Boolean(nick) && GAMEPASS_SPLITTABLE_STATUSES.includes(order.status);
+      case "ask":
+        return BUYER_STEP_STATUSES.includes(order.status);
       default:
         return false;
     }

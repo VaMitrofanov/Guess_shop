@@ -4,7 +4,7 @@ import { C, MONO } from "./theme";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
 import BottomSheet from "./BottomSheet";
-import { GamepassToolRows, KeyCreateForm } from "./GamepassTools";
+import { AskBuyerForm, GamepassToolRows, KeyCreateForm } from "./GamepassTools";
 import type { GamepassToolId } from "@/lib/gamepass-tools";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -985,9 +985,10 @@ export default function OrderSheet({
                 }}
                 active={tool}
                 compact
-                handlers={{ key: true, link: true, nick: true }}
+                handlers={{ key: true, link: true, nick: true, ask: true }}
                 onPick={id => {
                   if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+                  if (id === "ask") { setTool(prev => (prev === "ask" ? null : "ask")); return; }
                   setTool(null);
                   if (id === "link") { gpRef.current?.focus(); gpRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }
                   if (id === "nick") {
@@ -1010,6 +1011,9 @@ export default function OrderSheet({
                   onDone={() => { setTool(null); onDone(); }}
                   onClose={() => setTool(null)}
                 />
+              )}
+              {tool === "ask" && (
+                <AskBuyerForm key={target.orderId} order={{ id: target.orderId }} token={token} onClose={() => setTool(null)} />
               )}
             </div>
           )}

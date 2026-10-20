@@ -25,6 +25,7 @@ import {
   type GamepassToolId,
   type GamepassToolOrder,
 } from "@/lib/gamepass-tools";
+import { BUYER_STEP_OPTIONS, type BuyerStepKind } from "../../../../bots/shared/buyer-step";
 
 /** Что формам нужно о заказе. `Order` экрана «Заказы» и цель листа подходят обе. */
 export interface ToolOrder extends GamepassToolOrder {
@@ -382,6 +383,141 @@ export function GamepassToolRows({
           </span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/* ── 📨 Попросить у покупателя ────────────────────────────────────────────────
+   Бот присылает покупателю новое сообщение ровно с нужным шагом (20.10.2026:
+   поддержка объясняла словами, а кнопку в боте человек не находил). Тексты и
+   кнопки — `bots/shared/buyer-step`, общие с ботами и сайтом. Над выбором —
+   след: что уже просили и где бот покупателя не понял.
+   ────────────────────────────────────────────────────────────────────────── */
+export function AskBuyerForm({ order, token, onClose }: {
+  order: Pick<ToolOrder, "id">;
+  token: string;
+  onClose: () => void;
+}) {
+  const [trail, setTrail] = useState<{ at: string; type: string; text: string }[] | null>(null);
+  const [custom, setCustom] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState<BuyerStepKind | null>(null);
+
+  const post = async (payload: Record<string, unknown>) => {
+    const r = await fetch("/api/twa/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ...payload, orderId: order.id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error ?? `Сервер ответил ${r.status}`);
+    return d;
+  };
+
+  const loadTrail = async () => {
+    try { setTrail((await post({ action: "buyer-step-trail" })).trail ?? []); }
+    catch { setTrail([]); }
+  };
+
+  // Форма монтируется заново на каждом заказе (`key` у родителя).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const d = await post({ action: "buyer-step-trail" });
+        if (alive) setTrail(d.trail ?? []);
+      } catch { if (alive) setTrail([]); }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id, token]);
+
+  async function send(kind: BuyerStepKind) {
+    if (busy) return;
+    if (kind === "custom" && !custom) { setCustom(true); return; }
+    setBusy(kind);
+    haptic.impact("light");
+    try {
+      const d = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
+      haptic.notify("success");
+      toast(`📨 Отправлено покупателю (${String(d.channel).toUpperCase()})`, "success");
+      onClose();
+    } catch (err) {
+      haptic.notify("error");
+      toast(err instanceof Error ? err.message : "Не отправилось", "error");
+      void loadTrail();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 13px 13px", borderRadius: 12,
+      border: `1px solid ${C.accent}44`, background: `${C.accent}0f`,
+      display: "flex", flexDirection: "column", gap: 9,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.accent }}>📨 Попросить у покупателя</div>
+      <div style={{ fontSize: 14, color: C.textSecondary }}>
+        Бот напишет ему новым сообщением с нужной кнопкой. Ник, ссылку, Pass ID или ключ он примет и без кнопки.
+      </div>
+      {trail && trail.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 14 }}>
+          {trail.slice(0, 4).map((row, i) => (
+            <div key={`${row.at}-${i}`} style={{ color: row.type === "BOT_DEAD_END" ? C.orange : C.textSecondary }}>
+              <span style={{ fontFamily: MONO, color: C.textTertiary }}>
+                {new Date(row.at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+              </span>{" "}{row.text}
+            </div>
+          ))}
+        </div>
+      )}
+      {BUYER_STEP_OPTIONS.map(option => (
+        <button
+          key={option.kind}
+          onClick={() => void send(option.kind)}
+          disabled={busy !== null}
+          style={{
+            display: "flex", gap: 10, alignItems: "center", textAlign: "left",
+            padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+            border: `1px solid ${option.kind === "custom" && custom ? `${C.accent}66` : C.hairline}`,
+            background: "transparent", color: "#fff", fontFamily: "inherit",
+          }}
+        >
+          <span style={{ fontSize: 18 }}>{option.icon}</span>
+          <span>
+            <span style={{ display: "block", fontSize: 15, fontWeight: 600 }}>{busy === option.kind ? "Отправляем…" : option.label}</span>
+            <span style={{ display: "block", fontSize: 14, color: C.textTertiary }}>{option.hint}</span>
+          </span>
+        </button>
+      ))}
+      {custom && (
+        <>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={3}
+            maxLength={1000}
+            placeholder="Текст покупателю — к нему добавятся кнопки инструкции и ссылки"
+            style={{
+              width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+              color: "#fff", fontSize: 16, padding: "12px", outline: "none",
+              fontFamily: "inherit", boxSizing: "border-box", resize: "vertical",
+            }}
+          />
+          <button
+            onClick={() => void send("custom")}
+            disabled={!text.trim() || busy !== null}
+            style={{
+              padding: "12px", borderRadius: 10, border: "none", cursor: "pointer",
+              background: C.accent, color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "inherit",
+              opacity: !text.trim() || busy !== null ? 0.5 : 1,
+            }}
+          >
+            {busy === "custom" ? "Отправляем…" : "Отправить"}
+          </button>
+        </>
+      )}
     </div>
   );
 }

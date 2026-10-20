@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { grossOf } from "@/lib/order-presentation";
 import { AdminOrder, copyText, gamepassIdOf, num } from "./types";
-import { GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
+import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
 import type { GamepassToolId } from "@/lib/gamepass-tools";
 import styles from "./orders.module.css";
 
@@ -236,9 +236,10 @@ export default function OrderEditor({
             <GamepassToolRows
               order={order}
               active={tool}
-              handlers={{ key: true, link: true, nick: Boolean(onTool), split: Boolean(onTool) }}
+              handlers={{ key: true, link: true, nick: Boolean(onTool), ask: true, split: Boolean(onTool) }}
               onPick={id => {
                 if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+                if (id === "ask") { setTool(prev => (prev === "ask" ? null : "ask")); return; }
                 setTool(null);
                 if (id === "link") { gamepassRef.current?.focus(); gamepassRef.current?.select(); return; }
                 if (onTool && (id === "nick" || id === "split")) { onClose(); onTool(id); }
@@ -259,6 +260,23 @@ export default function OrderEditor({
                 }}
                 onToast={onToast}
                 onChanged={() => onSaved({ changes: ["геймпасс по ключу"], notified: null })}
+              />
+            )}
+            {tool === "ask" && (
+              <AskBuyerBox
+                key={order.id}
+                orderId={order.id}
+                post={async payload => {
+                  const response = await fetch("/api/admin/orders", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...payload, orderId: order.id }),
+                  });
+                  const body = await response.json().catch(() => ({}));
+                  if (!response.ok) throw new Error(body?.error ?? `Сервер ответил ${response.status}`);
+                  return body;
+                }}
+                onToast={onToast}
               />
             )}
           </div>

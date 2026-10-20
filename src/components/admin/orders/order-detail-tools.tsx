@@ -16,7 +16,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
+import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
 import type { GamepassToolId } from "@/lib/gamepass-tools";
 import styles from "./orders.module.css";
 
@@ -47,9 +47,10 @@ export default function OrderDetailTools({ order }: { order: DetailToolsOrder })
       <GamepassToolRows
         order={order}
         active={tool}
-        handlers={{ key: true, link: true, nick: true, split: true }}
+        handlers={{ key: true, link: true, nick: true, ask: true, split: true }}
         onPick={id => {
           if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+          if (id === "ask") { setTool(prev => (prev === "ask" ? null : "ask")); return; }
           setTool(null);
           router.push(workspace(id));
         }}
@@ -70,6 +71,24 @@ export default function OrderDetailTools({ order }: { order: DetailToolsOrder })
           }}
           onToast={(text, error) => setNote(`${error ? "⛔ " : "✅ "}${text}`)}
           onChanged={() => router.refresh()}
+        />
+      )}
+
+      {tool === "ask" && (
+        <AskBuyerBox
+          key={order.id}
+          orderId={order.id}
+          post={async payload => {
+            const response = await fetch("/api/admin/orders", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, orderId: order.id }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body?.error ?? `Сервер ответил ${response.status}`);
+            return body;
+          }}
+          onToast={(text, error) => setNote(`${error ? "⛔ " : "✅ "}${text}`)}
         />
       )}
 

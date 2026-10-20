@@ -51,6 +51,9 @@ const ORDER_EVENT_TEXT: Record<string, string> = {
   BOT_ORDER_CREATED: "заказ создан в боте",
   REVIEW_BONUS_GRANTED: "начислен бонус за отзыв",
   GAMEPASS_ATTACHED: "геймпасс привязан",
+  // 20.10.2026 — шаг геймпасса: что просили у покупателя и где он застрял.
+  BUYER_STEP_SENT: "покупателю отправлен шаг геймпасса",
+  BOT_DEAD_END: "бот не понял покупателя",
 };
 
 /** Статусы заказа словами — для строк `ORDER_STATUS_CHANGED`. */
@@ -215,7 +218,7 @@ export async function loadOverviewFeed(since: Date): Promise<OverviewFeedRow[]> 
     rows.push({
       id: `event:${event.id}`,
       at: event.createdAt.toISOString(),
-      actor: event.type.startsWith("AUDIT_") ? "buyer" : "us",
+      actor: event.type.startsWith("AUDIT_") ? "buyer" : event.type === "BOT_DEAD_END" ? "bot" : "us",
       text,
       code: event.order?.wbCode ?? null,
       orderId: event.order?.id ?? null,

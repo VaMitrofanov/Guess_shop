@@ -87,7 +87,7 @@ export default function GamepassCheck({
   /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE). */
   keyAutoEnabled?: boolean;
   /** `?stage=key` — человек пришёл по ссылке, которая ключ и просит. */
-  initialStage?: "key";
+  initialStage?: "key" | "passid";
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
@@ -156,6 +156,8 @@ export default function GamepassCheck({
    * пасса каждый раз выбрасывал бы человека обратно в форму ключа.
    */
   const keyWanted = useRef(initialStage === "key");
+  /** `?stage=passid` — то же намерение, но в поле Pass ID (пасс уже создан). */
+  const passIdWanted = useRef(initialStage === "passid");
   useEffect(() => {
     // Кнопки живут в переписке дольше кода: разосланные до этой правки ссылки
     // несут якорь `#key`. Принимаем и его, чтобы старые сообщения не вели в пустоту.
@@ -263,6 +265,10 @@ export default function GamepassCheck({
         // Флаг мог выключиться, пока сообщение с ссылкой лежало в чате: тогда
         // человек просто остаётся на результате — обещать выключённый метод нельзя.
         if (keyAutoEnabled) setStage("key");
+      } else if (passIdWanted.current) {
+        passIdWanted.current = false;
+        setStage("passid");
+        requestAnimationFrame(() => rescueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
       }
       requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch {

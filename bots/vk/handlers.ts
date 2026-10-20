@@ -66,6 +66,11 @@ import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shar
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
+import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
+
+/** Узкие представления `db` для шага геймпасса — без `any`. */
+const stepDb = db as unknown as BuyerStepClient;
+const strayKeyDb = db as unknown as StrayKeyDb;
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "../shared/order-audit";
 import { countPreviousOrders } from "../shared/order-loyalty";
@@ -1770,11 +1775,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await handleIdleMessage(ctx, vkUserId, text);
       return;
     }
+    // Ждали ключ, а пришла ссылка на пасс или ник — отвечаем на присланное
+    // (20.10.2026, тот же фикс, что в TG).
+    if (await routeVkOffKeyInput(ctx, vkUserId, state, text)) return;
     await handleVkApiKeyInput(ctx, vkUserId, text, {
       wbCode: state.wbCode,
       denomination: state.denomination,
       nick: state.nick,
     });
+    return;
+  }
+
+  // Ключ ВНЕ шага ключа (пропустил кнопку, бот перезапустился, поддержка
+  // сказала «пришли ключ боту») — заказ и ник берём из базы.
+  if (!String(state?.type ?? "").startsWith("AWAITING_DIRECT") && classifyBuyerInput(text).kind === "api_key") {
+    await handleVkStrayApiKey(ctx, vkUserId, text);
     return;
   }
 
@@ -2533,6 +2548,7 @@ async function handleGamepassLink(
       await handleRobloxNickInput(ctx, vkUserId, input, wbCode, denomination);
       return;
     }
+    void recordBuyerDeadEnd(stepDb, { wbCode, via: "vk-bot", reason: "link_format", sentLength: input.length });
     const fmtGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
     await ctx.reply({
       message:
@@ -3335,6 +3351,7 @@ async function handleRobloxNickInput(
 
   const nick = raw.trim().replace(/^@/, "");
   if (!ROBLOX_NICK_RE.test(nick)) {
+    void recordBuyerDeadEnd(stepDb, { wbCode, via: "vk-bot", reason: "nick_format", sentLength: nick.length });
     await ctx.reply({
       message:
         "⚠️ Ник не похож на ник Roblox.\n\n" +
@@ -3587,6 +3604,95 @@ async function handleQuestKey(ctx: MessageContext, vkUserId: number): Promise<vo
 }
 
 /**
+ * Бот ждёт ключ, а пришла ссылка на пасс или ник — отвечаем на присланное.
+ * `true` = обработано. Зеркало `routeOffKeyInput` в TG.
+ */
+async function routeVkOffKeyInput(
+  ctx: MessageContext,
+  vkUserId: number,
+  keyState: { wbCode: string; denomination: number; nick: string },
+  text: string,
+): Promise<boolean> {
+  const input = classifyBuyerInput(text);
+  if (input.kind === "gamepass") {
+    heldGameKeys.drop(vkUserId);
+    setState(vkUserId, { type: "AWAITING_LINK", wbCode: keyState.wbCode, denomination: keyState.denomination, viaManualLink: true });
+    await handleGamepassLink(ctx, vkUserId, text, keyState.wbCode, keyState.denomination, { viaManualLink: true });
+    return true;
+  }
+  const nick = text.trim().replace(/^@/, "");
+  if (!heldGameKeys.get(vkUserId) && !looksLikeApiKey(nick) && ROBLOX_NICK_RE.test(nick)) {
+    setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: keyState.wbCode, denomination: keyState.denomination });
+    await handleRobloxNickInput(ctx, vkUserId, nick, keyState.wbCode, keyState.denomination);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Ключ пришёл вне шага ключа. ВК не даёт сообществу удалять сообщения
+ * человека, поэтому просим удалить его самого — как и в штатной ветке.
+ */
+async function handleVkStrayApiKey(ctx: MessageContext, vkUserId: number, raw: string): Promise<void> {
+  const deleteHint = "Удали, пожалуйста, своё сообщение с ключом из чата — он нам больше не нужен в переписке.";
+  if (!gamepassAutocreateEnabled()) {
+    await ctx.reply(`Ключ получили, но этот способ сейчас выключен — создай геймпасс по инструкции (кнопка «Статус»).\n\n${deleteHint}`);
+    return;
+  }
+  const user = await strayKeyDb.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, robloxUsername: true } });
+  const orders = user
+    ? await strayKeyDb.wbOrder.findMany({
+        where: { userId: user.id, status: { in: STRAY_KEY_STATUSES }, heldAt: null },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+  const st = getState(vkUserId) as { wbCode?: string } | undefined;
+  const order = orders.find((o) => o.wbCode === st?.wbCode) ?? (orders.length === 1 ? orders[0] : null);
+  if (!order) {
+    if (orders.length > 1) {
+      await ctx.reply(`🔑 Ключ получили. У тебя несколько заказов — выбери, для какого он, и пришли ключ ещё раз.\n\n${deleteHint}`);
+      await replyOrderPicker(ctx, orders);
+      return;
+    }
+    await ctx.reply(`🔑 Ключ получили, но сейчас нет заказа, который ждёт геймпасс. Если это ошибка — напиши сюда, ответим.\n\n${deleteHint}`);
+    return;
+  }
+
+  const nick = (order.robloxUsername ?? order.probableNick ?? user?.robloxUsername ?? "").trim();
+  if (!nick) {
+    void recordBuyerDeadEnd(stepDb, { orderId: order.id, via: "vk-bot", reason: "key_no_nick" });
+    setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: order.wbCode, denomination: order.amount });
+    await ctx.reply(`🔑 Ключ получили. Чтобы создать пасс на нужный аккаунт, сначала пришли свой ник в Roblox — а потом ключ ещё раз.\n\n${deleteHint}`);
+    return;
+  }
+
+  let owned: OwnedPass[] = [];
+  try {
+    const outcome = await searchGamepassesByNick(nick, Math.ceil(order.amount / 0.7));
+    if (outcome.status === "user_not_found") {
+      setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: order.wbCode, denomination: order.amount });
+      await ctx.reply(`Аккаунта ${nick} нет на Roblox. Пришли свой ник ещё раз — потом ключ.`);
+      return;
+    }
+    owned = outcome.status === "no_gamepasses" ? [] : vkOwnedFromSearch(outcome.all);
+  } catch (err: unknown) {
+    console.error("[VK/stray-key] поиск по нику упал:", errText(err));
+    await ctx.reply("⚠️ Roblox сейчас не отвечает. Пришли ключ ещё раз через минуту.");
+    return;
+  }
+
+  const plan = planFromOwned(order.amount, owned);
+  setQuestPlan(vkUserId, { wbCode: order.wbCode, denomination: order.amount, nick, plan, owned });
+  if (targetsToCreate(plan).length === 0) {
+    await showVkQuestPlan(ctx, vkUserId, { wbCode: order.wbCode, denomination: order.amount, nick, owned });
+    return;
+  }
+  const pending = { wbCode: order.wbCode, denomination: order.amount, nick };
+  setState(vkUserId, { type: "AWAITING_API_KEY", ...pending });
+  await handleVkApiKeyInput(ctx, vkUserId, raw, pending);
+}
+
+/**
  * Покупатель прислал Open Cloud ключ.
  *
  * ВК, в отличие от Telegram, не даёт сообществу удалять сообщения человека —
@@ -3611,6 +3717,7 @@ async function handleVkApiKeyInput(
   }
 
   if (!game && !looksLikeApiKey(key)) {
+    void recordBuyerDeadEnd(stepDb, { wbCode: pending.wbCode, via: "vk-bot", reason: "key_format", sentLength: key.length });
     // Ожидание ключа НЕ бесконечно. Раньше любой текст получал «это не похоже
     // на ключ» — человек писал менеджеру, а бот отвечал ему этой фразой снова и
     // снова (11.09 — четыре раза подряд, в том числе на «спасибо, чуть позже
@@ -5252,7 +5359,8 @@ async function handleIdleMessage(
         : order.status === "PAYMENT_PENDING"
         ? "\n\n💳 Пришли скриншот оплаты сюда (фотографией, не файлом)."
         : order.status === "AWAITING_GAMEPASS"
-        ? `\n\nПройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$`
+        ? `\n\nПройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$` +
+          "\n💡 Ник, ссылку на геймпасс или ключ можно прислать прямо сюда — одним сообщением."
         : order.status === "PENDING"
         ? `\n\n💬 ${stage!.note}` + (pendingOver120 ? "\n💡 Ответы на частые вопросы — в кнопке ниже 👇" : "")
         : order.status === "IN_PROGRESS"
@@ -5288,7 +5396,9 @@ async function handleIdleMessage(
       kb.textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" }).row();
     } else if (order.status === "AWAITING_GAMEPASS") {
       kb.urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` }).row()
-        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" }).row();
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" }).row()
+        // Пасс уже создан, а поиск по нику его не видит — вход по ссылке.
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" }).row();
     } else if (order.status === "COMPLETED") {
       // Всегда уводим в прямой заказ. Кнопка отзыва — только пока бонус не начислен.
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();

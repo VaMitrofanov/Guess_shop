@@ -13,7 +13,8 @@ import {
   primaryActionFor, robuxUnlockAt, nextStepFor, sourceLabel,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
-import { GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
+import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
+import { buyerStepEventText } from "../../../../bots/shared/buyer-step";
 import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
@@ -396,12 +397,13 @@ export default function OrderDossier({
               <GamepassToolRows
                 order={order}
                 active={tool}
-                handlers={{ key: true, link: true, nick: true, split: true }}
+                handlers={{ key: true, link: true, nick: true, ask: true, split: true }}
                 hints={parts.length > 0
                   ? { split: `выкуплено ${parts.filter(part => part.purchasedAt).length} из ${parts.length}` }
                   : undefined}
                 onPick={id => {
                   if (id === "key") { setTool(prev => (prev === "key" ? null : "key")); return; }
+                  if (id === "ask") { setTool(prev => (prev === "ask" ? null : "ask")); return; }
                   if (id === "link") { setTool(null); onEdit(); return; }
                   if (id === "split") { setTool(null); onSplit(); return; }
                   // «Пассы ника» — список грузится по нажатию: поиск ходит в
@@ -414,6 +416,8 @@ export default function OrderDossier({
               {tool === "key" && (
                 <KeyCreateBox order={order} post={post} onToast={onToast} onChanged={onChanged} />
               )}
+
+              {tool === "ask" && <AskBuyerBox key={order.id} orderId={order.id} post={post} onToast={onToast} />}
 
               {tool === "nick" && (
                 <>
@@ -471,7 +475,7 @@ export default function OrderDossier({
                 <div key={event.id} className={`${styles.event} ${index === 0 ? styles.eventAccent : ""}`}>
                   <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
                   <span className={styles.eventDot}><i /></span>
-                  <span className={styles.eventText}>{EVENT_LABELS[event.type] ?? event.type}</span>
+                  <span className={styles.eventText}>{EVENT_LABELS[event.type] ?? buyerStepEventText(event.type, event.payload) ?? event.type}</span>
                 </div>
               ))}
               {noteLines.map(line => (
@@ -516,7 +520,7 @@ export default function OrderDossier({
                       <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
                       <span className={styles.eventDot}><i /></span>
                       <span className={styles.eventText}>
-                        {EVENT_LABELS[event.type] ?? event.type}
+                        {EVENT_LABELS[event.type] ?? buyerStepEventText(event.type, event.payload) ?? event.type}
                         {typeof event.payload === "object" && event.payload
                           ? <em> · {Object.entries(event.payload as Record<string, unknown>).slice(0, 4).map(([key, value]) => `${key}: ${String(value)}`).join(", ")}</em>
                           : null}

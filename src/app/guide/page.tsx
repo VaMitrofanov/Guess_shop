@@ -69,7 +69,9 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   // из сообщения, которое ключ и просит. Белый список из одного значения, а не
   // «любое состояние страницы из адреса»: остальные ветки без пройденной
   // проверки ника рисовать не на чем, и открывать их снаружи незачем.
-  const initialStage = stage === "key" ? ("key" as const) : undefined;
+  // `passid` (20.10.2026) — «📨 Попросить ссылку» из админки: человек с уже
+  // созданным пассом попадает прямо в поле Pass ID, без экрана выбора способа.
+  const initialStage = stage === "key" ? ("key" as const) : stage === "passid" ? ("passid" as const) : undefined;
 
   return (
     <>

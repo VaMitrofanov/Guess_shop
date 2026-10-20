@@ -10,7 +10,7 @@ import { toast } from "../Toast";
 import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import NickGamepasses from "../NickGamepasses";
-import { AttachGamepassForm, GamepassToolRows, KeyCreateForm } from "../GamepassTools";
+import { AskBuyerForm, AttachGamepassForm, GamepassToolRows, KeyCreateForm } from "../GamepassTools";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
@@ -1975,7 +1975,7 @@ function RejectModal({ order, onReject, onClose }: {
    стоять рядом с копированием ID.
    ────────────────────────────────────────────────────────────────────────── */
 type MenuAction =
-  | "edit" | "key" | "link" | "nick" | "split" | "rebind" | "move"
+  | "edit" | "key" | "link" | "nick" | "ask" | "split" | "rebind" | "move"
   | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
   | "purchase" | "refund" | "trace";
 
@@ -2504,7 +2504,8 @@ function OrderCard({
           // Все инструменты геймпасса открываются в одном блоке карточки.
           case "key":
           case "link":
-          case "nick":     inSheet(() => setTool(id), "gamepass"); break;
+          case "nick":
+          case "ask":      inSheet(() => setTool(id), "gamepass"); break;
           case "split":    inSheet(() => { setTool(null); setSplitOpen(true); }, "split"); break;
           case "rebind":   inSheet(() => setRebindOpen(true), "rebind"); break;
           case "move":     inSheet(() => setMoveOpen(true), "move"); break;
@@ -2853,7 +2854,7 @@ function OrderCard({
           <GamepassToolRows
             order={order}
             active={tool}
-            handlers={{ key: true, link: true, nick: true, split: true }}
+            handlers={{ key: true, link: true, nick: true, ask: true, split: true }}
             hints={split.length > 0
               ? { split: `выкуплено ${split.filter(part => part.purchasedAt).length} из ${split.length}` }
               : undefined}
@@ -2877,6 +2878,9 @@ function OrderCard({
               onDone={() => { setTool(null); onMoved(); }}
               onClose={() => setTool(null)}
             />
+          )}
+          {tool === "ask" && (
+            <AskBuyerForm key={order.id} order={order} token={token} onClose={() => setTool(null)} />
           )}
           {tool === "nick" && (
             <NickGamepasses

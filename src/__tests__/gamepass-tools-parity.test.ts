@@ -36,8 +36,8 @@ const SURFACES = [
 ];
 
 describe("список инструментов", () => {
-  it("четыре инструмента, и ключ первый — им заказ закрывается за минуту", () => {
-    expect(GAMEPASS_TOOLS.map(tool => tool.id)).toEqual(["key", "link", "nick", "split"]);
+  it("пять инструментов, и ключ первый — им заказ закрывается за минуту", () => {
+    expect(GAMEPASS_TOOLS.map(tool => tool.id)).toEqual(["key", "link", "nick", "ask", "split"]);
   });
 
   it("у каждого есть значок, имя и объяснение «зачем»", () => {
@@ -70,7 +70,7 @@ describe("предусловия — те же, что на сервере", () 
   });
 
   it("живому заказу доступно всё", () => {
-    expect(gamepassToolsFor(order()).map(t => t.id)).toEqual(["key", "link", "nick", "split"]);
+    expect(gamepassToolsFor(order()).map(t => t.id)).toEqual(["key", "link", "nick", "ask", "split"]);
     expect(gamepassToolsRefusal(order())).toBeNull();
   });
 
@@ -88,7 +88,7 @@ describe("предусловия — те же, что на сервере", () 
   });
 
   it("оплаченный прямой работает", () => {
-    expect(gamepassToolsFor(order({ isDirectOrder: true, paidAt: "2026-10-18T00:00:00Z" }))).toHaveLength(4);
+    expect(gamepassToolsFor(order({ isDirectOrder: true, paidAt: "2026-10-18T00:00:00Z" }))).toHaveLength(5);
   });
 
   it("готовый флаг `unpaidDirect` с сервера сильнее догадки по paidAt", () => {
@@ -97,7 +97,7 @@ describe("предусловия — те же, что на сервере", () 
 
   it("без ника нет поиска пассов и разбивки, но ключ и ссылка есть", () => {
     const noNick = order({ robloxUsername: null, probableNick: null });
-    expect(gamepassToolsFor(noNick).map(t => t.id)).toEqual(["key", "link"]);
+    expect(gamepassToolsFor(noNick).map(t => t.id)).toEqual(["key", "link", "ask"]);
     expect(gamepassToolsRefusal(noNick)).toContain("Ника Roblox нет");
   });
 
@@ -120,6 +120,13 @@ describe("предусловия — те же, что на сервере", () 
     expect(hasGamepassTool(order({ status: "IN_PROGRESS" }), "key")).toBe(false);
     expect(hasGamepassTool(order({ status: "IN_PROGRESS" }), "split")).toBe(true);
   });
+
+  it("📨 просить у покупателя можно, только пока ход за ним", () => {
+    expect(hasGamepassTool(order({ status: "AWAITING_GAMEPASS" }), "ask")).toBe(true);
+    expect(hasGamepassTool(order({ status: "REJECTED" }), "ask")).toBe(true);
+    expect(hasGamepassTool(order({ status: "PENDING" }), "ask")).toBe(false);
+    expect(hasGamepassTool(order({ status: "IN_PROGRESS" }), "ask")).toBe(false);
+  });
 });
 
 describe("все поверхности берут список из общего модуля", () => {
@@ -133,6 +140,10 @@ describe("все поверхности берут список из общег�
     const source = read(file);
     // Либо форма прямо здесь, либо строка меню, которая её открывает.
     expect(source).toMatch(/KeyCreateForm|KeyCreateBox/);
+  });
+
+  it.each(SURFACES)("%s даёт попросить шаг у покупателя", file => {
+    expect(read(file)).toMatch(/AskBuyerForm|AskBuyerBox/);
   });
 
   it("ни одна поверхность не держит свою копию статусов инструментов", () => {

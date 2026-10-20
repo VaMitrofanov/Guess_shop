@@ -51,7 +51,9 @@ import { createTargetsFor } from "@/lib/gamepass-plan";
 import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { notifyAdminsKeyCreated, passNeedsHands } from "@/lib/gamepass-key-admin-notify";
-import { notifyGamepassCreatedForBuyer } from "@/lib/twa-notify";
+import { notifyBuyerStep, notifyGamepassCreatedForBuyer } from "@/lib/twa-notify";
+import { BUYER_STEP_EVENT, buyerStepEventText, isBuyerStepKind } from "../../../../../bots/shared/buyer-step";
+import { BUYER_STEP_STATUSES } from "@/lib/gamepass-tools";
 import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
 import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
@@ -2721,7 +2723,9 @@ export async function POST(req: NextRequest) {
   // по запросу, а не в общий список — там это лишний вес на каждой карточке.
   if (action === "order-audit") {
     const events = await (prisma as any).orderEvent.findMany({
-      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED", "AUDIT_GAMEPASS_AUTOCREATED"] } },
+      // + где бот покупателя не понял и что у него просили (20.10.2026):
+      // спор «я присылал ссылку» разбирается по этим же строкам.
+      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED", "AUDIT_GAMEPASS_AUTOCREATED", BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END] } },
       orderBy: { createdAt: "asc" },
       select: { id: true, type: true, payload: true, createdAt: true },
     });
@@ -2994,6 +2998,72 @@ export async function POST(req: NextRequest) {
 
   // ── 👁 GP-watch из карточки: live-поиск ГП по вероятному нику + пинг клиенту ─
   // Кнопка «Найти ГП и оповестить» / «Оповестить ещё раз» во вкладке «Ждут ссылку».
+  /* ── 📨 Попросить у покупателя шаг геймпасса ─────────────────────────────
+     Поддержка объясняет словами, а где в боте нужная кнопка, покупатель не
+     находит (20.10.2026). Бот присылает ему новое сообщение ровно с нужными
+     кнопками; ответ бот принимает и без кнопки (`classifyBuyerInput`).
+     ──────────────────────────────────────────────────────────────────────── */
+  if (action === "send-step") {
+    const kind = body.kind;
+    if (!isBuyerStepKind(kind))
+      return NextResponse.json({ error: "Неизвестный шаг" }, { status: 400 });
+    if (!BUYER_STEP_STATUSES.includes(order.status))
+      return NextResponse.json({ error: `Заказ в статусе ${order.status} — у покупателя ничего не просим` }, { status: 400 });
+    if (order.heldAt)
+      return NextResponse.json({ error: "❄️ Заказ заморожен — сначала разморозь" }, { status: 400 });
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 400 });
+    const customText = typeof body.text === "string" ? body.text.trim().slice(0, 1000) : "";
+    if (kind === "custom" && !customText)
+      return NextResponse.json({ error: "Впиши текст сообщения" }, { status: 400 });
+    if (!order.user?.tgId && !order.user?.vkId)
+      return NextResponse.json({ error: "У покупателя нет ни Telegram, ни VK — написать некуда" }, { status: 400 });
+
+    // Двойное нажатие не должно дать два одинаковых сообщения подряд.
+    const bucket = Math.floor(Date.now() / 60_000);
+    const idempotencyKey = `step:${order.id}:${kind}:${bucket}`;
+    const dup = await prisma.orderEvent.findUnique({ where: { idempotencyKey }, select: { id: true } });
+    if (dup) return NextResponse.json({ error: "Этот шаг уже отправлен минуту назад" }, { status: 409 });
+
+    const channel = await notifyBuyerStep(order.user, order, kind, customText).catch(() => null);
+    await prisma.orderEvent.create({
+      data: {
+        orderId: order.id,
+        type: BUYER_STEP_EVENT.SENT,
+        idempotencyKey,
+        payload: {
+          kind,
+          channel,
+          by: actor.displayName,
+          ...(kind === "custom" ? { text: customText.slice(0, 300) } : {}),
+          at: new Date().toISOString(),
+        },
+      },
+    }).catch((err: unknown) => console.warn("[send-step] событие не записано:", err instanceof Error ? err.message : err));
+    if (!channel)
+      return NextResponse.json({ ok: false, channel: null, error: "Не доставлено: покупатель закрыл бота или не писал сообществу" }, { status: 502 });
+    return NextResponse.json({ ok: true, channel });
+  }
+
+  /* ── Что просили у покупателя и где бот его не понял ────────────────────
+     Отдельно от `order-events`: форме «📨 Попросить» нужны только эти два
+     типа, и грузятся они по открытию формы, а не на каждую карточку. */
+  if (action === "buyer-step-trail") {
+    const events = await prisma.orderEvent.findMany({
+      where: { orderId, type: { in: [BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END] } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: { type: true, payload: true, createdAt: true },
+    });
+    return NextResponse.json({
+      ok: true,
+      trail: events.map((event) => ({
+        at: event.createdAt,
+        type: event.type,
+        text: buyerStepEventText(event.type, event.payload) ?? event.type,
+      })),
+    });
+  }
+
   if (action === "gpwatch-notify") {
     if (order.status !== "AWAITING_GAMEPASS")
       return NextResponse.json({ error: `Заказ уже в статусе ${order.status}` }, { status: 400 });

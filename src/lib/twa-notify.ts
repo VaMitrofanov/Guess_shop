@@ -6,6 +6,13 @@ import {
 } from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
+import {
+  BUYER_STEP_COMMANDS,
+  buyerStepMessage,
+  stripHtml,
+  type BuyerStepKind,
+  type BuyerStepOrder,
+} from "../../bots/shared/buyer-step";
 
 interface UserRef {
   id: string;
@@ -406,6 +413,39 @@ export async function notifyGpWatchPing(
       { keyboard: vkKb },
     );
     return ok ? "vk" : null;
+  }
+  return null;
+}
+
+/**
+ * «📨 Попросить у покупателя» — админка отправляет нужный шаг геймпасса.
+ *
+ * Текст и кнопки — из `bots/shared/buyer-step` (общие с ботами). Кнопки
+ * действия ведут в обработчики самих ботов (`find_gp`, `send_gp_link`),
+ * поэтому ответ покупателя обрабатывает бот так же, как на свою кнопку.
+ * Возвращает канал реальной доставки.
+ */
+export async function notifyBuyerStep(
+  user: UserRef,
+  order: BuyerStepOrder,
+  kind: BuyerStepKind,
+  customText?: string,
+): Promise<"tg" | "vk" | null> {
+  const msg = buyerStepMessage(kind, order, customText);
+  if (user.tgId) {
+    const inline_keyboard = msg.buttons.map((row) => row.map((b) =>
+      "url" in b ? { text: b.label, url: b.url } : { text: b.label, callback_data: BUYER_STEP_COMMANDS.tg[b.action] },
+    ));
+    return (await tgPost(user.tgId, msg.html, { reply_markup: { inline_keyboard } })) ? "tg" : null;
+  }
+  if (user.vkId) {
+    const buttons = msg.buttons.map((row) => row.map((b) =>
+      "url" in b
+        ? { action: { type: "open_link", link: b.url, label: b.label.slice(0, 40) } }
+        : { action: { type: "text", label: b.label.slice(0, 40), payload: JSON.stringify({ command: BUYER_STEP_COMMANDS.vk[b.action] }) }, color: "primary" },
+    ));
+    const keyboard = JSON.stringify({ inline: true, buttons });
+    return (await vkPost(user.vkId, stripHtml(msg.html), { keyboard })) ? "vk" : null;
   }
   return null;
 }
