@@ -96,9 +96,12 @@ describe("Расхождение видно человеку", () => {
     expect(screen).toContain("void copyPassAndVerify(copySlot.text");
   });
 
-  it("повтор уже выкупленного пасса — отдельная строка, а не молчание", () => {
-    expect(presentation).toContain("live?.reusedIn");
-    expect(screen).toContain("Этот пасс уже выкуплен в заказе");
+  it("повтор уже выкупленного пасса — справка в шторке и подсказка при копировании, а не молчание", () => {
+    // С 21.10 повтор с закрытым заказом — не флаг ленты, а справка: выкуп идёт
+    // с разных аккаунтов. Громко — только повтор внутри одной очереди.
+    expect(presentation).toContain("options.packDupIn");
+    expect(screen).toContain("Этот пасс раньше выкупали в {live.reusedIn}");
+    expect(screen).toContain("пасс уже покупали в ${info.reusedIn}");
   });
 
   it("карточка оплаты называет цену пасса — это последний ручной шаг", () => {

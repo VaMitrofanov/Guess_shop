@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import type React from "react";
 import { createPortal } from "react-dom";
 
 const FOCUSABLE = [
@@ -99,6 +100,24 @@ export default function BottomSheet({
     };
   }, [open]);
 
+  /* Раскрытие жестом. Шторка-просмотр растёт тремя путями: свайп по ручке
+   * вверх, прокрутка содержимого (первый же сдвиг вниз по списку = «хочу
+   * дальше») и тап по ручке. Свайп вниз по ручке сворачивает, а из свёрнутой —
+   * закрывает. Порог 36 px: короче — это дрожание пальца при тапе. */
+  const dragStart = useRef<number | null>(null);
+  const onHandleTouchStart = (event: React.TouchEvent) => { dragStart.current = event.touches[0]?.clientY ?? null; };
+  const onHandleTouchEnd = (event: React.TouchEvent) => {
+    const start = dragStart.current;
+    dragStart.current = null;
+    if (start == null || !expandable) return;
+    const dy = (event.changedTouches[0]?.clientY ?? start) - start;
+    if (dy < -36 && !expanded) onExpandedChange?.(true);
+    else if (dy > 36) { if (expanded) onExpandedChange?.(false); else onClose(); }
+  };
+  const onScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    if (expandable && !expanded && event.currentTarget.scrollTop > 12) onExpandedChange?.(true);
+  };
+
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
@@ -113,7 +132,7 @@ export default function BottomSheet({
         aria-label={ariaLabel}
         tabIndex={-1}
       >
-        <div className="twa-sheet-handle-zone">
+        <div className="twa-sheet-handle-zone" onTouchStart={onHandleTouchStart} onTouchEnd={onHandleTouchEnd}>
           <button
             type="button"
             className="twa-sheet-handle"
@@ -121,7 +140,7 @@ export default function BottomSheet({
             onClick={() => expandable ? onExpandedChange?.(!expanded) : onClose()}
           />
         </div>
-        <div className="twa-sheet-scroll">{children}</div>
+        <div className="twa-sheet-scroll" onScroll={onScroll}>{children}</div>
         {footer && <div className="twa-sheet-footer">{footer}</div>}
       </section>
     </div>,

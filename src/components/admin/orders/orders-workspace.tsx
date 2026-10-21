@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ageBasis, ageTone, canComplete, fmtAge, grossOf, isHeld, laneOf,
-  LANE_META, orderBadge, orderFlag, primaryActionFor,
+  LANE_META, orderBadge, orderFlag, packDuplicates, primaryActionFor,
 } from "@/lib/order-presentation";
 import type { LaneId } from "@/lib/order-presentation";
 import type { OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
@@ -89,6 +89,9 @@ export default function OrdersWorkspace({
   const [narrow, setNarrow] = useState<Narrow>({});
 
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  /* Один пасс у двух заказов очереди = одна пачка выкупа: только такой повтор
+     подсвечиваем, повтор с закрытым заказом — справка в досье (21.10). */
+  const packDup = useMemo(() => packDuplicates(orders, gamepassIdsOf), [orders]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [slices, setSlices] = useState<OrderSlicesPayload | null>(null);
   const [total, setTotal] = useState(0);
@@ -934,6 +937,7 @@ export default function OrdersWorkspace({
                   order={order}
                   index={index}
                   live={live[order.id]}
+                  packDupIn={packDup.get(order.id) ?? null}
                   selected={selected.has(order.id)}
                   cursor={cursor === index}
                   open={openId === order.id}
@@ -960,6 +964,7 @@ export default function OrdersWorkspace({
                     order={order}
                     index={index}
                     live={live[order.id]}
+                    packDupIn={packDup.get(order.id) ?? null}
                     selected={selected.has(order.id)}
                     cursor={cursor === index}
                     open={openId === order.id}
@@ -986,6 +991,7 @@ export default function OrdersWorkspace({
           <OrderDossier
             order={openOrder}
             live={live[openOrder.id]}
+            packDupIn={packDup.get(openOrder.id) ?? null}
             onClose={() => setOpenId(null)}
             onPrimary={() => void runPrimary(openOrder)}
             onHold={() => void toggleHold(openOrder)}
@@ -1348,11 +1354,12 @@ function SliceStrip({
 /* ── Строка таблицы ───────────────────────────────────────────────────────── */
 
 function OrderRow({
-  order, index, live, selected, cursor, open, busy, leaving, onSelect, onOpen, onPrimary, onPriority, onCopyIds, onEdit,
+  order, index, live, packDupIn, selected, cursor, open, busy, leaving, onSelect, onOpen, onPrimary, onPriority, onCopyIds, onEdit,
 }: {
   order: AdminOrder;
   index: number;
   live?: LiveCheck;
+  packDupIn?: string | null;
   selected: boolean;
   cursor: boolean;
   open: boolean;
@@ -1366,7 +1373,7 @@ function OrderRow({
   onEdit: () => void;
 }) {
   const lane = laneOf(order);
-  const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
+  const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true, packDupIn });
   const action = primaryActionFor(order, live);
   const basis = ageBasis(order);
   const ids = gamepassIdOf(order);
@@ -1457,11 +1464,12 @@ function OrderRow({
 /* ── Карточка очереди ─────────────────────────────────────────────────────── */
 
 function QueueCard({
-  order, index, live, selected, cursor, open, busy, leaving, onOpen, onPrimary, onPriority,
+  order, index, live, packDupIn, selected, cursor, open, busy, leaving, onOpen, onPrimary, onPriority,
 }: {
   order: AdminOrder;
   index: number;
   live?: LiveCheck;
+  packDupIn?: string | null;
   selected: boolean;
   cursor: boolean;
   open: boolean;
@@ -1473,7 +1481,7 @@ function QueueCard({
 }) {
   const lane = laneOf(order);
   const badge = orderBadge(order);
-  const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
+  const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true, packDupIn });
   const action = primaryActionFor(order, live);
   const basis = ageBasis(order);
 

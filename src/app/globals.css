@@ -770,6 +770,8 @@ html.twa-route-active [contenteditable="true"] {
 .twa-order-sheet {
   max-height: min(72dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 84px));
 }
+/* Карточку заказа разворачивают жестом — рост с лёгкой пружиной. */
+.twa-order-sheet { transition: max-height .42s cubic-bezier(.32,1.25,.5,1); }
 
 /* Лист заказа: длинная форма, которую заполняют с клавиатурой на экране.
    Ей нужно больше высоты, чем карточке-просмотру, и запас снизу, чтобы
@@ -1846,7 +1848,8 @@ html.twa-route-active [contenteditable="true"] {
   font: 500 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .09em;
 }
 .twa-oc-code > i { font-family: inherit; font-size: 12px; font-style: normal; opacity: .7; }
-.twa-oc-code.is-done { background: rgba(48,209,88,.18); color: #6ee58d; }
+.twa-oc-code.is-done { background: rgba(48,209,88,.18); color: #6ee58d; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+.twa-oc-code.is-small { min-height: 26px; padding: 0 8px; font-size: 13px; margin-left: 0; }
 .twa-oc-main { display: flex; align-items: baseline; gap: 9px; margin-top: 2px; min-width: 0; }
 .twa-oc-main > strong { flex: 1; min-width: 0; overflow: hidden; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .twa-oc-main > b { flex: 0 0 auto; font-size: 16px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
@@ -1854,6 +1857,18 @@ html.twa-route-active [contenteditable="true"] {
 .twa-oc-meta { display: flex; flex-wrap: wrap; gap: 2px 9px; min-width: 0; color: #777181; font-size: 14px; font-variant-numeric: tabular-nums; }
 .twa-oc-meta > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .twa-oc-flag { margin-top: 2px; font-size: 14px; font-weight: 600; line-height: 1.35; }
+/* Шторка: ник копируется тапом, как код. */
+.twa-oc-nick { cursor: pointer; }
+.twa-oc-nick > i { margin-left: 6px; font-size: 12px; font-style: normal; opacity: .55; }
+/* «Дальше» — единственная плашка состояния в шторке: проблема и действие одной
+   строкой, цвет по срочности. Спокойная (ждём покупателя) — без заливки. */
+.twa-oc-next {
+  display: flex; flex-direction: column; gap: 3px; padding: 11px 13px;
+  border: 1px solid transparent; border-radius: 14px;
+  font-size: 15px; font-weight: 600; line-height: 1.35;
+}
+.twa-oc-next > small { color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.twa-oc-next.is-quiet { padding: 0; color: #aaa4b8; font-weight: 500; }
 
 .twa-oc-acts {
   display: flex; align-items: center; gap: 7px;
@@ -1918,3 +1933,149 @@ html.twa-route-active [contenteditable="true"] {
 .twa-slice-head-main > span,
 .twa-slice-head-main > b { white-space: nowrap; }
 .twa-slice-till.is-collapsed .twa-slice-head-main > em { flex-basis: 100%; margin-left: 0; }
+
+
+/* ── 21.10: карточка заказа «финал» ──────────────────────────────────────────
+   Готовность (слово + четыре отрезка), подсветка готовой карточки, части
+   разбитого заказа в ленте, шторка «ник → ID → заметки» и её полный вид.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-order-create {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 46px; margin-top: 8px; border: 1px solid rgba(255,255,255,.16); border-radius: 13px;
+  background: linear-gradient(180deg, #a68bff, #7c57f2); color: #fff;
+  box-shadow: 0 8px 22px -6px rgba(126,87,245,.6), 0 1px 0 rgba(255,255,255,.25) inset;
+  font: 700 16px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.twa-order-create > span { font-size: 18px; font-weight: 600; }
+
+.twa-rd { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 2px 0 1px; }
+.twa-rd-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+.twa-rd-label > i { width: 7px; height: 7px; border-radius: 50%; }
+.twa-rd-label > i.is-live { animation: twa-rd-pulse 1.6s ease-in-out infinite; }
+.twa-rd-segs { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.twa-rd-step { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.twa-rd-seg { position: relative; height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+.twa-rd-seg.is-done { background: #30d158; }
+.twa-rd-seg.is-now { background: linear-gradient(90deg, #30d158, #a6f5c2, #30d158); background-size: 200% 100%; animation: twa-rd-shim 1.6s linear infinite; }
+.twa-rd-seg.is-partial { animation: none; background: linear-gradient(90deg, #30d158 var(--share), rgba(48,209,88,.28) var(--share)); }
+.twa-rd-step > small { overflow: hidden; color: #777181; font-size: 12px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+.twa-rd-step > small.is-done { color: #6ee58d; }
+.twa-rd-step > small.is-now { color: #f7f5ff; }
+.twa-rd-step > small.is-wait, .twa-rd-step > small.is-bad { color: inherit; }
+.twa-rd.is-labeled { margin-top: 4px; }
+@keyframes twa-rd-shim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes twa-rd-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(48,209,88,.6); } 50% { box-shadow: 0 0 0 5px rgba(48,209,88,0); } }
+@media (prefers-reduced-motion: reduce) {
+  .twa-rd-seg.is-now, .twa-rd-label > i.is-live, .twa-os-pull { animation: none; }
+}
+
+/* Готовая к выкупу карточка: зелёное кольцо и полоса слева. */
+.twa-glass-order.is-ready { box-shadow: inset 0 0 0 1px rgba(48,209,88,.3), 0 0 26px -10px rgba(48,209,88,.45) !important; }
+.twa-glass-order.is-ready::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 3px 3px 0; background: #30d158; }
+
+.twa-oc-parts { display: flex; flex-direction: column; margin-top: 4px; border-radius: 11px; overflow: hidden; background: rgba(255,255,255,.05); }
+.twa-oc-part { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 10px; border-top: 1px solid rgba(255,255,255,.06); font-size: 14px; font-variant-numeric: tabular-nums; }
+.twa-oc-part:first-child { border-top: 0; }
+.twa-oc-part > i { width: 16px; color: #777181; font-style: normal; font-weight: 700; text-align: center; }
+.twa-oc-part > b { min-width: 70px; font-weight: 700; }
+.twa-oc-part > em { flex: 1; min-width: 0; overflow: hidden; color: #aaa4b8; font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-style: normal; text-overflow: ellipsis; }
+.twa-oc-part > small { color: #777181; font-size: 13px; }
+.twa-oc-part.is-done > i { color: #6ee58d; }
+.twa-oc-part.is-done > b { color: #777181; text-decoration: line-through; }
+.twa-oc-part.is-done > em { color: #5d5868; }
+.twa-oc-part.is-next { background: rgba(48,209,88,.08); }
+.twa-oc-part.is-next > em { color: #f7f5ff; }
+.twa-oc-part.is-next > small { color: #6ee58d; font-weight: 600; }
+
+/* ── Шторка заказа ── */
+.twa-os-bar {
+  position: sticky; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 9px;
+  max-height: 0; padding: 0 16px; overflow: hidden; opacity: 0; transform: translateY(-12px);
+  background: rgba(28,23,41,.97); border-bottom: 1px solid transparent;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  transition: max-height .42s cubic-bezier(.32,1.25,.5,1), opacity .25s ease, transform .42s cubic-bezier(.32,1.25,.5,1), padding .3s ease;
+  pointer-events: none;
+}
+.twa-os-bar.is-on { max-height: 120px; padding: 4px 16px 10px; opacity: 1; transform: none; border-bottom-color: rgba(255,255,255,.07); pointer-events: auto; }
+.twa-os-bar-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.twa-os-bar-row > strong { min-width: 0; overflow: hidden; font-size: 16px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.twa-os-bar-row > b { margin-left: auto; flex: 0 0 auto; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.twa-os-bar-row > b small { margin-left: 3px; color: #a8f0be; font-size: 12px; }
+.twa-os-collapse { flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: 10px; background: rgba(255,255,255,.07); color: #c9c2dc; font-size: 16px; line-height: 1; }
+.twa-os-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: 12px; background: rgba(255,255,255,.05); }
+.twa-os-tabs > button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; color: #aaa4b8; font-size: 14px; font-weight: 600; }
+.twa-os-tabs > button.is-on { background: rgba(255,255,255,.1); color: #f7f5ff; }
+
+.twa-os-head { display: flex; flex-direction: column; gap: 6px; padding: 4px 16px 0; }
+.twa-os-buyer { min-width: 0; overflow: hidden; color: #777181; font-size: 14px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.twa-os-amount { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; color: #8e8a99; font-size: 14px; }
+.twa-os-amount > b { color: #f7f5ff; font-size: 36px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.twa-os-amount > b small { margin-left: 4px; color: #a8f0be; font-size: 16px; font-weight: 700; }
+
+.twa-os-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 14px; }
+.twa-os-hero {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 14px 14px 16px;
+  border: 0; border-radius: 18px; color: #f7f5ff; text-align: left;
+  background: linear-gradient(180deg, rgba(48,209,88,.15), rgba(48,209,88,.07));
+  box-shadow: inset 0 0 0 1px rgba(48,209,88,.3);
+}
+.twa-os-hero > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.twa-os-hero small { color: #6ee58d; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.twa-os-hero strong { overflow: hidden; font-size: 24px; font-weight: 700; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.twa-os-hero > i { flex: 0 0 auto; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: #30d158; color: #0d1f14; font-size: 18px; font-style: normal; font-weight: 800; }
+.twa-os-hero.is-guess { background: linear-gradient(180deg, rgba(255,214,10,.14), rgba(255,214,10,.06)); box-shadow: inset 0 0 0 1px rgba(255,214,10,.3); }
+.twa-os-hero.is-guess small { color: #ffd60a; }
+.twa-os-hero.is-guess strong { color: #ffe066; }
+.twa-os-hero.is-guess > i { background: #ffd60a; }
+.twa-os-hero.is-done > i { background: #f7f5ff; }
+.twa-os-hero.is-empty { background: rgba(255,255,255,.05); box-shadow: none; }
+.twa-os-hero.is-empty small { color: #777181; }
+.twa-os-hero.is-empty strong { color: #777181; font-size: 18px; }
+
+.twa-os-pass { display: flex; flex-direction: column; gap: 6px; padding: 12px 8px 12px 16px; border-radius: 16px; background: rgba(255,255,255,.055); }
+.twa-os-pass-row { display: flex; align-items: center; gap: 10px; }
+.twa-os-pass-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.twa-os-pass-row small { color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.twa-os-pass-row strong { font: 600 19px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; }
+.twa-os-iconbtn { flex: 0 0 auto; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 12px; background: rgba(255,255,255,.08); color: #d8d3e4; font-size: 16px; }
+.twa-os-iconbtn.is-done { background: rgba(48,209,88,.18); color: #6ee58d; }
+.twa-os-pass-link { align-self: flex-start; color: #8cc4ff; font-size: 14px; font-weight: 600; text-decoration: none; }
+.twa-os-pass-state { font-size: 14px; font-weight: 600; }
+
+/* Подсказка прилипает к низу свёрнутой шторки: иначе она уходила за край,
+   и про полный вид никто бы не узнал. */
+.twa-os-more {
+  position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 9px;
+  margin: 0 -16px -14px; padding: 18px 16px 12px;
+  background: linear-gradient(180deg, rgba(25,20,37,0), rgba(25,20,37,.96) 34%);
+}
+.twa-os-more > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.twa-os-pull { color: #8e8a99; font-size: 13px; animation: twa-os-nudge 1.8s ease-in-out infinite; }
+.twa-os-chip { min-height: 34px; padding: 0 13px; border: 0; border-radius: 999px; background: rgba(255,255,255,.08); color: #d8d3e4; font-size: 14px; font-weight: 600; }
+@keyframes twa-os-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
+.twa-os-sec { scroll-margin-top: 112px; padding: 6px 0 8px; animation: twa-os-in .42s cubic-bezier(.32,1.25,.5,1) both; }
+.twa-os-sec > h3 { margin: 6px 20px 8px; color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+@keyframes twa-os-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+.twa-os-ref { margin: 2px 18px 8px; color: #777181; font-size: 13px; line-height: 1.4; }
+.twa-os-group { margin: 0 14px 10px; border-radius: 16px; overflow: hidden; background: rgba(255,255,255,.055); }
+.twa-os-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 54px; padding: 0 12px 0 14px; border: 0; border-top: 1px solid rgba(255,255,255,.06); background: transparent; color: #f7f5ff; text-align: left; }
+.twa-os-row:first-child { border-top: 0; }
+.twa-os-row > em { flex: 0 0 auto; color: #b9a4ff; font-size: 14px; font-style: normal; font-weight: 600; }
+.twa-os-ic { flex: 0 0 auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: rgba(255,255,255,.08); font-size: 15px; }
+.twa-os-ic.is-vk { background: #0077ff; color: #fff; font-size: 11px; font-weight: 800; }
+.twa-os-ic.is-tg { background: #229ed9; color: #fff; font-size: 11px; font-weight: 800; }
+.twa-os-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.twa-os-tx > b { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-os-tx > small { overflow: hidden; color: #8e8a99; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-os-tog { position: relative; flex: 0 0 auto; width: 44px; height: 26px; border-radius: 13px; background: rgba(255,255,255,.16); transition: background .2s ease; }
+.twa-os-tog::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #f2eff8; transition: transform .25s cubic-bezier(.32,1.25,.5,1); }
+.twa-os-tog.is-on { background: #30d158; }
+.twa-os-tog.is-on::after { transform: translateX(18px); }
+
+.twa-os-foot { display: flex; align-items: center; gap: 8px; }
+.twa-os-foot > .twa-oc-prim { flex: 1; justify-content: center; min-height: 50px; border-radius: 14px; background: #30d158; color: #0d1f14; font-size: 16px; }
+.twa-os-foot > .twa-oc-prim.is-blue { background: rgba(10,132,255,.2); color: #8cc4ff; }
+.twa-os-foot > .twa-oc-prim.is-ice { background: rgba(100,210,255,.18); color: #8fdcff; }
+.twa-os-foot > .twa-oc-copy { flex: 0 0 auto; min-height: 50px; padding: 0 16px; border-radius: 14px; }
+.twa-os-foot > .twa-oc-more { min-height: 50px; min-width: 52px; border-radius: 14px; }

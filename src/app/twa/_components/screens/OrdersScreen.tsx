@@ -21,6 +21,10 @@ import {
   primaryActionFor as sharedPrimaryAction,
   fmtUnlockDate,
   robuxUnlockAt,
+  packDuplicates,
+  readinessFor,
+  READINESS_STEPS,
+  type Readiness,
   type Tone,
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
@@ -288,9 +292,56 @@ function primaryActionFor(order: Order, live?: GpLiveInfo): CardAction | null {
    пасс снят с продажи, а бот вдобавок не достучался в VK, менеджеру нужно
    узнать про пасс — второе он увидит в досье.
    ────────────────────────────────────────────────────────────────────────── */
-function cardFlag(order: Order, live: GpLiveInfo | undefined, reminders: number): { text: string; color: string } | null {
-  const flag = sharedOrderFlag(order as never, live, reminders);
-  return flag ? { text: flag.text, color: TONE[flag.tone] } : null;
+function cardFlag(order: Order, live: GpLiveInfo | undefined, reminders: number, packDupIn?: string | null): { text: string; color: string; tone: Tone } | null {
+  const flag = sharedOrderFlag(order as never, live, reminders, { packDupIn });
+  return flag ? { text: flag.text, color: TONE[flag.tone], tone: flag.tone } : null;
+}
+
+/** ID пассов заказа — для поиска повторов внутри очереди. */
+function orderPassIds(order: Order): string[] {
+  const split = order.splitGamepasses ?? [];
+  if (split.length > 0) return split.map(part => part.gamepassId);
+  const id = extractGamepassId(order.gamepassUrl) ?? parseGamepassRef(order.gamepassUrl);
+  return id ? [id] : [];
+}
+
+/* ── Готовность: слово состояния и четыре отрезка ────────────────────────────
+   Оплата → Ник → Пасс → Выкуп. В ленте над полоской стоит одно слово
+   («Готов к выкупу», «Ждём пасс»), в шторке под каждым отрезком — его имя.
+   Отрезок «Выкуп» у готового заказа переливается: дальше ход за админом.
+   Правило — общий `readinessFor`, здесь только краска. */
+function ReadinessTrack({ r, labeled }: { r: Readiness; labeled?: boolean }) {
+  const color = TONE[r.tone];
+  return (
+    <span className={`twa-rd${labeled ? " is-labeled" : ""}`}>
+      {!labeled && (
+        <span className="twa-rd-label" style={{ color }}>
+          <i className={r.ready ? "is-live" : ""} style={{ background: color }} />{r.label}
+        </span>
+      )}
+      <span className="twa-rd-segs">
+        {r.steps.map((step, i) => {
+          const partial = i === 3 && step === "now" && r.buyoutShare > 0;
+          const tint = step === "wait" || step === "bad" ? color : undefined;
+          return (
+            <span key={READINESS_STEPS[i]} className="twa-rd-step" style={labeled && tint ? { color: tint } : undefined}>
+              <span
+                className={`twa-rd-seg is-${step}${partial ? " is-partial" : ""}`}
+                style={partial
+                  ? { ["--share" as string]: `${Math.round(r.buyoutShare * 100)}%` }
+                  : tint ? { background: tint } : undefined}
+              />
+              {labeled && (
+                <small className={`is-${step}`}>
+                  {step === "done" ? "✓ " : ""}{READINESS_STEPS[i]}{step === "now" ? " ← ты" : ""}
+                </small>
+              )}
+            </span>
+          );
+        })}
+      </span>
+    </span>
+  );
 }
 
 /* ───────────── Time formatting ───────────── */
@@ -565,16 +616,16 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>
-          Заметка
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: C.textTertiary }}>
+          Заметки{history.length > 0 ? ` · ${history.length}` : ""}
         </span>
         {flash && <span style={{ fontSize: 14, color: C.green, fontWeight: 600 }}>✓</span>}
       </div>
 
       {history.length > 0 && (
         <div style={{
-          display: "flex", flexDirection: "column", borderRadius: 10, overflow: "hidden",
-          background: `${C.yellow}14`, border: `1px solid ${C.yellow}40`,
+          display: "flex", flexDirection: "column", borderRadius: 14, overflow: "hidden",
+          background: "rgba(255,255,255,0.055)",
         }}>
           {history.map((line, i) => {
             const frozen = line.kind === "hold";
@@ -661,9 +712,11 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
 
 /* ───────────── ActionPanel per tab ───────────── */
 function ActionPanel({
-  order, currentTab, token, onRunAction, onPurchaseDone,
+  order, currentTab, token, onRunAction, onPurchaseDone, showComplete = true,
 }: {
   order: Order;
+  /** «Выкуплено» уже стоит в закреплённом низу шторки — второй раз не нужно. */
+  showComplete?: boolean;
   currentTab: FilterTab;
   token: string;
   onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
@@ -805,7 +858,7 @@ function ActionPanel({
           Ошибка
         </button>
       )}
-      <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
+      {showComplete && <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
         style={{
           flex: splitAllDone ? 2 : 1, padding: "14px", border: "none", borderRadius: 12,
           background: splitAllDone ? "rgba(48,209,88,0.22)" : "rgba(10,132,255,0.12)",
@@ -813,7 +866,7 @@ function ActionPanel({
           fontSize: 15, fontWeight: splitAllDone ? 700 : 600, cursor: "pointer", opacity: loading ? 0.5 : 1,
         }}>
         Выкуплено
-      </button>
+      </button>}
       <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
         style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
         ✕
@@ -2067,11 +2120,21 @@ function OrderMenuSheet({
   );
 }
 
+/** Разделы полной шторки заказа — чипы под заметками и вкладки в шапке. */
+type SheetSectionId = "gamepass" | "buyer" | "history";
+const SHEET_SECTIONS: { id: SheetSectionId; label: string }[] = [
+  { id: "gamepass", label: "🧩 Пасс" },
+  { id: "buyer", label: "👤 Покупатель" },
+  { id: "history", label: "🕓 История" },
+];
+
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
-  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onTogglePriority, onMoved, live, solo,
+  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onTogglePriority, onMoved, live, solo, packDupIn,
 }: {
   order: Order;
+  /** Тот же пасс стоит в другом заказе этой очереди — код того заказа. */
+  packDupIn?: string | null;
   token: string;
   currentTab: FilterTab;
   /* Карточка стоит ОДНА, без ленты и без заголовка группы над ней — так её
@@ -2112,7 +2175,7 @@ function OrderCard({
    *  карточке показывают одно и то же состояние, а не каждый своё. */
   const [tool, setTool] = useState<GamepassToolId | null>(null);
   /** Какая из двух кнопок копирования только что сработала — для галочки. */
-  const [copied, setCopied] = useState<"code" | "pass" | null>(null);
+  const [copied, setCopied] = useState<"code" | "pass" | "nick" | null>(null);
   const [primaryBusy, setPrimaryBusy] = useState(false);
   // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
@@ -2212,8 +2275,11 @@ function OrderCard({
 
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const shortName = userShortName(order.user);
-  const passId = extractGamepassId(order.gamepassUrl);
+  const passId = extractGamepassId(order.gamepassUrl) ?? parseGamepassRef(order.gamepassUrl);
   const split = order.splitGamepasses ?? [];
+  const orderedSplit = [...split].sort((a, b) => a.position - b.position);
+  const nextPartIdx = orderedSplit.findIndex(part => !part.purchasedAt);
+  const nextPart = nextPartIdx >= 0 ? orderedSplit[nextPartIdx] : null;
 
   // В «Требуют внимания» карточка ведёт себя как в родной вкладке заказа:
   // те же кнопки действий и формат суммы, что видел бы менеджер в BUYOUT/ERROR/….
@@ -2304,12 +2370,42 @@ function OrderCard({
   // это ставка, и цвет обязан сказать об этом до нажатия.
   const nick = order.robloxUsername ?? order.probableNick ?? null;
   const nickIsGuess = !order.robloxUsername && !!order.probableNick;
-  const flag = cardFlag(order, live, reminders);
+  const flag = cardFlag(order, live, reminders, packDupIn);
+  const readiness = readinessFor(order as never, live);
+  /* Готовая к выкупу карточка подсвечена целиком: в очереди на девяносто
+     заказов её видно боковым зрением, а не по чтению строки. Зелёный флаг
+     «пасс продаётся» в ленте при этом лишний — то же говорит слово «Готов». */
+  const feedFlag = flag && !(readiness.ready && flag.tone === "green") ? flag : null;
+  /* Разбитый заказ: части отмечаются по одной с карточки, ID — следующей
+     части. «Выкуплено» появится, когда отмечена последняя. */
+  const canMarkPart = !order.heldAt && ["PENDING", "IN_PROGRESS"].includes(order.status) && !!nextPart;
+  const [partBusy, setPartBusy] = useState(false);
+  async function markNextPart() {
+    if (!nextPart || partBusy) return;
+    setPartBusy(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "mark-split-part", orderId: order.id, partId: nextPart.id, purchased: true }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast(d.allDone
+        ? `🧩 ${d.progress} — все части отмечены. Нажми «Выкуплено», чтобы закрыть заказ`
+        : `🧩 ${d.progress}`, d.allDone ? "success" : "default");
+      onMoved();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setPartBusy(false); }
+  }
 
   /* Кнопка копирования показывает то, что вставляется в донора. Если пасса
      нет — вставлять нечего, и на её месте стоит вход в поиск пасса по нику. */
   const copySlot: { text: string; label: string; hint?: boolean } | null =
-    splitIds.length > 0 ? { text: splitIds.join("\n"), label: `${splitIds.length} ID пассов` }
+    nextPart ? { text: nextPart.gamepassId, label: nextPart.gamepassId }
+    : splitIds.length > 0 ? { text: splitIds.join("\n"), label: `${splitIds.length} ID пассов` }
       : passId ? { text: passId, label: passId }
         : showGpWatch ? { text: "", label: "Найти пасс по нику", hint: true }
           : null;
@@ -2322,7 +2418,7 @@ function OrderCard({
     try { await onRunAction(primary.action!); } finally { setPrimaryBusy(false); }
   }
 
-  function copyAnd(text: string, mark: "code" | "pass", toastText: string) {
+  function copyAnd(text: string, mark: "code" | "pass" | "nick", toastText: string) {
     copyText(text);
     haptic.impact("light");
     setCopied(mark);
@@ -2347,11 +2443,6 @@ function OrderCard({
       const d = await r.json().catch(() => null);
       const info = d?.results?.[order.id];
       if (!info) return;
-      if (info.reusedIn) {
-        haptic.notify("error");
-        toast(`♻️ СТОП: пасс уже выкуплен в ${info.reusedIn} — второй раз не покупается`, "error");
-        return;
-      }
       if (info.isForSale === false) {
         haptic.notify("error");
         toast("⛔ СТОП: пасс снят с продажи", "error");
@@ -2362,18 +2453,30 @@ function OrderCard({
         toast(`⛔ СТОП: пасс ${info.livePrice} R$ ≠ нужных ${info.expected} R$ — не выкупать`, "error");
         return;
       }
+      /* Повтор пасса — не стоп: другой аккаунт его купит. Но аккаунт, которым
+         брали в прошлый раз, получит AlreadyOwned, — об этом и предупреждаем. */
+      if (info.reusedIn) {
+        haptic.notify("warning");
+        toast(`♻️ цена сходится, но пасс уже покупали в ${info.reusedIn} — бери с другого аккаунта`);
+        return;
+      }
       toast(`✓ цена сходится: ${info.livePrice} R$`, "success");
     } catch { /* проверка не обязана мешать копированию */ }
   }
 
-  // Компактная сводка используется дважды: строкой в ленте и шапкой detail-sheet.
-  // Сам sheet рендерится порталом в body: position:fixed внутри iOS-скролла ленты
-  // глючит (containing block + layout shift), карточка «вылезала на весь экран».
-  const compactSummary = (
+  /* Сводка рисуется дважды: строкой в ленте и шапкой шторки. В шторке под ней
+     стоят строка покупателя и плашка «Дальше», поэтому там сводка не повторяет
+     ни покупателя, ни флаг: 21.10 «пасс уже выкуплен» стоял в шторке трижды
+     (флаг, «Дальше», отдельная строка), а код, возраст, ник, @клиент и
+     «WB DBS» — по два раза. Сама шторка — портал в body: position:fixed внутри
+     iOS-скролла ленты глючит (containing block + layout shift). */
+  const sourceMeta = SOURCE_BADGE_META[order.orderSource];
+  const queueAge = inBuyoutQueue && fmtAge(order.pendingAt!) !== fmtAge(timeRef) ? fmtAge(order.pendingAt!) : null;
+  const summary = () => (
     <>
       <span className="twa-oc-top">
-        <b style={{ color: tabBadge?.color ?? SOURCE_BADGE_META[order.orderSource]?.color ?? C.accent }}>
-          {tabBadge?.label ?? SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}
+        <b style={{ color: tabBadge?.color ?? sourceMeta?.color ?? C.accent }}>
+          {tabBadge?.label ?? sourceMeta?.label ?? order.orderSource}
         </b>
         <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>
           {boughtAt ? fmtTxDate(boughtAt) : fmtAge(timeRef)}
@@ -2385,16 +2488,10 @@ function OrderCard({
         {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
         {/* Код ВБ — якорь заказа: его называют в чате и по нему ищут. Крупный,
             всегда на одном месте, тап копирует. */}
-        <button
-          type="button"
-          className={`twa-oc-code twa-press-sm${copied === "code" ? " is-done" : ""}`}
-          aria-label={`Скопировать код ${order.wbCode}`}
-          onClick={e => { e.stopPropagation(); copyAnd(order.wbCode, "code", `Код ${order.wbCode} скопирован`); }}
-        >
-          {order.wbCode}<i>{copied === "code" ? "✓" : "⧉"}</i>
-        </button>
-        <i className="twa-oc-chev">{expanded ? "⌃" : "⌄"}</i>
+        {codeChip()}
       </span>
+      {/* Готовность — до ника: в очереди глаз ищет сначала «что с заказом». */}
+      {!isDoneState && <ReadinessTrack r={readiness} />}
       <span className="twa-oc-main">
         <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "Ник не указан"}</strong>
         <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
@@ -2402,21 +2499,128 @@ function OrderCard({
       <span className="twa-oc-meta">
         {/* Одиночной карточке бейдж состояния занял место источника — а полоса
             («WB DBS» против прямого заказа) для разговора с клиентом важна. */}
-        {solo && SOURCE_BADGE_META[order.orderSource] && <span>{SOURCE_BADGE_META[order.orderSource].label}</span>}
+        {solo && sourceMeta && <span>{sourceMeta.label}</span>}
         {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
+        {orderedSplit.length > 1 && <span>{orderedSplit.length} {orderedSplit.length < 5 ? "пасса" : "пассов"}</span>}
         {nickIsGuess && <span>вероятный ник</span>}
         {order.status === "COMPLETED" && <span>выкуп: {boughtBy ?? "вручную"}</span>}
         {robuxPending && <span>робуксы {fmtUnlockDate(robuxUnlock!)}</span>}
         <span>{shortName}</span>
       </span>
-      {flag && <span className="twa-oc-flag" style={{ color: flag.color }}>{flag.text}</span>}
+      {/* Несколько пассов: какие куплены и какой следующий — прямо в ленте. */}
+      {orderedSplit.length > 1 && (
+        <span className="twa-oc-parts">
+          {orderedSplit.map((part, i) => {
+            const bought = !!part.purchasedAt;
+            const isNext = i === nextPartIdx;
+            return (
+              <span key={part.id} className={`twa-oc-part${bought ? " is-done" : isNext ? " is-next" : ""}`}>
+                <i>{bought ? "✓" : i + 1}</i>
+                <b>{(showDirty ? Math.ceil(part.amount / 0.7) : part.amount).toLocaleString("ru-RU")} R$</b>
+                <em>{part.gamepassId}</em>
+                <small>{bought ? "выкуплен" : isNext ? "следующий" : ""}</small>
+              </span>
+            );
+          })}
+        </span>
+      )}
+      {feedFlag && <span className="twa-oc-flag" style={{ color: feedFlag.color }}>{feedFlag.text}</span>}
     </>
+  );
+
+  /* Код заказа — одна и та же кнопка в ленте, в шторке и в её шапке. */
+  const codeChip = (small = false) => (
+    <button
+      type="button"
+      className={`twa-oc-code twa-press-sm${copied === "code" ? " is-done" : ""}${small ? " is-small" : ""}`}
+      aria-label={`Скопировать код ${order.wbCode}`}
+      onClick={e => { e.stopPropagation(); copyAnd(order.wbCode, "code", `Код ${order.wbCode} скопирован`); }}
+    >
+      {copied === "code" ? <>✓ Скопирован</> : <>{order.wbCode}<i>⧉</i></>}
+    </button>
+  );
+
+  /* ── Полная шторка: разделы и переход ────────────────────────────────
+     Попасть в неё можно тремя путями: потянуть шторку вверх (или просто
+     прокрутить содержимое), нажать раздел-чип под заметками, нажать ручку.
+     Чип сразу раскрывает шторку и ведёт к своему разделу. */
+  const [section, setSection] = useState<SheetSectionId>("gamepass");
+  /** До какого момента подсветку держит тап по разделу, а не прокрутка. */
+  const jumpLockRef = useRef(0);
+  function sheetScroller(): HTMLElement | null {
+    return sheetBodyRef.current?.closest<HTMLElement>(".twa-sheet-scroll") ?? null;
+  }
+  function jumpTo(id: SheetSectionId) {
+    haptic.select();
+    setSection(id);
+    jumpLockRef.current = Date.now() + 900;
+    setSheetExpanded(true);
+    // Кадр ожидания: раздел встаёт на место после того, как шторка выросла.
+    window.setTimeout(() => {
+      sheetScroller()?.querySelector<HTMLElement>(`[data-form="${id}"]`)
+        ?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 60);
+  }
+  function collapseSheet() {
+    sheetScroller()?.scrollTo({ top: 0, behavior: "smooth" });
+    setSheetExpanded(false);
+  }
+  /* Подсветка текущего раздела в шапке — по прокрутке, а не только по тапу. */
+  useEffect(() => {
+    if (!expanded || !sheetExpanded) return;
+    const scroller = sheetBodyRef.current?.closest<HTMLElement>(".twa-sheet-scroll");
+    if (!scroller) return;
+    const onScroll = () => {
+      if (Date.now() < jumpLockRef.current) return;
+      const box = scroller.getBoundingClientRect();
+      const top = box.top + box.height * 0.4;
+      let current: SheetSectionId = "gamepass";
+      for (const sec of SHEET_SECTIONS) {
+        const node = scroller.querySelector<HTMLElement>(`[data-form="${sec.id}"]`);
+        if (node && node.getBoundingClientRect().top <= top) current = sec.id;
+      }
+      setSection(current);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, [expanded, sheetExpanded]);
+
+  /* Низ шторки закреплён: те же три цели, что на карточке в ленте. */
+  const sheetFooter = (
+    <div className="twa-os-foot">
+      {canMarkPart && !primary && (
+        <button type="button" className="twa-oc-prim twa-press-sm" disabled={partBusy} onClick={() => void markNextPart()}>
+          <i>✓</i>{partBusy ? "…" : `Часть ${nextPartIdx + 1} выкуплена`}
+        </button>
+      )}
+      {primary && (
+        <button type="button" className={`twa-oc-prim twa-press-sm${primary.tone === "blue" ? " is-blue" : primary.tone === "ice" ? " is-ice" : ""}`}
+          disabled={primaryBusy} onClick={() => void runPrimary()}>
+          <i>{primary.icon}</i>{primaryBusy ? "…" : primary.label}
+        </button>
+      )}
+      {copySlot && !copySlot.hint && (
+        <button type="button" className={`twa-oc-copy twa-press-sm${copied === "pass" ? " is-done" : ""}`}
+          aria-label="Скопировать ID пасса"
+          onClick={() => {
+            if (nextPart) copyAnd(copySlot.text, "pass", `ID части ${nextPartIdx + 1} скопирован`);
+            else if (splitIds.length > 0) copyAnd(copySlot.text, "pass", `${splitIds.length} ID скопированы`);
+            else void copyPassAndVerify(copySlot.text, "ID пасса");
+          }}>
+          <i>{copied === "pass" ? "✓" : "⧉"}</i><span>ID</span>
+        </button>
+      )}
+      <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
+        onClick={() => { haptic.select(); setMenuOpen(true); }}>
+        ···
+      </button>
+    </div>
   );
 
   return (
     <>
     <article
-      className={`twa-glass-order${exiting ? " twa-card-exit" : ""}${railColor ? " has-rail" : ""}${isDoneState ? " is-done-state" : ""}`}
+      className={`twa-glass-order${exiting ? " twa-card-exit" : ""}${railColor ? " has-rail" : ""}${isDoneState ? " is-done-state" : ""}${readiness.ready && !railColor ? " is-ready" : ""}`}
       style={{ background: C.card, borderRadius: 16, overflow: "hidden", boxShadow: SHADOW.card, position: "relative" }}
     >
       {railColor && <span className="twa-oc-rail" style={{ background: railColor }} />}
@@ -2433,11 +2637,17 @@ function OrderCard({
           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); haptic.select(); setExpanded(v => !v); }
         }}
       >
-        {compactSummary}
+        {summary()}
       </div>
 
       {/* Три цели: главное действие · ID пасса · «···». Ни одной ниже 36 px. */}
       <div className="twa-oc-acts">
+        {canMarkPart && !primary && (
+          <button type="button" className="twa-oc-prim twa-press-sm" disabled={partBusy}
+            onClick={e => { e.stopPropagation(); void markNextPart(); }}>
+            <i>✓</i>{partBusy ? "…" : `Часть ${nextPartIdx + 1}`}
+          </button>
+        )}
         {primary && (
           <button type="button" className={`twa-oc-prim twa-press-sm${primary.tone === "blue" ? " is-blue" : primary.tone === "ice" ? " is-ice" : ""}`}
             disabled={primaryBusy} onClick={e => { e.stopPropagation(); void runPrimary(); }}>
@@ -2454,7 +2664,8 @@ function OrderCard({
               if (copySlot.hint) { void gpwNotify(); return; }
               // Разбитый заказ проверяется по своим частям в блоке разбиения —
               // сверять пачку с номиналом ВСЕГО заказа было бы ложной тревогой.
-              if (splitIds.length > 0) copyAnd(copySlot.text, "pass", `${splitIds.length} ID скопированы`);
+              if (nextPart) copyAnd(copySlot.text, "pass", `ID части ${nextPartIdx + 1} скопирован`);
+              else if (splitIds.length > 0) copyAnd(copySlot.text, "pass", `${splitIds.length} ID скопированы`);
               else void copyPassAndVerify(copySlot.text, "ID пасса");
             }}
           >
@@ -2530,127 +2741,59 @@ function OrderCard({
       expandable
       expanded={sheetExpanded}
       onExpandedChange={setSheetExpanded}
+      footer={sheetFooter}
     >
-      <div
-        role="button"
-        tabIndex={0}
-        className="twa-oc-open twa-press-sm"
-        onClick={() => { haptic.select(); setExpanded(false); }}
-        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(false); } }}
-      >
-        {compactSummary}
-      </div>
-      <>
-      {/* Header: platform badge + nick + star */}
-      <div ref={sheetBodyRef} style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-            <span style={{
-              fontSize: 14, fontWeight: 800, color: "#fff",
-              background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
-              borderRadius: 5, padding: "4px 8px", flexShrink: 0,
-            }}>
-              {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
-            </span>
-            <span
-              onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); }}
-              style={{
-                fontSize: 17, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}
-            >
-              {shortName}
-            </span>
-            {tabBadge && (
-              <span style={{
-                fontSize: 14, fontWeight: 600, color: tabBadge.color,
-                background: `${tabBadge.color}1c`, padding: "4px 9px",
-                borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
-              }}>
-                {tabBadge.label}
-              </span>
-            )}
-            {order.orderSource && order.orderSource !== "WB" && (() => {
-              const sb = SOURCE_BADGE_META[order.orderSource];
-              if (!sb) return null;
-              return (
-                <span style={{
-                  fontSize: 14, fontWeight: 600, color: sb.color,
-                  background: `${sb.color}1c`, padding: "3px 8px",
-                  borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
-                }}>
-                  {sb.label}
-                </span>
-              );
-            })()}
-          </div>
-          {/* ❄️ Вход в заморозку — рядом со звездой: оба «признака поверх
-              статуса», и оба должны быть доступны из любой вкладки. */}
-          {!order.heldAt && (
-            <button
-              className="twa-press-sm"
-              aria-label="Заморозить заказ"
-              onClick={e => { e.stopPropagation(); haptic.impact("light"); setHoldOpen(true); }}
-              style={{
-                background: "transparent", border: "none", cursor: "pointer",
-                fontSize: 19, padding: "4px 4px", flexShrink: 0, opacity: 0.35,
-              }}
-            >
-              ❄️
+      {/* ── Шапка развёрнутой шторки ───────────────────────────────────────
+          Когда шторку потянули вверх, крупная шапка уезжает со скроллом, а
+          сверху остаётся строка «ник · код · сумма» и переключатель разделов.
+          Выкупить можно с любого места: кнопки — в закреплённом низе. */}
+      <div className={`twa-os-bar${sheetExpanded ? " is-on" : ""}`} aria-hidden={!sheetExpanded}>
+        <div className="twa-os-bar-row">
+          <button type="button" className="twa-os-collapse twa-press-sm" aria-label="Свернуть карточку" tabIndex={sheetExpanded ? 0 : -1}
+            onClick={() => { haptic.select(); collapseSheet(); }}>⌄</button>
+          <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "ник не указан"}</strong>
+          {codeChip(true)}
+          <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
+        </div>
+        <div className="twa-os-tabs" role="tablist" aria-label="Разделы карточки">
+          {SHEET_SECTIONS.map(sec => (
+            <button key={sec.id} type="button" role="tab" tabIndex={sheetExpanded ? 0 : -1}
+              aria-selected={section === sec.id}
+              className={`twa-press-sm${section === sec.id ? " is-on" : ""}`}
+              onClick={() => jumpTo(sec.id)}>
+              {sec.label}
             </button>
-          )}
-          <button
-            className="twa-press-sm"
-            onClick={e => { e.stopPropagation(); haptic.impact("light"); onToggleFavorite(); }}
-            style={{
-              background: "transparent", border: "none", cursor: "pointer",
-              fontSize: 22, padding: "4px 6px", flexShrink: 0,
-              opacity: order.isFavorite ? 1 : 0.35,
-            }}
-          >
-            {order.isFavorite ? "★" : "☆"}
-          </button>
-        </div>
-
-        {/* 👉 «Дальше» — то же правило, что в досье сайта (`nextStepFor`). */}
-        {(() => {
-          const next = sharedNextStep(order as never, live, order.remindersSent ?? 0);
-          return next ? (
-            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.35, color: TONE[next.tone] }}>
-              <span style={{ color: C.textTertiary, fontWeight: 500 }}>👉 Дальше: </span>{next.text}
-            </div>
-          ) : null;
-        })()}
-
-        {/* Возраст: сумма, ник и код уже стоят в шапке шторки — здесь только
-            время (20.10: раньше сумма повторялась трижды). Второй таймер —
-            лишь когда заказ стоит в очереди меньше, чем живёт, и с подписью. */}
-        <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 12 }}>
-          <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
-            ⏱ {fmtAge(timeRef)} {inBuyoutQueue ? "с создания" : "ждёт"}
-          </span>
-          {inBuyoutQueue && fmtAge(order.pendingAt!) !== fmtAge(timeRef) && (
-            <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(order.pendingAt!), ...tabular }}>
-              🛒 {fmtAge(order.pendingAt!)} в очереди
-            </span>
-          )}
-          {/* Бот шлёт три напоминания (3 ч / 24 ч / 72 ч) и замолкает навсегда. */}
-          {order.status === "AWAITING_GAMEPASS" && (order.remindersSent ?? 0) > 0 && (
-            <span
-              title="Напоминаний отправлено"
-              style={{ fontSize: 15, fontWeight: 600, color: (order.remindersSent ?? 0) >= 3 ? C.orange : C.textTertiary, ...tabular }}>
-              🔔 {order.remindersSent} из 3
-            </span>
-          )}
+          ))}
         </div>
       </div>
 
+      <div ref={sheetBodyRef} className="twa-os-head">
+        <span className="twa-oc-top">
+          {sourceMeta && <b style={{ color: sourceMeta.color }}>{sourceMeta.label}</b>}
+          {tabBadge && tabBadge.label !== sourceMeta?.label && <b style={{ color: tabBadge.color }}>{tabBadge.label}</b>}
+          <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>
+            {boughtAt ? fmtTxDate(boughtAt) : fmtAge(timeRef)}
+          </small>
+          {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
+          {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
+          <em className="twa-os-buyer">{shortName}</em>
+          {codeChip()}
+        </span>
+        <span className="twa-os-amount">
+          <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
+          {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
+          {queueAge && <span>🛒 {queueAge} в очереди</span>}
+        </span>
+        {order.status !== "REJECTED" && <ReadinessTrack r={readiness} labeled />}
+      </div>
+
+      <div className="twa-os-body">
       {/* ❄️ Плашка заморозки — ПЕРЕД всеми полями.
           Раньше причину «почему нельзя трогать» приходилось вычитывать из
           заметки наравне со служебным логом; здесь она первое, что видно. */}
       {order.heldAt && (
         <div style={{
-          display: "flex", gap: 11, margin: "4px 16px 2px", padding: "13px 14px",
+          display: "flex", gap: 11, margin: 0, padding: "13px 14px",
           borderRadius: 14, background: `${ICE}1a`, border: `1px solid ${ICE}57`,
         }}>
           <span style={{ fontSize: 19, lineHeight: 1.2 }}>❄️</span>
@@ -2668,65 +2811,286 @@ function OrderCard({
         </div>
       )}
 
-      {/* Data rows */}
-      <div style={{ padding: "6px 16px 12px" }}>
-        {order.robloxUsername && (
-          <DataRow icon="🎮" copyText={order.robloxUsername}>
-            <span style={{ fontWeight: 600 }}>{order.robloxUsername}</span>
-          </DataRow>
+
+        {/* 1. Ник Roblox — крупно, тап копирует. По нику проверяют аккаунт и
+            ищут пасс; на сайте на этом месте стоит ID пасса (там выкупают с
+            компьютера и вставляют ID, а с телефона чаще ищут по нику). */}
+        {nick ? (
+          <button
+            type="button"
+            className={`twa-os-hero twa-press-sm${copied === "nick" ? " is-done" : ""}${nickIsGuess ? " is-guess" : ""}`}
+            onClick={() => copyAnd(nick, "nick", `Ник ${nick} скопирован`)}
+          >
+            <span>
+              <small>{copied === "nick" ? "Скопирован" : nickIsGuess ? "Вероятный ник · тап — скопировать" : "Ник Roblox · тап — скопировать"}</small>
+              <strong>{nick}</strong>
+            </span>
+            <i aria-hidden="true">{copied === "nick" ? "✓" : "⧉"}</i>
+          </button>
+        ) : (
+          <div className="twa-os-hero is-empty">
+            <span><small>Ник Roblox</small><strong>не указан</strong></span>
+          </div>
         )}
-        {!order.robloxUsername && order.probableNick && (
-          <DataRow icon="👁" copyText={order.probableNick}>
-            <span style={{ fontWeight: 600, color: C.yellow }}>{order.probableNick}</span>
-            <span style={{ fontSize: 14, color: C.textTertiary }}> · вероятный ник</span>
-          </DataRow>
-        )}
-        {/* Разбитый выкуп: список частей вместо одной ссылки. Без него
-            «выкуплено 1 из 3» выглядит как зависший заказ без объяснения. */}
+
+        {/* 2. ID пасса и ссылка на него. Разбитый заказ — список частей. */}
         {split.length > 0 ? (
           <SplitPartsBlock parts={split} orderAmount={order.amount} orderId={order.id} token={token} onChanged={onMoved} />
-        ) : order.gamepassUrl && (
+        ) : passId ? (
+          <div className="twa-os-pass">
+            <div className="twa-os-pass-row">
+              <span>
+                <small>ID пасса</small>
+                <strong>{passId}</strong>
+              </span>
+              <button type="button" className={`twa-os-iconbtn twa-press-sm${copied === "pass" ? " is-done" : ""}`}
+                aria-label="Скопировать ID пасса" onClick={() => void copyPassAndVerify(passId, "ID пасса")}>
+                {copied === "pass" ? "✓" : "⧉"}
+              </button>
+            </div>
+            <a className="twa-os-pass-link" href={`https://www.roblox.com/game-pass/${passId}`} target="_blank" rel="noreferrer">
+              roblox.com/game-pass/{passId} <span aria-hidden="true">↗</span>
+            </a>
+            {live && (
+              <span className="twa-os-pass-state" style={{ color: live.isForSale === false ? C.red : live.priceMismatch ? C.orange : C.green }}>
+                {live.isForSale === false
+                  ? "⛔ снят с продажи"
+                  : live.priceMismatch && live.livePrice != null
+                    ? `⚠ ${live.livePrice.toLocaleString("ru-RU")} R$ — не та цена`
+                    : `✓ ${live.livePrice != null ? `${live.livePrice.toLocaleString("ru-RU")} R$ · ` : ""}в продаже, цена сходится`}
+              </span>
+            )}
+          </div>
+        ) : order.gamepassUrl ? (
           <DataRow icon="🔗" copyText={order.gamepassUrl}>
             <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
           </DataRow>
+        ) : null}
+
+        {/* «Дальше» — только когда есть что сказать сверх полоски готовности:
+            зелёное «выкупить пасс за N» она уже показала. */}
+        {(() => {
+          if (order.heldAt) return null;
+          const next = sharedNextStep(order as never, live, order.remindersSent ?? 0, { packDupIn });
+          if (!next || next.tone === "green") return null;
+          const color = TONE[next.tone];
+          const quiet = next.tone === "muted";
+          return (
+            <div className={`twa-oc-next${quiet ? " is-quiet" : ""}`} style={quiet ? undefined : { color, background: `${color}14`, borderColor: `${color}33` }}>
+              <small>Дальше</small>
+              <span>{next.text}</span>
+            </div>
+          );
+        })()}
+
+        {/* 3. Заметки. */}
+        <NotesEditor order={order} onSave={onSaveNote} />
+
+        {/* Вход в полную шторку: потянуть вверх или сразу в раздел. */}
+        {!sheetExpanded && (
+          <div className="twa-os-more">
+            <span className="twa-os-pull" aria-hidden="true">⌃ Потяни вверх — или сразу в раздел</span>
+            <div>
+              {SHEET_SECTIONS.map(sec => (
+                <button key={sec.id} type="button" className="twa-os-chip twa-press-sm" onClick={() => jumpTo(sec.id)}>{sec.label}</button>
+              ))}
+            </div>
+          </div>
         )}
-        {/* Прайс-гард (Ш4): расхождение живой цены пасса с номиналом видно до
-            нажатия «Выкупить» — сервер такой выкуп всё равно заблокирует. */}
-        {live?.priceMismatch && live.livePrice != null && (
-          <DataRow icon="⚠️">
-            <span style={{ color: C.orange, fontWeight: 600 }}>
-              цена ≠ номиналу: пасс {live.livePrice.toLocaleString("ru-RU")} R$, ожид {live.expected.toLocaleString("ru-RU")} R$
+      </div>
+
+      {/* ── Разделы полной шторки ─────────────────────────────────────────── */}
+      <section data-form="gamepass" className="twa-os-sec">
+        <h3>Пасс</h3>
+      {/* ── 🎮 Геймпасс заказа: одно меню на четыре инструмента ──────────────
+          Было четыре отдельных блока со своими кнопками и своими словами —
+          «Вставить ссылку», «Ещё пассы ника», «Разбить», а ключ вообще только
+          в меню «···». Теперь список один (`@/lib/gamepass-tools`, тот же, что
+          на сайте), а раскрывается ровно тот инструмент, который выбрали. */}
+      {tools.length > 0 && (
+        <div style={{ padding: "0 14px 10px", display: "grid", gap: 8 }}>
+          <GamepassToolRows
+            order={order}
+            active={tool}
+            handlers={{ key: true, link: true, nick: true, ask: true, split: true }}
+            hints={split.length > 0
+              ? { split: `выкуплено ${split.filter(part => part.purchasedAt).length} из ${split.length}` }
+              : undefined}
+            onPick={id => {
+              if (id === "split") { setTool(null); setSplitOpen(true); return; }
+              setTool(prev => (prev === id ? null : id));
+            }}
+          />
+          {tool === "link" && (
+            <AttachGamepassForm
+              order={order}
+              token={token}
+              onDone={() => { setTool(null); onMoved(); }}
+              onClose={() => setTool(null)}
+            />
+          )}
+          {tool === "key" && (
+            <KeyCreateForm
+              order={order}
+              token={token}
+              onDone={() => { setTool(null); onMoved(); }}
+              onClose={() => setTool(null)}
+            />
+          )}
+          {tool === "ask" && (
+            <AskBuyerForm key={order.id} order={order} token={token} onClose={() => setTool(null)} />
+          )}
+          {tool === "nick" && (
+            <NickGamepasses
+              orderId={order.id}
+              wbCode={order.wbCode}
+              orderAmount={order.amount}
+              currentId={parseGamepassRef(order.gamepassUrl)}
+              parts={split}
+              splittable={isSplittable}
+              token={token}
+              autoOpen
+              onChanged={onMoved}
+              onSplitWith={gamepassId => { setTool(null); setSplitSeed(gamepassId); setSplitOpen(true); }}
+            />
+          )}
+        </div>
+      )}
+
+
+      {/* 👁 GP-watch: вероятный ник есть, подтверждённого нет — найти ГП и оповестить */}
+      {showGpWatch && (
+        <div style={{ padding: "0 14px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {gpwPassId && (
+            <div style={{
+              padding: "8px 10px", background: `${C.green}14`, borderRadius: 8,
+              fontSize: 14, color: C.green, display: "flex", alignItems: "center", gap: 6,
+              flexWrap: "wrap",
+            }}>
+              <span style={{ fontWeight: 600 }}>👁 ГП найден по нику — клиент оповещён, ждём ✅</span>
+              <a
+                href={`https://www.roblox.com/game-pass/${gpwPassId}`}
+                target="_blank" rel="noreferrer"
+                onClick={e => e.stopPropagation()}
+                style={{ color: C.blue, fontSize: 14 }}
+              >
+                game-pass/{gpwPassId}
+              </a>
+            </div>
+          )}
+          <button className="twa-press-sm" disabled={gpwLoading}
+            onClick={e => { e.stopPropagation(); gpwNotify(); }}
+            style={{
+              width: "100%", padding: "10px", borderRadius: 10,
+              border: `1px solid ${gpwPassId ? C.textTertiary + "44" : C.yellow + "55"}`,
+              background: "transparent", color: gpwPassId ? C.textSecondary : C.yellow,
+              fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: gpwLoading ? 0.5 : 1,
+            }}>
+            {gpwLoading ? "Ищу пасс на Roblox…" : gpwPassId ? "📣 Оповестить клиента ещё раз" : "🔎 Найти пасс по нику и оповестить"}
+          </button>
+        </div>
+      )}
+
+      {/* ❌ П3: клиент отверг GP-watch-ник — вероятного ника больше нет, дожать вручную */}
+      {order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername && (
+        <div style={{
+          margin: "0 14px 10px", padding: "8px 10px",
+          background: `${C.red}14`, borderRadius: 8,
+          fontSize: 14, color: C.red,
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontWeight: 600 }}>❌ Клиент сказал: не его ник</span>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>
+            {new Date(order.gpWatchDeclinedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+            {" · "}ждём правильный ник — дожать вручную
+          </span>
+        </div>
+      )}
+
+        {/* Повтор с закрытым заказом — справка, а не флаг: выкуп идёт с разных
+            аккаунтов, и другой аккаунт тот же пасс купит. */}
+        {live?.reusedIn && !packDupIn && (
+          <p className="twa-os-ref">♻ Этот пасс раньше выкупали в {live.reusedIn} — для справки</p>
+        )}
+      </section>
+
+      <section data-form="buyer" className="twa-os-sec">
+        <h3>Покупатель</h3>
+        <div className="twa-os-group">
+          <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); openContact(order.user); }}>
+            <span className={`twa-os-ic is-${platform}`}>{platform === "tg" ? "TG" : platform === "vk" ? "VK" : "—"}</span>
+            <span className="twa-os-tx"><b style={{ color: "#8cc4ff" }}>{shortName}</b><small>{platform === "—" ? "нет канала связи" : "написать покупателю"}</small></span>
+            <em>Написать ›</em>
+          </button>
+          {order.heldAt ? (
+            <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); void onRunAction("unhold"); }}>
+              <span className="twa-os-ic" style={{ background: `${ICE}24` }}>❄️</span>
+              <span className="twa-os-tx"><b>Заморожен</b><small>{order.heldReason ?? "не выкупать"}</small></span>
+              <span className="twa-os-tog is-on" aria-hidden="true" />
+            </button>
+          ) : !["COMPLETED", "REJECTED"].includes(order.status) && (
+            <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); setHoldOpen(true); setScrollTo("hold"); }}>
+              <span className="twa-os-ic" style={{ background: `${ICE}24` }}>❄️</span>
+              <span className="twa-os-tx"><b>Заморозить</b><small>не выкупать, но и не удалять</small></span>
+              <span className="twa-os-tog" aria-hidden="true" />
+            </button>
+          )}
+          <button type="button" className="twa-os-row twa-press-sm" aria-pressed={!!order.isFavorite} onClick={() => { haptic.impact("light"); onToggleFavorite(); }}>
+            <span className="twa-os-ic" style={{ background: `${C.yellow}24`, color: C.yellow }}>★</span>
+            <span className="twa-os-tx"><b>В избранное</b><small>держать под рукой</small></span>
+            <span className={`twa-os-tog${order.isFavorite ? " is-on" : ""}`} aria-hidden="true" />
+          </button>
+          {canPrioritize && (
+            <button type="button" className="twa-os-row twa-press-sm" aria-pressed={!!order.priorityAt} onClick={() => { haptic.impact("light"); onTogglePriority?.(); }}>
+              <span className="twa-os-ic" style={{ background: `${C.orange}24` }}>⚡</span>
+              <span className="twa-os-tx"><b>Вперёд очереди</b><small>выкупать первым</small></span>
+              <span className={`twa-os-tog${order.priorityAt ? " is-on" : ""}`} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
+      {order.vkUnreachable === true && order.user.vkId && (
+        <div style={{
+          margin: "0 14px 10px", padding: "8px 10px",
+          background: `${C.red}14`, borderRadius: 8,
+          fontSize: 14, color: C.red,
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontWeight: 600 }}>🚫 Бот не может написать (VK)</span>
+          {/* У DBS есть рабочий канал: чат WB, которым человеку пришла ссылка
+              на гейт. «Выкуплено» уходит туда автоматически — говорим это
+              здесь, чтобы красная плашка не читалась как тупик. */}
+          {order.orderSource === "WB_DBS" && (
+            <span style={{ color: C.textSecondary, fontSize: 14 }}>
+              — о выкупе скажем в чат WB
             </span>
-          </DataRow>
-        )}
-        {live?.isForSale === false && (
-          <DataRow icon="⛔">
-            <span style={{ color: C.red, fontWeight: 600 }}>геймпасс не на продаже</span>
-          </DataRow>
-        )}
-        {/* Пасс уже выкуплен по другому заказу: второй раз тот же донор его не
-            купит, а другой заплатит за то, что у нас уже есть (DIR-39544969). */}
-        {live?.reusedIn && (
-          <DataRow icon="♻️">
-            <span style={{ color: C.red, fontWeight: 600 }}>
-              Этот пасс уже выкуплен в заказе {live.reusedIn}
-            </span>
-          </DataRow>
-        )}
-        {order.buyoutErrorCode === "REGIONAL_PRICE" && (
-          <DataRow icon="🌍">
-            <span style={{ color: C.red, fontWeight: 600 }}>
-              Рег. цена на доноре — автоматическая полная замена по нику не найдена
-            </span>
-          </DataRow>
-        )}
-        {!order.isDirectOrder && (
-          <DataRow icon="📦" copyText={order.wbCode}>
-            <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 16 }}>
-              {order.wbCode}
-            </span>
-          </DataRow>
-        )}
+          )}
+          <a
+            href={`https://vk.com/id${order.user.vkId}`}
+            target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ color: C.blue, fontSize: 14, fontWeight: 600 }}
+          >
+            профиль VK — писать с личного
+          </a>
+        </div>
+      )}
+
+      {holdOpen && (
+        <div data-form="hold">
+        <HoldModal
+          order={order}
+          onHold={(reason) => onRunAction("hold", reason)}
+          onClose={() => setHoldOpen(false)}
+        />
+        </div>
+      )}
+
+      </section>
+
+      <section data-form="history" className="twa-os-sec">
+        <h3>Заказ и история</h3>
+        <div style={{ padding: "0 16px" }}>
         {/* Кто и когда выкупил. Условие «не на вкладке Готово» стояло тут потому,
             что там покупателя называет заголовок аккордеона — но у одиночной
             карточки заголовка нет, и строка исчезала вместе с ним. */}
@@ -2805,145 +3169,7 @@ function OrderCard({
           </button>
         )}
 
-        {/* Notes */}
-        <div style={{ marginTop: 8 }}>
-          <NotesEditor order={order} onSave={onSaveNote} />
         </div>
-      </div>
-
-      {/* 👁 GP-watch: вероятный ник есть, подтверждённого нет — найти ГП и оповестить */}
-      {showGpWatch && (
-        <div style={{ padding: "0 14px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
-          {gpwPassId && (
-            <div style={{
-              padding: "8px 10px", background: `${C.green}14`, borderRadius: 8,
-              fontSize: 14, color: C.green, display: "flex", alignItems: "center", gap: 6,
-              flexWrap: "wrap",
-            }}>
-              <span style={{ fontWeight: 600 }}>👁 ГП найден по нику — клиент оповещён, ждём ✅</span>
-              <a
-                href={`https://www.roblox.com/game-pass/${gpwPassId}`}
-                target="_blank" rel="noreferrer"
-                onClick={e => e.stopPropagation()}
-                style={{ color: C.blue, fontSize: 14 }}
-              >
-                game-pass/{gpwPassId}
-              </a>
-            </div>
-          )}
-          <button className="twa-press-sm" disabled={gpwLoading}
-            onClick={e => { e.stopPropagation(); gpwNotify(); }}
-            style={{
-              width: "100%", padding: "10px", borderRadius: 10,
-              border: `1px solid ${gpwPassId ? C.textTertiary + "44" : C.yellow + "55"}`,
-              background: "transparent", color: gpwPassId ? C.textSecondary : C.yellow,
-              fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: gpwLoading ? 0.5 : 1,
-            }}>
-            {gpwLoading ? "Ищу пасс на Roblox…" : gpwPassId ? "📣 Оповестить клиента ещё раз" : "🔎 Найти пасс по нику и оповестить"}
-          </button>
-        </div>
-      )}
-
-      {/* ── 🎮 Геймпасс заказа: одно меню на четыре инструмента ──────────────
-          Было четыре отдельных блока со своими кнопками и своими словами —
-          «Вставить ссылку», «Ещё пассы ника», «Разбить», а ключ вообще только
-          в меню «···». Теперь список один (`@/lib/gamepass-tools`, тот же, что
-          на сайте), а раскрывается ровно тот инструмент, который выбрали. */}
-      {tools.length > 0 && (
-        <div data-form="gamepass" style={{ padding: "0 14px 10px", display: "grid", gap: 8 }}>
-          <GamepassToolRows
-            order={order}
-            active={tool}
-            handlers={{ key: true, link: true, nick: true, ask: true, split: true }}
-            hints={split.length > 0
-              ? { split: `выкуплено ${split.filter(part => part.purchasedAt).length} из ${split.length}` }
-              : undefined}
-            onPick={id => {
-              if (id === "split") { setTool(null); setSplitOpen(true); return; }
-              setTool(prev => (prev === id ? null : id));
-            }}
-          />
-          {tool === "link" && (
-            <AttachGamepassForm
-              order={order}
-              token={token}
-              onDone={() => { setTool(null); onMoved(); }}
-              onClose={() => setTool(null)}
-            />
-          )}
-          {tool === "key" && (
-            <KeyCreateForm
-              order={order}
-              token={token}
-              onDone={() => { setTool(null); onMoved(); }}
-              onClose={() => setTool(null)}
-            />
-          )}
-          {tool === "ask" && (
-            <AskBuyerForm key={order.id} order={order} token={token} onClose={() => setTool(null)} />
-          )}
-          {tool === "nick" && (
-            <NickGamepasses
-              orderId={order.id}
-              wbCode={order.wbCode}
-              orderAmount={order.amount}
-              currentId={parseGamepassRef(order.gamepassUrl)}
-              parts={split}
-              splittable={isSplittable}
-              token={token}
-              autoOpen
-              onChanged={onMoved}
-              onSplitWith={gamepassId => { setTool(null); setSplitSeed(gamepassId); setSplitOpen(true); }}
-            />
-          )}
-        </div>
-      )}
-
-
-      {/* ❌ П3: клиент отверг GP-watch-ник — вероятного ника больше нет, дожать вручную */}
-      {order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername && (
-        <div style={{
-          margin: "0 14px 10px", padding: "8px 10px",
-          background: `${C.red}14`, borderRadius: 8,
-          fontSize: 14, color: C.red,
-          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-        }}>
-          <span style={{ fontWeight: 600 }}>❌ Клиент сказал: не его ник</span>
-          <span style={{ fontSize: 14, color: C.textTertiary }}>
-            {new Date(order.gpWatchDeclinedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
-            {" · "}ждём правильный ник — дожать вручную
-          </span>
-        </div>
-      )}
-
-      {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
-      {order.vkUnreachable === true && order.user.vkId && (
-        <div style={{
-          margin: "0 14px 10px", padding: "8px 10px",
-          background: `${C.red}14`, borderRadius: 8,
-          fontSize: 14, color: C.red,
-          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-        }}>
-          <span style={{ fontWeight: 600 }}>🚫 Бот не может написать (VK)</span>
-          {/* У DBS есть рабочий канал: чат WB, которым человеку пришла ссылка
-              на гейт. «Выкуплено» уходит туда автоматически — говорим это
-              здесь, чтобы красная плашка не читалась как тупик. */}
-          {order.orderSource === "WB_DBS" && (
-            <span style={{ color: C.textSecondary, fontSize: 14 }}>
-              — о выкупе скажем в чат WB
-            </span>
-          )}
-          <a
-            href={`https://vk.com/id${order.user.vkId}`}
-            target="_blank" rel="noreferrer"
-            onClick={e => e.stopPropagation()}
-            style={{ color: C.blue, fontSize: 14, fontWeight: 600 }}
-          >
-            профиль VK — писать с личного
-          </a>
-        </div>
-      )}
-
       {/* Rejection reason for ALL tab */}
       {(currentTab === "ALL" || currentTab === "REJECTED") && order.status === "REJECTED" && order.rejectionReason && (
         <div style={{
@@ -2967,16 +3193,6 @@ function OrderCard({
             }}>
             ↪ Переместить в другой раздел
           </button>
-        </div>
-      )}
-
-      {holdOpen && (
-        <div data-form="hold">
-        <HoldModal
-          order={order}
-          onHold={(reason) => onRunAction("hold", reason)}
-          onClose={() => setHoldOpen(false)}
-        />
         </div>
       )}
 
@@ -3078,12 +3294,13 @@ function OrderCard({
       {/* Action panel */}
       <ActionPanel
         order={order}
+        showComplete={primary?.action !== "complete"}
         currentTab={viewTab}
         token={token}
         onRunAction={onRunAction}
         onPurchaseDone={onPurchaseDone}
       />
-      </>
+      </section>
     </BottomSheet>
     </>
   );
@@ -3311,6 +3528,9 @@ export default function OrdersScreen({
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  /* Один и тот же пасс у двух заказов очереди — «пачки выкупа». Только этот
+     повтор подсвечивается; повтор с давно закрытым заказом — справка в досье. */
+  const packDup = useMemo(() => packDuplicates(allOrders, orderPassIds), [allOrders]);
   const [exiting, setExiting] = useState<Set<string>>(new Set());
   const [doneSourceFilter, setDoneSourceFilter] = useState<SourceFilter>("ALL");
   const reqIdRef = useRef(0);
@@ -3959,16 +4179,18 @@ export default function OrdersScreen({
           <div className="twa-orders-search-wrap">
             <SearchBar value={query} onChange={setQuery} />
           </div>
+        </div>
+        {/* «Создать заказ» — полноширинной кнопкой под поиском, а не «+» в углу:
+            его искали глазами (21.10). В режиме поиска не нужна — там ищут. */}
+        {!query && (
           <button
-            className="twa-order-add twa-press-sm"
+            className="twa-order-create twa-press-sm"
             type="button"
-            aria-label="Создать заказ вручную"
-            title="Создать заказ вручную"
             onClick={() => { haptic.impact("light"); setCreateMode(filter === "DIRECT" ? "direct" : "manual"); setCreateOpen(true); }}
           >
-            +
+            <span aria-hidden="true">＋</span>Создать заказ
           </button>
-        </div>
+        )}
 
         {/* Один ряд срезов вместо трёх этажей навигации. Срез назван глаголом:
             что вы собираетесь с этими заказами делать. Пустой срез из ряда
@@ -4230,6 +4452,7 @@ export default function OrdersScreen({
                     token={token}
                     currentTab={query ? orderToTab(order) : isAttentionView ? "ATTENTION" : filter}
                     live={liveMap[order.id]}
+                    packDupIn={packDup.get(order.id) ?? null}
                     exiting={exiting.has(order.id)}
                     onRunAction={(action, reason) => runAction(order, action, reason)}
                     onSaveNote={(note) => saveNote(order.id, note)}

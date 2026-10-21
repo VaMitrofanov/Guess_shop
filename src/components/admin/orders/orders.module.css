@@ -806,3 +806,35 @@
   .actionsOpen .actionMore { display: inline-flex; }
   .actionMoreToggle { display: inline-flex !important; }
 }
+
+
+/* ── 21.10: готовность и ID пасса в досье ──────────────────────────────────── */
+.readiness { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 12px; }
+.readyStep { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--o-muted); }
+.readyStep small { overflow: hidden; font-size: 12px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+.readySeg { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); }
+.seg_done { background: var(--o-green); }
+.seg_now { background: linear-gradient(90deg, #30d158, #a6f5c2, #30d158); background-size: 200% 100%; animation: readyShim 1.6s linear infinite; }
+.segPartial { animation: none; background: linear-gradient(90deg, #30d158 var(--share), rgba(48, 209, 88, .28) var(--share)); }
+.lbl_done { color: var(--o-green); }
+.lbl_now { color: #f7f5ff; }
+@keyframes readyShim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .seg_now { animation: none; } }
+
+.idHero {
+  display: flex; align-items: center; gap: 14px; width: 100%; margin-top: 12px; padding: 13px 14px 13px 16px;
+  border: 0; border-radius: 16px; color: #f7f5ff; text-align: left; cursor: pointer; font: inherit;
+  background: linear-gradient(180deg, rgba(48, 209, 88, .15), rgba(48, 209, 88, .07));
+  box-shadow: inset 0 0 0 1px rgba(48, 209, 88, .3);
+  transition: box-shadow .15s ease, transform .1s ease;
+}
+.idHero:hover { box-shadow: inset 0 0 0 1px rgba(48, 209, 88, .55); }
+.idHero:active { transform: scale(.99); }
+.idHeroText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.idHeroText small { color: var(--o-green); font-size: 11.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.idHeroText strong { overflow: hidden; font: 600 24px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+.idHeroText em { font-size: 13px; font-style: normal; font-weight: 600; }
+.idHeroIcon { flex: 0 0 auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 50px; height: 50px; border-radius: 14px; background: #30d158; color: #0d1f14; font-size: 18px; font-weight: 800; }
+.idHeroIcon kbd { padding: 0 4px; border-radius: 4px; background: rgba(13, 31, 20, .18); color: #0d1f14; font-size: 10px; font-weight: 700; }
+.idHeroDone .idHeroIcon { background: #f7f5ff; }
+.refNote { margin-bottom: 8px; color: var(--o-muted); font-size: 12.5px; }

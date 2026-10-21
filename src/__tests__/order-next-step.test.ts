@@ -1,4 +1,4 @@
-import { nextStepFor, primaryActionFor, sourceLabel, statusLabel, type PresentableOrder } from "@/lib/order-presentation";
+import { nextStepFor, orderFlag, packDuplicates, primaryActionFor, readinessFor, sourceLabel, statusLabel, type PresentableOrder } from "@/lib/order-presentation";
 
 const base: PresentableOrder = {
   amount: 800, status: "PENDING", wbCode: "TEST1", gamepassUrl: "https://www.roblox.com/game-pass/1",
@@ -43,12 +43,64 @@ describe("слова вместо enum", () => {
 });
 
 describe("главное действие и живая проверка пасса (20.10)", () => {
-  test("пасс выкуплен в другом заказе — не «Выкуплено», а «Написать»", () => {
-    expect(primaryActionFor(base, { reusedIn: "OTHER1" })?.kind).toBe("contact");
+  test("пасс снят с продажи — не «Выкуплено», а «Написать»", () => {
     expect(primaryActionFor(base, { isForSale: false })?.kind).toBe("contact");
+  });
+  test("пасс уже покупали в закрытом заказе — «Выкуплено» остаётся, флага нет: это справка (21.10, 3FBF66L)", () => {
+    expect(primaryActionFor(base, { reusedIn: "OTHER1" })?.action).toBe("complete");
+    expect(orderFlag(base, { reusedIn: "OTHER1" })?.text ?? "").not.toMatch(/OTHER1/);
+    expect(nextStepFor(base, { reusedIn: "OTHER1" })?.tone).toBe("green");
+  });
+  test("тот же пасс у двух заказов одной очереди — оранжевое «с другого аккаунта»", () => {
+    expect(orderFlag(base, null, 0, { packDupIn: "TWIN1" })).toEqual(expect.objectContaining({ tone: "orange" }));
+    expect(nextStepFor(base, null, 0, { packDupIn: "TWIN1" })?.text).toMatch(/другого аккаунта.*TWIN1/);
+    expect(primaryActionFor(base)?.action).toBe("complete");
   });
   test("без живой проверки или при годном пассе — «Выкуплено»", () => {
     expect(primaryActionFor(base)?.action).toBe("complete");
     expect(primaryActionFor(base, { isForSale: true, priceMismatch: false })?.action).toBe("complete");
+  });
+});
+
+describe("повтор пасса внутри очереди", () => {
+  const row = (id: string, pass: string, status = "PENDING", heldAt: string | null = null) =>
+    ({ id, wbCode: `C${id}`, status, heldAt, pass });
+  test("пара с одним пассом подсвечивает друг друга, закрытый и замороженный не в счёт", () => {
+    const dup = packDuplicates(
+      [row("1", "77"), row("2", "77"), row("3", "88"), row("4", "88", "COMPLETED"), row("5", "88", "PENDING", "x")],
+      o => [o.pass],
+    );
+    expect(dup.get("1")).toBe("C2");
+    expect(dup.get("2")).toBe("C1");
+    expect(dup.has("3")).toBe(false);
+  });
+});
+
+describe("готовность к выкупу", () => {
+  test("пасс есть и годен — «Готов к выкупу», шаг выкупа текущий", () => {
+    const r = readinessFor(base, { isForSale: true });
+    expect(r.ready).toBe(true);
+    expect(r.label).toBe("Готов к выкупу");
+    expect(r.steps).toEqual(["done", "done", "done", "now"]);
+  });
+  test("ждёт пасс — оранжевое «Ждём пасс», не готов", () => {
+    const r = readinessFor({ ...base, status: "AWAITING_GAMEPASS", gamepassUrl: null, robloxUsername: null });
+    expect(r.ready).toBe(false);
+    expect(r.label).toBe("Ждём пасс");
+    expect(r.steps[2]).toBe("wait");
+  });
+  test("пасс снят — шаг пасса плохой, выкупать нельзя", () => {
+    const r = readinessFor(base, { isForSale: false });
+    expect(r.ready).toBe(false);
+    expect(r.steps[2]).toBe("bad");
+  });
+  test("разбитый заказ: доля выкупленных частей в шаге «Выкуп»", () => {
+    const r = readinessFor({ ...base, splitGamepasses: [{ purchasedAt: "x" }, { purchasedAt: null }] });
+    expect(r.label).toBe("Выкуп · 1 из 2");
+    expect(r.buyoutShare).toBe(0.5);
+  });
+  test("заморожен и выкуплен — не «готов»", () => {
+    expect(readinessFor({ ...base, heldAt: "x" }).ready).toBe(false);
+    expect(readinessFor({ ...base, status: "COMPLETED" }).steps).toEqual(["done", "done", "done", "done"]);
   });
 });

@@ -175,11 +175,15 @@ export function primaryActionFor(order: PresentableOrder, live?: GpLive | null):
   // купив не всё», и клиент получил бы меньше оплаченного.
   if (split.length > 0 && split.some(part => !part.purchasedAt)) return null;
   if (!hasGamepass) return null;
-  /* Живая проверка говорит «этот пасс не купить»: он уже выкуплен по другому
-     заказу или снят с продажи. До 20.10 рядом с красным флагом стояла зелёная
-     «Выкуплено» — кнопка звала сделать то, что флаг запрещал. Теперь главное
-     действие — написать покупателю за новым пассом; «Выкуплено» остаётся в меню. */
-  if (live?.reusedIn || live?.isForSale === false)
+  /* Пасс снят с продажи — купить его нельзя никому, главное действие —
+     написать покупателю. «Выкуплено» остаётся в меню.
+
+     Повтор пасса (`reusedIn`) сюда НЕ относится. 20.10 он тоже прятал
+     «Выкуплено», но выкуп идёт с разных мелких аккаунтов, и другой аккаунт
+     тот же пасс покупает спокойно: в базе 59 закрытых повторов, а 3FBF66L
+     21.10 админ закрыл через меню, потому что кнопки не было. Повтор —
+     предупреждение «бери с другого аккаунта», а не запрет. */
+  if (live?.isForSale === false)
     return { kind: "contact", icon: "✉", label: "Написать", labelLong: "Написать за новым пассом", tone: "blue" };
   return { kind: "action", action: "complete", icon: "✓", label: "Выкуплено", tone: "green" };
 }
@@ -199,17 +203,18 @@ export function orderFlag(
    * в таблице другого места для прогресса частей нет; в TWA прогресс уже
    * стоит на самой карточке, и второй раз он был бы шумом.
    */
-  options: { splitProgress?: boolean } = {},
+  options: { splitProgress?: boolean; packDupIn?: string | null } = {},
 ): { text: string; tone: Tone } | null {
   if (order.heldAt) return { text: `❄️ ${order.heldReason ?? "заморожен — не выкупать"}`, tone: "ice" };
   if (order.buyoutErrorCode === "REGIONAL_PRICE")
     return { text: "🌍 рег. цена на доноре — замена по нику не найдена", tone: "red" };
   if (live?.isForSale === false) return { text: "⛔ геймпасс снят с продажи", tone: "red" };
-  /* Пасс уже выкуплен по другому заказу. Второй раз тот же донор его не купит
-     (`AlreadyOwned`), а другой заплатит за то, что у нас уже есть. Сервер это
-     знал (`gp-live-check.reusedIn`) и молчал — строка появилась 08.09.2026
-     после DIR-39544969, где клиент подставил пасс из своего прошлого заказа. */
-  if (live?.reusedIn) return { text: `♻️ пасс уже выкуплен в ${live.reusedIn} — второй раз не покупается`, tone: "red" };
+  /* Тот же пасс стоит ещё в одном заказе ТЕКУЩЕЙ очереди — то есть в одной
+     пачке выкупа. Это единственный повтор, о котором кричим: оба заказа уйдут
+     в работу рядом, и одним аккаунтом второй уже не купить (`AlreadyOwned`).
+     Повтор с закрытым заказом (`reusedIn`) с 21.10 строкой не считается —
+     выкуп идёт с разных аккаунтов, и это справка в досье, а не флаг. */
+  if (options.packDupIn) return { text: `♻️ тот же пасс в ${options.packDupIn} — второй брать с другого аккаунта`, tone: "orange" };
   if (live?.priceMismatch && live.livePrice != null)
     return {
       text: `⚠ цена пасса ${live.livePrice.toLocaleString("ru-RU")} R$ ≠ ${(live.expected ?? grossOf(order.amount)).toLocaleString("ru-RU")} R$`,
@@ -311,6 +316,7 @@ export function nextStepFor(
   order: PresentableOrder,
   live?: GpLive | null,
   reminders = order.remindersSent ?? 0,
+  options: { packDupIn?: string | null } = {},
 ): { text: string; tone: Tone } | null {
   if (order.heldAt) return { text: "снять заморозку, когда причина отпадёт — до этого не выкупать", tone: "ice" };
   if (order.status === "COMPLETED" || order.status === "REJECTED") return null;
@@ -343,7 +349,7 @@ export function nextStepFor(
 
   // PENDING / IN_PROGRESS
   if (live?.isForSale === false) return { text: "попросить покупателя вернуть пасс в продажу", tone: "red" };
-  if (live?.reusedIn) return { text: `нужен новый пасс — этот уже выкуплен в ${live.reusedIn}`, tone: "red" };
+  if (options.packDupIn) return { text: `выкупить с другого аккаунта — тот же пасс в ${options.packDupIn} из этой очереди`, tone: "orange" };
   if (live?.priceMismatch && live.livePrice != null)
     return {
       text: `проверить цену: пасс ${live.livePrice.toLocaleString("ru-RU")} R$, нужен ${(live.expected ?? grossOf(order.amount)).toLocaleString("ru-RU")} R$`,
@@ -355,4 +361,85 @@ export function nextStepFor(
     return { text: `выкупить оставшиеся части: ${left} из ${split.length}`, tone: "green" };
   }
   return { text: `выкупить пасс за ${grossOf(order.amount).toLocaleString("ru-RU")} R$`, tone: "green" };
+}
+
+/* ── Повтор пасса внутри очереди («пачки выкупа») ────────────────────────────
+   Заказы, ждущие выкупа, с одним и тем же ID пасса. Ключ — заказ, значение —
+   код ДРУГОГО заказа с тем же пассом (первого по списку). Считается по тому,
+   что лежит на экране: пачка — это и есть текущая очередь.
+   ────────────────────────────────────────────────────────────────────────── */
+
+export function packDuplicates<T extends { id: string; wbCode: string; status: string; heldAt: string | null }>(
+  orders: T[],
+  passIdsOf: (order: T) => string[],
+): Map<string, string> {
+  const byPass = new Map<string, T[]>();
+  for (const order of orders) {
+    if (order.heldAt || !["PENDING", "IN_PROGRESS"].includes(order.status)) continue;
+    for (const id of new Set(passIdsOf(order))) {
+      const list = byPass.get(id) ?? [];
+      list.push(order);
+      byPass.set(id, list);
+    }
+  }
+  const out = new Map<string, string>();
+  for (const list of byPass.values()) {
+    if (list.length < 2) continue;
+    for (const order of list) {
+      const other = list.find(o => o.id !== order.id);
+      if (other && !out.has(order.id)) out.set(order.id, other.wbCode);
+    }
+  }
+  return out;
+}
+
+/* ── Готовность к выкупу ─────────────────────────────────────────────────────
+   Четыре шага, которые проходит каждый заказ: оплата → ник → пасс → выкуп.
+   Карточка рисует их полоской, а над полоской — одно слово состояния
+   («Готов к выкупу», «Ждём пасс»). Правило общее для TWA и сайта; цвет каждый
+   экран берёт из тона сам.
+   ────────────────────────────────────────────────────────────────────────── */
+
+export type StepState = "done" | "now" | "wait" | "bad" | "todo";
+
+export interface Readiness {
+  /** Оплата · Ник · Пасс · Выкуп. */
+  steps: [StepState, StepState, StepState, StepState];
+  /** Доля закрытых частей у разбитого заказа (0..1) — для шага «Выкуп». */
+  buyoutShare: number;
+  label: string;
+  tone: Tone;
+  /** Заказ можно выкупать прямо сейчас. */
+  ready: boolean;
+}
+
+export const READINESS_STEPS = ["Оплата", "Ник", "Пасс", "Выкуп"] as const;
+
+export function readinessFor(order: PresentableOrder & { probableNick?: string | null }, live?: GpLive | null): Readiness {
+  const split = order.splitGamepasses ?? [];
+  const hasGamepass = !!order.gamepassUrl || split.length > 0;
+  const bought = split.filter(p => p.purchasedAt).length;
+  const share = split.length > 0 ? bought / split.length : 0;
+
+  const paid: StepState = ["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status) ? "wait" : "done";
+  const nick: StepState = order.robloxUsername || hasGamepass ? "done" : "wait";
+  const passBad = live?.isForSale === false || (!!live?.priceMismatch && live.livePrice != null);
+  const pass: StepState = !hasGamepass ? "wait" : passBad || order.buyoutErrorCode === "REGIONAL_PRICE" ? "bad" : "done";
+
+  const make = (steps: Readiness["steps"], label: string, tone: Tone, ready = false): Readiness =>
+    ({ steps, buyoutShare: share, label, tone, ready });
+
+  if (order.status === "COMPLETED") return make(["done", "done", "done", "done"], "Выкуплен", "green");
+  if (order.status === "REJECTED") return make(["todo", "todo", "todo", "todo"], "Отменён", "red");
+  if (order.heldAt) return make([paid, nick, pass, "todo"], "Заморожен", "ice");
+  if (paid === "wait") return make(["wait", "todo", "todo", "todo"], "Ждём оплату", "muted");
+  if (order.status === "ERROR") return make([paid, nick, hasGamepass ? "bad" : "wait", "todo"], "Ошибка", "red");
+  if (order.status === "AWAITING_GAMEPASS" || !hasGamepass) {
+    const guess = !order.robloxUsername && !!order.probableNick;
+    return make([paid, guess ? "wait" : nick, "wait", "todo"], guess ? "Ник под вопросом" : "Ждём пасс", "orange");
+  }
+  if (live?.isForSale === false) return make([paid, nick, "bad", "todo"], "Пасс снят", "red");
+  if (pass === "bad") return make([paid, nick, "bad", "todo"], "Цена не та", "orange");
+  if (split.length > 0 && bought > 0) return make([paid, nick, pass, "now"], `Выкуп · ${bought} из ${split.length}`, "green", true);
+  return make([paid, nick, pass, "now"], "Готов к выкупу", "green", true);
 }

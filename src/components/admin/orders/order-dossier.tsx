@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ageBasis, ageTone, fmtAge, fmtUnlockDate, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
-  primaryActionFor, robuxUnlockAt, nextStepFor, sourceLabel,
+  primaryActionFor, robuxUnlockAt, nextStepFor, sourceLabel, readinessFor, READINESS_STEPS,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
@@ -46,11 +46,13 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function OrderDossier({
-  order, live, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onEdit, onToast, onChanged,
+  order, live, packDupIn = null, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onEdit, onToast, onChanged,
   initialTool = null,
 }: {
   order: AdminOrder;
   live?: LiveCheck;
+  /** Тот же пасс в другом заказе этой очереди — код того заказа. */
+  packDupIn?: string | null;
   onClose: () => void;
   onPrimary: () => void;
   onHold: () => void;
@@ -123,10 +125,12 @@ export default function OrderDossier({
 
   const lane = laneOf(order);
   const badge = orderBadge(order);
-  const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
+  const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true, packDupIn });
   const action = primaryActionFor(order, live);
   const [moreActions, setMoreActions] = useState(false);
-  const next = nextStepFor(order, live);
+  const next = nextStepFor(order, live, order.remindersSent ?? 0, { packDupIn });
+  const readiness = readinessFor(order as never, live);
+  const [idCopied, setIdCopied] = useState(false);
   /* Флаг под пассом — только то, чего не сказали заголовок блока и строка
      цены: «цена не сходится» и «продаётся, цена сходится» там уже есть. */
   const flagShown = flag && !(live?.priceMismatch && flag.tone === "orange") && flag.tone !== "green" ? flag : null;
@@ -230,7 +234,49 @@ export default function OrderDossier({
           {!order.robloxUsername && order.probableNick && " (вероятный)"} · {clientLabel(order)}
           {href && <> · <a href={href} target="_blank" rel="noreferrer">написать</a></>}
         </div>
-        {next && (
+        {order.status !== "REJECTED" && (
+          <div className={styles.readiness} aria-label={`Готовность: ${readiness.label}`}>
+            {readiness.steps.map((step, i) => {
+              const tint = step === "wait" || step === "bad" ? TONE_COLOR[readiness.tone] : undefined;
+              const partial = i === 3 && step === "now" && readiness.buyoutShare > 0;
+              return (
+                <div key={READINESS_STEPS[i]} className={styles.readyStep} style={tint ? { color: tint } : undefined}>
+                  <span
+                    className={`${styles.readySeg} ${styles[`seg_${step}`] ?? ""} ${partial ? styles.segPartial : ""}`}
+                    style={partial ? { ["--share" as string]: `${Math.round(readiness.buyoutShare * 100)}%` } : tint ? { background: tint } : undefined}
+                  />
+                  <small className={styles[`lbl_${step}`] ?? ""}>{step === "done" ? "✓ " : ""}{READINESS_STEPS[i]}{step === "now" ? " ← сейчас" : ""}</small>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {/* ID пасса — главное в досье: на компьютере выкупают вставкой ID.
+            Крупная плашка, клик (или C) копирует. В TWA на этом месте ник. */}
+        {ids.length > 0 && (
+          <button
+            type="button"
+            className={`${styles.idHero} ${idCopied ? styles.idHeroDone : ""}`}
+            onClick={() => {
+              copyText(ids.join("\n"));
+              onToast(ids.length > 1 ? `⧉ ${ids.length} ID пассов` : `⧉ ${ids[0]}`);
+              setIdCopied(true);
+              window.setTimeout(() => setIdCopied(false), 1400);
+            }}
+          >
+            <span className={styles.idHeroText}>
+              <small>{idCopied ? "Скопировано" : ids.length > 1 ? `${ids.length} ID пассов · клик — скопировать все` : "ID пасса · клик — скопировать"}</small>
+              <strong>{ids.length > 1 ? ids.join(" · ") : ids[0]}</strong>
+              {live && ids.length === 1 && (
+                <em style={{ color: live.isForSale === false ? "var(--o-red)" : live.priceMismatch ? "var(--o-orange)" : "var(--o-green)" }}>
+                  {live.isForSale === false ? "⛔ снят с продажи" : live.priceMismatch ? "⚠ цена не сходится" : `✓ ${num(grossOf(order.amount))} R$ · в продаже, цена сходится`}
+                </em>
+              )}
+            </span>
+            <span className={styles.idHeroIcon} aria-hidden="true">{idCopied ? "✓" : "⧉"}<kbd>C</kbd></span>
+          </button>
+        )}
+        {next && next.tone !== "green" && (
           <div className={styles.nextStep} style={{ color: TONE_COLOR[next.tone] }}>
             <span>👉 Дальше:</span> {next.text}
           </div>
@@ -242,15 +288,6 @@ export default function OrderDossier({
               {action.icon} {action.labelLong ?? action.label}
               {action.action === "complete" && <kbd>⌘↵</kbd>}
               {action.action === "restore-to-buyout" && <kbd>R</kbd>}
-            </button>
-          )}
-          {ids.length > 0 && (
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.btnMono}`}
-              onClick={() => { copyText(ids.join("\n")); onToast(ids.length > 1 ? `⧉ ${ids.length} ID пассов` : `⧉ ${ids[0]}`); }}
-            >
-              ⧉ {ids.length > 1 ? `${ids.length} ID пассов` : ids[0]} <kbd>C</kbd>
             </button>
           )}
           {/* Правка — рядом с главным действием: чаще всего в досье приходят
@@ -348,6 +385,11 @@ export default function OrderDossier({
                   {live.isForSale === false ? "снят с продажи" : live.priceMismatch ? "цена не сходится" : "продаётся, цена сходится"}
                 </em>}
               </div>
+              {/* Повтор с закрытым заказом — справка: выкуп идёт с разных
+                  аккаунтов, другой аккаунт тот же пасс купит (21.10). */}
+              {live?.reusedIn && !packDupIn && (
+                <div className={styles.refNote}>♻ Этот пасс раньше выкупали в {live.reusedIn} — для справки</div>
+              )}
               {ids.length === 0 && (
                 <div style={{ color: "var(--o-muted)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   Пасса нет — выкупать нечего.
