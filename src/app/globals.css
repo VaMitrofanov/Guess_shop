@@ -571,7 +571,9 @@ html.twa-route-active [contenteditable="true"] {
   position: relative;
   z-index: 5;
   flex-shrink: 0;
-  padding: 12px 18px 11px;
+  /* В полноэкранном режиме Telegram сверху лежат вырез экрана и его кнопки
+     «закрыть/···» — переменные равны нулю в обычном режиме. */
+  padding: calc(12px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)) 18px 11px;
   border-bottom: 1px solid rgba(255,255,255,.08);
   background: rgba(18,15,28,.72);
   -webkit-backdrop-filter: blur(18px) saturate(1.22);
@@ -759,7 +761,7 @@ html.twa-route-active [contenteditable="true"] {
   transition: max-height .25s cubic-bezier(.22,1,.36,1);
 }
 .twa-sheet button, .twa-sheet input, .twa-sheet textarea { font-family: inherit; }
-.twa-sheet.is-expanded { max-height: calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 20px); }
+.twa-sheet.is-expanded { max-height: calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 20px - var(--tg-safe-area-inset-top, 0px) - var(--tg-content-safe-area-inset-top, 0px)); }
 .twa-sheet-handle-zone { flex: 0 0 auto; display: grid; place-items: center; height: 26px; }
 .twa-sheet-handle { width: 44px; height: 14px; padding: 0; border: 0; background: transparent; }
 .twa-sheet-handle::after { content: ""; display: block; width: 36px; height: 4px; margin: auto; border-radius: 999px; background: rgba(255,255,255,.28); }
@@ -1996,12 +1998,14 @@ html.twa-route-active [contenteditable="true"] {
   transition: max-height .42s cubic-bezier(.32,1.25,.5,1), opacity .25s ease, transform .42s cubic-bezier(.32,1.25,.5,1), padding .3s ease;
   pointer-events: none;
 }
-.twa-os-bar.is-on { max-height: 120px; padding: 4px 16px 10px; opacity: 1; transform: none; border-bottom-color: rgba(255,255,255,.07); pointer-events: auto; }
+.twa-os-bar.is-on { max-height: 140px; padding: 4px 16px 10px; opacity: 1; transform: none; border-bottom-color: rgba(255,255,255,.07); pointer-events: auto; }
 .twa-os-bar-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .twa-os-bar-row > strong { min-width: 0; overflow: hidden; font-size: 16px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .twa-os-bar-row > b { margin-left: auto; flex: 0 0 auto; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .twa-os-bar-row > b small { margin-left: 3px; color: #a8f0be; font-size: 12px; }
-.twa-os-collapse { flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: 10px; background: rgba(255,255,255,.07); color: #c9c2dc; font-size: 16px; line-height: 1; }
+/* «Свернуть» — крупная цель (44 px), а не стрелка 32 px в углу: в неё не попадали. */
+.twa-os-collapse { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px 0 9px; border: 0; border-radius: 12px; background: rgba(255,255,255,.09); color: #e3def0; font-size: 14px; font-weight: 600; line-height: 1; }
+.twa-os-collapse > span { font-size: 18px; margin-top: -4px; }
 .twa-os-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: 12px; background: rgba(255,255,255,.05); }
 .twa-os-tabs > button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; color: #aaa4b8; font-size: 14px; font-weight: 600; }
 .twa-os-tabs > button.is-on { background: rgba(255,255,255,.1); color: #f7f5ff; }
@@ -2079,3 +2083,53 @@ html.twa-route-active [contenteditable="true"] {
 .twa-os-foot > .twa-oc-prim.is-ice { background: rgba(100,210,255,.18); color: #8fdcff; }
 .twa-os-foot > .twa-oc-copy { flex: 0 0 auto; min-height: 50px; padding: 0 16px; border-radius: 14px; }
 .twa-os-foot > .twa-oc-more { min-height: 50px; min-width: 52px; border-radius: 14px; }
+
+/* ── 21.10 (2): лента без прилипшей шапки, кнопка «Наверх», карточка покупателя ── */
+.twa-liquid-titlebar { transition: padding .25s ease; }
+.twa-liquid-titlebar .twa-liquid-title { transition: font-size .25s ease; }
+.twa-liquid-titlebar.is-compact { padding-top: calc(8px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); padding-bottom: 8px; }
+.twa-liquid-titlebar.is-compact > div:first-child:not(.twa-liquid-title) { display: none; }
+.twa-liquid-titlebar.is-compact .twa-liquid-title { font-size: 19px; }
+/* Тулбар заказов — первый блок ленты: без своего стекла и границы. */
+.twa-orders-toolbar.is-inline { border-bottom: 0 !important; background: transparent !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.twa-to-top {
+  /* Сверху по центру, как «наверх» в iOS: снизу кнопка ложилась на ID пасса. */
+  position: absolute; left: 50%; top: 10px; margin-left: -58px; width: 116px; justify-content: center;
+  z-index: 20; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px 0 13px;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 999px;
+  background: rgba(43,35,62,.92); color: #f7f5ff; font-size: 14px; font-weight: 700;
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow: 0 10px 28px rgba(3,0,12,.45);
+  opacity: 0; transform: translateY(-14px) scale(.96); pointer-events: none;
+  transition: opacity .2s ease, transform .3s cubic-bezier(.32,1.25,.5,1);
+}
+.twa-to-top > span { font-size: 16px; }
+.twa-to-top.is-on { opacity: 1; transform: none; pointer-events: auto; }
+
+.twa-bh { display: flex; flex-direction: column; gap: 12px; padding: 0 14px 8px; }
+.twa-bh-head { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255,255,255,.055); }
+.twa-bh-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: linear-gradient(145deg, #b59aff, #7c57f2); color: #fff; font-size: 16px; font-weight: 800; }
+.twa-bh-avatar.is-vk { background: linear-gradient(145deg, #3b8cff, #0063dd); }
+.twa-bh-avatar.is-tg { background: linear-gradient(145deg, #4fb8ea, #1d8fc8); }
+.twa-bh-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.twa-bh-who > b { overflow: hidden; font-size: 17px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.twa-bh-who > small { overflow: hidden; color: #8e8a99; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-bh-write { flex: 0 0 auto; min-height: 40px; padding: 0 14px; border: 0; border-radius: 12px; background: rgba(140,196,255,.16); color: #8cc4ff; font-size: 14px; font-weight: 700; }
+.twa-bh-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.twa-bh-stats > span { display: flex; flex-direction: column; gap: 2px; padding: 10px 6px; border-radius: 13px; background: rgba(255,255,255,.055); text-align: center; }
+.twa-bh-stats b { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.twa-bh-stats small { color: #8e8a99; font-size: 12px; }
+.twa-bh-label { margin: 2px 4px -4px; color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.twa-bh-order { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; padding: 8px 14px; border: 0; border-top: 1px solid rgba(255,255,255,.06); background: transparent; color: #f7f5ff; text-align: left; }
+.twa-bh-order:first-child { border-top: 0; }
+.twa-bh-order.is-current { background: rgba(167,139,250,.1); }
+.twa-bh-order-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.twa-bh-order-main > b { display: flex; align-items: center; gap: 7px; font: 600 14px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+.twa-bh-order-main > b > i { padding: 2px 6px; border-radius: 6px; background: rgba(167,139,250,.2); color: #cdbcff; font: 700 11px/1.2 -apple-system, sans-serif; font-style: normal; letter-spacing: 0; }
+.twa-bh-order-main > small { overflow: hidden; color: #8e8a99; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.twa-bh-order-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.twa-bh-order-side > b { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-bh-order-side > small { font-size: 12.5px; font-weight: 600; }
+/* Последний раздел шторки должен доезжать до её верха — иначе вкладка
+   «История» показывала конец раздела «Заказ». */
+.twa-os-sec:last-of-type { min-height: calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 220px); }

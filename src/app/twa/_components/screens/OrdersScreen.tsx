@@ -1,6 +1,7 @@
 "use client";
 import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
+import type React from "react";
 import { RefreshCw } from "lucide-react";
 import { C, SHADOW, tabular, MONO } from "../theme";
 import { ageColor, fmtAge } from "../age";
@@ -2121,12 +2122,147 @@ function OrderMenuSheet({
 }
 
 /** Разделы полной шторки заказа — чипы под заметками и вкладки в шапке. */
-type SheetSectionId = "gamepass" | "buyer" | "history";
+type SheetSectionId = "gamepass" | "order" | "history";
 const SHEET_SECTIONS: { id: SheetSectionId; label: string }[] = [
   { id: "gamepass", label: "🧩 Пасс" },
-  { id: "buyer", label: "👤 Покупатель" },
-  { id: "history", label: "🕓 История" },
+  { id: "order", label: "⚙️ Заказ" },
+  { id: "history", label: "👤 История" },
 ];
+
+/* ── Карточка покупателя в шторке ────────────────────────────────────────────
+   Кто он, сколько уже взял, не было ли отмен, и список его заказов. Грузится,
+   когда шторку развернули: в ленте это не нужно. Тап по заказу копирует код —
+   по нему его находит поиск. */
+interface BuyerHistoryData {
+  user: {
+    tgId: string | null; vkId: string | null; name: string | null; username: string | null;
+    robloxUsername: string | null; robloxDisplayName: string | null; balance: number;
+    bonusExpiresAt: string | null; rubleDiscount: number; createdAt: string;
+  } | null;
+  stats: { orders: number; completed: number; completedRobux: number; rejected: number; open: number };
+  orders: {
+    id: string; wbCode: string; amount: number; status: string; orderSource: string; isDirectOrder: boolean;
+    createdAt: string; completedAt: string | null; robloxUsername: string | null; gamepassId: string | null;
+    heldAt: string | null; rejectionReason: string | null;
+  }[];
+}
+
+const HISTORY_STATUS: Record<string, { label: string; color: string }> = {
+  COMPLETED: { label: "Выкуплен", color: C.green },
+  REJECTED: { label: "Отменён", color: C.red },
+  ERROR: { label: "Ошибка", color: C.red },
+  PENDING: { label: "К выкупу", color: C.green },
+  IN_PROGRESS: { label: "Выкупается", color: C.green },
+  AWAITING_GAMEPASS: { label: "Ждёт пасс", color: C.orange },
+  AWAITING_PAYMENT: { label: "Ждёт оплату", color: C.textTertiary },
+  PAYMENT_PENDING: { label: "Оплата", color: C.textTertiary },
+};
+
+function fmtDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "2-digit" });
+}
+
+function BuyerHistory({ order, token, active, platform, shortName, onContact }: {
+  order: Order; token: string; active: boolean; platform: "tg" | "vk" | "—"; shortName: string; onContact: () => void;
+}) {
+  const [data, setData] = useState<BuyerHistoryData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const loadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!active || loadedFor.current === order.id) return;
+    loadedFor.current = order.id;
+    void (async () => {
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "user-history", orderId: order.id }),
+        });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d?.ok) { setError(d?.error ?? "Не удалось загрузить историю"); return; }
+        setData(d);
+      } catch { setError("Ошибка сети"); }
+    })();
+  }, [active, order.id, token]);
+
+  const user = data?.user;
+  const display = user?.name?.trim() || shortName;
+  const initials = display.replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase() || "?";
+  const handle = user?.username ? `@${user.username}` : platform === "vk" && user?.vkId ? `id${user.vkId}` : platform === "tg" && user?.tgId ? `tg ${user.tgId}` : null;
+
+  return (
+    <div className="twa-bh">
+      <div className="twa-bh-head">
+        <span className={`twa-bh-avatar is-${platform}`}>{initials}</span>
+        <span className="twa-bh-who">
+          <b>{display}</b>
+          <small>{platform === "tg" ? "Telegram" : platform === "vk" ? "VK" : "без канала"}{handle ? ` · ${handle}` : ""}</small>
+        </span>
+        {platform !== "—" && (
+          <button type="button" className="twa-bh-write twa-press-sm" onClick={onContact}>Написать</button>
+        )}
+      </div>
+
+      {error && <p className="twa-os-ref">{error}</p>}
+      {!data && !error && <p className="twa-os-ref">Загружаю историю…</p>}
+
+      {data && (
+        <>
+          <div className="twa-bh-stats">
+            <span><b>{data.stats.orders}</b><small>заказов</small></span>
+            <span><b style={{ color: C.green }}>{data.stats.completed}</b><small>выкуплено</small></span>
+            <span><b>{data.stats.completedRobux.toLocaleString("ru-RU")}</b><small>R$ чистыми</small></span>
+            <span><b style={{ color: data.stats.rejected > 0 ? C.red : undefined }}>{data.stats.rejected}</b><small>отмен</small></span>
+          </div>
+
+          <div className="twa-os-group" style={{ margin: "0 0 12px" }}>
+            {(user?.robloxUsername || order.robloxUsername) && (
+              <button type="button" className="twa-os-row twa-press-sm"
+                onClick={() => { const n = user?.robloxUsername ?? order.robloxUsername!; copyText(n); haptic.impact("light"); toast(`Ник ${n} скопирован`, "success"); }}>
+                <span className="twa-os-tx"><small>Ник Roblox в профиле</small><b>{user?.robloxUsername ?? order.robloxUsername}</b></span>
+                <em style={{ color: C.textTertiary }}>⧉</em>
+              </button>
+            )}
+            <div className="twa-os-row">
+              <span className="twa-os-tx"><small>Бонусный баланс</small>
+                <b>{(user?.balance ?? 0) > 0
+                  ? `${user!.balance} R$${user!.bonusExpiresAt ? ` · до ${new Date(user!.bonusExpiresAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}` : ""}`
+                  : "нет"}</b>
+              </span>
+            </div>
+            {(user?.rubleDiscount ?? 0) > 0 && (
+              <div className="twa-os-row"><span className="twa-os-tx"><small>Скидка на прямой</small><b>{user!.rubleDiscount} ₽</b></span></div>
+            )}
+            {user?.createdAt && (
+              <div className="twa-os-row"><span className="twa-os-tx"><small>С нами с</small><b>{fmtDay(user.createdAt)}</b></span></div>
+            )}
+          </div>
+
+          <p className="twa-bh-label">Заказы покупателя{data.stats.orders > data.orders.length ? ` · последние ${data.orders.length}` : ""}</p>
+          <div className="twa-os-group" style={{ margin: 0 }}>
+            {data.orders.map(o => {
+              const st = o.heldAt ? { label: "Заморожен", color: ICE } : HISTORY_STATUS[o.status] ?? { label: o.status, color: C.textTertiary };
+              const current = o.id === order.id;
+              return (
+                <button key={o.id} type="button" className={`twa-bh-order twa-press-sm${current ? " is-current" : ""}`}
+                  onClick={() => { copyText(o.wbCode); haptic.impact("light"); toast(`Код ${o.wbCode} скопирован`, "success"); }}>
+                  <span className="twa-bh-order-main">
+                    <b>{o.wbCode}{current && <i>этот</i>}</b>
+                    <small>{fmtDay(o.completedAt ?? o.createdAt)}{o.robloxUsername ? ` · ${o.robloxUsername}` : ""}{o.status === "REJECTED" && o.rejectionReason ? ` · ${o.rejectionReason}` : ""}</small>
+                  </span>
+                  <span className="twa-bh-order-side">
+                    <b>{o.amount.toLocaleString("ru-RU")} R$</b>
+                    <small style={{ color: st.color }}>{st.label}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
@@ -2562,7 +2698,8 @@ function OrderCard({
     }, 60);
   }
   function collapseSheet() {
-    sheetScroller()?.scrollTo({ top: 0, behavior: "smooth" });
+    const scroller = sheetScroller();
+    if (scroller) scroller.scrollTop = 0;
     setSheetExpanded(false);
   }
   /* Подсветка текущего раздела в шапке — по прокрутке, а не только по тапу. */
@@ -2750,7 +2887,7 @@ function OrderCard({
       <div className={`twa-os-bar${sheetExpanded ? " is-on" : ""}`} aria-hidden={!sheetExpanded}>
         <div className="twa-os-bar-row">
           <button type="button" className="twa-os-collapse twa-press-sm" aria-label="Свернуть карточку" tabIndex={sheetExpanded ? 0 : -1}
-            onClick={() => { haptic.select(); collapseSheet(); }}>⌄</button>
+            onClick={() => { haptic.select(); collapseSheet(); }}><span aria-hidden="true">⌄</span>Свернуть</button>
           <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "ник не указан"}</strong>
           {codeChip(true)}
           <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
@@ -3014,14 +3151,11 @@ function OrderCard({
         )}
       </section>
 
-      <section data-form="buyer" className="twa-os-sec">
-        <h3>Покупатель</h3>
+      {/* Заказ: признаки поверх статуса (заморозка, избранное, очередь) и всё,
+          что делается с самим заказом. */}
+      <section data-form="order" className="twa-os-sec">
+        <h3>Заказ</h3>
         <div className="twa-os-group">
-          <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); openContact(order.user); }}>
-            <span className={`twa-os-ic is-${platform}`}>{platform === "tg" ? "TG" : platform === "vk" ? "VK" : "—"}</span>
-            <span className="twa-os-tx"><b style={{ color: "#8cc4ff" }}>{shortName}</b><small>{platform === "—" ? "нет канала связи" : "написать покупателю"}</small></span>
-            <em>Написать ›</em>
-          </button>
           {order.heldAt ? (
             <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); void onRunAction("unhold"); }}>
               <span className="twa-os-ic" style={{ background: `${ICE}24` }}>❄️</span>
@@ -3048,34 +3182,6 @@ function OrderCard({
             </button>
           )}
         </div>
-      {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
-      {order.vkUnreachable === true && order.user.vkId && (
-        <div style={{
-          margin: "0 14px 10px", padding: "8px 10px",
-          background: `${C.red}14`, borderRadius: 8,
-          fontSize: 14, color: C.red,
-          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-        }}>
-          <span style={{ fontWeight: 600 }}>🚫 Бот не может написать (VK)</span>
-          {/* У DBS есть рабочий канал: чат WB, которым человеку пришла ссылка
-              на гейт. «Выкуплено» уходит туда автоматически — говорим это
-              здесь, чтобы красная плашка не читалась как тупик. */}
-          {order.orderSource === "WB_DBS" && (
-            <span style={{ color: C.textSecondary, fontSize: 14 }}>
-              — о выкупе скажем в чат WB
-            </span>
-          )}
-          <a
-            href={`https://vk.com/id${order.user.vkId}`}
-            target="_blank" rel="noreferrer"
-            onClick={e => e.stopPropagation()}
-            style={{ color: C.blue, fontSize: 14, fontWeight: 600 }}
-          >
-            профиль VK — писать с личного
-          </a>
-        </div>
-      )}
-
       {holdOpen && (
         <div data-form="hold">
         <HoldModal
@@ -3086,10 +3192,6 @@ function OrderCard({
         </div>
       )}
 
-      </section>
-
-      <section data-form="history" className="twa-os-sec">
-        <h3>Заказ и история</h3>
         <div style={{ padding: "0 16px" }}>
         {/* Кто и когда выкупил. Условие «не на вкладке Готово» стояло тут потому,
             что там покупателя называет заголовок аккордеона — но у одиночной
@@ -3300,6 +3402,47 @@ function OrderCard({
         onRunAction={onRunAction}
         onPurchaseDone={onPurchaseDone}
       />
+      </section>
+
+      {/* История: полноценная карточка покупателя и все его заказы. */}
+      <section data-form="history" className="twa-os-sec">
+        <h3>Покупатель и история</h3>
+      {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
+      {order.vkUnreachable === true && order.user.vkId && (
+        <div style={{
+          margin: "0 14px 10px", padding: "8px 10px",
+          background: `${C.red}14`, borderRadius: 8,
+          fontSize: 14, color: C.red,
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontWeight: 600 }}>🚫 Бот не может написать (VK)</span>
+          {/* У DBS есть рабочий канал: чат WB, которым человеку пришла ссылка
+              на гейт. «Выкуплено» уходит туда автоматически — говорим это
+              здесь, чтобы красная плашка не читалась как тупик. */}
+          {order.orderSource === "WB_DBS" && (
+            <span style={{ color: C.textSecondary, fontSize: 14 }}>
+              — о выкупе скажем в чат WB
+            </span>
+          )}
+          <a
+            href={`https://vk.com/id${order.user.vkId}`}
+            target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ color: C.blue, fontSize: 14, fontWeight: 600 }}
+          >
+            профиль VK — писать с личного
+          </a>
+        </div>
+      )}
+
+        <BuyerHistory
+          order={order}
+          token={token}
+          active={expanded && sheetExpanded}
+          platform={platform}
+          shortName={shortName}
+          onContact={() => { haptic.impact("light"); openContact(order.user); }}
+        />
       </section>
     </BottomSheet>
     </>
@@ -3528,6 +3671,19 @@ export default function OrdersScreen({
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  /* Лента прокручивается вместе с поиском и срезами. Ушли с верха — сжимаем
+     шапку экрана (событие слушает TwaApp) и показываем «Наверх». */
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrolledAway, setScrolledAway] = useState(false);
+  const scrolledRef = useRef(false);
+  const onListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const away = event.currentTarget.scrollTop > 220;
+    if (away === scrolledRef.current) return;
+    scrolledRef.current = away;
+    setScrolledAway(away);
+    window.dispatchEvent(new CustomEvent("twa:compact-title", { detail: away }));
+  }, []);
+  useEffect(() => () => { window.dispatchEvent(new CustomEvent("twa:compact-title", { detail: false })); }, []);
   /* Один и тот же пасс у двух заказов очереди — «пачки выкупа». Только этот
      повтор подсвечивается; повтор с давно закрытым заказом — справка в досье. */
   const packDup = useMemo(() => packDuplicates(allOrders, orderPassIds), [allOrders]);
@@ -4171,10 +4327,23 @@ export default function OrdersScreen({
   ) : null;
 
   return (
-    <div className="twa-orders-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "transparent" }}>
+    <div className="twa-orders-shell" style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "transparent" }}>
+      <button
+        type="button"
+        className={`twa-to-top twa-press-sm${scrolledAway ? " is-on" : ""}`}
+        aria-label="Наверх, к поиску"
+        tabIndex={scrolledAway ? 0 : -1}
+        onClick={() => { haptic.select(); listScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }}
+      >
+        <span aria-hidden="true">↑</span>Наверх
+      </button>
 
+      {/* Content. Поиск, «Создать заказ» и срезы — первым блоком ленты, а не
+          над ней: при прокрутке они уезжают и не съедают экран (21.10).
+          Вернуться к ним — кнопкой «Наверх». */}
+      <div ref={listScrollRef} onScroll={onListScroll} style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
       {/* Premium Calm: three primary modes, compact status strip and secondary filters in a sheet. */}
-      <div className="twa-orders-toolbar twa-orders-toolbar-calm">
+      <div className="twa-orders-toolbar twa-orders-toolbar-calm is-inline">
         <div className="twa-orders-search-row">
           <div className="twa-orders-search-wrap">
             <SearchBar value={query} onChange={setQuery} />
@@ -4242,8 +4411,7 @@ export default function OrdersScreen({
         )}
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+
         {/* Шапка среза: сводка того среза, в котором вы стоите. Скроллится
             вместе с лентой — высоту тулбара не отбирает; при поиске её нет
             вовсе: ищут конкретный заказ, а не разбирают очередь. */}

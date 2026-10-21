@@ -114,8 +114,43 @@ export default function BottomSheet({
     if (dy < -36 && !expanded) onExpandedChange?.(true);
     else if (dy > 36) { if (expanded) onExpandedChange?.(false); else onClose(); }
   };
+  /* Сразу после сворачивания содержимое ещё доезжает до верха — эти кадры
+   * прокрутки не должны раскрывать шторку обратно. */
+  const collapsedAt = useRef(0);
+  useEffect(() => { if (!expanded) collapsedAt.current = Date.now(); }, [expanded]);
   const onScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    if (expandable && !expanded && event.currentTarget.scrollTop > 12) onExpandedChange?.(true);
+    if (!expandable || expanded || Date.now() - collapsedAt.current < 600) return;
+    if (event.currentTarget.scrollTop > 12) onExpandedChange?.(true);
+  };
+
+  /* Тянуть вниз за само содержимое, когда оно у верха: развёрнутая шторка
+   * сворачивается, свёрнутая закрывается. Раньше вернуться можно было только
+   * мелкой стрелкой, а жест сверху уводил весь Telegram (вертикальные свайпы
+   * Telegram теперь выключены в TwaApp). Пока палец тянет, шторка едет за ним. */
+  const pull = useRef<{ y: number; atTop: boolean; dy: number } | null>(null);
+  const onBodyTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    pull.current = { y: event.touches[0]?.clientY ?? 0, atTop: event.currentTarget.scrollTop <= 0, dy: 0 };
+  };
+  const onBodyTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const p = pull.current;
+    if (!p || !p.atTop || !sheetRef.current) return;
+    p.dy = (event.touches[0]?.clientY ?? p.y) - p.y;
+    if (p.dy > 0 && event.currentTarget.scrollTop <= 0) {
+      sheetRef.current.style.transition = "none";
+      sheetRef.current.style.transform = `translateY(${Math.min(p.dy * 0.55, 160)}px)`;
+    }
+  };
+  const onBodyTouchEnd = () => {
+    const p = pull.current;
+    pull.current = null;
+    const sheet = sheetRef.current;
+    if (sheet) {
+      sheet.style.transition = "";
+      sheet.style.transform = "";
+    }
+    if (!p || !p.atTop || p.dy < 70) return;
+    if (expandable && expanded) onExpandedChange?.(false);
+    else onClose();
   };
 
   if (!open || typeof document === "undefined") return null;
@@ -140,7 +175,16 @@ export default function BottomSheet({
             onClick={() => expandable ? onExpandedChange?.(!expanded) : onClose()}
           />
         </div>
-        <div className="twa-sheet-scroll" onScroll={onScroll}>{children}</div>
+        <div
+          className="twa-sheet-scroll"
+          onScroll={onScroll}
+          onTouchStart={onBodyTouchStart}
+          onTouchMove={onBodyTouchMove}
+          onTouchEnd={onBodyTouchEnd}
+          onTouchCancel={onBodyTouchEnd}
+        >
+          {children}
+        </div>
         {footer && <div className="twa-sheet-footer">{footer}</div>}
       </section>
     </div>,

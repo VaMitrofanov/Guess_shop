@@ -43,6 +43,12 @@ declare global {
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
         setBottomBarColor?: (color: string) => void;
+        /** Bot API 8.0: развернуть мини-апп на весь экран. */
+        requestFullscreen?: () => void;
+        isFullscreen?: boolean;
+        /** Bot API 7.7: свайп вниз больше не сворачивает/закрывает мини-апп. */
+        disableVerticalSwipes?: () => void;
+        isVersionAtLeast?: (version: string) => boolean;
         close: () => void;
         BackButton?: {
           show: () => void;
@@ -86,6 +92,14 @@ export default function TwaApp() {
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
   const [dbsBadge,            setDbsBadge]            = useState(0);
+  /* Шапка экрана сжимается, когда лента заказов ушла с верха (событие шлёт
+     OrdersScreen): дата и крупный заголовок не съедают экран при работе. */
+  const [compactTitle, setCompactTitle] = useState(false);
+  useEffect(() => {
+    const onCompact = (event: Event) => setCompactTitle(Boolean((event as CustomEvent<boolean>).detail));
+    window.addEventListener("twa:compact-title", onCompact);
+    return () => window.removeEventListener("twa:compact-title", onCompact);
+  }, []);
   // Pre-focus the Orders search when launched via admin notification deep-link.
   // Accepts either ?q=... in the URL (works with InlineKeyboardButton.web_app
   // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
@@ -256,6 +270,14 @@ export default function TwaApp() {
           try { wa.setBackgroundColor?.(C.bg); } catch { /* unsupported SDK */ }
           try { wa.setBottomBarColor?.(C.bg); } catch { /* unsupported SDK */ }
           try { wa.ready(); wa.expand(); } catch { /* SDK ещё гидрируется */ }
+          /* Свайп вниз внутри шторки заказа — это «свернуть шторку», а Telegram
+             забирал его себе и сворачивал весь мини-апп (21.10). */
+          try { if (wa.isVersionAtLeast?.("7.7")) wa.disableVerticalSwipes?.(); } catch { /* старый клиент */ }
+          /* Полный экран — только на телефоне: на компьютере Telegram развернул
+             бы окно поверх всего рабочего стола. Отступы сверху берут
+             `--tg-safe-area-inset-top` и `--tg-content-safe-area-inset-top`. */
+          const mobile = ["ios", "android", "android_x"].includes(wa.platform ?? "");
+          try { if (mobile && wa.isVersionAtLeast?.("8.0") && !wa.isFullscreen) wa.requestFullscreen?.(); } catch { /* старый клиент */ }
           return;
         }
         await new Promise(r => setTimeout(r, 100));
@@ -338,7 +360,7 @@ export default function TwaApp() {
     }}>
       {/* Title bar — doubles as a context zone: back chevron on drill-down
           screens, date otherwise. */}
-      <div className="twa-liquid-titlebar">
+      <div className={`twa-liquid-titlebar${compactTitle ? " is-compact" : ""}`}>
         {(() => {
           const parent = SCREEN_PARENT[screen];
           if (parent) {

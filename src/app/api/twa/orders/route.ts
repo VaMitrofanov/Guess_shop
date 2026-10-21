@@ -2695,6 +2695,58 @@ export async function POST(req: NextRequest) {
      система, `adminNote` — то, что дописывали руками (`appendOrderAudit`).
      При трёх админах это главный ответ на «почему заказ в таком виде»,
      поэтому строки заметки отдаются вместе с событиями, а не отдельно. */
+  /* ── Карточка покупателя: кто он и что заказывал ──────────────────────────
+     Раздел «История» шторки заказа. Грузится по запросу: в ленту это не
+     нужно, а в шторке отвечает на «он у нас впервые?», «сколько уже взял?»,
+     «не было ли с ним отмен». Тестовые заказы не считаются. */
+  if (action === "user-history") {
+    const userId = order.user?.id;
+    if (!userId) return NextResponse.json({ error: "У заказа нет покупателя" }, { status: 404 });
+    const [user, orders, totals] = await Promise.all([
+      (prisma as any).user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true, tgId: true, vkId: true, name: true, username: true, robloxUsername: true,
+          robloxDisplayName: true, balance: true, bonusExpiresAt: true, rubleDiscount: true,
+          reviewBonusGrantedAt: true, createdAt: true,
+        },
+      }),
+      (prisma as any).wbOrder.findMany({
+        where: { userId, isTest: false },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+        select: {
+          id: true, wbCode: true, amount: true, status: true, orderSource: true, isDirectOrder: true,
+          createdAt: true, completedAt: true, robloxUsername: true, gamepassId: true, heldAt: true,
+          rejectionReason: true,
+        },
+      }),
+      (prisma as any).wbOrder.groupBy({
+        by: ["status"],
+        where: { userId, isTest: false },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+    ]);
+    const byStatus: Record<string, { count: number; amount: number }> = {};
+    for (const row of totals as { status: string; _count: { _all: number }; _sum: { amount: number | null } }[]) {
+      byStatus[row.status] = { count: row._count._all, amount: row._sum.amount ?? 0 };
+    }
+    const all = Object.values(byStatus).reduce((acc, v) => acc + v.count, 0);
+    return NextResponse.json({
+      ok: true,
+      user,
+      stats: {
+        orders: all,
+        completed: byStatus.COMPLETED?.count ?? 0,
+        completedRobux: byStatus.COMPLETED?.amount ?? 0,
+        rejected: byStatus.REJECTED?.count ?? 0,
+        open: all - (byStatus.COMPLETED?.count ?? 0) - (byStatus.REJECTED?.count ?? 0),
+      },
+      orders,
+    });
+  }
+
   if (action === "order-events") {
     const events = await (prisma as any).orderEvent.findMany({
       where: { orderId },
