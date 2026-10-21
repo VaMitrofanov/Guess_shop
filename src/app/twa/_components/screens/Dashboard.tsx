@@ -7,9 +7,7 @@ import {
   CircleAlert,
   Copy,
   MessageCircleQuestion,
-  Plus,
   RefreshCw,
-  Search,
   Snowflake,
   TriangleAlert,
   Truck,
@@ -119,7 +117,6 @@ export default function Dashboard({
   onOpenOrders,
   onOpenInbox,
   onOpenDelivery,
-  onCreateOrder,
 }: {
   token: string;
   onOpenOrders?: (query?: string, tab?: OrdersTab) => void;
@@ -130,7 +127,6 @@ export default function Dashboard({
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [query, setQuery] = useState("");
   /** Когда данные последний раз пришли с сервера — из этого «живая · N с». */
   const [syncedAt, setSyncedAt] = useState(() => Date.now());
   const [liveAge, setLiveAge] = useState(0);
@@ -290,31 +286,10 @@ export default function Dashboard({
     onOpenOrders?.(undefined, tab);
   }
 
-  function submitSearch() {
-    const value = query.trim();
-    if (value.length < 2) return;
-    haptic.select();
-    onOpenOrders?.(value);
-  }
 
   return (
     <div className="twa-liquid-dashboard twa-fade-in">
-      {/* Поиск — вход в единственный поиск приложения, а не второй его движок. */}
-      <div className="twa-search-field twa-home-search">
-        <Search size={20} />
-        <input
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          onKeyDown={event => { if (event.key === "Enter") submitSearch(); }}
-          enterKeyHint="search"
-          placeholder="Код, ник, @username, ID геймпасса"
-          aria-label="Поиск по заказам"
-        />
-        {query.trim().length >= 2 && (
-          <button type="button" className="twa-home-search-go" onClick={submitSearch}>Найти</button>
-        )}
-      </div>
-
+      {/* Поиск переехал в 🔍 шапки — он один на все экраны (21.10). */}
       {!data.apiAvailable && (
         <div className="twa-liquid-alert">
           <CircleAlert size={19} />
@@ -325,7 +300,7 @@ export default function Dashboard({
       {/* ── Касса выкупа ─────────────────────────────────────────────────── */}
       <section className="twa-till">
         <header className="twa-till-head">
-          <span>К выкупу</span>
+          <span>Следующее дело · к выкупу</span>
           <div>
             <b>{buyout.orders} {plural(buyout.orders, "заказ", "заказа", "заказов")}</b>
             <button
@@ -384,6 +359,12 @@ export default function Dashboard({
         )}
 
         {buyout.orders === 0 && <div className="twa-till-empty">Очередь выкупа пуста</div>}
+        {/* Одна главная кнопка экрана: открывает очередь «Выкупить». */}
+        {buyout.orders > 0 && (
+          <button type="button" className="twa-till-start twa-press" onClick={() => openOrders("BUYOUT")}>
+            Начать выкуп <span aria-hidden="true">→</span>
+          </button>
+        )}
       </section>
 
       {/* ── ⚡ Первым делом ───────────────────────────────────────────────
@@ -484,7 +465,7 @@ export default function Dashboard({
       {/* ── Требует решения ──────────────────────────────────────────────── */}
       {(dbsNeedsDecision || errors.count > 0 || inbox.total > 0) ? (
         <>
-          <div className="twa-section-label">Требует решения</div>
+          <div className="twa-section-label">Ждут тебя · по срочности</div>
           <div className="twa-inset-group twa-action-list">
             {/* Незакрытая доставка бьёт всё остальное: там висят деньги WB.
                 Если доставка закрыта, но ход за нами (проверка, полученный код,
@@ -570,6 +551,7 @@ export default function Dashboard({
       ) : null}
 
       {/* ── Тихие строки: видно, что есть, но это не невыполненная задача ─── */}
+      <div className="twa-section-label">Остальное</div>
       <div className="twa-quiet-rows">
         {/* Код у покупателя, доставка закрыта, он идёт по нашей воронке.
             Это ход покупателя, а не наш — в «Требует решения» ему не место. */}
@@ -646,10 +628,7 @@ export default function Dashboard({
           с телефона — одна смена одного человека. */}
       {data.shift && <ShiftBlock shift={data.shift} liveAge={liveAge} />}
 
-      <button type="button" className="twa-primary-row twa-press" onClick={() => { haptic.select(); onCreateOrder?.("manual"); }}>
-        <Plus size={19} /> Новый заказ
-      </button>
-
+      {/* «Новый заказ» — в центральной «＋» нижней панели. */}
       <div className="twa-home-footer">
         Неделя · {rub(data.week.sum)} · {data.week.orders} {plural(data.week.orders, "заказ", "заказа", "заказов")} · {totalCodes} WB-{plural(totalCodes, "код", "кода", "кодов")} на складе
       </div>

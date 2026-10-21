@@ -7,6 +7,8 @@ import { C, SHADOW, tabular, MONO } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import BottomSheet from "../BottomSheet";
+import { RECENT_KEY, readRecentOrders } from "../BottomNav";
+import type { OrdersCommand } from "../TwaApp";
 import { toast } from "../Toast";
 import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
@@ -2333,6 +2335,16 @@ function OrderCard({
     return () => cancelAnimationFrame(frame);
   }, [scrollTo, expanded]);
 
+  /* «Недавно открывали» для «＋»: код кладётся в начало списка при открытии
+     шторки. Только удобство одного устройства. */
+  useEffect(() => {
+    if (!expanded) return;
+    try {
+      const next = [order.wbCode, ...readRecentOrders().filter(code => code !== order.wbCode)].slice(0, 8);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch { /* приватный режим */ }
+  }, [expanded, order.wbCode]);
+
   /* Повтор уведомления о выкупе. Кнопка нужна ровно там, где след доставки
      сказал «не дошло»: без неё единственный выход — писать клиенту руками. */
   const [resendBusy, setResendBusy] = useState(false);
@@ -3450,7 +3462,7 @@ function OrderCard({
 }
 
 /* ───────────── Search ───────────── */
-function SearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
   const [local, setLocal] = useState(value);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => {
@@ -3471,8 +3483,10 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
         <path d="m21 21-4.3-4.3" />
       </svg>
       <input
+        ref={inputRef}
         value={local}
         onChange={e => setLocal(e.target.value)}
+        enterKeyHint="search"
         placeholder="Ник, @username, WB-код, ссылка, ID"
         style={{
           background: "transparent", border: "none", outline: "none",
@@ -3555,50 +3569,26 @@ function SearchProfileCard({ user, orders }: {
     return t < min ? t : min;
   }, Date.now());
 
+  /* Тот же вид, что у карточки покупателя в шторке (раздел «История»): поиск
+     по нику или @ показывает человека одинаково на обоих путях. */
+  const done = orders.filter(o => o.status === "COMPLETED");
+  const initials = shortName.replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase() || "?";
   return (
-    <div style={{
-      padding: 14, background: C.card, borderRadius: 14,
-      boxShadow: SHADOW.card,
-      display: "flex", flexDirection: "column", gap: 10,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{
-          width: 42, height: 42, borderRadius: 12,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0,
-          background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
-        }}>
-          {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
+    <div className="twa-bh" style={{ padding: 0 }}>
+      <div className="twa-bh-head">
+        <span className={`twa-bh-avatar is-${platform}`}>{initials}</span>
+        <span className="twa-bh-who">
+          <b>{shortName}</b>
+          <small>{platform === "tg" ? "Telegram" : platform === "vk" ? "VK" : "без канала"}{user.username ? ` · @${user.username}` : ""} · клиент с {new Date(oldest).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</small>
         </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 17, fontWeight: 700, color: C.textPrimary,
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
-            {shortName}
-          </div>
-          <div style={{ fontSize: 14, color: C.textSecondary, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>{platform === "tg" ? "Telegram" : platform === "vk" ? "VK" : "—"}</span>
-            <span style={{ color: C.green }}>· {orders.length} {pluralOrders(orders.length).split(" ").pop()}</span>
-          </div>
-        </div>
-        <button
-          className="twa-press-sm"
-          onClick={() => { haptic.impact("light"); openContact(user); }}
-          style={{
-            padding: "8px 14px", borderRadius: 10, border: "none",
-            background: `${C.blue}22`, color: C.blue,
-            fontSize: 14, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-          }}
-        >
-          Написать
-        </button>
+        {platform !== "—" && (
+          <button type="button" className="twa-bh-write twa-press-sm" onClick={() => { haptic.impact("light"); openContact(user); }}>Написать</button>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 16, fontSize: 14, color: C.textSecondary, paddingTop: 6, borderTop: `1px solid ${C.hairline}` }}>
-        <span>Всего <span style={{ fontWeight: 700, color: C.textPrimary, ...tabular }}>{totalR.toLocaleString("ru-RU")} R$</span></span>
-        <span>Клиент с <span style={{ fontWeight: 700, color: C.textPrimary }}>
-          {new Date(oldest).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
-        </span></span>
+      <div className="twa-bh-stats" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+        <span><b>{orders.length}</b><small>найдено</small></span>
+        <span><b style={{ color: C.green }}>{done.length}</b><small>выкуплено</small></span>
+        <span><b>{totalR.toLocaleString("ru-RU")}</b><small>R$ всего</small></span>
       </div>
     </div>
   );
@@ -3608,8 +3598,12 @@ function SearchProfileCard({ user, orders }: {
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
 export default function OrdersScreen({
-  token, onActionDone, initialQuery, initialTab, initialCreate, onInitialQueryConsumed, onOpenDelivery,
+  token, onActionDone, initialQuery, initialTab, initialCreate, initialExport, initialFocusSearch, onInitialQueryConsumed, onOpenDelivery,
 }: {
+  /** «＋» → «ID очереди»: открыть выгрузку сразу. */
+  initialExport?: boolean;
+  /** 🔍 в шапке: открыть с курсором в поиске. */
+  initialFocusSearch?: boolean;
   token: string;
   onActionDone?: () => void;
   initialQuery?: string;
@@ -3630,7 +3624,7 @@ export default function OrdersScreen({
   // подборка «Требуют внимания» — по кнопке «⚠ Внимание (N)» (решение 2026-07-06).
   const [allView, setAllView] = useState<"attention" | "list">("list");
   // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
-  const [exportOpen, setExportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(!!initialExport);
   const [createOpen, setCreateOpen] = useState(!!initialCreate);
   const [createMode, setCreateMode] = useState<"manual" | "direct">(initialCreate === "direct" ? "direct" : "manual");
   // Предзаполнение формы создания из найденного геймпасса: «нашёл пасс ника —
@@ -3787,6 +3781,34 @@ export default function OrdersScreen({
     setAllView("list");
     setNarrow({});
   }, []);
+
+  /* Поиск: с курсором по 🔍 в шапке и по «＋ → Найти». Лента прокручивается к
+     началу — поиск живёт её первым блоком. */
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const focusSearch = useCallback(() => {
+    listScrollRef.current?.scrollTo({ top: 0 });
+    window.setTimeout(() => searchInputRef.current?.focus(), 60);
+  }, []);
+  useEffect(() => {
+    if (initialFocusSearch) focusSearch();
+    if (initialExport) setFilter("BUYOUT");
+    // Только при монтировании: дальше команды приходят событием.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /* Команды от «＋» и шапки, пока экран уже открыт. */
+  useEffect(() => {
+    const onCommand = (event: Event) => {
+      const cmd = (event as CustomEvent<OrdersCommand>).detail;
+      if (!cmd) return;
+      if (cmd.kind === "create") { setCreateMode(cmd.mode); setCreatePrefill(null); setCreateOpen(true); }
+      if (cmd.kind === "tab") { setQuery(""); selectSlice(cmd.tab as FilterTab); listScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }
+      if (cmd.kind === "query") { setQuery(cmd.query); listScrollRef.current?.scrollTo({ top: 0 }); }
+      if (cmd.kind === "export") { setQuery(""); selectSlice("BUYOUT"); setExportOpen(true); }
+      if (cmd.kind === "focus-search") focusSearch();
+    };
+    window.addEventListener("twa:orders-command", onCommand);
+    return () => window.removeEventListener("twa:orders-command", onCommand);
+  }, [selectSlice, focusSearch]);
 
   useEffect(() => {
     setPage(1);
@@ -4346,20 +4368,11 @@ export default function OrdersScreen({
       <div className="twa-orders-toolbar twa-orders-toolbar-calm is-inline">
         <div className="twa-orders-search-row">
           <div className="twa-orders-search-wrap">
-            <SearchBar value={query} onChange={setQuery} />
+            <SearchBar value={query} onChange={setQuery} inputRef={searchInputRef} />
           </div>
         </div>
-        {/* «Создать заказ» — полноширинной кнопкой под поиском, а не «+» в углу:
-            его искали глазами (21.10). В режиме поиска не нужна — там ищут. */}
-        {!query && (
-          <button
-            className="twa-order-create twa-press-sm"
-            type="button"
-            onClick={() => { haptic.impact("light"); setCreateMode(filter === "DIRECT" ? "direct" : "manual"); setCreateOpen(true); }}
-          >
-            <span aria-hidden="true">＋</span>Создать заказ
-          </button>
-        )}
+        {/* «Создать заказ» переехал в центральную «＋» нижней панели (21.10):
+            она видна с любого экрана и на любой глубине ленты. */}
 
         {/* Один ряд срезов вместо трёх этажей навигации. Срез назван глаголом:
             что вы собираетесь с этими заказами делать. Пустой срез из ряда
@@ -4543,7 +4556,9 @@ export default function OrdersScreen({
               <SearchProfileCard user={allOrders[0].user} orders={allOrders} />
             )}
 
-            {liveResults}
+            {/* Найденные заказы — сразу под покупателем; геймпассы Roblox и
+                доставка — ниже них (21.10: список пассов ника выталкивал сам
+                заказ за экран). */}
 
             {filter === "DONE" ? (
               <>
@@ -4632,6 +4647,8 @@ export default function OrdersScreen({
                 </Fragment>
               ))
             )}
+
+            {liveResults}
 
             {data && page < data.pages && (
               <div ref={sentinelRef} style={{ minHeight: 1 }}>

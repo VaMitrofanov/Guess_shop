@@ -2,7 +2,8 @@
 import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
-import BottomNav from "./BottomNav";
+import BottomNav, { type QuickAction } from "./BottomNav";
+import { Search as SearchIcon } from "lucide-react";
 import { ToastHost } from "./Toast";
 import { C } from "./theme";
 import { haptic } from "./haptics";
@@ -61,10 +62,18 @@ declare global {
   }
 }
 
+/** Команда экрану «Заказы» — от «＋» и поиска в шапке. */
+export type OrdersCommand =
+  | { kind: "create"; mode: "manual" | "direct" }
+  | { kind: "tab"; tab: string }
+  | { kind: "query"; query: string }
+  | { kind: "export" }
+  | { kind: "focus-search" };
+
 type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics";
 
 const SCREEN_TITLES: Record<Screen, string> = {
-  dashboard:  "Главная",
+  dashboard:  "Сегодня",
   orders:     "Заказы",
   wb:         "Wildberries",
   delivery:   "WB Доставка",
@@ -115,7 +124,9 @@ export default function TwaApp() {
   // ссылку) — экран менялся, ничего не происходило. Теперь тот же тап открывает
   // форму создания, которая уже живёт в Заказах.
   const [ordersCreatePreload, setOrdersCreatePreload] = useState<"manual" | "direct" | null>(null);
-  const [wbTabPreload,       setWbTabPreload]       = useState<"analytics" | "reviews">("analytics");
+  const [wbTabPreload,       setWbTabPreload]       = useState<"analytics" | "reviews" | "codes">("analytics");
+  const [ordersExportPreload, setOrdersExportPreload] = useState(false);
+  const [ordersFocusPreload,  setOrdersFocusPreload]  = useState(false);
   const [deliveryFocusPreload, setDeliveryFocusPreload] = useState<WbDeliveryFocus | null>(null);
   // Заказ DBS, найденный из общего поиска в «Заказах», открывается на своём
   // экране с тем же запросом — иначе его пришлось бы вводить второй раз.
@@ -351,6 +362,32 @@ export default function TwaApp() {
 
   const sp = { token: token! };
 
+  /* «＋» и 🔍 в шапке. Если «Заказы» уже открыты, команда уходит событием —
+     экран не пересоздаётся и не теряет ленту; иначе — через preload при
+     монтировании. */
+  function ordersCommand(detail: OrdersCommand) {
+    if (screen === "orders") {
+      window.dispatchEvent(new CustomEvent("twa:orders-command", { detail }));
+      return;
+    }
+    if (detail.kind === "create") setOrdersCreatePreload(detail.mode);
+    if (detail.kind === "tab") setOrdersTabPreload(detail.tab);
+    if (detail.kind === "query") setOrderQueryPreload(detail.query);
+    if (detail.kind === "export") setOrdersExportPreload(true);
+    if (detail.kind === "focus-search") setOrdersFocusPreload(true);
+    setScreen("orders");
+  }
+  function runQuick(action: QuickAction) {
+    switch (action.kind) {
+      case "create": ordersCommand({ kind: "create", mode: action.mode }); break;
+      case "buyout": ordersCommand({ kind: "tab", tab: "BUYOUT" }); break;
+      case "search": ordersCommand({ kind: "focus-search" }); break;
+      case "export": ordersCommand({ kind: "export" }); break;
+      case "open":   ordersCommand({ kind: "query", query: action.code }); break;
+      case "codes":  setWbTabPreload("codes"); setScreen("wb"); break;
+    }
+  }
+
   return (
     <div className="twa-root twa-liquid-root" style={{
       display: "flex", flexDirection: "column",
@@ -361,6 +398,15 @@ export default function TwaApp() {
       {/* Title bar — doubles as a context zone: back chevron on drill-down
           screens, date otherwise. */}
       <div className={`twa-liquid-titlebar${compactTitle ? " is-compact" : ""}`}>
+        {/* Поиск — с любого экрана: одна кнопка в шапке, ищет в «Заказах». */}
+        <button
+          type="button"
+          className="twa-title-search twa-press-sm"
+          aria-label="Поиск заказа или покупателя"
+          onClick={() => { haptic.select(); ordersCommand({ kind: "focus-search" }); }}
+        >
+          <SearchIcon size={19} />
+        </button>
         {(() => {
           const parent = SCREEN_PARENT[screen];
           if (parent) {
@@ -402,8 +448,8 @@ export default function TwaApp() {
           onOpenDelivery={(focus) => { setDeliveryFocusPreload(focus ?? null); setDeliveryQueryPreload(""); setScreen("delivery"); }}
           onCreateOrder={(mode) => { setOrdersCreatePreload(mode); setScreen("orders"); }}
         />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} initialCreate={ordersCreatePreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); setOrdersCreatePreload(null); }} onOpenDelivery={(q) => { setDeliveryQueryPreload(q); setDeliveryFocusPreload(null); setScreen("delivery"); }} />}
-        {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} initialCreate={ordersCreatePreload} initialExport={ordersExportPreload} initialFocusSearch={ordersFocusPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); setOrdersCreatePreload(null); setOrdersExportPreload(false); setOrdersFocusPreload(false); }} onOpenDelivery={(q) => { setDeliveryQueryPreload(q); setDeliveryFocusPreload(null); setScreen("delivery"); }} />}
+        {screen === "wb"         && <WbScreen       key={wbTabPreload} {...sp} initialTab={wbTabPreload} />}
         {screen === "delivery"   && <WbDeliveryScreen {...sp} initialFocus={deliveryFocusPreload} initialQuery={deliveryQueryPreload} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
@@ -411,7 +457,7 @@ export default function TwaApp() {
         {screen === "economics"  && <EconomicsScreen {...sp} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} />
+      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} onQuick={runQuick} />
       <ToastHost />
     </div>
   );

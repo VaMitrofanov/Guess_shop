@@ -2133,3 +2133,61 @@ html.twa-route-active [contenteditable="true"] {
 /* Последний раздел шторки должен доезжать до её верха — иначе вкладка
    «История» показывала конец раздела «Заказ». */
 .twa-os-sec:last-of-type { min-height: calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 220px); }
+
+/* ── 21.10 (3): навигация «Сегодня · Заказы · ＋ · Доставка · Ещё» ───────────── */
+.twa-liquid-tabbar.is-five { grid-template-columns: repeat(2, 1fr) 72px repeat(2, 1fr); align-items: center; }
+.twa-fab {
+  justify-self: center; display: grid; place-items: center; width: 56px; height: 56px; margin-top: -22px;
+  border: 1px solid rgba(255,255,255,.22); border-radius: 19px; color: #fff;
+  background: linear-gradient(180deg, #a68bff, #7c57f2);
+  box-shadow: 0 12px 26px -6px rgba(126,87,245,.85), 0 0 0 5px rgba(13,11,20,.92);
+  -webkit-touch-callout: none; user-select: none; touch-action: manipulation;
+}
+.twa-fab:active { transform: scale(.94); }
+
+.twa-quick { display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 18px; }
+.twa-quick-head { display: flex; flex-direction: column; gap: 3px; padding: 0 2px; }
+.twa-quick-head > b { font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+.twa-quick-head > small { color: #8e8a99; font-size: 13px; }
+.twa-quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.twa-quick-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 96px; padding: 14px;
+  border: 0; border-radius: 18px; background: rgba(255,255,255,.06); color: #f7f5ff; text-align: left;
+}
+.twa-quick-tile > svg { margin-bottom: 6px; color: #cdbcff; }
+.twa-quick-tile > b { font-size: 15px; font-weight: 700; }
+.twa-quick-tile > small { color: #8e8a99; font-size: 12.5px; }
+.twa-quick-tile.is-primary { background: linear-gradient(180deg, rgba(166,139,255,.32), rgba(124,87,242,.2)); box-shadow: inset 0 0 0 1px rgba(185,164,255,.35); }
+.twa-quick-tile.is-primary > svg { color: #fff; }
+.twa-quick-tile.is-green { background: rgba(48,209,88,.12); box-shadow: inset 0 0 0 1px rgba(48,209,88,.28); }
+.twa-quick-tile.is-green > svg { color: #6ee58d; }
+.twa-quick-label { margin: 2px 4px -4px; color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.twa-quick-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.twa-quick-recent > button { min-height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(255,255,255,.08); color: #e3def0; font: 600 13.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+
+.twa-more-group { margin: 10px 6px 2px; color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.twa-more-icon.is-green { background: rgba(48,209,88,.16) !important; color: #6ee58d !important; }
+.twa-more-icon.is-purple { background: rgba(167,139,250,.18) !important; color: #cdbcff !important; }
+.twa-more-icon.is-pink { background: rgba(203,17,171,.2) !important; color: #f39be0 !important; }
+.twa-more-icon.is-orange { background: rgba(255,189,92,.16) !important; color: #ffbd5c !important; }
+
+/* 🔍 в шапке любого экрана. */
+.twa-title-search {
+  position: absolute; right: 16px; bottom: 11px; display: grid; place-items: center; width: 42px; height: 42px;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 13px; background: rgba(255,255,255,.07); color: #e3def0;
+}
+.twa-liquid-titlebar.is-compact .twa-title-search { bottom: 4px; width: 36px; height: 36px; border-radius: 11px; }
+
+.twa-till-start {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 50px; margin-top: 14px;
+  border: 0; border-radius: 14px; background: #30d158; color: #0d1f14; font-size: 16px; font-weight: 800;
+  box-shadow: 0 10px 22px -10px rgba(48,209,88,.7);
+}
+/* Результаты живого поиска — тем же языком, что группы шторки: сетка
+   «текст | стрелка/кнопка», а не перенос строк (стрелка падала вниз). */
+.twa-live-group { border: 0; border-radius: 16px; background: rgba(255,255,255,.055); }
+.twa-live-group > span { padding: 12px 14px 6px; color: #8e8a99; font-weight: 700; letter-spacing: .08em; }
+.twa-live-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "b side" "s side"; align-items: center; gap: 3px 12px; min-height: 56px; padding: 10px 14px; border-top-color: rgba(255,255,255,.06); }
+.twa-live-row b { grid-area: b; }
+.twa-live-row small { grid-area: s; color: #8e8a99; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-live-row > span:last-child, .twa-live-row > .twa-live-cta { grid-area: side; }
