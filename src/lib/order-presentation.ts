@@ -52,14 +52,15 @@ export interface GpLive {
 export const grossOf = (amount: number): number => expectedGamepassPrice(amount);
 
 /* ── Робуксы после выкупа ────────────────────────────────────────────────────
-   Roblox держит выручку за геймпасс в Pending ~5 дней, и клиенту эту дату
+   Roblox держит выручку за геймпасс в Pending до 7 дней (с 23.10.2026 ориентир
+   считается по максимуму — зеркало bots/shared/robux-eta.ts), и клиенту эту дату
    называют в первом же сообщении после выкупа. Админ до 08.09.2026 её нигде не
    видел: и карточка, и алерт поддержки говорили только «выкуплен», а вопрос у
    человека был «когда придут» (49ANALQ). Правило живёт здесь, потому что это
    ПРЕДСТАВЛЕНИЕ заказа — им пользуются и экраны, и `twa-notify`.
    ────────────────────────────────────────────────────────────────────────── */
 
-export const ROBUX_UNLOCK_DAYS = 5;
+export const ROBUX_UNLOCK_DAYS = 7;
 
 export function robuxUnlockAt(completedAt: string | Date): Date {
   const at = completedAt instanceof Date ? completedAt : new Date(completedAt);

@@ -92,7 +92,7 @@ async function vkPost(vkUserId: string, message: string, extra: Record<string, s
 // напоминание о бонусе на балансе → TIER-2 питч → благодарность (+скидка DIR<500).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/* Правило «робуксы разблокируются через 5 дней» живёт в `order-presentation`:
+/* Правило «робуксы разблокируются до 7 дней» живёт в `order-presentation`:
    на него смотрят и экраны админки, и это сообщение клиенту. Здесь только
    имена, под которыми оно исторически известно в этом файле. */
 export const ROBUX_UNLOCK_DAYS = PRESENTATION_UNLOCK_DAYS;
@@ -142,14 +142,19 @@ const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (bots/shared/review-
 function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
   const unlockStr = fmtDateRu(robuxUnlockDate(inp.completedAt ?? new Date()));
 
+  // Зеркало bots/shared/completed-messages.ts (23.10.2026): дата — ориентир, не обещание.
   const tgMsg1 =
-    `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
-    `Roblox зачислит их до <b>${unlockStr}</b> — это стандартная заморозка «Pending» на их стороне.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending</b>`;
+    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте 🚀\n\n` +
+    `Roblox держит их в статусе <b>Pending</b> до 7 дней — ориентир <b>до ${unlockStr}</b>. ` +
+    `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending</b>\n` +
+    `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
   const vkMsg1 =
-    `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
-    `Roblox зачислит их до ${unlockStr} — это стандартная заморозка «Pending» на их стороне.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending`;
+    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте 🚀\n\n` +
+    `Roblox держит их в статусе Pending до 7 дней — ориентир до ${unlockStr}. ` +
+    `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка Pending\n` +
+    `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
   const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";

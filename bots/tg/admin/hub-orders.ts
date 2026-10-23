@@ -501,7 +501,7 @@ export async function confirmBatchFulfill(
       try {
         await bot.telegram.sendMessage(
           order.user.tgId,
-          `✅ Заказ на ${order.amount} R$ выкуплен! Робуксы придут через 5-7 дней.`,
+          `✅ Заказ на ${order.amount} R$ выкуплен! Робуксы уже на аккаунте — Roblox держит их в Pending до 7 дней.`,
           { parse_mode: "HTML" }
         );
       } catch { /* non-fatal */ }

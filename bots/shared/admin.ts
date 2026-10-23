@@ -90,6 +90,7 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   pending_long:   "Заказ долго в обработке",
   direct_wait:    "Долгое ожидание прямого заказа",
   general:        "Общий вопрос",
+  robux_overdue:  "Робуксов нет — срок заморозки Roblox (7 дней) прошёл",
   // Item 7 Phase E — nick-search dead-ends
   nick_not_found: "Ник Roblox не найден",
   place_closed:   "Закрытый плейс / нет публичных геймпассов",
@@ -224,16 +225,17 @@ function blockerLine(order: any): string | null {
       break;
     case "COMPLETED": {
       // Самый частый разговор «долго в обработке» — про уже выкупленный заказ:
-      // робуксы у Roblox лежат под замком пять дней, и это не наша задержка.
+      // робуксы у Roblox лежат под замком до 7 дней, и это не наша задержка.
       if (!order.completedAt) { parts.push("✅ Выкуплен"); break; }
       parts.push(`✅ Выкуплен, прошло ${formatOrderAge(order.completedAt)}`);
       /* Человек спрашивает не «сколько прошло», а «когда придут». Дату ему уже
          назвали в сообщении о выкупе — админ обязан видеть ТУ ЖЕ дату, иначе
-         считает пять дней в уме прямо в разговоре (49ANALQ, 08.09.2026). */
+         считает срок в уме прямо в разговоре (49ANALQ, 08.09.2026). С 23.10.2026
+         ориентир — 7 дней (максимум Roblox), тот же, что в таймере клиента. */
       const unlock = robuxUnlockDate(new Date(order.completedAt));
       parts.push(unlock.getTime() > Date.now()
-        ? `💎 робуксы выйдут из Pending ${fmtDateRu(unlock)}`
-        : `💎 робуксы разблокированы ${fmtDateRu(unlock)} — если их нет, это уже к Roblox`);
+        ? `💎 в заморозке Roblox, ориентир до ${fmtDateRu(unlock)}`
+        : `⌛ срок заморозки Roblox прошёл ${fmtDateRu(unlock)} — если робуксов нет, проверить выкуп`);
       break;
     }
     case "REJECTED":

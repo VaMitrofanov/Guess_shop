@@ -88,6 +88,8 @@ import { revokeGateCode } from "./wb-code-revocation";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
+import { notifyBuyerViaWbChat } from "./wb-chat-notify";
+import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -1283,6 +1285,47 @@ async function tryAutoRequestCode(
   }
 }
 
+/** Не чаще одного автоответа про робуксы на чат за это окно. */
+const ROBUX_ETA_CHAT_WINDOW_MS = 6 * 60 * 60_000;
+
+/**
+ * «Где робуксы?» в чате WB (23.10.2026). Покупатель DBS спрашивает там же, где
+ * ему писали про доставку, а сообщения по закрытому заказу до оператора даже
+ * не доходили. Отвечаем таймером заморозки Roblox — только по выкупленному
+ * заказу и не чаще раза в 6 часов на чат. Срок прошёл — дополнительно зовём
+ * оператора: тогда проблема может быть настоящей. Выключатель —
+ * `WB_CHAT_ROBUX_ETA=off`.
+ */
+async function answerRobuxQuestionInChat(
+  db: Db,
+  order: { id: string; wbOrderId: string; cancelledAt: Date | null },
+  chatId: string,
+  rawText: string,
+): Promise<void> {
+  if (process.env.WB_CHAT_ROBUX_ETA === "off") return;
+  if (order.cancelledAt) return;
+  const ref = await dbsRef(db, order.id, order.wbOrderId);
+  if (!ref.code) return;
+  const buyout = await db.wbOrder.findUnique({
+    where: { wbCode: ref.code },
+    select: { status: true, amount: true, completedAt: true },
+  });
+  if (!buyout || buyout.status !== "COMPLETED" || !buyout.completedAt) return;
+  const reply = buildRobuxEtaWbChat([{ amount: buyout.amount, completedAt: buyout.completedAt }]);
+  if (!reply) return;
+
+  const bucket = Math.floor(Date.now() / ROBUX_ETA_CHAT_WINDOW_MS);
+  const key = `robux-eta:${chatId}:${bucket}`;
+  const already = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: key }, select: { id: true } });
+  if (already) return;
+  const sent = await notifyBuyerViaWbChat(db, ref.code, reply.text, { skipIfClaimOpen: true });
+  if (sent.sent) {
+    await audit(db, order.id, "ROBUX_ETA_ANSWERED", key, { overdue: reply.overdue });
+  }
+  // Барьер: пока срок идёт, оператору не пишем вовсе; после — раз на окно.
+  if (reply.overdue) notifyDbsBuyerMessage(ref, rawText);
+}
+
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
   const cursor = await db.wbSyncCursor.findUnique({ where: { stream: EVENTS_STREAM } });
   const response = await fetchBuyerChatEvents(cursor?.cursor ?? undefined);
@@ -1395,6 +1438,11 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
           });
         if (outcome.kind === "attached") out.attachedGamepasses += 1;
       }
+    }
+    // «Где робуксы?» по выкупленному заказу — таймер заморозки Roblox.
+    if (isNewEvent && order && isBuyerSender(event.sender) && rawText && isArrivalQuestion(rawText)) {
+      await answerRobuxQuestionInChat(db, order, event.chatID, rawText)
+        .catch((err) => console.warn("[WbDbsSync] таймер робуксов в чате:", err instanceof Error ? err.message : err));
     }
     // Runs after capture so an opening message that already carries the code
     // never triggers a request for it.

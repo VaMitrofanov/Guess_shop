@@ -199,8 +199,8 @@ export function buildBuyerMenuText(input: BuyerMenuInput): BuyerMenuText {
     if (done.completedAt) {
       const unlock = robuxUnlockDate(new Date(done.completedAt));
       lines.push(unlock.getTime() > now.getTime()
-        ? `💎 Робуксы выйдут из Pending <b>${fmtDateRu(unlock)}</b> — Roblox держит их 5 дней`
-        : `💎 Робуксы разблокированы ${fmtDateRu(unlock)} — проверь раздел Transactions`);
+        ? `💎 Робуксы в Pending у Roblox — ориентир <b>до ${fmtDateRu(unlock)}</b> (до 7 дней)`
+        : `💎 Срок заморозки Roblox прошёл ${fmtDateRu(unlock)} — проверь раздел Transactions`);
     }
   }
 

@@ -85,11 +85,11 @@ export function wbChatCompletedMessage(
   const daysPassed = completedAt
     ? Math.floor((Date.now() - completedAt.getTime()) / 86_400_000)
     : 0;
-  const pending = daysPassed >= 5
-    ? `Robux приходят в Roblox со статусом Pending и разблокируются примерно за 5 дней — ` +
-      `с момента выкупа прошло больше, так что они уже должны быть доступны.`
-    : `Robux приходят в Roblox со статусом Pending и становятся доступны примерно через 5 дней — ` +
-      `это правило Roblox, а не задержка с нашей стороны.`;
+  const pending = daysPassed >= 7
+    ? `Robux приходят в Roblox со статусом Pending, и Roblox держит их до 7 дней — ` +
+      `с момента выкупа прошло больше, так что обычно они уже доступны.`
+    : `Robux приходят в Roblox со статусом Pending, и Roblox держит их до 7 дней — ` +
+      `этот срок устанавливает Roblox, а не мы.`;
   return (
     `Ваш заказ выполнен: ${amount} R$${who} отправлены через геймпасс.\n\n` +
     `${pending}\n\n` +

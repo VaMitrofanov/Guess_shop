@@ -91,9 +91,9 @@ describe("экран целиком", () => {
     }).text;
     expect(text).toContain("ГОТОВО");
     expect(text).toContain("выкуплен");
-    // Выкуп + 5 дней = 21 октября.
-    expect(text).toContain("Робуксы выйдут из Pending");
-    expect(text).toContain("21 октября");
+    // Выкуп + 7 дней (максимум Roblox) = 23 октября.
+    expect(text).toContain("Робуксы в Pending у Roblox");
+    expect(text).toContain("23 октября");
   });
 
   it("когда срок Pending вышел — не обещает ожидание, а отправляет в Transactions", () => {
@@ -101,7 +101,7 @@ describe("экран целиком", () => {
       active: [],
       lastCompleted: order({ status: "COMPLETED", completedAt: new Date(NOW.getTime() - 9 * DAY) }),
     }).text;
-    expect(text).toContain("разблокированы");
+    expect(text).toContain("Срок заморозки Roblox прошёл");
     expect(text).toContain("Transactions");
   });
 

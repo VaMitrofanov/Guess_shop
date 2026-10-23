@@ -137,9 +137,9 @@ describe("справка по заказу внутри алерта подде�
     await call();
 
     const text = sentText();
-    expect(text).toContain("💎 робуксы выйдут из Pending");
-    // Дата — та же, что видит клиент: выкуп + 5 дней.
-    const expected = new Date(Date.now() + 3 * DAY)
+    expect(text).toContain("💎 в заморозке Roblox, ориентир до");
+    // Дата — та же, что видит клиент: выкуп + 7 дней (с 23.10.2026).
+    const expected = new Date(Date.now() + 5 * DAY)
       .toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
     expect(text).toContain(expected);
   });
@@ -150,7 +150,7 @@ describe("справка по заказу внутри алерта подде�
       completedAt: new Date(Date.now() - 9 * DAY),
     }));
     await call();
-    expect(sentText()).toContain("робуксы разблокированы");
+    expect(sentText()).toContain("срок заморозки Roblox прошёл");
   });
 
   /* `[НИК? …]` пишет `capture-nick`, и никто её не снимает — заметка это журнал.
