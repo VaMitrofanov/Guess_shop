@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { cancelCanonicalTinkoffPayment } from "@/lib/tinkoff";
+import { holdForProblem } from "@/lib/order-hold";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
     if (existing) return { kind: "existing", existing } as const;
     const order = await tx.wbOrder.findUnique({
       where: { id: input.orderId },
-      select: { id: true, receiptEmail: true, paymentAttempts: { orderBy: { createdAt: "desc" }, take: 1 } },
+      select: { id: true, wbCode: true, receiptEmail: true, paymentAttempts: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     const attempt = order?.paymentAttempts[0];
     if (!order || !attempt || !attempt.paymentId || !order.receiptEmail) throw new Error("PAYMENT_NOT_FOUND");
@@ -49,6 +50,7 @@ export async function POST(req: NextRequest) {
     return {
       kind: "prepared",
       orderId: order.id,
+      wbCode: order.wbCode,
       receiptEmail,
       attempt: { ...attempt, paymentId },
       refund, amountKopecks, remaining,
@@ -67,7 +69,17 @@ export async function POST(req: NextRequest) {
     const existing = prepared.existing;
     return NextResponse.json({ success: existing.status === "SUBMITTED" || existing.status === "CONFIRMED", refund: existing, alreadyExists: true });
   }
-  const { orderId, receiptEmail, attempt, refund, amountKopecks } = prepared;
+  const { orderId, wbCode, receiptEmail, attempt, refund, amountKopecks } = prepared;
+
+  /* ❄️ Деньги уходят покупателю — заказ больше не выкупаем (24.10.2026).
+     Морозим ДО запроса в банк: исход запроса бывает неизвестен, а очередь
+     выкупа не должна угадывать, вернули деньги или нет. */
+  const fullRefund = amountKopecks >= attempt.amountKopecks - (attempt.refundedAmountKopecks ?? 0);
+  await holdForProblem(prisma, {
+    wbCode,
+    kind: fullRefund ? "PAYMENT_REFUNDED" : "PAYMENT_PARTIAL_REFUND",
+    actor: `возврат: ${operator.firstName || operator.userId}`,
+  }).catch((holdError) => console.error("[refund] hold failed", { orderId, holdError }));
 
   try {
     const provider = await cancelCanonicalTinkoffPayment({

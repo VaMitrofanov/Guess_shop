@@ -299,6 +299,147 @@ export async function activeHoldCodes(db: any, codes: string[]): Promise<Set<str
   return new Set(rows.map((r: { wbCode: string }) => r.wbCode));
 }
 
+/* ── Автозаморозка проблемных заказов (24.10.2026) ─────────────────────────
+   Требование владельца: «любой проблемный, отменённый заказ не будет
+   выкуплен». До этого дня заявка на возврат на WB (JR7HTSW) только присылала
+   алерт: заказ оставался в очереди выкупа, а автобай его не отличал от
+   обычного. Теперь каждое событие «деньги уходят от нас» ставит заморозку
+   по коду, а перед любой тратой робуксов стоит `assertOrderBuyable`.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type ProblemKind =
+  | "WB_CLAIM"
+  | "WB_CLAIM_REFUNDED"
+  | "WB_CANCELLED"
+  | "CODE_REVOKED"
+  | "PAYMENT_REFUNDED"
+  | "PAYMENT_PARTIAL_REFUND";
+
+/** Кто ставит автозаморозку — так она подписана в заметке и в карточке. */
+export const PROBLEM_HOLD_ACTOR = "автозащита";
+
+/** Начало причины — по нему видно, что заморозку поставила автоматика. */
+const PROBLEM_REASON_HEAD: Record<ProblemKind, string> = {
+  WB_CLAIM: "Возврат на WB: покупатель открыл заявку",
+  WB_CLAIM_REFUNDED: "Возврат на WB одобрен — деньги уходят покупателю",
+  WB_CANCELLED: "Заказ отменён на WB — деньги вернулись покупателю",
+  CODE_REVOKED: "Код аннулирован",
+  PAYMENT_REFUNDED: "Платёж возвращён покупателю",
+  PAYMENT_PARTIAL_REFUND: "Частичный возврат платежа — решить вручную",
+};
+
+export function problemHoldReason(kind: ProblemKind, detail?: string | null): string {
+  const head = PROBLEM_REASON_HEAD[kind];
+  const tail = (detail ?? "").replace(/\s+/g, " ").trim();
+  return normalizeHoldReason(tail ? `${head}: «${tail}»` : head) ?? head;
+}
+
+export interface ProblemHoldResult extends HoldResult {
+  /** Заказ уже выкуплен — морозить нечего, робуксы потрачены. */
+  alreadyCompleted?: boolean;
+  /** Статус нашего заказа на момент события (`null` — заказа ещё нет). */
+  internalStatus?: string | null;
+}
+
+/**
+ * Заморозить заказ из-за проблемы. Идемпотентна (как `holdByCode`).
+ *
+ * Выкупленный заказ не морозим: тратить уже нечего, а во вкладке «Заморожены»
+ * он только мешал бы. Его исход решает человек по алерту.
+ */
+export async function holdForProblem(
+  db: any,
+  input: { wbCode: string | null | undefined; kind: ProblemKind; detail?: string | null; actor?: string },
+): Promise<ProblemHoldResult> {
+  const wbCode = normalizeHoldCode(input.wbCode);
+  if (!wbCode) return { ok: false, error: "Не указан код" };
+  const order = await db.wbOrder.findUnique({ where: { wbCode }, select: { status: true } });
+  if (order?.status === "COMPLETED") {
+    return { ok: true, alreadyCompleted: true, internalStatus: "COMPLETED" };
+  }
+  const res = await holdByCode(db, {
+    wbCode,
+    reason: problemHoldReason(input.kind, input.detail),
+    actor: input.actor ?? PROBLEM_HOLD_ACTOR,
+  });
+  return { ...res, internalStatus: order?.status ?? null };
+}
+
+/** Статусы, в которых выкуп невозможен ни при каких условиях. */
+const NEVER_BUYABLE = new Set(["REJECTED"]);
+
+/** Платёж жив — есть деньги, за которые выкупаем. */
+const LIVE_PAYMENT = new Set(["AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED"]);
+
+/**
+ * Найти «жёсткую» проблему заказа — ту, при которой выкуп запрещён, даже если
+ * заморозку кто-то снял: открытая заявка на возврат, отмена на WB,
+ * аннулированный код, полностью возвращённый платёж.
+ *
+ * Мягкие проблемы (возврат отклонён, частичный возврат) сюда не входят: их
+ * решает человек, и после ручной разморозки заказ должен выкупаться.
+ */
+export async function findHardProblem(
+  db: any,
+  order: { id: string; wbCode: string },
+): Promise<{ kind: ProblemKind; detail?: string | null } | null> {
+  const [code, dbs, payments] = await Promise.all([
+    db.wbCode?.findUnique({ where: { code: order.wbCode }, select: { status: true } }).catch(() => null),
+    db.wbMarketplaceOrder?.findFirst({
+      where: { wbCode: { code: order.wbCode } },
+      select: { cancelledAt: true, claimOpenedAt: true, claimResolvedAt: true, claimReason: true },
+    }).catch(() => null),
+    db.paymentAttempt?.findMany({ where: { orderId: order.id }, select: { status: true } }).catch(() => []),
+  ]);
+  if (code?.status === "REVOKED") return { kind: "CODE_REVOKED" };
+  if (dbs?.cancelledAt) return { kind: "WB_CANCELLED" };
+  if (dbs?.claimOpenedAt && !dbs.claimResolvedAt) return { kind: "WB_CLAIM", detail: dbs.claimReason };
+  const statuses: string[] = (payments ?? []).map((p: { status: string }) => String(p.status));
+  if (statuses.includes("REFUNDED") && !statuses.some((s) => LIVE_PAYMENT.has(s))) {
+    return { kind: "PAYMENT_REFUNDED" };
+  }
+  return null;
+}
+
+/**
+ * Единственный гард перед тратой робуксов (24.10.2026).
+ *
+ * Поверх `assertOrderNotHeld` проверяет то, о чём заморозка могла ещё не
+ * узнать: заявку на возврат, отмену на WB, аннулированный код, возврат
+ * платежа. Найдя такую проблему, сам ставит заморозку — дальше заказ виден в
+ * ленте как замороженный, а не «почему-то не выкупается».
+ *
+ * Тест `buyable-guard.test.ts` требует его в КАЖДОМ пути выкупа.
+ */
+export async function assertOrderBuyable(
+  db: any,
+  orderId: string,
+  opts: { allowRejected?: boolean } = {},
+): Promise<{ held: false } | { held: true; reason: string; message: string }> {
+  const held = await assertOrderNotHeld(db, orderId);
+  if (held.held) return held;
+
+  const order = await db.wbOrder.findUnique({
+    where: { id: orderId },
+    select: { id: true, wbCode: true, status: true },
+  });
+  if (!order) return { held: false };
+  // Привязка пасса законно поднимает отклонённый заказ (пасса не было —
+  // теперь есть). Отмену на WB это не обходит: её ловит заморозка и
+  // `findHardProblem` ниже.
+  if (NEVER_BUYABLE.has(order.status) && !opts.allowRejected) {
+    const reason = "заказ отклонён";
+    return { held: true, reason, message: `⛔ Заказ отклонён — выкуп невозможен.` };
+  }
+
+  const problem = await findHardProblem(db, order);
+  if (!problem) return { held: false };
+  const reason = problemHoldReason(problem.kind, problem.detail);
+  await holdByCode(db, { wbCode: order.wbCode, reason, actor: PROBLEM_HOLD_ACTOR })
+    .catch(() => { /* пометка — не повод пропустить блокировку */ });
+  return { held: true, reason, message: heldRefusal(reason) };
+}
+
 /* ── Признак «замороженный клиент» для алертов поддержки ─────────────────── */
 
 export interface HeldCustomer {

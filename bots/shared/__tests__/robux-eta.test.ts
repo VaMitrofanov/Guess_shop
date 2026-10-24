@@ -13,6 +13,12 @@ import {
   loadRobuxEtaOrders,
   robuxEta,
   robuxUnlockDate,
+  selfCheckTarget,
+  selfCheckButtons,
+  robuxScreenshotRequestText,
+  intakeNeedsScreenshot,
+  ROBUX_LOW_PENDING_CONTEXT,
+  PENDING_INFO_URL,
   type RobuxEtaDb,
 } from "../robux-eta";
 
@@ -170,5 +176,43 @@ describe("барьер перед поддержкой", () => {
     const now = new Date(BOUGHT.getTime() + 8 * D);
     expect(hasOverdueOrder([{ amount: 1, completedAt: BOUGHT }], now)).toBe(true);
     expect(hasOverdueOrder([{ amount: 1, completedAt: new Date(now.getTime() - D) }], now)).toBe(false);
+  });
+});
+
+describe("самопроверка по числу в Pending (24.10.2026)", () => {
+  it("спрашивает ЧИСЛО и называет номинал и аккаунт", () => {
+    const t = robuxSelfCheckText("plain", { amount: 1000, robloxUsername: "Kid123" });
+    expect(t).toContain("Pending Robux");
+    expect(t).toContain("число");
+    expect(t).toContain("не меньше 1000");
+    expect(t).toContain("Kid123");
+    expect(t).toContain("а не 0");
+  });
+
+  it("кнопки помещаются в лимит VK (40 символов) даже на 10 000", () => {
+    const btn = selfCheckButtons({ amount: 10000 });
+    for (const label of Object.values(btn)) expect(label.length).toBeLessThanOrEqual(40);
+    expect(btn.low).toContain("10000");
+  });
+
+  it("«меньше номинала» принимается только со скриншотом", () => {
+    expect(intakeNeedsScreenshot(ROBUX_LOW_PENDING_CONTEXT)).toBe(true);
+    expect(intakeNeedsScreenshot("robux_overdue")).toBe(false);
+    expect(intakeNeedsScreenshot(undefined)).toBe(false);
+    expect(robuxScreenshotRequestText("plain")).toMatch(/скриншот/i);
+  });
+
+  it("проверяем свежий просроченный заказ, а не любой", () => {
+    const now = new Date(BOUGHT.getTime() + 9 * D);
+    const fresh = { amount: 500, completedAt: new Date(now.getTime() - D) };
+    const overdue = { amount: 1000, completedAt: BOUGHT };
+    expect(selfCheckTarget([fresh, overdue], now)?.amount).toBe(1000);
+    expect(selfCheckTarget([fresh], now)?.amount).toBe(500);
+    expect(selfCheckTarget([], now)).toBeNull();
+  });
+
+  it("ответ про заморозку ведёт на страницу-объяснение", () => {
+    const reply = buildRobuxEtaReply([{ amount: 1000, completedAt: BOUGHT }], "plain", new Date(BOUGHT.getTime() + D));
+    expect(reply?.text).toContain(PENDING_INFO_URL);
   });
 });

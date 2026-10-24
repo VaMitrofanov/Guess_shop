@@ -14,8 +14,13 @@ export {
   NOT_HELD,
   NOT_HELD_SQL,
   UNHOLD_NOTE_MARK,
+  PROBLEM_HOLD_ACTOR,
   activeHoldCodes,
+  assertOrderBuyable,
   assertOrderNotHeld,
+  findHardProblem,
+  holdForProblem,
+  problemHoldReason,
   hasHoldNoteFor,
   heldCustomerFor,
   heldRefusal,
@@ -26,6 +31,7 @@ export {
   releaseByCode,
   sweepPendingHolds,
 } from "../../bots/shared/order-hold";
+export type { ProblemKind } from "../../bots/shared/order-hold";
 
 import { HOLD_NOTE_MARK, UNHOLD_NOTE_MARK } from "../../bots/shared/order-hold";
 

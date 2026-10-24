@@ -21,7 +21,7 @@
 
 /* Срок заморозки Roblox — в `robux-eta` (до 7 дней, 23.10.2026). Здесь только
    старые имена, под которыми его импортируют остальные модули ботов. */
-import { ROBUX_HOLD_DAYS, robuxUnlockDate, fmtDateRu } from "./robux-eta";
+import { ROBUX_HOLD_DAYS, robuxUnlockDate, fmtDateRu, PENDING_INFO_URL } from "./robux-eta";
 export { robuxUnlockDate, fmtDateRu };
 export const ROBUX_UNLOCK_DAYS = ROBUX_HOLD_DAYS;
 
@@ -35,6 +35,8 @@ export interface CompletedMessagesInput {
   isDirectOrder: boolean;
   /** Все COMPLETED-заказы юзера (включая этот). */
   completedCount: number;
+  /** Номинал заказа — столько должно стоять в Pending Robux (24.10.2026). */
+  amount?: number | null;
   /** Момент выкупа (WbOrder.completedAt); null у легаси-путей → сейчас. */
   completedAt: Date | null;
   /** user.reviewBonusGrantedAt — бонус сейчас на балансе (крон обнуляет по истечении). */
@@ -76,13 +78,15 @@ export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMe
     `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте 🚀\n\n` +
     `Roblox держит их в статусе <b>Pending</b> до 7 дней — ориентир <b>до ${unlockStr}</b>. ` +
     `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending</b>\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}\n` +
     `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
   const vkMsg1 =
     `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте 🚀\n\n` +
     `Roblox держит их в статусе Pending до 7 дней — ориентир до ${unlockStr}. ` +
     `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}\n` +
     `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";

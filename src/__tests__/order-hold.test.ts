@@ -105,7 +105,7 @@ describe("гарды выкупа", () => {
   it("ручной выкуп из TWA отказывает до траты", () => {
     const route = read("src/app/api/twa/orders/route.ts");
     const purchase = route.slice(route.indexOf('if (action === "purchase")'));
-    const guard = purchase.indexOf("assertOrderNotHeld");
+    const guard = purchase.indexOf("assertOrderBuyable");
     const spend = purchase.indexOf("purchaseGamepassWithCookie");
     expect(guard).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(spend);
@@ -114,7 +114,7 @@ describe("гарды выкупа", () => {
   it("ручной выкуп из TG-бота отказывает до траты", () => {
     const handlers = read("bots/tg/handlers.ts");
     const pb = handlers.slice(handlers.indexOf('if (data.startsWith("pb:"))'));
-    const guard = pb.indexOf("assertOrderNotHeld");
+    const guard = pb.indexOf("assertOrderBuyable");
     const spend = pb.indexOf("purchaseGamepassVerified");
     expect(guard).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(spend);
@@ -129,7 +129,7 @@ describe("гарды выкупа", () => {
        по КОДУ и бывает старше заказа. */
     const route = read("src/app/api/twa/orders/route.ts");
     const attach = route.slice(route.indexOf('if (action === "attach-gamepass")'));
-    const guard = attach.indexOf("assertOrderNotHeld");
+    const guard = attach.indexOf("assertOrderBuyable");
     const queue = attach.indexOf('status: "PENDING"');
     expect(guard).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(queue);

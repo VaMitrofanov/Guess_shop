@@ -29,7 +29,7 @@ import {
   getRobuxBalance,
 } from "../shared/roblox";
 import { searchGamepassesByNick } from "../shared/gamepass-search";
-import { NOT_HELD, activeHoldCodes, assertOrderNotHeld } from "../shared/order-hold";
+import { NOT_HELD, activeHoldCodes, assertOrderBuyable } from "../shared/order-hold";
 import { runDrain, drainAuthedUser, drainUserGamepasses } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
@@ -148,7 +148,16 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         autobuySkip.add(order.id);
         // Заодно проставляет заморозку на сам заказ — дальше он виден в ленте
         // как замороженный, а не как «почему-то не выкупается».
-        await assertOrderNotHeld(db, order.id).catch(() => {});
+        await assertOrderBuyable(db, order.id).catch(() => {});
+        continue;
+      }
+      // Третий рубеж (24.10.2026): заявка на возврат, отмена на WB, возврат
+      // платежа — то, о чём заморозка могла ещё не узнать. Сбой проверки =
+      // пропуск заказа, а не выкуп вслепую.
+      const buyable = await assertOrderBuyable(db, order.id)
+        .catch(() => ({ held: true as const, reason: "проверка не прошла", message: "" }));
+      if (buyable.held) {
+        autobuySkip.add(order.id);
         continue;
       }
 

@@ -67,7 +67,7 @@ import {
   WB_RECEIVE_RECHECK_AFTER_ATTEMPTS,
   WB_RECEIVE_RETRY_HORIZON_MS,
 } from "./wb-delivery-policy";
-import type { WbCancellationOutcome } from "./wb-delivery-admin-notify";
+import type { ClaimHoldOutcome, WbCancellationOutcome } from "./wb-delivery-admin-notify";
 import {
   notifyDbsBuyerMessage,
   notifyDbsCodeCaptured,
@@ -82,7 +82,7 @@ import {
   notifyWbClaimResolved,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
-import { activeHoldCodes, holdByCode } from "./order-hold";
+import { activeHoldCodes, holdByCode, holdForProblem, type ProblemHoldResult } from "./order-hold";
 import { runBuyoutGate, type GateOrder } from "./buyout-gate";
 import { revokeGateCode } from "./wb-code-revocation";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
@@ -1617,6 +1617,14 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
     }
   }
 
+  /* Заморозка — на все исходы, кроме уже выкупленного (24.10.2026). Раньше
+     `needs_human` (выкуп в работе или в ошибке) оставался в очереди, а
+     отклонённый можно было вернуть к выкупу одной кнопкой. */
+  if (code && outcome !== "already_delivered") {
+    await holdForProblem(db, { wbCode: code, kind: "WB_CANCELLED", detail: `WB #${wbOrderId}, ${wbStatus}` })
+      .catch((error) => console.error(`[WbDbsSync] заморозка отмены ${code} не встала:`, safeErrorCode(error)));
+  }
+
   /* Деньги вернулись, а код остался бы рабочим: до 12.09.2026 ни одна точка
      активации не смотрела на отмену, и `XKFFJUU` двое суток ждал предъявителя.
      Аннулируем сразу же — руками этого сделать было нельзя вовсе (в консоли
@@ -1826,6 +1834,31 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   }
 }
 
+/** Заморозка по заявке. Ошибка не роняет синк: алерт важнее, а последний
+ *  рубеж — `assertOrderBuyable` в пути выкупа — проверит заявку сам. */
+async function claimHold(
+  db: Db,
+  code: string | null,
+  kind: "WB_CLAIM",
+  reason: string | null,
+  refunded: boolean,
+): Promise<ProblemHoldResult | null> {
+  if (!code) return null;
+  return holdForProblem(db, { wbCode: code, kind: refunded ? "WB_CLAIM_REFUNDED" : kind, detail: reason })
+    .catch((error) => {
+      console.error(`[WbDbsSync] заморозка по заявке ${code} не встала:`, safeErrorCode(error));
+      return null;
+    });
+}
+
+function claimHoldOutcome(hold: ProblemHoldResult | null): ClaimHoldOutcome {
+  if (!hold || !hold.ok) return "failed";
+  if (hold.alreadyCompleted) return "already_delivered";
+  if (hold.internalStatus === "IN_PROGRESS") return "held_in_progress";
+  if (hold.awaitingOrder) return "held_code";
+  return "held";
+}
+
 async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
   type SeenClaim = { dt: string | undefined; reason: string | undefined; status: number | undefined; statusEx: number | undefined };
   const seen = new Map<string, SeenClaim>();
@@ -1879,12 +1912,17 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
         status: claim.status ?? null,
       });
       out.newClaims += 1;
+      /* Заявка = деньги могут уйти покупателю. До 24.10.2026 тут был только
+         алерт, а заказ оставался в очереди выкупа (JR7HTSW). Морозим по КОДУ:
+         заморозка сядет и на заказ, которого ещё нет. */
+      const hold = await claimHold(db, order.wbCode?.code ?? null, "WB_CLAIM", claim.reason ?? null, resolved && claim.statusEx === CLAIM_REFUND_GRANTED);
       await notifyWbBuyerClaim({
         wbOrderId: order.wbOrderId,
         code: order.wbCode?.code ?? null,
         denomination: order.denominationSnapshot,
         buyerName: order.buyerName,
         reason: claim.reason ?? null,
+        hold: claimHoldOutcome(hold),
       }).catch(() => undefined);
       continue;
     }
@@ -1901,12 +1939,19 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
       status: claim.status ?? null,
       statusEx: claim.statusEx ?? null,
     }).catch(() => {});
+    const refunded = claim.statusEx === CLAIM_REFUND_GRANTED;
+    /* Одобренный возврат обновляет причину заморозки. Отказ заморозку НЕ
+       снимает (решение владельца 24.10.2026): покупатель мог уже уйти, и
+       выкупать ли заказ, решает человек — кнопкой в карточке. */
+    if (refunded) {
+      await claimHold(db, order.wbCode?.code ?? null, "WB_CLAIM", null, true);
+    }
     notifyWbClaimResolved({
       wbOrderId: order.wbOrderId,
       code: order.wbCode?.code ?? null,
       denomination: order.denominationSnapshot,
       buyerName: order.buyerName,
-      refunded: claim.statusEx === CLAIM_REFUND_GRANTED,
+      refunded,
     });
   }
 }

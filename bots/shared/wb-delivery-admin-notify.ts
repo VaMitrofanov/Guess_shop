@@ -106,12 +106,33 @@ export function notifyDbsGateUndelivered(ref: DbsRef, code: string | null) {
  * всегда — диагноз продукту («не знаем, как создать геймпасс»), поэтому он
  * идёт в сообщение целиком, а не прячется за ссылкой в кабинет.
  */
+/** Что автозащита сделала с нашим заказом, увидев заявку (24.10.2026). */
+export type ClaimHoldOutcome =
+  | "held"
+  | "held_code"
+  | "held_in_progress"
+  | "already_delivered"
+  | "failed";
+
+const CLAIM_HOLD_LINE: Record<ClaimHoldOutcome, string> = {
+  held: "❄️ Заказ заморожен — выкуп заблокирован",
+  held_code: "❄️ Код заморожен — заказ, если появится, выкупаться не будет",
+  held_in_progress: "❄️ Заказ заморожен, но <b>выкуп уже шёл</b> — проверить, не потрачены ли робуксы",
+  already_delivered: "⚠️ Заказ <b>уже выкуплен</b> — робуксы потрачены, спор решать вручную",
+  failed: "⚠️ Заморозка не встала — выкуп всё равно заблокирован гардом, но проверить карточку",
+};
+
+export function claimHoldLine(outcome: ClaimHoldOutcome | undefined): string | null {
+  return outcome ? CLAIM_HOLD_LINE[outcome] : null;
+}
+
 export function notifyWbBuyerClaim(input: {
   wbOrderId: string;
   code: string | null;
   denomination: number | null;
   buyerName: string | null;
   reason: string | null;
+  hold?: ClaimHoldOutcome;
 }): Promise<void> {
   const ref: DbsRef = {
     wbOrderId: input.wbOrderId,
@@ -126,6 +147,7 @@ export function notifyWbBuyerClaim(input: {
     lines: [
       refLine(ref),
       input.reason ? `💬 <i>${escapeHtml(input.reason)}</i>` : null,
+      claimHoldLine(input.hold),
       "🔕 Напоминания по гейту для этого заказа остановлены",
     ],
     next: "ответить в чате WB и решить заявку в кабинете — статус заказа про неё не знает",
@@ -226,7 +248,7 @@ export function notifyWbClaimResolved(input: {
     lines: [refLine(ref)],
     next: input.refunded
       ? "деньги возвращаются — отмена заказа придёт следом, отдельно делать ничего не нужно"
-      : "деньги остаются у нас; заказ живой — покупателю всё ещё нужен его номинал",
+      : "деньги остаются у нас; заказ остаётся замороженным — если покупатель ждёт робуксы, снять заморозку в карточке",
   }, ref);
 }
 

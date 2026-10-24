@@ -91,6 +91,7 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   direct_wait:    "Долгое ожидание прямого заказа",
   general:        "Общий вопрос",
   robux_overdue:  "Робуксов нет — срок заморозки Roblox (7 дней) прошёл",
+  robux_low_pending: "Робуксов нет: в Pending меньше номинала (самопроверка, скрин Transactions приложен)",
   // Item 7 Phase E — nick-search dead-ends
   nick_not_found: "Ник Roblox не найден",
   place_closed:   "Закрытый плейс / нет публичных геймпассов",

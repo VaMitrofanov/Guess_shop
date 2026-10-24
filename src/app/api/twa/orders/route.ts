@@ -36,7 +36,7 @@ import {
   type FilterTab,
 } from "@/lib/order-queue";
 import {
-  assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
+  assertOrderBuyable, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
 } from "@/lib/order-hold";
 import { isRevokedCode } from "@/lib/wb-code-revocation";
 import {
@@ -1658,6 +1658,10 @@ export async function POST(req: NextRequest) {
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
+    // ❄️ «Выкуплено» по замороженному или спорному заказу — это либо ошибка
+    // нажатия, либо выкуп в обход заморозки. Сначала сними заморозку.
+    const completeHeld = await assertOrderBuyable(prisma, orderId);
+    if (completeHeld.held) return NextResponse.json({ error: completeHeld.message }, { status: 409 });
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const currentRate = settings?.purchaseRate ?? null;
     // У разбитого заказа себестоимость — сумма списаний по частям. Считать её
@@ -1765,6 +1769,10 @@ export async function POST(req: NextRequest) {
 
     const markPurchased = body.purchased !== false;
     const stamp = new Date().toISOString().slice(0, 10);
+    if (markPurchased) {
+      const partHeld = await assertOrderBuyable(prisma, orderId);
+      if (partHeld.held) return NextResponse.json({ error: partHeld.message }, { status: 409 });
+    }
 
     if (markPurchased) {
       // Цену списания при ручной покупке никто не сообщает — записываем
@@ -1839,7 +1847,7 @@ export async function POST(req: NextRequest) {
     // ❄️ Гард заморозки — до всякого похода в Roblox и до списания робуксов.
     // Читает не только `heldAt` заказа, но и `OrderHold`: заказ мог родиться по
     // заранее замороженному коду за минуту до того, как крон-свип его пометил.
-    const heldCheck = await assertOrderNotHeld(prisma, orderId);
+    const heldCheck = await assertOrderBuyable(prisma, orderId);
     if (heldCheck.held) return NextResponse.json({ error: heldCheck.message }, { status: 409 });
 
     // ── Разбитый заказ: покупаем ТЕКУЩУЮ часть ──────────────────────────────
@@ -2308,6 +2316,9 @@ export async function POST(req: NextRequest) {
 
   if (action === "purchase-script") {
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    // Скрипт — тот же выкуп, только руками в браузере.
+    const scriptHeld = await assertOrderBuyable(prisma, orderId);
+    if (scriptHeld.held) return NextResponse.json({ error: scriptHeld.message }, { status: 409 });
     const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
     const gpId = gpMatch[1];
@@ -2403,7 +2414,7 @@ export async function POST(req: NextRequest) {
        31.08). Читаем `OrderHold`, а не только `heldAt`: заморозка ставится по
        КОДУ и может быть старше самого заказа, а крон-свип помечает его не
        мгновенно. Интерфейс кнопку уже прячет — здесь стоит запрет. */
-    const attachHeld = await assertOrderNotHeld(prisma, orderId);
+    const attachHeld = await assertOrderBuyable(prisma, orderId, { allowRejected: true });
     if (attachHeld.held) return NextResponse.json({ error: attachHeld.message }, { status: 409 });
     const raw = String(body.gamepassId ?? "").trim();
     const idMatch = raw.match(/game-pass(?:es)?\/(\d+)/i) ?? raw.match(/^(\d+)$/);
@@ -2470,7 +2481,7 @@ export async function POST(req: NextRequest) {
     // Привязка ставит заказ в очередь выкупа — то же, что запрещают заморозка
     // и неоплаченный прямой заказ (дыра, закрытая у `attach-gamepass`).
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
-    const keyHeld = await assertOrderNotHeld(prisma, orderId);
+    const keyHeld = await assertOrderBuyable(prisma, orderId, { allowRejected: true });
     if (keyHeld.held) return NextResponse.json({ error: keyHeld.message }, { status: 409 });
 
     const KEYABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];

@@ -39,7 +39,7 @@ describe("гейты действия", () => {
   });
 
   it("❄️ заморозка запрещает — привязка ставит заказ в очередь выкупа", () => {
-    expect(block).toContain("assertOrderNotHeld(prisma, orderId)");
+    expect(block).toContain("assertOrderBuyable(prisma, orderId");
   });
 
   it("неоплаченный прямой заказ до выкупа не доходит", () => {

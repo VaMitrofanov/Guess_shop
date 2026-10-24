@@ -6,6 +6,7 @@ import {
 } from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
+import { PENDING_INFO_URL } from "../../bots/shared/robux-eta";
 import {
   BUYER_STEP_COMMANDS,
   buyerStepMessage,
@@ -106,6 +107,8 @@ type CompletedButton = {
 };
 
 interface CompletedMessagesInput {
+  /** Номинал — столько должно стоять в Pending Robux (24.10.2026). */
+  amount?: number | null;
   isDirectOrder: boolean;
   /** Все COMPLETED-заказы юзера (включая этот). */
   completedCount: number;
@@ -147,13 +150,15 @@ function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages 
     `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте 🚀\n\n` +
     `Roblox держит их в статусе <b>Pending</b> до 7 дней — ориентир <b>до ${unlockStr}</b>. ` +
     `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending</b>\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}\n` +
     `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
   const vkMsg1 =
     `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте 🚀\n\n` +
     `Roblox держит их в статусе Pending до 7 дней — ориентир до ${unlockStr}. ` +
     `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}\n` +
     `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
@@ -268,6 +273,7 @@ export async function notifyOrderCompleted(
 
   const m = buildCompletedMessages({
     isDirectOrder,
+    amount,
     completedCount,
     completedAt: order?.completedAt ? new Date(order.completedAt) : new Date(),
     bonusGrantedAt: dbUser?.reviewBonusGrantedAt ? new Date(dbUser.reviewBonusGrantedAt) : null,

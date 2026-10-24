@@ -84,6 +84,9 @@ import {
   buildRobuxEtaReply, buildRobuxEtaShort, fmtLeft, holdBar, isRepeatEtaQuestion,
   loadRobuxEtaOrders, robuxEta, fmtDateRu, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
+  selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
+  robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
+  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext,
 } from "../shared/robux-eta";
 import { requoteForPass } from "../shared/direct-requote";
 import { priceMismatchText } from "../shared/direct-gamepass-copy";
@@ -150,6 +153,7 @@ import {
   xlinkOwnerConfirmedText,
   xlinkWaitingText,
 } from "../shared/cross-platform-notify";
+import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -281,6 +285,14 @@ async function deliverSupportIntake(
     denomination: hint.denom,
     problemText: said,
     problemPhotoUrl: photoUrl,
+  });
+  void recordSupportMetric(db as any, {
+    type: SUPPORT_METRIC_EVENT.DELIVERED, wbCode: hint.wbCode, via: "vk-bot",
+    payload: {
+      contextKey: intake?.contextKey ?? "general",
+      robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
+      photo: !!photoUrl,
+    },
   });
   await pauseSupport(vkUserId, "клиент описал проблему");
   await ctx.reply(intakeAckText("VK"));
@@ -1036,19 +1048,36 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
 
   // ── «Робуксов нет» — самопроверка до поддержки (23.10.2026) ─────────────
-  if (msgPayload?.command === "rbx_chk") {
+  // 24.10.2026: спрашиваем ЧИСЛО в Pending Robux (строка есть у всех, с
+  // нулём), а «меньше номинала» принимаем только со скриншотом.
+  if (msgPayload?.command === "rbx_chk" || msgPayload?.command === "rbx_where") {
+    const first = msgPayload.command === "rbx_chk";
+    const sc = await selfCheckContextVk(vkUserId);
+    const btn = selfCheckButtons(sc);
+    const kb = Keyboard.builder()
+      .textButton({ label: btn.enough, payload: { command: "rbx_pend" }, color: "positive" })
+      .row()
+      .textButton({ label: btn.low, payload: { command: "rbx_low" }, color: "secondary" });
+    if (first) kb.row().textButton({ label: btn.notFound, payload: { command: "rbx_where" }, color: "secondary" });
     await ctx.reply({
-      message: robuxSelfCheckText("plain"),
-      keyboard: Keyboard.builder()
-        .textButton({ label: "⏳ Строка Pending есть", payload: { command: "rbx_pend" }, color: "positive" })
-        .row()
-        .textButton({ label: "❌ Строки нет, аккаунт тот", payload: { command: "support", context: "robux_overdue" }, color: "secondary" })
-        .inline(),
+      message: first ? robuxSelfCheckText("plain", sc) : robuxPendingWhereText("plain", sc),
+      keyboard: kb.inline(),
     });
     return;
   }
   if (msgPayload?.command === "rbx_pend") {
     await ctx.reply(robuxPendingSeenText("plain"));
+    return;
+  }
+  if (msgPayload?.command === "rbx_low") {
+    const sc = await selfCheckContextVk(vkUserId);
+    await openIntake(intakeDb, intakeSubject(vkUserId), {
+      platform: "VK",
+      contextKey: ROBUX_LOW_PENDING_CONTEXT,
+      wbCode: sc.wbCode ?? undefined,
+      denomination: sc.amount ?? undefined,
+    });
+    await ctx.reply(robuxScreenshotRequestText("plain", sc));
     return;
   }
 
@@ -1247,6 +1276,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const intakeIsFlow =
       looksLikeFlowInput(text, { passId: extractPassId(text) !== null, expectsNick: intakeAwaitsNick }) ||
       (intakePhoto && await hasPendingProofPhoto(vkUserId));
+    if (!intakeIsFlow && intakeNeedsScreenshot(intake.contextKey) && !intakePhoto) {
+      // «В Pending меньше номинала» — только со скриншотом (владелец, 24.10.2026).
+      await ctx.reply(robuxScreenshotRepeatText());
+      return;
+    }
     if (!intakeIsFlow) {
       // Барьер (23.10.2026): «где робуксы», пока 7 дней не прошли, — вопрос со
       // сроком, а не проблема. Таймер вместо алерта; robux_overdue пропускаем.
@@ -1283,6 +1317,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       !(await isSupportPaused(vkUserId)) &&
       await replyVkRobuxEta(ctx, vkUserId).catch((err) => { console.error("[VK] robux-eta failed:", err); return false; })
     ) {
+      return;
+    }
+    // Заказ ещё не выкуплен — ответ не таймер, а этап заказа (24.10.2026).
+    if (
+      !etaState.startsWith("AWAITING_DIRECT") &&
+      isArrivalQuestion(text) &&
+      !(await isSupportPaused(vkUserId)) &&
+      await vkHasActiveOrder(vkUserId)
+    ) {
+      await ctx.reply(activeOrderLeadText("plain"));
+      await handleIdleMessage(ctx, vkUserId, "статус");
+      void vkActiveOrderId(vkUserId).then((orderId) => recordSupportMetric(db as any, {
+        type: SUPPORT_METRIC_EVENT.SELF_SERVED, orderId, via: "vk-bot", payload: { kind: "stage" },
+      }));
       return;
     }
   }
@@ -5115,6 +5163,39 @@ function vkRobuxCountdown(completedAt: Date | string): string {
 
 const vkRobuxEtaDb = db as unknown as RobuxEtaDb;
 
+/** Живой невыкупленный заказ человека (свежий) — или `null`. */
+async function vkActiveOrderId(vkUserId: number): Promise<string | null> {
+  try {
+    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    if (!user) return null;
+    const order = await (db as any).wbOrder.findFirst({
+      where: { userId: user.id, status: { in: ACTIVE_ORDER_STATUSES } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    return order?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function vkHasActiveOrder(vkUserId: number): Promise<boolean> {
+  return (await vkActiveOrderId(vkUserId)) !== null;
+}
+
+/** Заказ для самопроверки «Робуксов нет»: сумма, аккаунт, код. */
+async function selfCheckContextVk(vkUserId: number): Promise<SelfCheckContext & { wbCode?: string | null }> {
+  try {
+    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    if (!user) return {};
+    const orders = await loadRobuxEtaOrders(vkRobuxEtaDb, user.id);
+    const target = orders ? selfCheckTarget(orders) : null;
+    return target ? { amount: target.amount, robloxUsername: target.robloxUsername, wbCode: target.wbCode } : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Ответ на «где мои робуксы?» (зеркало TG `replyRobuxEta`, 23.10.2026).
  * `false` — таймер не к месту, сообщение идёт дальше штатно.
@@ -5133,6 +5214,10 @@ async function replyVkRobuxEta(ctx: MessageContext, vkUserId: number, opts: { ho
     kb.row().textButton({ label: "💬 Робуксов нет", payload: { command: "rbx_chk" }, color: "secondary" });
   }
   await ctx.reply({ message: short ?? reply.text, keyboard: kb.inline() });
+  void recordSupportMetric(db as any, {
+    type: SUPPORT_METRIC_EVENT.SELF_SERVED, wbCode: orders[0]?.wbCode, via: "vk-bot",
+    payload: { kind: "eta", overdue: reply.overdue },
+  });
   return true;
 }
 

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { BuyoutError, purchaseGamepassWithCookie, resolveGamepassForBuyer } from "@/lib/roblox-buyout";
 import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
+import { assertOrderBuyable } from "@/lib/order-hold";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -265,6 +266,23 @@ export async function POST(req: NextRequest) {
         },
         select: { id: true, wbCode: true, amount: true },
       });
+      /* ❄️ Пасс привязан к замороженному или спорному заказу (возврат на WB,
+         отмена, возврат платежа) — покупать его «мимо очереди» нельзя тем
+         более. Смотрим и отклонённые: отменённый на WB заказ — REJECTED. */
+      const guardCandidates = await (prisma as any).wbOrder.findMany({
+        where: { isTest: false, status: { not: "COMPLETED" }, gamepassId: gpIdRaw },
+        select: { id: true, wbCode: true },
+        take: 5,
+      });
+      for (const candidate of guardCandidates) {
+        const guard = await assertOrderBuyable(prisma, candidate.id, { allowRejected: true });
+        if (guard.held)
+          return NextResponse.json(
+            { error: `Пасс привязан к заказу ${candidate.wbCode}.\n${guard.message}` },
+            { status: 409 },
+          );
+      }
+
       const linked = linkedCandidates[0];
       if (linked) {
         const { ok: priceOk, expected } = checkGamepassPrice(

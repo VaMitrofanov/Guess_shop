@@ -8,6 +8,7 @@ import {
   paymentTransitionAllowed,
 } from "@/lib/payment-notification";
 import { verifyTinkoffSignature } from "@/lib/tinkoff";
+import { holdForProblem } from "@/lib/order-hold";
 import {
   reserveLatePaymentBenefitsTx,
   revertWebOrderBenefits,
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
   try {
     const attempt = await prisma.paymentAttempt.findUnique({
       where: { publicOrderId },
-      include: { order: { select: { id: true, status: true } } },
+      include: { order: { select: { id: true, status: true, wbCode: true } } },
     });
     if (!attempt) return fail("payment attempt not found", 404);
     // A notification can beat the Init response. Returning a retryable error is
@@ -220,6 +221,17 @@ export async function POST(req: NextRequest) {
       } catch (revertError) {
         console.error("[Tinkoff webhook] benefits revert failed", { orderId: benefitsToRevert, revertError });
       }
+    }
+
+    // ❄️ Возврат денег = заказ больше не выкупаем (24.10.2026). Полный возврат
+    // ставит REJECTED выше, частичный — не трогает статус вовсе, поэтому без
+    // заморозки он остался бы в очереди. Сбой заморозки не валит webhook:
+    // `assertOrderBuyable` в пути выкупа увидит полный возврат и сам.
+    if (refundNotification) {
+      await holdForProblem(prisma, {
+        wbCode: attempt.order.wbCode,
+        kind: nextStatus === "REFUNDED" ? "PAYMENT_REFUNDED" : "PAYMENT_PARTIAL_REFUND",
+      }).catch((holdError) => console.error("[Tinkoff webhook] refund hold failed", { orderId: attempt.order.id, holdError }));
     }
 
     // T-Bank treats this exact body as acknowledgement. It is returned only

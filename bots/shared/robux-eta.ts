@@ -26,6 +26,8 @@ const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 
 export const ROBLOX_TRANSACTIONS_URL = "https://www.roblox.com/transactions";
+/** Наша страница «что такое геймпасс и Pending» — со схемой и скриншотами. */
+export const PENDING_INFO_URL = "https://robloxbank.ru/pending";
 
 /** Ориентир разблокировки: момент выкупа + 7 дней. */
 export function robuxUnlockDate(completedAt: Date): Date {
@@ -127,6 +129,9 @@ export function isArrivalQuestion(text: string): boolean {
 export interface RobuxEtaOrder {
   amount: number;
   completedAt: Date;
+  /** Аккаунт Roblox заказа — на него ушли робуксы. */
+  robloxUsername?: string | null;
+  wbCode?: string | null;
 }
 
 export type RobuxEtaFormat = "html" | "plain";
@@ -203,6 +208,8 @@ export function buildRobuxEtaReply(
     lines.push(`ℹ️ ${b(fmt, NOT_US_HEAD)} ${NOT_US_TAIL}`);
     lines.push("");
     lines.push(`${check} Пока там видна эта строка — всё идёт как надо.`);
+    lines.push("");
+    lines.push(infoLine(fmt));
   }
   if (overdue) {
     if (holding.length > 0) lines.push("");
@@ -219,6 +226,22 @@ export function buildRobuxEtaReply(
   return { text: lines.join("\n"), overdue };
 }
 
+/** Ссылка на объяснение «что такое геймпасс и Pending». */
+export function infoLine(fmt: RobuxEtaFormat): string {
+  return fmt === "html"
+    ? `📖 <a href="${PENDING_INFO_URL}">Как работает геймпасс и почему робуксы «заморожены»</a> — 1 минута, со скриншотами.`
+    : `📖 Как работает геймпасс и почему робуксы «заморожены» (1 минута, со скриншотами): ${PENDING_INFO_URL}`;
+}
+
+/**
+ * «Где робуксы?», когда заказ ещё НЕ выкуплен (24.10.2026). Частый случай:
+ * «я оплатил, где робуксы» пишут, пока заказ ждёт геймпасс от самого
+ * покупателя. Таймер заморозки тут не к месту — отвечаем этапом заказа.
+ */
+export function activeOrderLeadText(fmt: RobuxEtaFormat): string {
+  return `⏳ ${b(fmt, "Робуксы приходят после выкупа геймпасса, а твой заказ ещё не выкуплен.")} Вот где он сейчас 👇`;
+}
+
 // ── Барьер перед поддержкой ─────────────────────────────────────────────────
 /*
  * Требование владельца 23.10.2026: «чтобы поддержку лишний раз не дёргали —
@@ -230,24 +253,107 @@ export function buildRobuxEtaReply(
  *    «строки нет вовсе, аккаунт тот» открывает обращение.
  */
 
+/**
+ * Самопроверка «Робуксов нет» (24.10.2026, правка владельца).
+ *
+ * Раньше спрашивали «строка Pending есть?» — а строка Pending Robux есть на
+ * странице Transactions У ВСЕХ ВСЕГДА, просто с нулём. Человек видел строку,
+ * жал «есть» и получал «всё в порядке», хотя робуксов не было. Теперь
+ * спрашиваем ЧИСЛО в строке: там должен быть номинал заказа, а не 0.
+ *
+ * «Меньше номинала» сразу требует скриншот Transactions: без него менеджер
+ * всё равно первым делом попросит его, а кнопка без скрина превращалась в
+ * способ дёрнуть поддержку одним нажатием.
+ */
+
+/** Заказ, о котором спрашиваем: свежий просроченный, иначе просто свежий. */
+export function selfCheckTarget(ordersIn: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaOrder | null {
+  const orders = etaOrders(ordersIn, now);
+  return orders.find((o) => robuxEta(o.completedAt, now).phase === "overdue") ?? orders[0] ?? null;
+}
+
+export interface SelfCheckContext {
+  amount?: number | null;
+  robloxUsername?: string | null;
+}
+
+function amountText(c: SelfCheckContext): string {
+  return c.amount ? `${c.amount} R$` : "сумма заказа";
+}
+
 /** Шаг самопроверки после кнопки «Робуксов нет». */
-export function robuxSelfCheckText(fmt: RobuxEtaFormat): string {
+export function robuxSelfCheckText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}): string {
+  const account = c.robloxUsername
+    ? `аккаунт ${b(fmt, c.robloxUsername)} — робуксы зачисляются именно на него, на тот аккаунт, где создан геймпасс`
+    : `${b(fmt, "тот аккаунт")}, на который делали заказ — частая причина «робуксов нет» в том, что смотрят другой аккаунт`;
+  const link = fmt === "html" ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>` : ROBLOX_TRANSACTIONS_URL;
   return (
     `🔍 ${b(fmt, "Давай проверим за минуту")}\n\n` +
-    `1. Зайди в Roblox в ${b(fmt, "тот аккаунт")}, на который делали заказ — частая причина «робуксов нет» в том, что смотрят другой аккаунт.\n` +
-    `2. Открой ${fmt === "html" ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>` : ROBLOX_TRANSACTIONS_URL} и найди строку ${b(fmt, "Pending")}.\n\n` +
-    `Что видишь?`
+    `1. Зайди в Roblox в ${account}.\n` +
+    `2. Открой ${link} и найди строку ${b(fmt, "Pending Robux")}.\n\n` +
+    `⚠️ Строка Pending Robux есть у всех — важно ${b(fmt, "число")} в ней. ` +
+    `Там должно быть ${b(fmt, c.amount ? `не меньше ${c.amount}` : "не меньше суммы заказа")}, а не 0.\n\n` +
+    `Какое число видишь?`
   );
 }
 
-/** «Pending есть» — значит всё на месте, ждать Roblox. В поддержку не ведём. */
+/** Подписи кнопок самопроверки — общие для TG и VK (у VK лимит 40 символов). */
+export function selfCheckButtons(c: SelfCheckContext = {}): { enough: string; low: string; notFound: string } {
+  return {
+    enough: c.amount ? `✅ ${c.amount} или больше` : "✅ Сумма заказа или больше",
+    low: c.amount ? `❌ Меньше ${c.amount} или 0` : "❌ Меньше суммы заказа или 0",
+    notFound: "🤷 Не нахожу эту строку",
+  };
+}
+
+/** «В Pending номинал или больше» — значит всё на месте, ждать Roblox. */
 export function robuxPendingSeenText(fmt: RobuxEtaFormat): string {
   return (
     `✅ ${b(fmt, "Значит, всё в порядке — робуксы на твоём аккаунте.")}\n\n` +
-    `Строка Pending означает, что Roblox их уже начислил и просто ещё держит. Иногда он держит дольше 7 дней — ` +
+    `Число в Pending Robux — это твои робуксы: Roblox их уже начислил и просто ещё держит. Иногда он держит дольше 7 дней — ` +
     `это решение Roblox, и ускорить его не может ни наша поддержка, ни мы.\n\n` +
-    `Ничего делать не нужно: как только Roblox разморозит, робуксы сами появятся на балансе.`
+    `Ничего делать не нужно: как только Roblox разморозит, робуксы сами появятся на балансе.\n\n` +
+    infoLine(fmt)
   );
+}
+
+/** «Не нахожу строку» — где она и как выглядит. */
+export function robuxPendingWhereText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}): string {
+  const link = fmt === "html" ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>` : ROBLOX_TRANSACTIONS_URL;
+  return (
+    `📍 ${b(fmt, "Где искать")}\n\n` +
+    `• Открой ${link} в браузере (в приложении Roblox этой страницы нет).\n` +
+    `• Войди в аккаунт ${c.robloxUsername ? b(fmt, c.robloxUsername) : "заказа"}.\n` +
+    `• Вкладка ${b(fmt, "Summary")} → в таблице строка ${b(fmt, "Pending Robux")}, справа число.\n\n` +
+    `Скриншот с подсказкой — на странице: ${PENDING_INFO_URL}\n\n` +
+    `Нашёл? Какое там число?`
+  );
+}
+
+/** Контекст обращения: «в Pending меньше номинала» — только со скриншотом. */
+export const ROBUX_LOW_PENDING_CONTEXT = "robux_low_pending";
+
+/** Обращение этого контекста принимается только со скриншотом. */
+export function intakeNeedsScreenshot(contextKey: string | null | undefined): boolean {
+  return contextKey === ROBUX_LOW_PENDING_CONTEXT;
+}
+
+/** Просьба о скриншоте после «меньше номинала». */
+export function robuxScreenshotRequestText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}): string {
+  return (
+    `📸 ${b(fmt, "Пришли скриншот страницы Transactions")} — одним фото, сюда в чат.\n\n` +
+    `На скрине должны быть видны:\n` +
+    `• строка ${b(fmt, "Pending Robux")} с числом;\n` +
+    `• ник аккаунта${c.robloxUsername ? ` (${c.robloxUsername})` : ""} в правом верхнем углу.\n\n` +
+    `По скрину менеджер сразу проверит выкуп и ответит по делу. Без скриншота обращение не передаётся — ` +
+    `проверить «на слово» мы не можем.\n\n` +
+    `Передумал — напиши «отмена».`
+  );
+}
+
+/** Прислал текст вместо скриншота. */
+export function robuxScreenshotRepeatText(): string {
+  return "📸 Нужен именно скриншот страницы Transactions (фото, не текст) — с ним менеджер сразу проверит выкуп. Пришли его сюда или напиши «отмена».";
 }
 
 /** Есть ли среди заказов такой, у которого 7 дней уже прошли. */
@@ -282,15 +388,16 @@ export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new D
         `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox, но пока заморожены самим Roblox (статус Pending).\n\n` +
         `Выкупили: ${fmtDateRu(eta.completedAt)}. Ориентир разморозки: до ${fmtDateRu(eta.unlockAt)} (примерно, осталось ${fmtLeft(eta.msLeft)}).\n\n` +
         `Этот срок устанавливает Roblox, а не мы: так он делает с каждой покупкой геймпасса, до 7 дней. Ускорить его мы не можем, робуксы станут доступны сами.\n\n` +
-        `Проверить можно в Roblox: раздел Transactions, строка Pending.`,
+        `Проверить можно в Roblox: раздел Transactions, строка Pending Robux — в ней должно быть число не меньше ${amount}.`,
     };
   }
   return {
     overdue: true,
     text:
       `Срок заморозки Roblox по заказу на ${amount} R$ прошёл ${fmtDateRu(eta.unlockAt)} — обычно робуксы к этому дню уже на балансе.\n\n` +
-      `Проверьте в Roblox раздел Transactions. Если строка всё ещё Pending — это задержка на стороне Roblox, подождите ещё немного. ` +
-      `Если строки Pending нет вовсе — напишите здесь, менеджер проверит выкуп.`,
+      `Проверьте в Roblox раздел Transactions, строку Pending Robux: важно число в ней. ` +
+      `Если там ${amount} или больше — это задержка на стороне Roblox, подождите ещё немного. ` +
+      `Если меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.`,
   };
 }
 
@@ -318,7 +425,7 @@ export const ACTIVE_ORDER_STATUSES = ["PAYMENT_PENDING", "AWAITING_GAMEPASS", "P
 /** Минимальный клиент БД для выборки (Prisma `wbOrder`). */
 export interface RobuxEtaDb {
   wbOrder: {
-    findMany(args: unknown): Promise<Array<{ amount: number; completedAt: Date | null }>>;
+    findMany(args: unknown): Promise<Array<{ amount: number; completedAt: Date | null; robloxUsername?: string | null; wbCode?: string | null }>>;
     findFirst(args: unknown): Promise<{ createdAt: Date } | null>;
   };
 }
@@ -336,11 +443,16 @@ export async function loadRobuxEtaOrders(db: RobuxEtaDb, userId: string, now: Da
     },
     orderBy: { completedAt: "desc" },
     take: MAX_ORDERS,
-    select: { amount: true, completedAt: true },
+    select: { amount: true, completedAt: true, robloxUsername: true, wbCode: true },
   });
   const orders = rows
-    .filter((r): r is { amount: number; completedAt: Date } => r.completedAt != null)
-    .map((r) => ({ amount: r.amount, completedAt: new Date(r.completedAt) }));
+    .filter((r) => r.completedAt != null)
+    .map((r) => ({
+      amount: r.amount,
+      completedAt: new Date(r.completedAt as Date),
+      robloxUsername: r.robloxUsername ?? null,
+      wbCode: r.wbCode ?? null,
+    }));
   if (orders.length === 0) return null;
   const newerActive = await db.wbOrder.findFirst({
     where: { userId, status: { in: ACTIVE_ORDER_STATUSES }, createdAt: { gt: orders[0].completedAt } },

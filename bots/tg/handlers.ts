@@ -13,7 +13,7 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, tgMessageId, escapeHtml } from 
 import { getSbpQrBuffer } from "../shared/sbp";
 import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
-import { assertOrderNotHeld } from "../shared/order-hold";
+import { assertOrderBuyable } from "../shared/order-hold";
 import {
   cancelIntake,
   clipProblemText,
@@ -87,6 +87,9 @@ import {
   buildRobuxEtaReply, buildRobuxEtaShort, fmtLeft, holdBar, isRepeatEtaQuestion,
   loadRobuxEtaOrders, robuxEta, fmtDateRu, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
+  selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
+  robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
+  activeOrderLeadText, type SelfCheckContext,
 } from "../shared/robux-eta";
 import { recordCompletedNotice } from "../shared/notice-delivery";
 import { requoteForPass } from "../shared/direct-requote";
@@ -148,6 +151,7 @@ import {
   xlinkOwnerConfirmedText,
   xlinkWaitingText,
 } from "../shared/cross-platform-notify";
+import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -424,6 +428,14 @@ async function deliverSupportIntakeTg(
     wbCode: hint.wbCode,
     denomination: hint.denomination,
     problemText: said,
+  });
+  void recordSupportMetric(db as any, {
+    type: SUPPORT_METRIC_EVENT.DELIVERED, wbCode: hint.wbCode, via: "tg-bot",
+    payload: {
+      contextKey: intake?.contextKey ?? "general",
+      robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
+      photo: !!photoFileId,
+    },
   });
   // Скриншот — отдельным сообщением тем же админам: половина обращений «не
   // вижу геймпасс» объясняется картинкой, а не словами.
@@ -1819,6 +1831,38 @@ function robuxCountdown(completedAt: Date | string): string {
 /** Клиент БД для таймера робуксов. */
 const robuxEtaDb = db as unknown as RobuxEtaDb;
 
+/** «Где робуксы?» при живом невыкупленном заказе — карточка этапа. */
+async function replyActiveOrderStage(ctx: any, tgId: string): Promise<boolean> {
+  const user = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+  if (!user) return false;
+  const active = await findActiveOrders(user.id);
+  if (active.length === 0) return false;
+  const { text, keyboard } = await buildStatusMessage(tgId);
+  await ctx.reply(`${activeOrderLeadText("html")}\n\n${text}`, {
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+    ...keyboard,
+  });
+  void recordSupportMetric(db as any, {
+    type: SUPPORT_METRIC_EVENT.SELF_SERVED, orderId: active[0].id, via: "tg-bot",
+    payload: { kind: "stage", status: active[0].status },
+  });
+  return true;
+}
+
+/** Заказ для самопроверки «Робуксов нет»: сумма, аккаунт, код. */
+async function selfCheckContextTg(tgId: string): Promise<SelfCheckContext & { wbCode?: string | null }> {
+  try {
+    const user = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+    if (!user) return {};
+    const orders = await loadRobuxEtaOrders(robuxEtaDb, user.id);
+    const target = orders ? selfCheckTarget(orders) : null;
+    return target ? { amount: target.amount, robloxUsername: target.robloxUsername, wbCode: target.wbCode } : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Ответ на «где мои робуксы?» (23.10.2026). `false` — таймер не к месту
  * (нет выкупа за 30 дней или есть заказ в работе), вопрос идёт дальше штатно.
@@ -1842,6 +1886,10 @@ async function replyRobuxEta(ctx: any, tgId: string, opts: { forceFull?: boolean
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...Markup.inlineKeyboard(rows),
+  });
+  void recordSupportMetric(db as any, {
+    type: SUPPORT_METRIC_EVENT.SELF_SERVED, wbCode: orders[0]?.wbCode, via: "tg-bot",
+    payload: { kind: "eta", overdue: reply.overdue },
   });
   return true;
 }
@@ -2348,6 +2396,12 @@ export function registerText(bot: Telegraf): void {
           passId: extractPassId(text) !== null,
           expectsNick,
         });
+        if (!isFlow && intakeNeedsScreenshot(intake.contextKey)) {
+          // «В Pending меньше номинала» принимаем только скриншотом — иначе
+          // это обращение одним нажатием (владелец, 24.10.2026).
+          await ctx.reply(robuxScreenshotRepeatText());
+          return;
+        }
         if (!isFlow) {
           // Барьер (23.10.2026): «где робуксы», пока 7 дней не прошли, — не
           // проблема, а вопрос со сроком. Отвечаем таймером, админов не зовём.
@@ -2378,10 +2432,11 @@ export function registerText(bot: Telegraf): void {
       !isAdmin &&
       !pendingDirectFlow.has(ctx.from.id) &&
       !pendingDirectPaymentEmail.has(ctx.from.id) &&
-      isArrivalQuestion(text) &&
-      await replyRobuxEta(ctx, tgId).catch((err) => { console.error("[TG] robux-eta failed:", err); return false; })
+      isArrivalQuestion(text)
     ) {
-      return;
+      if (await replyRobuxEta(ctx, tgId).catch((err) => { console.error("[TG] robux-eta failed:", err); return false; })) return;
+      // Заказ ещё не выкуплен — ответ не таймер, а этап заказа (24.10.2026).
+      if (await replyActiveOrderStage(ctx, tgId).catch(() => false)) return;
     }
 
     // 1. ADMIN REJECTION REASON flow
@@ -5794,21 +5849,39 @@ export function registerCallbacks(bot: Telegraf): void {
     }
 
     // ── «Робуксов нет» — самопроверка до поддержки (23.10.2026) ───────────
-    if (data === "rbx_chk") {
+    // 24.10.2026: спрашиваем ЧИСЛО в Pending Robux (строка есть у всех, с
+    // нулём), а «меньше номинала» принимаем только со скриншотом.
+    if (data === "rbx_chk" || data === "rbx_where") {
       await ctx.answerCbQuery().catch(() => {});
-      await ctx.reply(robuxSelfCheckText("html"), {
+      const sc = await selfCheckContextTg(tgId);
+      const btn = selfCheckButtons(sc);
+      const rows = [
+        [Markup.button.callback(btn.enough, "rbx_pend")],
+        [Markup.button.callback(btn.low, "rbx_low")],
+        ...(data === "rbx_chk" ? [[Markup.button.callback(btn.notFound, "rbx_where")]] : []),
+      ];
+      await ctx.reply(data === "rbx_chk" ? robuxSelfCheckText("html", sc) : robuxPendingWhereText("html", sc), {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("⏳ Строка Pending есть", "rbx_pend")],
-          [supportBtn("❌ Строки нет, аккаунт тот", "robux_overdue")],
-        ]),
+        ...Markup.inlineKeyboard(rows),
       });
       return;
     }
     if (data === "rbx_pend") {
       await ctx.answerCbQuery().catch(() => {});
-      await ctx.reply(robuxPendingSeenText("html"), { parse_mode: "HTML" });
+      await ctx.reply(robuxPendingSeenText("html"), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+      return;
+    }
+    if (data === "rbx_low") {
+      const sc = await selfCheckContextTg(tgId);
+      await openIntake(intakeDb, { tgId }, {
+        platform: "TG",
+        contextKey: ROBUX_LOW_PENDING_CONTEXT,
+        wbCode: sc.wbCode ?? undefined,
+        denomination: sc.amount ?? undefined,
+      });
+      await ctx.answerCbQuery("Пришли скриншот 📸").catch(() => {});
+      await ctx.reply(robuxScreenshotRequestText("html", sc), { parse_mode: "HTML" });
       return;
     }
 
@@ -5928,7 +6001,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
         // ❄️ Тот же гард, что в TWA и в автовыкупе. Стоит до product-info, а не
         // после: замороженный заказ не должен даже ходить в Roblox.
-        const hold = await assertOrderNotHeld(db, orderId);
+        const hold = await assertOrderBuyable(db, orderId);
         if (hold.held) {
           await ctx.answerCbQuery("❄️ Заказ заморожен").catch(() => {});
           await ctx.reply(hold.message);
@@ -6058,6 +6131,13 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.split(":")[1];
       try {
+        // ❄️ «Выкуплено» по замороженному/спорному заказу — сначала разморозка.
+        const okHold = await assertOrderBuyable(db, orderId);
+        if (okHold.held) {
+          await ctx.answerCbQuery("❄️ Заказ заморожен").catch(() => {});
+          await ctx.reply(okHold.message);
+          return;
+        }
         // Snapshot purchase rate at fulfillment time
         const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
         const currentRate = settings?.purchaseRate ?? null;
@@ -7672,6 +7752,7 @@ export async function notifyUserCompleted(
 
   const m = buildCompletedMessages({
     isDirectOrder,
+    amount,
     completedCount,
     completedAt: order?.completedAt ? new Date(order.completedAt) : new Date(),
     bonusGrantedAt: dbUser?.reviewBonusGrantedAt ? new Date(dbUser.reviewBonusGrantedAt) : null,

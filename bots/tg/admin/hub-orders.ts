@@ -14,6 +14,7 @@ import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAdminSearch, pendingBatchFulfill } from "../session";
 import { formatOrderAge } from "../../shared/order-age";
 import { countPreviousOrders } from "../../shared/order-loyalty";
+import { NOT_HELD, assertOrderBuyable } from "../../shared/order-hold";
 
 // ── VK community ID for direct-message links ────────────────────────────────
 const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
@@ -477,10 +478,16 @@ export async function confirmBatchFulfill(
 ): Promise<void> {
   const adminId = String(ctx.from!.id);
   try {
-  const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
+  const candidates = await (db as any).wbOrder.findMany({
+    // ❄️ Массовое «выполнено» не трогает замороженные и спорные заказы.
+    where: { status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] }, ...NOT_HELD },
     include: { user: true },
   });
+  const orders: any[] = [];
+  for (const candidate of candidates) {
+    const guard = await assertOrderBuyable(db, candidate.id).catch(() => ({ held: true }));
+    if (!guard.held) orders.push(candidate);
+  }
 
   if (orders.length === 0) {
     await ctx.answerCbQuery("Нет заказов");

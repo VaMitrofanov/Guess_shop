@@ -8,6 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/guide",          priority: 0.9, changeFrequency: "monthly" },
     { path: "/faq",            priority: 0.7, changeFrequency: "monthly" },
     { path: "/guarantees",     priority: 0.6, changeFrequency: "monthly" },
+    { path: "/pending",        priority: 0.6, changeFrequency: "monthly" },
     { path: "/reviews",        priority: 0.6, changeFrequency: "weekly"  },
     // Legal pages intentionally stay out until owner requisites replace every
     // placeholder and the texts pass legal acceptance.
