@@ -1,10 +1,29 @@
 import { NextResponse } from "next/server";
+import { checkVkReachableFresh } from "@/lib/vk-reach";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { REVOKED_CODE_REFUSAL, isRevokedCode } from "@/lib/wb-code-revocation";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
+// Per-IP throttle on code reservation/status (risk #2). A real WB customer
+// enters one code; these limits are generous for that but choke brute-force
+// scanning of the code space.
+function limited(request: Request, capacity: number, refillPerSec: number) {
+  const ip = clientIp(request);
+  const { ok, retryAfter } = rateLimit(`wb-code:${ip}`, capacity, refillPerSec);
+  if (ok) return null;
+  console.warn(`[wb-code] rate-limited ip=${ip} retryAfter=${retryAfter}s`);
+  return NextResponse.json(
+    { error: "Слишком много запросов. Попробуйте через минуту." },
+    { status: 429, headers: { "retry-after": String(retryAfter) } }
+  );
+}
+
 export async function POST(request: Request) {
+  const rl = limited(request, 10, 0.2); // burst 10, then 1 per 5s
+  if (rl) return rl;
   try {
     const body = await request.json();
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
@@ -36,6 +55,11 @@ export async function POST(request: Request) {
         throw { status: 404, message: "Код не найден. Проверьте правильность ввода." };
       }
 
+      // Деньги за заказ вернулись на WB — код больше не наш долг.
+      if (isRevokedCode(wbCode)) {
+        throw { status: 409, message: REVOKED_CODE_REFUSAL, code: "CODE_REVOKED" };
+      }
+
       if (wbCode.isUsed && wbCode.userId) {
         throw { status: 409, message: "Этот код уже был активирован ранее." };
       }
@@ -56,22 +80,14 @@ export async function POST(request: Request) {
           });
           return { wbCode: updated };
         } else {
-          // Different session.
-          if (wbCode.reservedUntil && wbCode.reservedUntil > now) {
-            // Hijack the session: since the user knows the physical code, we transfer the reservation.
-            const updated = await tx.wbCode.update({
-              where: { id: wbCode.id },
-              data: { sessionId: sessionId, reservedUntil: reserveTime },
-            });
-            return { wbCode: updated };
-          } else {
-            // Reservation expired, claim it
-            const updated = await tx.wbCode.update({
-              where: { id: wbCode.id },
-              data: { sessionId: sessionId, reservedUntil: reserveTime },
-            });
-            return { wbCode: updated };
-          }
+          // Different session — transfer the reservation regardless of expiry:
+          // the user holds the physical card, so they win (active reservation
+          // gets hijacked; expired one is simply re-claimed).
+          const updated = await tx.wbCode.update({
+            where: { id: wbCode.id },
+            data: { sessionId: sessionId, reservedUntil: reserveTime },
+          });
+          return { wbCode: updated };
         }
       }
 
@@ -105,7 +121,38 @@ export async function POST(request: Request) {
   }
 }
 
+/** Заказы, по которым мы ещё будем писать покупателю: дальше — только итог. */
+const VK_REACH_STATUSES = new Set([null, "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"]);
+
+/**
+ * Код забран входом через VK ID, но написать человеку сообщество не может.
+ *
+ * Вход на сайте создаёт пользователя без диалога с сообществом: пока человек
+ * сам не написал боту, VK отвечает на любое наше сообщение ошибкой 901. За
+ * 30 дней до 11.10.2026 так остались без уведомлений 37 покупателей DBS — им
+ * писали уже только в чат WB. Страница инструкции держит такого покупателя на
+ * шаге «нажми «Начать»», пока VK не подтвердит разрешение.
+ *
+ * Отвечает `false` при любом сомнении: есть Telegram, нет VK, VK молчит.
+ * Задержать человека зря хуже, чем пропустить.
+ */
+async function vkMessagesMissing(userId: string, orderStatus: string | null): Promise<boolean> {
+  if (!VK_REACH_STATUSES.has(orderStatus)) return false;
+  try {
+    const user = await (db as any).user.findUnique({
+      where: { id: userId },
+      select: { tgId: true, vkId: true },
+    });
+    if (!user?.vkId || user.tgId) return false;
+    return (await checkVkReachableFresh(String(user.vkId))) === false;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: Request) {
+  const rl = limited(request, 20, 0.5); // burst 20, then 1 per 2s (status polling)
+  if (rl) return rl;
   const url = new URL(request.url);
   const code = url.searchParams.get("code")?.trim().toUpperCase();
   if (!code || code.length !== 7) {
@@ -121,7 +168,39 @@ export async function GET(request: Request) {
     }
     // Code is "activated" if userId is set (by TG or VK) OR status is CLAIMED
     const claimed = !!(wbCode.userId || wbCode.status === "CLAIMED");
-    return NextResponse.json({ claimed, denomination: wbCode.denomination });
+
+    // The provisional order tells us which channel the user picked (TG/VK) and
+    // how far the order has progressed — the instruction page uses this to show
+    // a single channel CTA and to reflect "order already placed".
+    let platform: string | null = null;
+    let orderStatus: string | null = null;
+    let robloxUsername: string | null = null;
+    try {
+      const order = await (db as any).wbOrder.findFirst({
+        where: { wbCode: { equals: code, mode: "insensitive" } },
+        select: { platform: true, status: true, robloxUsername: true },
+      });
+      if (order) {
+        platform = order.platform ?? null;
+        orderStatus = order.status ?? null;
+        robloxUsername = order.robloxUsername ?? null;
+      }
+    } catch {
+      /* non-fatal — CTA falls back to showing both channels */
+    }
+
+    const needsVkMessages = claimed && wbCode.userId
+      ? await vkMessagesMissing(wbCode.userId, orderStatus)
+      : false;
+
+    return NextResponse.json({
+      claimed,
+      denomination: wbCode.denomination,
+      platform,
+      orderStatus,
+      robloxUsername,
+      needsVkMessages,
+    });
   } catch (err) {
     console.error("[wb-code GET] error:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

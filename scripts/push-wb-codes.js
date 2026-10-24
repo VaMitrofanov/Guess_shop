@@ -1,195 +1,183 @@
 #!/usr/bin/env node
 /**
- * push-wb-codes.js — подключается через WebSocket (порт 443, не 5432)
- * Решает ETIMEDOUT на MacOS когда провайдер блокирует порт 5432.
- *
- * Перед первым запуском:
- *   npm install @neondatabase/serverless ws
+ * push-wb-codes.js — единственный загрузчик кодов WB в БД.
  *
  * Запуск:
- *   node scripts/push-wb-codes.js codes.csv
+ *   node scripts/push-wb-codes.js codes.csv            # загрузка
+ *   node scripts/push-wb-codes.js codes.csv --dry-run  # только отчёт, без записи
+ *
+ * CSV: обязательный заголовок с колонками code, denomination и (опционально) batch.
+ * Порядок колонок любой.
+ *
+ * Главная гарантия: после успешного прогона КАЖДЫЙ код из CSV присутствует в БД.
+ * Скрипт проверяет это отдельным запросом после вставки и падает с ненулевым exit
+ * code, если хоть один код не доехал. Молчаливого «✅ ГОТОВО» при потерянных кодах
+ * больше быть не может — именно так карта 6QYDK79 оказалась напечатана, но не в базе
+ * (инцидент 15–16.07, см. docs/database.md).
+ *
+ * Пишет через Prisma Client, а не сырой SQL: схема WbCode уже уезжала от скриптов
+ * (id/updatedAt остались без DEFAULT), и raw INSERT молча падал по not-null.
  */
 
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 
-// Загружаем .env
 require('dotenv').config({ path: path.join(__dirname, '../.env.local') });
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
-// ── Config ─────────────────────────────────────────────────────────────────
-const CSV_PATH = path.resolve(process.cwd(), process.argv[2] || 'codes.csv');
-const BATCH    = 100;
+const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { Pool } = require('pg');
 
-// Добавляй новые номиналы сюда при необходимости
+const CSV_PATH = path.resolve(process.cwd(), process.argv[2] || '');
+const DRY_RUN = process.argv.includes('--dry-run');
+
+// Добавляй новые номиналы сюда при печати нового тиража.
 const VALID_DENOMINATIONS = new Set([200, 300, 500, 800, 1000, 1200, 2000]);
 
-// ── Проверяем наличие @neondatabase/serverless ─────────────────────────────
-let neonModule;
-try {
-  neonModule = require('@neondatabase/serverless');
-} catch {
-  console.error(`
-❌ Пакет @neondatabase/serverless не установлен.
-
-Выполни в корне проекта:
-  npm install @neondatabase/serverless ws
-
-Затем снова запусти скрипт.
-`);
-  process.exit(1);
+/** Neon: direct-хост иногда таймаутит, пулер на том же порту — нет. Зеркалит src/lib/prisma.ts. */
+function buildPoolerUrl(raw) {
+  try {
+    const u = new URL(raw);
+    if (u.hostname.includes('-pooler.')) return raw;
+    u.hostname = u.hostname.replace(/^(ep-[^.]+)(\.)/, '$1-pooler$2');
+    u.searchParams.delete('channel_binding');
+    return u.toString();
+  } catch {
+    return raw;
+  }
 }
 
-const { neon } = neonModule;
-
-// ── Парсим CSV ─────────────────────────────────────────────────────────────
+/** Разбирает CSV. Бросает на любой некорректной строке — тихого skip быть не должно. */
 function parseCsv(filePath) {
-  if (!fs.existsSync(filePath)) {
-    console.error(`❌ Файл не найден: ${filePath}`);
-    process.exit(1);
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error(`Файл не найден: ${filePath || '<не указан>'}\nЗапуск: node scripts/push-wb-codes.js codes.csv`);
   }
 
-  const lines   = fs.readFileSync(filePath, 'utf-8').split('\n');
-  const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+  const lines = fs.readFileSync(filePath, 'utf-8').split('\n').map(l => l.replace(/\r$/, ''));
+  const headerLine = lines.find(l => l.trim());
+  if (!headerLine) throw new Error('CSV пустой');
 
+  const headers = headerLine.split(',').map(h => h.trim().toLowerCase());
   const cIdx = headers.indexOf('code');
   const dIdx = headers.indexOf('denomination');
   const bIdx = headers.indexOf('batch');
-
   if (cIdx === -1 || dIdx === -1) {
-    console.error('❌ CSV должен содержать колонки: code, denomination');
-    process.exit(1);
+    throw new Error(`CSV должен содержать колонки code и denomination. Найдено: ${headers.join(', ')}`);
   }
 
   const rows = [];
-  let skippedBadDenom = 0;
+  const problems = [];
+  const seen = new Map();
 
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].trim().split(',');
-    if (parts.length < 2) continue;
+  for (let i = lines.indexOf(headerLine) + 1; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw.trim()) continue;
 
-    const code  = (parts[cIdx] ?? '').trim().toUpperCase();
-    const denom = parseInt(parts[dIdx], 10);
-    const batch = bIdx !== -1 ? (parts[bIdx] ?? '').trim() || 'batch-01' : 'batch-01';
+    const parts = raw.split(',');
+    const code = (parts[cIdx] ?? '').trim().toUpperCase();
+    const denomRaw = (parts[dIdx] ?? '').trim();
+    const denomination = Number.parseInt(denomRaw, 10);
+    const batch = bIdx !== -1 ? (parts[bIdx] ?? '').trim() || null : null;
 
-    if (!code) continue;
-
-    if (!VALID_DENOMINATIONS.has(denom)) {
-      skippedBadDenom++;
+    const lineNo = i + 1;
+    if (!code) { problems.push(`строка ${lineNo}: пустой code`); continue; }
+    if (!Number.isInteger(denomination)) { problems.push(`строка ${lineNo}: код ${code} — номинал не число («${denomRaw}»)`); continue; }
+    if (!VALID_DENOMINATIONS.has(denomination)) {
+      problems.push(`строка ${lineNo}: код ${code} — номинал ${denomination} не в списке разрешённых (${[...VALID_DENOMINATIONS].join(', ')})`);
       continue;
     }
+    if (seen.has(code)) { problems.push(`строка ${lineNo}: код ${code} дублируется в CSV (первый раз — строка ${seen.get(code)})`); continue; }
 
-    rows.push({ code, denomination: denom, batch });
+    seen.set(code, lineNo);
+    rows.push({ code, denomination, batch });
   }
 
-  if (skippedBadDenom > 0) {
-    console.warn(`⚠️  Пропущено строк с неизвестным номиналом: ${skippedBadDenom}`);
-    console.warn(`   Разрешённые: ${[...VALID_DENOMINATIONS].join(', ')}`);
+  if (problems.length) {
+    throw new Error(
+      `CSV содержит ${problems.length} некорректных строк — ни один код не загружен.\n` +
+      `Раньше такие строки молча пропускались, из-за чего напечатанные коды не попадали в БД.\n\n` +
+      problems.map(p => `  • ${p}`).join('\n') +
+      `\n\nПочини CSV и запусти снова.`
+    );
   }
+  if (rows.length === 0) throw new Error('В CSV нет ни одной строки с кодом');
 
   return rows;
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
   const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error('❌ DATABASE_URL не найден в .env');
-    process.exit(1);
-  }
+  if (!dbUrl) throw new Error('DATABASE_URL не найден в .env / .env.local');
 
-  // neon() — HTTP/WebSocket клиент, работает на порту 443
-  const sql = neon(dbUrl);
-
-  // ── Шаг 0: проверяем соединение ────────────────────────────
-  console.log('🔌 Подключаемся к Neon (WebSocket/443)...');
-  await sql`SELECT 1`;
-  console.log('✅ Соединение успешно\n');
-
-  // ── Шаг 1: создаём таблицу если нет ─────────────────────────
-  console.log('⚙️  Проверяем таблицу WbCode...');
-  await sql`
-    CREATE TABLE IF NOT EXISTS "WbCode" (
-      "id"           TEXT         NOT NULL DEFAULT gen_random_uuid()::text,
-      "code"         TEXT         NOT NULL,
-      "denomination" INTEGER      NOT NULL,
-      "isUsed"       BOOLEAN      NOT NULL DEFAULT false,
-      "usedAt"       TIMESTAMPTZ,
-      "batch"        TEXT,
-      "createdAt"    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-      CONSTRAINT "WbCode_pkey" PRIMARY KEY ("id")
-    )
-  `;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS "WbCode_code_key"        ON "WbCode"("code")`;
-  await sql`CREATE INDEX       IF NOT EXISTS "WbCode_isUsed_idx"       ON "WbCode"("isUsed")`;
-  await sql`CREATE INDEX       IF NOT EXISTS "WbCode_denomination_idx" ON "WbCode"("denomination")`;
-  console.log('✅ Таблица готова\n');
-
-  // ── Шаг 2: парсим CSV ────────────────────────────────────────
   const rows = parseCsv(CSV_PATH);
-  if (rows.length === 0) {
-    console.log('⚠️  Нет валидных строк для загрузки.');
-    return;
-  }
-  console.log(`📂 Найдено строк для загрузки: ${rows.length}`);
+  console.log(`📂 ${path.basename(CSV_PATH)}: ${rows.length} валидных кодов`);
 
-  // ── Шаг 3: вставляем батчами ─────────────────────────────────
-  let inserted = 0;
-  let skipped  = 0;
+  const byDenom = {};
+  for (const r of rows) byDenom[r.denomination] = (byDenom[r.denomination] || 0) + 1;
+  console.log(`   Состав: ${Object.entries(byDenom).map(([d, n]) => `${n}×${d}`).join(', ')}`);
 
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const chunk = rows.slice(i, i + BATCH);
+  const pool = new Pool({ connectionString: buildPoolerUrl(dbUrl), max: 3, connectionTimeoutMillis: 15_000 });
+  const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-    // neon() тегированный шаблон не поддерживает динамические списки VALUES,
-    // поэтому строим через обычный запрос с unnest
-    const codes   = chunk.map(r => r.code);
-    const denoms  = chunk.map(r => r.denomination);
-    const batches = chunk.map(r => r.batch);
+  try {
+    const codes = rows.map(r => r.code);
+    const existingBefore = await prisma.wbCode.findMany({ where: { code: { in: codes } }, select: { code: true } });
+    const existingSet = new Set(existingBefore.map(r => r.code));
+    const fresh = rows.filter(r => !existingSet.has(r.code));
 
-    const result = await sql`
-      INSERT INTO "WbCode" ("code", "denomination", "batch")
-      SELECT * FROM UNNEST(
-        ${codes}::text[],
-        ${denoms}::integer[],
-        ${batches}::text[]
-      )
-      ON CONFLICT ("code") DO NOTHING
-      RETURNING "id"
-    `;
+    console.log(`\n🔎 Уже в БД: ${existingSet.size}   К вставке: ${fresh.length}`);
 
-    inserted += result.length;
-    skipped  += chunk.length - result.length;
+    if (DRY_RUN) {
+      console.log('\n🧪 --dry-run: ничего не записано.');
+      if (fresh.length) console.log(`   Вставились бы: ${fresh.slice(0, 10).map(r => r.code).join(', ')}${fresh.length > 10 ? ` … и ещё ${fresh.length - 10}` : ''}`);
+      return;
+    }
 
-    process.stdout.write(`  ⏳ ${Math.min(i + BATCH, rows.length)}/${rows.length}\r`);
-  }
+    // createMany + Prisma сам проставит id (cuid) и updatedAt по схеме.
+    const { count: inserted } = await prisma.wbCode.createMany({ data: fresh, skipDuplicates: true });
 
-  console.log(`\n✅ Готово!   Добавлено: ${inserted}   Дублей пропущено: ${skipped}`);
+    // Главная проверка: КАЖДЫЙ код из CSV обязан быть в БД.
+    const presentAfter = await prisma.wbCode.findMany({ where: { code: { in: codes } }, select: { code: true } });
+    const presentSet = new Set(presentAfter.map(r => r.code));
+    const missing = codes.filter(c => !presentSet.has(c));
 
-  // ── Итоговая статистика ───────────────────────────────────────
-  const stats = await sql`
-    SELECT denomination,
-           COUNT(*)                                          AS total,
-           SUM(CASE WHEN "isUsed" THEN 1 ELSE 0 END)::int  AS used
-    FROM "WbCode"
-    GROUP BY denomination
-    ORDER BY denomination
-  `;
+    console.log(`\n✅ Вставлено: ${inserted}   Уже были (дубли): ${existingSet.size}`);
+    console.log(`🔒 Сверка: в CSV ${codes.length} = вставлено ${inserted} + дубли ${existingSet.size}${inserted + existingSet.size === codes.length ? '' : '  ← НЕ СХОДИТСЯ'}`);
 
-  console.log('\n📊 Остаток кодов в базе:');
-  console.log('  Номинал    Всего   Использовано   Свободно');
-  console.log('  ---------+-------+--------------+---------');
-  for (const r of stats) {
-    const avail = r.total - r.used;
-    console.log(
-      `  ${(r.denomination + ' R$').padEnd(9)}  ${String(r.total).padEnd(7)}  ${String(r.used).padEnd(14)} ${avail}`
-    );
+    if (missing.length) {
+      throw new Error(
+        `${missing.length} кодов из CSV отсутствуют в БД после загрузки:\n` +
+        missing.map(c => `  • ${c}`).join('\n') +
+        `\n\nЭти карты нельзя пускать в печать/продажу — клиент получит «Код не найден».`
+      );
+    }
+    if (inserted + existingSet.size !== codes.length) {
+      throw new Error('Сверка не сошлась: вставлено + дубли ≠ строк CSV. Загрузка неполная, разбирайся до отправки тиража.');
+    }
+
+    console.log(`✅ Все ${codes.length} кодов подтверждены в БД.`);
+
+    const stats = await prisma.wbCode.groupBy({
+      by: ['denomination', 'status'],
+      _count: { _all: true },
+      orderBy: { denomination: 'asc' },
+    });
+    const table = {};
+    for (const s of stats) {
+      const d = `${s.denomination} R$`;
+      table[d] = table[d] || { AVAILABLE: 0, RESERVED: 0, CLAIMED: 0 };
+      table[d][s.status] = s._count._all;
+    }
+    console.log('\n📊 Остаток кодов в базе:');
+    console.table(table);
+  } finally {
+    await prisma.$disconnect();
+    await pool.end();
   }
 }
 
 main().catch(e => {
-  console.error('\n❌ Ошибка:', e?.message ?? String(e));
-  if (e?.detail)  console.error('   Детали:',     e.detail);
-  if (e?.hint)    console.error('   Подсказка:',  e.hint);
-  if (e?.code)    console.error('   Код:',        e.code);
+  console.error(`\n❌ ${e.message}`);
   process.exit(1);
 });
