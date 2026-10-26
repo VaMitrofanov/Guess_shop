@@ -358,3 +358,38 @@ export async function loadRobuxEtaOrders(db: RobuxEtaDb, userId: string, now: Da
   });
   return newerActive ? null : orders;
 }
+
+// ── Опрос «пришли ли робуксы?» (рассылка 26.10.2026) ────────────────────────
+/*
+ * Отправляет `scripts/broadcast-pending-check.mjs`. Кнопки отдельные от
+ * самопроверки (`rbx_s_*`), чтобы ответ на опрос можно было посчитать:
+ * «в Pending» и «нигде нет» дальше идут ровно туда же, что `rbx_pend`/`rbx_low`.
+ */
+export const SURVEY_CMD = { got: "rbx_s_got", pending: "rbx_s_pend", none: "rbx_s_none" } as const;
+
+/** Подписи кнопок опроса — общие для TG и VK (лимит VK 40 символов). */
+export function surveyButtons(amount?: number | null): { got: string; pending: string; none: string } {
+  return {
+    got: "✅ Уже на балансе",
+    pending: amount ? `⏳ В Pending ${amount} или больше` : "⏳ В Pending, сумма заказа",
+    none: "❌ Ни в Pending, ни на балансе",
+  };
+}
+
+/** Текст опроса. Акцент владельца: робуксы должны быть ИЛИ в Pending, ИЛИ на балансе. */
+export function robuxSurveyText(fmt: RobuxEtaFormat, amount: number): string {
+  const link = fmt === "html" ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>` : ROBLOX_TRANSACTIONS_URL;
+  return (
+    `💎 ${b(fmt, `Пришли ли робуксы за заказ на ${amount} R$?`)}\n\n` +
+    `Roblox сейчас держит робуксы за геймпассы в статусе Pending дольше обычного — так у всех продавцов, не только у нас.\n\n` +
+    `❗️ ${b(fmt, "Важно: робуксы должны быть в одном из двух мест — в Pending или уже на балансе.")} ` +
+    `Если они в Pending — всё в порядке: с нашей стороны всё сделано, на баланс их переведёт сам Roblox.\n\n` +
+    `🔍 Проверь: ${link} → строка ${b(fmt, "Pending Robux")} (там должно быть ${amount} или больше) и баланс робуксов.\n\n` +
+    `Нажми, что видишь 👇`
+  );
+}
+
+/** Ответ на «✅ Уже на балансе». */
+export function robuxSurveyGotText(): string {
+  return "🙌 Отлично, робуксы дошли! Спасибо, что ответил — это помогает нам следить, как Roblox сейчас переводит робуксы.";
+}

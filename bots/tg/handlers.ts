@@ -89,7 +89,7 @@ import {
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
-  activeOrderLeadText, type SelfCheckContext,
+  activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText,
 } from "../shared/robux-eta";
 import { recordCompletedNotice } from "../shared/notice-delivery";
 import { requoteForPass } from "../shared/direct-requote";
@@ -5310,7 +5310,7 @@ export function registerCallbacks(bot: Telegraf): void {
     const cbq = ctx.callbackQuery;
     if (!("data" in cbq)) return ctx.answerCbQuery().catch(() => {});
 
-    const data = cbq.data;
+    let data = cbq.data;
     const tgId = String(ctx.from.id);
     const adminId = tgId;
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
@@ -5854,6 +5854,23 @@ export function registerCallbacks(bot: Telegraf): void {
         ...Markup.inlineKeyboard(rows),
       });
       return;
+    }
+    // Опрос «пришли ли робуксы?» (рассылка 26.10.2026): считаем ответ, дальше —
+    // те же ветки, что у самопроверки.
+    if (data === SURVEY_CMD.got || data === SURVEY_CMD.pending || data === SURVEY_CMD.none) {
+      const sc = await selfCheckContextTg(tgId);
+      void recordSupportMetric(db as any, {
+        type: data === SURVEY_CMD.got ? SUPPORT_METRIC_EVENT.SURVEY_GOT
+          : data === SURVEY_CMD.pending ? SUPPORT_METRIC_EVENT.SURVEY_PENDING
+          : SUPPORT_METRIC_EVENT.SURVEY_NONE,
+        wbCode: sc.wbCode, via: "tg-bot",
+      });
+      if (data === SURVEY_CMD.got) {
+        await ctx.answerCbQuery("Спасибо! 🙌").catch(() => {});
+        await ctx.reply(robuxSurveyGotText());
+        return;
+      }
+      data = data === SURVEY_CMD.pending ? "rbx_pend" : "rbx_low";
     }
     if (data === "rbx_pend") {
       await ctx.answerCbQuery().catch(() => {});

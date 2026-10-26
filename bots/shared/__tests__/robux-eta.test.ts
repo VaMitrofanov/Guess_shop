@@ -15,6 +15,9 @@ import {
   ROBUX_LOW_PENDING_CONTEXT,
   PENDING_INFO_URL,
   NO_ROBUX_BUTTON,
+  robuxSurveyText,
+  surveyButtons,
+  SURVEY_CMD,
   type RobuxEtaDb,
 } from "../robux-eta";
 
@@ -190,5 +193,21 @@ describe("самопроверка по числу в Pending (24.10.2026)", () 
   it("ответ про заморозку ведёт на страницу-объяснение", () => {
     const reply = buildRobuxEtaReply([{ amount: 1000, completedAt: BOUGHT }], "plain", new Date(BOUGHT.getTime() + D));
     expect(reply?.text).toContain(PENDING_INFO_URL);
+  });
+});
+
+describe("опрос «пришли ли робуксы?» (26.10.2026)", () => {
+  it("акцент: робуксы в Pending ИЛИ на балансе; без срока", () => {
+    const t = robuxSurveyText("html", 800);
+    expect(t).toContain("в Pending или уже на балансе");
+    expect(t).toContain("800 или больше");
+    expect(t).not.toMatch(NO_DEADLINE);
+    expect(robuxSurveyText("plain", 800)).not.toContain("<b>");
+  });
+
+  it("кнопки влезают в лимит VK и не совпадают с командами самопроверки", () => {
+    for (const label of Object.values(surveyButtons(10000))) expect(label.length).toBeLessThanOrEqual(40);
+    expect(Object.values(SURVEY_CMD)).not.toContain("rbx_pend");
+    expect(Object.values(SURVEY_CMD)).not.toContain("rbx_low");
   });
 });

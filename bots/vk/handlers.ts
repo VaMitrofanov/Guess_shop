@@ -86,7 +86,7 @@ import {
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
-  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext,
+  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText,
 } from "../shared/robux-eta";
 import { requoteForPass } from "../shared/direct-requote";
 import { priceMismatchText } from "../shared/direct-gamepass-copy";
@@ -1064,6 +1064,23 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       keyboard: kb.inline(),
     });
     return;
+  }
+  // Опрос «пришли ли робуксы?» (рассылка 26.10.2026): считаем ответ, дальше —
+  // те же ветки, что у самопроверки (зеркало TG).
+  const surveyCmd = msgPayload?.command;
+  if (surveyCmd === SURVEY_CMD.got || surveyCmd === SURVEY_CMD.pending || surveyCmd === SURVEY_CMD.none) {
+    const sc = await selfCheckContextVk(vkUserId);
+    void recordSupportMetric(db as any, {
+      type: surveyCmd === SURVEY_CMD.got ? SUPPORT_METRIC_EVENT.SURVEY_GOT
+        : surveyCmd === SURVEY_CMD.pending ? SUPPORT_METRIC_EVENT.SURVEY_PENDING
+        : SUPPORT_METRIC_EVENT.SURVEY_NONE,
+      wbCode: sc.wbCode, via: "vk-bot",
+    });
+    if (surveyCmd === SURVEY_CMD.got) {
+      await ctx.reply(robuxSurveyGotText());
+      return;
+    }
+    msgPayload.command = surveyCmd === SURVEY_CMD.pending ? "rbx_pend" : "rbx_low";
   }
   if (msgPayload?.command === "rbx_pend") {
     await ctx.reply(robuxPendingSeenText("plain"));

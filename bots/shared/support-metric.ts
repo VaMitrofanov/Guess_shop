@@ -18,6 +18,11 @@
 export const SUPPORT_METRIC_EVENT = {
   SELF_SERVED: "ROBUX_QUESTION_SELF_SERVED",
   DELIVERED: "SUPPORT_REQUEST_DELIVERED",
+  /* Опрос «пришли ли робуксы?» (рассылка 26.10.2026): по типу на ответ, чтобы
+     смена ответа в пределах окна не терялась; итог — последний по времени. */
+  SURVEY_GOT: "ROBUX_SURVEY_GOT",
+  SURVEY_PENDING: "ROBUX_SURVEY_PENDING",
+  SURVEY_NONE: "ROBUX_SURVEY_NONE",
 } as const;
 
 /** Окно, в котором повтор того же события по заказу не плодит строк. */
