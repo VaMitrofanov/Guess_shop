@@ -780,6 +780,13 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 `encrypt(...)`. Значения в БД зашифрованы; `->update(['value' => 'false'])` записало открытый
 текст, и restart упал `DecryptException` — бот простоял ~2 минуты, пока SG уже был остановлен.
 
+**Проверка здоровья:** `node scripts/hk-health-check.mjs [--tg=<chat_id>] [--hours=48]` — с мака
+владельца (нужны `ssh hk`/`ssh rf` и `.env`), только чтение: бот (рестарты, 409, ошибки), мост
+(tg-proxy/check-pass), релей, ресурсы HK, адрес моста у Web/Guide/VK, путь до Neon, очередь
+Telegram, опрос. Адрес HK берёт из `~/.ssh/config`, в коде его нет. Разовый запуск 29.10.2026
+11:00 (локально) стоит в launchd владельца: `~/Library/LaunchAgents/ru.robloxbank.hk-check.plist`,
+отметка `~/Library/Logs/robloxbank-hk-check.done`, лог рядом.
+
 **Откат:** HK `TG_bot_HK` stop → SG `TG_bot` start (+ автодеплой on), `VALIDATOR_SOURCE_URL`
 обратно, Restart Web/Guide/VK, `RELAY_HOST` из `/etc/neon-route.conf.bak-sg-2026-10-27`.
 
