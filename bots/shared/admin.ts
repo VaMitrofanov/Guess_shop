@@ -18,7 +18,6 @@ import { refreshDbsCardByCode } from "./wb-dbs-thread";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 import { formatAdminNotice, mskTime, orderRef, orderStatusWord } from "./notify-format";
-import { fmtDateRu, robuxUnlockDate } from "./completed-messages";
 import { getGamepassDetails } from "./roblox";
 export {
   BONUS_MIN_PACK,
@@ -90,7 +89,7 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   pending_long:   "Заказ долго в обработке",
   direct_wait:    "Долгое ожидание прямого заказа",
   general:        "Общий вопрос",
-  robux_overdue:  "Робуксов нет — срок заморозки Roblox (7 дней) прошёл",
+  robux_overdue:  "Робуксов нет — самопроверка Pending",
   robux_low_pending: "Робуксов нет: в Pending меньше номинала (самопроверка, скрин Transactions приложен)",
   // Item 7 Phase E — nick-search dead-ends
   nick_not_found: "Ник Roblox не найден",
@@ -226,17 +225,13 @@ function blockerLine(order: any): string | null {
       break;
     case "COMPLETED": {
       // Самый частый разговор «долго в обработке» — про уже выкупленный заказ:
-      // робуксы у Roblox лежат под замком до 7 дней, и это не наша задержка.
+      // робуксы у Roblox лежат в Pending, и срок решает он, а не мы.
       if (!order.completedAt) { parts.push("✅ Выкуплен"); break; }
       parts.push(`✅ Выкуплен, прошло ${formatOrderAge(order.completedAt)}`);
-      /* Человек спрашивает не «сколько прошло», а «когда придут». Дату ему уже
-         назвали в сообщении о выкупе — админ обязан видеть ТУ ЖЕ дату, иначе
-         считает срок в уме прямо в разговоре (49ANALQ, 08.09.2026). С 23.10.2026
-         ориентир — 7 дней (максимум Roblox), тот же, что в таймере клиента. */
-      const unlock = robuxUnlockDate(new Date(order.completedAt));
-      parts.push(unlock.getTime() > Date.now()
-        ? `💎 в заморозке Roblox, ориентир до ${fmtDateRu(unlock)}`
-        : `⌛ срок заморозки Roblox прошёл ${fmtDateRu(unlock)} — если робуксов нет, проверить выкуп`);
+      /* Админ говорит то же, что клиент слышал от бота (26.10.2026): срока нет,
+         робуксы в Pending, дальше решает Roblox. Проблема — только если в
+         Pending Robux нет суммы заказа (скриншот Transactions). */
+      parts.push(`💎 в Pending у Roblox — с нашей стороны всё; проблема, только если в Pending Robux нет суммы заказа`);
       break;
     }
     case "REJECTED":

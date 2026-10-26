@@ -1,9 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import {
-  ROBUX_UNLOCK_DAYS as PRESENTATION_UNLOCK_DAYS,
-  fmtUnlockDate,
-  robuxUnlockAt,
-} from "@/lib/order-presentation";
+import { fmtUnlockDate } from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
 import { PENDING_INFO_URL } from "../../bots/shared/robux-eta";
@@ -93,11 +89,6 @@ async function vkPost(vkUserId: string, message: string, extra: Record<string, s
 // напоминание о бонусе на балансе → TIER-2 питч → благодарность (+скидка DIR<500).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/* Правило «робуксы разблокируются до 7 дней» живёт в `order-presentation`:
-   на него смотрят и экраны админки, и это сообщение клиенту. Здесь только
-   имена, под которыми оно исторически известно в этом файле. */
-export const ROBUX_UNLOCK_DAYS = PRESENTATION_UNLOCK_DAYS;
-export const robuxUnlockDate = (completedAt: Date): Date => robuxUnlockAt(completedAt);
 export const fmtDateRu = (d: Date): string => fmtUnlockDate(d);
 
 type CompletedButton = {
@@ -143,23 +134,18 @@ const BTN_USE_BONUS: CompletedButton = { label: "💎 Использовать �
 const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (bots/shared/review-eligibility.ts)
 
 function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
-  const unlockStr = fmtDateRu(robuxUnlockDate(inp.completedAt ?? new Date()));
-
-  // Зеркало bots/shared/completed-messages.ts (23.10.2026): дата — ориентир, не обещание.
+  /* С 26.10.2026 — без срока и даты: Roblox стал держать Pending дольше 7 дней,
+     и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
   const tgMsg1 =
-    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте 🚀\n\n` +
-    `Roblox держит их в статусе <b>Pending</b> до 7 дней — ориентир <b>до ${unlockStr}</b>. ` +
-    `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n` +
-    `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
+    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
+    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}`;
   const vkMsg1 =
-    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте 🚀\n\n` +
-    `Roblox держит их в статусе Pending до 7 дней — ориентир до ${unlockStr}. ` +
-    `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n` +
-    `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
+    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
+    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}`;
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
   const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";
@@ -472,7 +458,7 @@ export async function notifyGamepassAttached(user: UserRef, wbCode: string): Pro
   const tgMsg =
     `🎉 Отлично, геймпасс принят!\n\n` +
     `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
-    `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
+    `💡 <i>После выкупа робуксы сначала попадут в Pending у Roblox — когда перевести их на баланс, решает уже Roblox.</i>\n\n` +
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
@@ -503,7 +489,7 @@ export async function notifyGamepassCreatedForBuyer(
     `${passLine} на аккаунте <b>${opts.nick}</b> — по ключу, который ты нам прислал.\n\n` +
     `👍 От тебя больше ничего не нужно: заказ уже в очереди на выкуп.\n` +
     `⏳ Выкупим в течение нескольких часов — как только будет готово, напишем.\n` +
-    `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
+    `💡 <i>После выкупа робуксы сначала попадут в Pending у Roblox — когда перевести их на баланс, решает уже Roblox.</i>\n\n` +
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 

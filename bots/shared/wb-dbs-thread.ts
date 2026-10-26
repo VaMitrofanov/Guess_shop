@@ -13,7 +13,6 @@ import {
   type DbsRef,
 } from "./wb-delivery-admin-notify";
 import { mskTime } from "./notify-format";
-import { fmtDateRu, robuxUnlockDate } from "./completed-messages";
 
 /**
  * Живая карточка DBS-заказа и нить вокруг неё.
@@ -408,14 +407,10 @@ function buyoutHeadline(buyout: BuyoutState): Pick<DbsCardState, "marker" | "tit
     case "IN_PROGRESS":
       return { marker: "action", title: "в очереди на выкуп", next: "выкупить пасс у донора и нажать «ВЫКУПЛЕНО»" };
     case "COMPLETED": {
-      /* «Робуксы у покупателя» — неправда первые дни: Roblox держит их (до 7 дней) в
-         Pending, и именно с этим человек приходит в поддержку. Карточка обязана
-         называть срок, а не объявлять выдачу состоявшейся (49ANALQ). */
+      /* Робуксы после выкупа лежат у Roblox в Pending, и срок решает он (с
+         26.10.2026 мы его не называем — Roblox держит дольше 7 дней). */
       if (!buyout.completedAt) return { marker: "done", title: "выкуплен", next: "ждём отзыв" };
-      const unlock = robuxUnlockDate(buyout.completedAt);
-      return unlock.getTime() > Date.now()
-        ? { marker: "done", title: "выкуплен", next: `робуксы в Pending, ориентир до ${fmtDateRu(unlock)}` }
-        : { marker: "done", title: "выкуплен", next: `срок Pending прошёл ${fmtDateRu(unlock)} — ждём отзыв` };
+      return { marker: "done", title: "выкуплен", next: "робуксы в Pending у Roblox — ждём отзыв" };
     }
     case "ERROR":
       return { marker: "urgent", title: "ошибка выкупа", next: "разобрать во вкладке «Заказы»" };

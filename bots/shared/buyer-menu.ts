@@ -29,7 +29,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { expectedGamepassPrice } from "./gamepass-plan";
-import { fmtDateRu, robuxUnlockDate } from "./completed-messages";
+import { fmtDateRu } from "./completed-messages";
 
 export interface BuyerMenuOrder {
   amount: number;
@@ -197,10 +197,7 @@ export function buildBuyerMenuText(input: BuyerMenuInput): BuyerMenuText {
     const when = done.completedAt ?? done.createdAt;
     lines.push(`✅ ${fmtDateRu(new Date(when))} · <b>${done.amount} R$</b> — выкуплен`);
     if (done.completedAt) {
-      const unlock = robuxUnlockDate(new Date(done.completedAt));
-      lines.push(unlock.getTime() > now.getTime()
-        ? `💎 Робуксы в Pending у Roblox — ориентир <b>до ${fmtDateRu(unlock)}</b> (до 7 дней)`
-        : `💎 Срок заморозки Roblox прошёл ${fmtDateRu(unlock)} — проверь раздел Transactions`);
+      lines.push(`💎 Робуксы в Pending у Roblox — с нашей стороны всё, дальше решает Roblox`);
     }
   }
 

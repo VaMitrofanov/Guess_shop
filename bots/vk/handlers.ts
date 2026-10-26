@@ -81,8 +81,8 @@ import { VK_HELP_REF } from "../shared/bot-links";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import {
-  buildRobuxEtaReply, buildRobuxEtaShort, fmtLeft, holdBar, isRepeatEtaQuestion,
-  loadRobuxEtaOrders, robuxEta, fmtDateRu, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
+  buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
+  loadRobuxEtaOrders, ROBLOX_TRANSACTIONS_URL, fmtDateRu, type RobuxEtaDb,
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
@@ -744,7 +744,7 @@ function vkSupportKb(ctxKey: string) {
 
 const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
-  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте, но Roblox держит их в статусе Pending до 7 дней — так он делает с каждой покупкой геймпасса.\n\nПроверить: roblox.com/transactions → строка Pending.\n\nЭтот срок устанавливает Roblox, не мы, — ускорить его нельзя. Спроси «где робуксы?», и я покажу, сколько осталось по твоему заказу." },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя.\n\nПроверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
   { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставь отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформи следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.` },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — открой 📖 Инструкцию и пройди все шаги." },
@@ -1095,7 +1095,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           })
         : null;
       if (lastDone) {
-        whenRbxExtra = `\n📌 По твоему заказу на ${lastDone.amount} R$: ${vkRobuxCountdown(lastDone.completedAt)}`;
+        whenRbxExtra = `\n📌 Твой заказ на ${lastDone.amount} R$ выкуплен ${fmtDateRu(new Date(lastDone.completedAt))} — робуксы в Pending у Roblox.`;
       }
     } catch { /* персонализация — не повод ронять FAQ */ }
 
@@ -1282,13 +1282,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     }
     if (!intakeIsFlow) {
-      // Барьер (23.10.2026): «где робуксы», пока 7 дней не прошли, — вопрос со
-      // сроком, а не проблема. Таймер вместо алерта; robux_overdue пропускаем.
+      // Барьер: «где робуксы» — вопрос про Pending, а не проблема. Ответ
+      // «с нашей стороны всё» + самопроверка вместо алерта; robux_overdue пропускаем.
       if (
         intake.contextKey !== "robux_overdue" &&
         !intakePhoto &&
         isArrivalQuestion(text) &&
-        await replyVkRobuxEta(ctx, vkUserId, { holdingOnly: true }).catch(() => false)
+        await replyVkRobuxEta(ctx, vkUserId, { forceFull: true }).catch(() => false)
       ) {
         await cancelIntake(intakeDb, intakeSubject(vkUserId));
         return;
@@ -3032,7 +3032,7 @@ async function handleGamepassLink(
       `\n\n📋 Что будет дальше:\n` +
       `1. Выкупим твой геймпасс\n` +
       `2. Пришлём уведомление сюда ✅\n` +
-      `3. Roblox разморозит робуксы — до 7 дней после выкупа\n\n` +
+      `3. Робуксы попадут в Pending у Roblox — с этого момента с нашей стороны всё, на баланс их переводит сам Roblox\n\n` +
       `⚠️ Обязательно проверь, что Managed pricing отключён (Sales → переключатель OFF). Если он включён — Roblox изменит цену и мы не сможем выкупить геймпасс, пока ты не исправишь. Подробности — шаг 7 инструкции.\n\n` +
       `Ничего делать не нужно — просто жди сообщение 👌` +
       BUYOUT_ETA_NOTE +
@@ -5153,14 +5153,6 @@ function vkPendingStage(createdAt: Date | string): { label: string; note: string
   return            { label: "⏳ В очереди на выкуп",        note: "Заказ в очереди — почти всегда выкупаем в течение суток. Уведомим сразу, как выкупим 🙏" };
 }
 
-/** Строка таймера заморозки Roblox (зеркало TG `robuxCountdown`, срок — `robux-eta`). */
-function vkRobuxCountdown(completedAt: Date | string): string {
-  const eta = robuxEta(new Date(completedAt));
-  return eta.phase === "holding"
-    ? `⏳ ${holdBar(eta)} осталось ${fmtLeft(eta.msLeft)} — ориентир до ${fmtDateRu(eta.unlockAt)} (примерно).`
-    : `⌛ Срок заморозки Roblox прошёл ${fmtDateRu(eta.unlockAt)} — робуксы обычно уже на балансе.`;
-}
-
 const vkRobuxEtaDb = db as unknown as RobuxEtaDb;
 
 /** Живой невыкупленный заказ человека (свежий) — или `null`. */
@@ -5200,23 +5192,23 @@ async function selfCheckContextVk(vkUserId: number): Promise<SelfCheckContext & 
  * Ответ на «где мои робуксы?» (зеркало TG `replyRobuxEta`, 23.10.2026).
  * `false` — таймер не к месту, сообщение идёт дальше штатно.
  */
-async function replyVkRobuxEta(ctx: MessageContext, vkUserId: number, opts: { holdingOnly?: boolean } = {}): Promise<boolean> {
+async function replyVkRobuxEta(ctx: MessageContext, vkUserId: number, opts: { forceFull?: boolean } = {}): Promise<boolean> {
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } }).catch(() => null);
   if (!user) return false;
   const orders = await loadRobuxEtaOrders(vkRobuxEtaDb, user.id).catch(() => null);
   if (!orders) return false;
   const reply = buildRobuxEtaReply(orders, "plain");
   if (!reply) return false;
-  if (opts.holdingOnly && reply.overdue) return false;
-  const short = !opts.holdingOnly && isRepeatEtaQuestion(`vk:${vkUserId}`) ? buildRobuxEtaShort(orders, "plain") : null;
-  const kb = Keyboard.builder().urlButton({ label: "🔍 Открыть Transactions", url: ROBLOX_TRANSACTIONS_URL });
-  if (reply.overdue) {
-    kb.row().textButton({ label: "💬 Робуксов нет", payload: { command: "rbx_chk" }, color: "secondary" });
-  }
+  const short = !opts.forceFull && isRepeatEtaQuestion(`vk:${vkUserId}`) ? buildRobuxEtaShort(orders, "plain") : null;
+  // Самопроверка доступна сразу (26.10.2026) — срока больше нет.
+  const kb = Keyboard.builder()
+    .urlButton({ label: "🔍 Открыть Transactions", url: ROBLOX_TRANSACTIONS_URL })
+    .row()
+    .textButton({ label: NO_ROBUX_BUTTON, payload: { command: "rbx_chk" }, color: "secondary" });
   await ctx.reply({ message: short ?? reply.text, keyboard: kb.inline() });
   void recordSupportMetric(db as any, {
     type: SUPPORT_METRIC_EVENT.SELF_SERVED, wbCode: orders[0]?.wbCode, via: "vk-bot",
-    payload: { kind: "eta", overdue: reply.overdue },
+    payload: { kind: "eta" },
   });
   return true;
 }
@@ -5551,8 +5543,8 @@ async function handleIdleMessage(
         : order.status === "IN_PROGRESS"
         ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
         : order.status === "COMPLETED"
-        ? "\n\n" + vkRobuxCountdown(order.completedAt ?? order.updatedAt) +
-          "\n💡 Они уже у тебя в Roblox — лежат в Pending до 7 дней. Этот срок решает Roblox, не мы. Проверить: roblox.com/transactions → строка Pending." +
+        ? "\n\n💎 Робуксы уже у тебя в Roblox — в статусе Pending. С нашей стороны всё сделано, дальше решает Roblox: когда перевести их на баланс, он определяет сам." +
+          "\n💡 Проверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." +
           (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
             : "\n\n🎁 Оставь отзыв на Wildberries с текстом и фото — получи +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся.\nПришли скриншот отзыва сюда фотографией.")

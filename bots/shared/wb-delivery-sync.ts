@@ -1291,9 +1291,10 @@ const ROBUX_ETA_CHAT_WINDOW_MS = 6 * 60 * 60_000;
 /**
  * «Где робуксы?» в чате WB (23.10.2026). Покупатель DBS спрашивает там же, где
  * ему писали про доставку, а сообщения по закрытому заказу до оператора даже
- * не доходили. Отвечаем таймером заморозки Roblox — только по выкупленному
- * заказу и не чаще раза в 6 часов на чат. Срок прошёл — дополнительно зовём
- * оператора: тогда проблема может быть настоящей. Выключатель —
+ * не доходили. Отвечаем «робуксы в Pending, с нашей стороны всё, дальше решает
+ * Roblox» — только по выкупленному заказу и не чаще раза в 6 часов на чат.
+ * Срока нет (26.10.2026), поэтому оператора зовём, когда человек спрашивает
+ * СНОВА после уже полученного ответа: тогда проблема может быть настоящей. Выключатель —
  * `WB_CHAT_ROBUX_ETA=off`.
  */
 async function answerRobuxQuestionInChat(
@@ -1318,12 +1319,16 @@ async function answerRobuxQuestionInChat(
   const key = `robux-eta:${chatId}:${bucket}`;
   const already = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: key }, select: { id: true } });
   if (already) return;
+  const answeredBefore = await db.wbMarketplaceEvent.findFirst({
+    where: { marketplaceOrderId: order.id, type: "ROBUX_ETA_ANSWERED" },
+    select: { id: true },
+  });
   const sent = await notifyBuyerViaWbChat(db, ref.code, reply.text, { skipIfClaimOpen: true });
   if (sent.sent) {
-    await audit(db, order.id, "ROBUX_ETA_ANSWERED", key, { overdue: reply.overdue });
+    await audit(db, order.id, "ROBUX_ETA_ANSWERED", key, { repeat: !!answeredBefore });
   }
-  // Барьер: пока срок идёт, оператору не пишем вовсе; после — раз на окно.
-  if (reply.overdue) notifyDbsBuyerMessage(ref, rawText);
+  // Барьер: первый вопрос закрывает автоответ; повторный — раз на окно оператору.
+  if (answeredBefore) notifyDbsBuyerMessage(ref, rawText);
 }
 
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {

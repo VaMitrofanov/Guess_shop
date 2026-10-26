@@ -72,24 +72,15 @@ export async function notifyBuyerViaWbChat(
  * Текст «заказ выкуплен» для чата WB: без HTML, без кнопок, без ссылок на
  * сторонние площадки — WB их не любит, а человеку нужен сам факт.
  *
- * Про заморозку Pending говорим по-разному в зависимости от того, сколько
- * прошло: «подождите пять дней» через три недели после выкупа — это не забота,
- * а издевательство, и человек справедливо прочтёт его как отписку.
+ * Срок Pending не называем (26.10.2026): Roblox стал держать его дольше 7 дней,
+ * и любая дата превращалась в нарушенное обещание. Говорим одно — с нашей
+ * стороны всё, дальше решает Roblox.
  */
-export function wbChatCompletedMessage(
-  amount: number,
-  nick: string | null,
-  completedAt?: Date | null,
-): string {
+export function wbChatCompletedMessage(amount: number, nick: string | null): string {
   const who = nick ? ` на ник ${nick}` : "";
-  const daysPassed = completedAt
-    ? Math.floor((Date.now() - completedAt.getTime()) / 86_400_000)
-    : 0;
-  const pending = daysPassed >= 7
-    ? `Robux приходят в Roblox со статусом Pending, и Roblox держит их до 7 дней — ` +
-      `с момента выкупа прошло больше, так что обычно они уже доступны.`
-    : `Robux приходят в Roblox со статусом Pending, и Roblox держит их до 7 дней — ` +
-      `этот срок устанавливает Roblox, а не мы.`;
+  const pending =
+    `Robux приходят в Roblox со статусом Pending. С нашей стороны всё сделано — ` +
+    `дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам.`;
   return (
     `Ваш заказ выполнен: ${amount} R$${who} отправлены через геймпасс.\n\n` +
     `${pending}\n\n` +

@@ -129,28 +129,17 @@ describe("справка по заказу внутри алерта подде�
      выкупа: он ждал робуксы, которые Roblox держит в Pending пять дней. Дату
      ему назвали в сообщении о выкупе, а у админа её не было — алерт говорил
      только «прошло 2 дня 13 ч», и срок приходилось считать в уме в разговоре. */
-  it("у выкупленного называет дату разблокировки робуксов, а не только возраст", async () => {
-    orderFindUnique.mockResolvedValue(order({
-      status: "COMPLETED",
-      completedAt: new Date(Date.now() - 2 * DAY),
-    }));
-    await call();
-
-    const text = sentText();
-    expect(text).toContain("💎 в заморозке Roblox, ориентир до");
-    // Дата — та же, что видит клиент: выкуп + 7 дней (с 23.10.2026).
-    const expected = new Date(Date.now() + 5 * DAY)
-      .toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
-    expect(text).toContain(expected);
-  });
-
-  it("когда срок вышел, не обещает Pending, а отправляет к Roblox", async () => {
-    orderFindUnique.mockResolvedValue(order({
-      status: "COMPLETED",
-      completedAt: new Date(Date.now() - 9 * DAY),
-    }));
-    await call();
-    expect(sentText()).toContain("срок заморозки Roblox прошёл");
+  it("у выкупленного говорит то же, что клиент: Pending, с нашей стороны всё — без срока", async () => {
+    for (const ago of [2, 9]) {
+      orderFindUnique.mockResolvedValue(order({
+        status: "COMPLETED",
+        completedAt: new Date(Date.now() - ago * DAY),
+      }));
+      await call();
+      const text = sentText();
+      expect(text).toContain("💎 в Pending у Roblox — с нашей стороны всё");
+      expect(text).not.toMatch(/ориентир|срок заморозки/);
+    }
   });
 
   /* `[НИК? …]` пишет `capture-nick`, и никто её не снимает — заметка это журнал.

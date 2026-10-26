@@ -1,8 +1,8 @@
 /**
  * Ф5 (2026-07-12): уведомление о выкупе = ДВА сообщения.
  *
- *  • msg1 — операционное (всем, всегда): факт выкупа + дата разблокировки
- *    робуксов (ориентир completedAt + 7 дней) + как проверить. Никакого маркетинга.
+ *  • msg1 — операционное (всем, всегда): факт выкупа + «с нашей стороны всё,
+ *    дальше Pending у Roblox» + как проверить. Без срока (26.10.2026). Никакого маркетинга.
  *  • msg2 — бонусное (отдельным сообщением сразу после), по приоритету:
  *      1. WB-заказ, бонус не на балансе, код не заклеймлен → питч отзыва,
  *         кнопки [📸 Прислать отзыв] [💎 Купить напрямую] (О2);
@@ -19,11 +19,10 @@
  * менять СИНХРОННО).
  */
 
-/* Срок заморозки Roblox — в `robux-eta` (до 7 дней, 23.10.2026). Здесь только
-   старые имена, под которыми его импортируют остальные модули ботов. */
-import { ROBUX_HOLD_DAYS, robuxUnlockDate, fmtDateRu, PENDING_INFO_URL } from "./robux-eta";
-export { robuxUnlockDate, fmtDateRu };
-export const ROBUX_UNLOCK_DAYS = ROBUX_HOLD_DAYS;
+/* Тексты про Pending — в `robux-eta`. `fmtDateRu` реэкспортируется под старым
+   именем для остальных модулей ботов. */
+import { fmtDateRu, PENDING_INFO_URL } from "./robux-eta";
+export { fmtDateRu };
 
 export type CompletedButton = {
   label: string;
@@ -69,25 +68,18 @@ const BTN_USE_BONUS: CompletedButton = { label: "💎 Использовать �
 const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (review-eligibility.ts)
 
 export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
-  const unlockStr = fmtDateRu(robuxUnlockDate(inp.completedAt ?? new Date()));
-
-  /* Дату называем ориентиром, а не обещанием: срок решает Roblox (до 7 дней),
-     и «зачислит до N» превращалось в нарушенное слово у тех, кому Roblox
-     держал дольше. Вопрос «где робуксы?» бот теперь понимает сам. */
+  /* С 26.10.2026 — без срока и даты: Roblox стал держать Pending дольше 7 дней,
+     и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
   const tgMsg1 =
-    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте 🚀\n\n` +
-    `Roblox держит их в статусе <b>Pending</b> до 7 дней — ориентир <b>до ${unlockStr}</b>. ` +
-    `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n` +
-    `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
+    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
+    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}`;
   const vkMsg1 =
-    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте 🚀\n\n` +
-    `Roblox держит их в статусе Pending до 7 дней — ориентир до ${unlockStr}. ` +
-    `Этот срок устанавливает Roblox, не мы, и ускорить его нельзя.\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "номинала"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n` +
-    `⏳ Спроси «где робуксы?» — покажу, сколько осталось.`;
+    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
+    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `📖 Почему так: ${PENDING_INFO_URL}`;
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
   const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";

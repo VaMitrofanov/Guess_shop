@@ -1,92 +1,38 @@
 /**
- * «Где мои робуксы?» — личный таймер заморозки Roblox.
+ * «Где мои робуксы?» — ответ про Pending у Roblox.
  *
- * До 23.10.2026 бот сам напоминал на 5-й день «робуксы уже могли
- * разблокироваться», а на 7-й — «точно разблокированы». Оба сообщения
- * обещали то, чего мы не знаем: срок Pending решает Roblox, и у части людей
- * он дольше пяти дней. Напоминание само рождало обращения «а где?».
+ * До 23.10.2026 бот сам напоминал на 5-й и 7-й день, с 23.10 показывал личный
+ * таймер «до 7 дней». С 26.10.2026 (решение владельца) срока нет вовсе: Roblox
+ * стал держать Pending дольше 7 дней, и любая названная дата превращалась в
+ * нарушенное обещание и новое обращение «а где?». Теперь мысль одна: если
+ * робуксы в Pending — с нашей стороны всё, дальше решает Roblox. Проверка —
+ * ЧИСЛО в строке Pending Robux, а не прошедшие дни.
  *
- * Решение владельца 23.10.2026: никаких пушей. Человек спрашивает — получает
- * ПРИМЕРНЫЙ таймер, где 7 дней (максимум) считаются от момента выкупа, и
- * ясное «срок решает Roblox, не мы». После 7 дней — не отписка, а кнопка
- * «робуксов нет — проверить»: тогда проблема может быть настоящей.
- *
- * Модуль — единственный источник срока для ботов. Зеркало для Next-роутов —
- * `src/lib/order-presentation.ts` (bots/ и src/ друг друга не импортируют).
+ * Модуль — единственный источник этих текстов для ботов. Зеркало для
+ * Next-роутов — `src/lib/twa-notify.ts` (bots/ и src/ друг друга не импортируют).
  */
 
-/** Сколько Roblox держит робуксы за геймпасс в Pending — по максимуму. */
-export const ROBUX_HOLD_DAYS = 7;
-/** Старше этого вопрос уже не про заморозку: таймер не показываем. */
+/** Старше этого вопрос уже не про Pending: карточку не показываем. */
 export const ROBUX_ETA_LOOKBACK_DAYS = 30;
 /** Сколько заказов перечисляем в одном ответе. */
 const MAX_ORDERS = 4;
 
 const DAY_MS = 86_400_000;
-const HOUR_MS = 3_600_000;
 
 export const ROBLOX_TRANSACTIONS_URL = "https://www.roblox.com/transactions";
 /** Наша страница «что такое геймпасс и Pending» — со схемой и скриншотами. */
 export const PENDING_INFO_URL = "https://robloxbank.ru/pending";
 
-/** Ориентир разблокировки: момент выкупа + 7 дней. */
-export function robuxUnlockDate(completedAt: Date): Date {
-  return new Date(completedAt.getTime() + ROBUX_HOLD_DAYS * DAY_MS);
-}
-
 export function fmtDateRu(d: Date): string {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
 }
 
-export function pluralRu(n: number, forms: [string, string, string]): string {
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return forms[2];
-  if (b > 1 && b < 5) return forms[1];
-  if (b === 1) return forms[0];
-  return forms[2];
-}
-
-const DAYS: [string, string, string] = ["день", "дня", "дней"];
-
-export type RobuxEtaPhase = "holding" | "overdue";
-
-export interface RobuxEta {
-  phase: RobuxEtaPhase;
-  completedAt: Date;
-  unlockAt: Date;
-  /** Сколько осталось до ориентира (0, если срок прошёл). */
-  msLeft: number;
-  /** Полных дней с момента выкупа. */
-  daysPassed: number;
-}
-
-export function robuxEta(completedAt: Date, now: Date = new Date()): RobuxEta {
-  const unlockAt = robuxUnlockDate(completedAt);
-  const msLeft = Math.max(0, unlockAt.getTime() - now.getTime());
-  return {
-    phase: msLeft > 0 ? "holding" : "overdue",
-    completedAt,
-    unlockAt,
-    msLeft,
-    daysPassed: Math.max(0, Math.floor((now.getTime() - completedAt.getTime()) / DAY_MS)),
-  };
-}
-
-/** «≈ 3 дня» / «≈ 20 ч» / «меньше часа». Таймер примерный — точность до часа
- *  только вводила бы в заблуждение. */
-export function fmtLeft(msLeft: number): string {
-  if (msLeft <= 0) return "срок вышел";
-  if (msLeft < HOUR_MS) return "меньше часа";
-  if (msLeft < 36 * HOUR_MS) return `≈ ${Math.ceil(msLeft / HOUR_MS)} ч`;
-  const days = Math.round(msLeft / DAY_MS);
-  return `≈ ${days} ${pluralRu(days, DAYS)}`;
-}
-
-/** Шкала из семи делений — одно деление на день заморозки. */
-export function holdBar(eta: RobuxEta): string {
-  const filled = Math.min(ROBUX_HOLD_DAYS, eta.daysPassed);
-  return "▰".repeat(filled) + "▱".repeat(ROBUX_HOLD_DAYS - filled);
+/** Главная мысль про Pending — одна на все тексты (26.10.2026). */
+export function ourPartDoneText(fmt: RobuxEtaFormat): string {
+  return (
+    `✅ ${b(fmt, "С нашей стороны всё сделано:")} геймпасс выкуплен, робуксы уже на твоём аккаунте — в статусе Pending. ` +
+    `Дальше всё зависит от Roblox: он сам решает, когда перевести их на баланс. Ускорить это не может ни наша поддержка, ни мы.`
+  );
 }
 
 // ── Распознавание вопроса ───────────────────────────────────────────────────
@@ -138,8 +84,6 @@ export type RobuxEtaFormat = "html" | "plain";
 
 export interface RobuxEtaReply {
   text: string;
-  /** Есть заказ, у которого срок Roblox уже прошёл — показать кнопку проверки. */
-  overdue: boolean;
 }
 
 function b(fmt: RobuxEtaFormat, s: string): string {
@@ -155,8 +99,14 @@ export function etaOrders(orders: RobuxEtaOrder[], now: Date = new Date()): Robu
     .slice(0, MAX_ORDERS);
 }
 
-const NOT_US_HEAD = "Этот срок устанавливает Roblox, а не мы.";
-const NOT_US_TAIL = "Свою часть мы выполнили — геймпасс выкуплен. Ускорить разморозку мы не можем, она произойдёт сама.";
+/** «Проверить: Transactions → Pending Robux, число не меньше N». */
+function checkLine(fmt: RobuxEtaFormat, amount: number | null): string {
+  const link = fmt === "html"
+    ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>`
+    : ROBLOX_TRANSACTIONS_URL;
+  const need = amount ? `не меньше ${amount}` : "не меньше суммы заказа";
+  return `🔍 Проверить: ${link} → строка ${b(fmt, "Pending Robux")}, там должно быть число ${need}. Есть — всё в порядке, робуксы придут сами.`;
+}
 
 /**
  * Полный ответ на «где мои робуксы?». `null` — показывать нечего (выкупленных
@@ -169,62 +119,29 @@ export function buildRobuxEtaReply(
 ): RobuxEtaReply | null {
   const orders = etaOrders(ordersIn, now);
   if (orders.length === 0) return null;
-  const etas = orders.map((o) => ({ o, eta: robuxEta(o.completedAt, now) }));
-  const overdue = etas.some((e) => e.eta.phase === "overdue");
-  const holding = etas.filter((e) => e.eta.phase === "holding");
-  const check = fmt === "html"
-    ? `🔍 Проверить: <a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a> → строка <b>Pending</b>.`
-    : `🔍 Проверить: ${ROBLOX_TRANSACTIONS_URL} → строка Pending.`;
   const lines: string[] = [];
 
-  if (etas.length === 1 && !overdue) {
-    const { o, eta } = etas[0];
-    lines.push(`⏳ ${b(fmt, `Робуксы за заказ на ${o.amount} R$ — в заморозке у Roblox`)}`);
-    lines.push("");
-    lines.push(`Выкупили: ${b(fmt, fmtDateRu(eta.completedAt))}`);
-    lines.push(`Ориентир: ${b(fmt, `до ${fmtDateRu(eta.unlockAt)}`)} (примерно)`);
-    lines.push(`${holdBar(eta)}  осталось ${fmtLeft(eta.msLeft)}`);
-  } else if (etas.length === 1) {
-    const { o, eta } = etas[0];
-    lines.push(`⌛ ${b(fmt, `Срок Roblox по заказу на ${o.amount} R$ прошёл`)} (${fmtDateRu(eta.unlockAt)})`);
+  if (orders.length === 1) {
+    const o = orders[0];
+    lines.push(`⏳ ${b(fmt, `Робуксы за заказ на ${o.amount} R$ — в Pending у Roblox`)}`);
+    lines.push(`Выкупили: ${fmtDateRu(o.completedAt)}`);
   } else {
-    lines.push(`⏳ ${b(fmt, "Твои робуксы в заморозке у Roblox")}`);
-    for (const { o, eta } of etas) {
-      lines.push("");
-      lines.push(`${b(fmt, `${o.amount} R$`)} · выкупили ${fmtDateRu(eta.completedAt)}`);
-      lines.push(eta.phase === "holding"
-        ? `${holdBar(eta)}  ${fmtLeft(eta.msLeft)} · до ${fmtDateRu(eta.unlockAt)}`
-        : `⌛ срок Roblox прошёл ${fmtDateRu(eta.unlockAt)}`);
-    }
+    lines.push(`⏳ ${b(fmt, "Твои робуксы — в Pending у Roblox")}`);
+    for (const o of orders) lines.push(`• ${b(fmt, `${o.amount} R$`)} · выкупили ${fmtDateRu(o.completedAt)}`);
   }
-
   lines.push("");
-  if (holding.length > 0) {
-    lines.push(
-      "Робуксы уже на твоём аккаунте — Roblox держит их в статусе Pending до 7 дней. " +
-      "Так он делает с каждой покупкой геймпасса, у любого продавца.",
-    );
-    lines.push("");
-    lines.push(`ℹ️ ${b(fmt, NOT_US_HEAD)} ${NOT_US_TAIL}`);
-    lines.push("");
-    lines.push(`${check} Пока там видна эта строка — всё идёт как надо.`);
-    lines.push("");
-    lines.push(infoLine(fmt));
-  }
-  if (overdue) {
-    if (holding.length > 0) lines.push("");
-    lines.push(holding.length > 0
-      ? "По заказу, где срок уже прошёл, обычно робуксы уже на балансе. Проверь Transactions:"
-      : "Обычно к этому дню робуксы уже на балансе. Проверь Transactions:");
-    lines.push(`• строка всё ещё ${b(fmt, "Pending")} — Roblox задерживает выплату. Это решается только на его стороне, подожди ещё немного;`);
-    lines.push(`• строки ${b(fmt, "нет вовсе")} — нажми «Робуксов нет», проверим вместе.`);
-    if (holding.length === 0) {
-      lines.push("");
-      lines.push(check);
-    }
-  }
-  return { text: lines.join("\n"), overdue };
+  lines.push(ourPartDoneText(fmt));
+  lines.push("");
+  lines.push(checkLine(fmt, orders.length === 1 ? orders[0].amount : null));
+  lines.push("");
+  lines.push(`Числа нет или там 0 — нажми «${NO_ROBUX_BUTTON}», проверим вместе.`);
+  lines.push("");
+  lines.push(infoLine(fmt));
+  return { text: lines.join("\n") };
 }
+
+/** Кнопка самопроверки под ответом — одна для TG и VK. */
+export const NO_ROBUX_BUTTON = "💬 Робуксов нет";
 
 /** Ссылка на объяснение «что такое геймпасс и Pending». */
 export function infoLine(fmt: RobuxEtaFormat): string {
@@ -246,9 +163,9 @@ export function activeOrderLeadText(fmt: RobuxEtaFormat): string {
 /*
  * Требование владельца 23.10.2026: «чтобы поддержку лишний раз не дёргали —
  * пробиваться должны только реальные проблемы». Поэтому:
- *  • пока срок 7 дней не вышел, вопрос «где робуксы» в поддержку не уходит
- *    вовсе — ни текстом, ни через кнопку «Поддержка» (на него есть ответ);
- *  • после 7 дней кнопка «Робуксов нет» ведёт не к менеджеру, а к самопроверке:
+ *  • вопрос «где робуксы» в поддержку не уходит — на него есть ответ про
+ *    Pending (до 26.10.2026 — только пока не вышли «7 дней»);
+ *  • кнопка «Робуксов нет» (с 26.10.2026 — сразу) ведёт не к менеджеру, а к самопроверке:
  *    Pending есть → это Roblox, ждём; не тот аккаунт → переключись; и только
  *    «строки нет вовсе, аккаунт тот» открывает обращение.
  */
@@ -266,10 +183,9 @@ export function activeOrderLeadText(fmt: RobuxEtaFormat): string {
  * способ дёрнуть поддержку одним нажатием.
  */
 
-/** Заказ, о котором спрашиваем: свежий просроченный, иначе просто свежий. */
+/** Заказ, о котором спрашиваем: самый свежий выкуп. */
 export function selfCheckTarget(ordersIn: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaOrder | null {
-  const orders = etaOrders(ordersIn, now);
-  return orders.find((o) => robuxEta(o.completedAt, now).phase === "overdue") ?? orders[0] ?? null;
+  return etaOrders(ordersIn, now)[0] ?? null;
 }
 
 export interface SelfCheckContext {
@@ -310,9 +226,9 @@ export function selfCheckButtons(c: SelfCheckContext = {}): { enough: string; lo
 export function robuxPendingSeenText(fmt: RobuxEtaFormat): string {
   return (
     `✅ ${b(fmt, "Значит, всё в порядке — робуксы на твоём аккаунте.")}\n\n` +
-    `Число в Pending Robux — это твои робуксы: Roblox их уже начислил и просто ещё держит. Иногда он держит дольше 7 дней — ` +
-    `это решение Roblox, и ускорить его не может ни наша поддержка, ни мы.\n\n` +
-    `Ничего делать не нужно: как только Roblox разморозит, робуксы сами появятся на балансе.\n\n` +
+    `Число в Pending Robux — это твои робуксы. С нашей стороны всё сделано, дальше решает Roblox: ` +
+    `когда перевести их на баланс, он определяет сам, и ускорить это не может ни наша поддержка, ни мы.\n\n` +
+    `Ничего делать не нужно: как только Roblox их отпустит, робуксы сами появятся на балансе.\n\n` +
     infoLine(fmt)
   );
 }
@@ -356,48 +272,30 @@ export function robuxScreenshotRepeatText(): string {
   return "📸 Нужен именно скриншот страницы Transactions (фото, не текст) — с ним менеджер сразу проверит выкуп. Пришли его сюда или напиши «отмена».";
 }
 
-/** Есть ли среди заказов такой, у которого 7 дней уже прошли. */
-export function hasOverdueOrder(ordersIn: RobuxEtaOrder[], now: Date = new Date()): boolean {
-  return etaOrders(ordersIn, now).some((o) => robuxEta(o.completedAt, now).phase === "overdue");
-}
-
 /** Короткий ответ на повторный вопрос за несколько минут: вся карточка заново
  *  читалась бы как автоответчик, который не слышит. */
 export function buildRobuxEtaShort(ordersIn: RobuxEtaOrder[], fmt: RobuxEtaFormat, now: Date = new Date()): string | null {
-  const orders = etaOrders(ordersIn, now);
-  if (orders.length === 0) return null;
-  const eta = robuxEta(orders[0].completedAt, now);
-  return eta.phase === "holding"
-    ? `⏳ Всё так же: ${holdBar(eta)} ${fmtLeft(eta.msLeft)}, ориентир — ${b(fmt, `до ${fmtDateRu(eta.unlockAt)}`)}. Срок решает Roblox, робуксы придут сами.`
-    : `⌛ Срок Roblox прошёл ${fmtDateRu(eta.unlockAt)}. Если в Transactions нет строки Pending — нажми «Робуксов нет», проверим вместе.`;
+  if (etaOrders(ordersIn, now).length === 0) return null;
+  return (
+    `⏳ Всё так же: робуксы в Pending у Roblox. ${b(fmt, "С нашей стороны всё сделано")} — когда перевести их на баланс, решает Roblox.\n` +
+    `Если в строке Pending Robux нет суммы заказа — нажми «${NO_ROBUX_BUTTON}».`
+  );
 }
 
 /**
  * Текст для чата Wildberries: без HTML, без ссылок наружу и без кнопок — WB
- * их не любит. Вместо кнопки «проверить» — просьба написать сюда же.
+ * их не любит. Вместо кнопки «проверить» — просьба прислать скриншот сюда же.
  */
 export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaReply | null {
   const orders = etaOrders(ordersIn, now);
   if (orders.length === 0) return null;
-  const eta = robuxEta(orders[0].completedAt, now);
-  const amount = orders[0].amount;
-  if (eta.phase === "holding") {
-    return {
-      overdue: false,
-      text:
-        `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox, но пока заморожены самим Roblox (статус Pending).\n\n` +
-        `Выкупили: ${fmtDateRu(eta.completedAt)}. Ориентир разморозки: до ${fmtDateRu(eta.unlockAt)} (примерно, осталось ${fmtLeft(eta.msLeft)}).\n\n` +
-        `Этот срок устанавливает Roblox, а не мы: так он делает с каждой покупкой геймпасса, до 7 дней. Ускорить его мы не можем, робуксы станут доступны сами.\n\n` +
-        `Проверить можно в Roblox: раздел Transactions, строка Pending Robux — в ней должно быть число не меньше ${amount}.`,
-    };
-  }
+  const { amount, completedAt } = orders[0];
   return {
-    overdue: true,
     text:
-      `Срок заморозки Roblox по заказу на ${amount} R$ прошёл ${fmtDateRu(eta.unlockAt)} — обычно робуксы к этому дню уже на балансе.\n\n` +
-      `Проверьте в Roblox раздел Transactions, строку Pending Robux: важно число в ней. ` +
-      `Если там ${amount} или больше — это задержка на стороне Roblox, подождите ещё немного. ` +
-      `Если меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.`,
+      `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox — в статусе Pending. Выкупили: ${fmtDateRu(completedAt)}.\n\n` +
+      `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, ускорить это мы не можем.\n\n` +
+      `Проверить можно в Roblox: раздел Transactions, строка Pending Robux — в ней должно быть число не меньше ${amount}. ` +
+      `Если там меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.`,
   };
 }
 

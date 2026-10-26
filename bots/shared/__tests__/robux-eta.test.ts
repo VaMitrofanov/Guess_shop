@@ -2,23 +2,19 @@ import {
   buildRobuxEtaReply,
   buildRobuxEtaShort,
   buildRobuxEtaWbChat,
-  fmtLeft,
-  holdBar,
-  hasOverdueOrder,
   isArrivalQuestion,
   isRepeatEtaQuestion,
   isRobuxQuestion,
   robuxPendingSeenText,
   robuxSelfCheckText,
   loadRobuxEtaOrders,
-  robuxEta,
-  robuxUnlockDate,
   selfCheckTarget,
   selfCheckButtons,
   robuxScreenshotRequestText,
   intakeNeedsScreenshot,
   ROBUX_LOW_PENDING_CONTEXT,
   PENDING_INFO_URL,
+  NO_ROBUX_BUTTON,
   type RobuxEtaDb,
 } from "../robux-eta";
 
@@ -27,30 +23,8 @@ const D = 24 * H;
 // 18 октября 2026, 12:00 МСК
 const BOUGHT = new Date("2026-10-18T09:00:00Z");
 
-describe("срок заморозки", () => {
-  it("ориентир = выкуп + 7 дней", () => {
-    expect(robuxUnlockDate(BOUGHT).toISOString()).toBe("2026-10-25T09:00:00.000Z");
-  });
-
-  it("фаза меняется ровно на 7-м дне", () => {
-    expect(robuxEta(BOUGHT, new Date(BOUGHT.getTime() + 7 * D - 1)).phase).toBe("holding");
-    expect(robuxEta(BOUGHT, new Date(BOUGHT.getTime() + 7 * D)).phase).toBe("overdue");
-  });
-
-  it("шкала — одно деление на прошедший день", () => {
-    expect(holdBar(robuxEta(BOUGHT, BOUGHT))).toBe("▱▱▱▱▱▱▱");
-    expect(holdBar(robuxEta(BOUGHT, new Date(BOUGHT.getTime() + 5 * D + H)))).toBe("▰▰▰▰▰▱▱");
-    expect(holdBar(robuxEta(BOUGHT, new Date(BOUGHT.getTime() + 20 * D)))).toBe("▰▰▰▰▰▰▰");
-  });
-
-  it("остаток — примерный, со склонением", () => {
-    expect(fmtLeft(5 * D)).toBe("≈ 5 дней");
-    expect(fmtLeft(2 * D + 3 * H)).toBe("≈ 2 дня");
-    expect(fmtLeft(30 * H)).toBe("≈ 30 ч");
-    expect(fmtLeft(20 * 60_000)).toBe("меньше часа");
-    expect(fmtLeft(0)).toBe("срок вышел");
-  });
-});
+/** Срок не называем нигде (26.10.2026): Roblox стал держать Pending дольше 7 дней. */
+const NO_DEADLINE = /\d\s*(?:[–-]\s*\d+\s*)?(?:дн|дня|дней|сут)|ориентир|осталось|срок (?:прош|вышел)|▰|▱/i;
 
 describe("распознавание «где мои робуксы?»", () => {
   it.each([
@@ -81,43 +55,47 @@ describe("распознавание «где мои робуксы?»", () => {
 
 describe("ответ", () => {
   const now = new Date(BOUGHT.getTime() + 5 * D + H);
+  const late = new Date(BOUGHT.getTime() + 20 * D);
 
-  it("один заказ в заморозке: таймер, дата, «решает Roblox», без кнопки проверки", () => {
-    const r = buildRobuxEtaReply([{ amount: 1200, completedAt: BOUGHT }], "html", now)!;
-    expect(r.overdue).toBe(false);
-    expect(r.text).toContain("1200 R$");
-    expect(r.text).toContain("до 25 октября");
-    expect(r.text).toContain("▰▰▰▰▰▱▱");
-    expect(r.text).toContain("≈ 2 дня");
-    expect(r.text).toContain("устанавливает Roblox, а не мы");
+  it("один заказ: «с нашей стороны всё», номинал, дата выкупа, кнопка самопроверки — без срока", () => {
+    for (const at of [now, late]) {
+      const r = buildRobuxEtaReply([{ amount: 1200, completedAt: BOUGHT }], "html", at)!;
+      expect(r.text).toContain("1200 R$");
+      expect(r.text).toContain("18 октября");
+      expect(r.text).toContain("С нашей стороны всё сделано");
+      expect(r.text).toContain("зависит от Roblox");
+      expect(r.text).toContain("не меньше 1200");
+      expect(r.text).toContain(NO_ROBUX_BUTTON);
+      expect(r.text).not.toMatch(NO_DEADLINE);
+    }
   });
 
-  it("срок прошёл: кнопка проверки и развилка Pending / нет строки", () => {
-    const r = buildRobuxEtaReply([{ amount: 500, completedAt: BOUGHT }], "plain", new Date(BOUGHT.getTime() + 9 * D))!;
-    expect(r.overdue).toBe(true);
-    expect(r.text).toContain("прошёл");
-    expect(r.text).toContain("нет вовсе");
+  it("plain — без разметки", () => {
+    const r = buildRobuxEtaReply([{ amount: 500, completedAt: BOUGHT }], "plain", now)!;
     expect(r.text).not.toContain("<b>");
   });
 
-  it("несколько заказов — строка на каждый", () => {
+  it("несколько заказов — строка на каждый, свежий сверху", () => {
     const r = buildRobuxEtaReply([
       { amount: 500, completedAt: new Date(BOUGHT.getTime() - 3 * D) },
       { amount: 1200, completedAt: BOUGHT },
     ], "plain", now)!;
     expect(r.text.indexOf("1200 R$")).toBeLessThan(r.text.indexOf("500 R$"));
-    expect(r.overdue).toBe(true);
+    expect(r.text).not.toMatch(NO_DEADLINE);
   });
 
   it("выкуп старше 30 дней — таймера нет", () => {
     expect(buildRobuxEtaReply([{ amount: 500, completedAt: BOUGHT }], "html", new Date(BOUGHT.getTime() + 31 * D))).toBeNull();
   });
 
-  it("короткий повтор и текст для чата WB без разметки", () => {
-    expect(buildRobuxEtaShort([{ amount: 1200, completedAt: BOUGHT }], "plain", now)).toContain("до 25 октября");
-    const wb = buildRobuxEtaWbChat([{ amount: 1200, completedAt: BOUGHT }], now)!;
+  it("короткий повтор и текст для чата WB — без срока, WB без разметки", () => {
+    const short = buildRobuxEtaShort([{ amount: 1200, completedAt: BOUGHT }], "plain", now)!;
+    expect(short).toContain("С нашей стороны всё сделано");
+    expect(short).not.toMatch(NO_DEADLINE);
+    const wb = buildRobuxEtaWbChat([{ amount: 1200, completedAt: BOUGHT }], late)!;
     expect(wb.text).not.toMatch(/https?:|<b>/);
-    expect(wb.text).toContain("устанавливает Roblox, а не мы");
+    expect(wb.text).toContain("С нашей стороны всё сделано");
+    expect(wb.text).not.toMatch(NO_DEADLINE);
   });
 
   it("повтор в течение 10 минут распознаётся", () => {
@@ -172,10 +150,9 @@ describe("барьер перед поддержкой", () => {
     expect(robuxPendingSeenText("plain")).not.toMatch(/менеджер|поддержк[уи] напиш/i);
   });
 
-  it("просрочка определяется по самому старому из заказов", () => {
-    const now = new Date(BOUGHT.getTime() + 8 * D);
-    expect(hasOverdueOrder([{ amount: 1, completedAt: BOUGHT }], now)).toBe(true);
-    expect(hasOverdueOrder([{ amount: 1, completedAt: new Date(now.getTime() - D) }], now)).toBe(false);
+  it("ответ «Pending есть» — без срока", () => {
+    expect(robuxPendingSeenText("plain")).not.toMatch(NO_DEADLINE);
+    expect(robuxPendingSeenText("plain")).toContain("С нашей стороны всё сделано");
   });
 });
 
@@ -202,12 +179,11 @@ describe("самопроверка по числу в Pending (24.10.2026)", () 
     expect(robuxScreenshotRequestText("plain")).toMatch(/скриншот/i);
   });
 
-  it("проверяем свежий просроченный заказ, а не любой", () => {
+  it("проверяем самый свежий выкуп", () => {
     const now = new Date(BOUGHT.getTime() + 9 * D);
     const fresh = { amount: 500, completedAt: new Date(now.getTime() - D) };
-    const overdue = { amount: 1000, completedAt: BOUGHT };
-    expect(selfCheckTarget([fresh, overdue], now)?.amount).toBe(1000);
-    expect(selfCheckTarget([fresh], now)?.amount).toBe(500);
+    const old = { amount: 1000, completedAt: BOUGHT };
+    expect(selfCheckTarget([old, fresh], now)?.amount).toBe(500);
     expect(selfCheckTarget([], now)).toBeNull();
   });
 

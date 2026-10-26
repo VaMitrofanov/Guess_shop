@@ -70,7 +70,7 @@ export async function rescueCompletedNotice(
   return notifyBuyerViaWbChat(
     db as never,
     input.wbCode,
-    wbChatCompletedMessage(input.amount, input.robloxUsername ?? null, input.completedAt ?? null),
+    wbChatCompletedMessage(input.amount, input.robloxUsername ?? null),
   ).catch((error) => {
     console.warn("[notice-delivery] запасной канал WB упал:", (error as Error)?.message ?? error);
     return { sent: false, reason: "send_failed" as const };

@@ -202,7 +202,7 @@ function StatusContent() {
           <aside className={styles.sideColumn}>
             <section className={styles.trustCard}><ShieldCheck size={21} /><div><strong>Статус защищён</strong><p>Доступ есть только у владельца аккаунта или по секретной ссылке после оплаты.</p></div></section>
             <section className={styles.infoCard}><ReceiptText size={20} /><div><strong>Чек и история</strong><p>Платёжные данные и все заказы доступны в личном кабинете.</p><Link href="/dashboard">Открыть кабинет <ArrowRight size={15} /></Link></div></section>
-            <section className={styles.infoCard}><PackageCheck size={20} /><div><strong>Pending — это нормально</strong><p>Roblox удерживает Robux после выкупа геймпасса до 5–7 дней.</p><a href="https://www.roblox.com/transactions" target="_blank" rel="noopener noreferrer">Транзакции Roblox <ArrowRight size={15} /></a></div></section>
+            <section className={styles.infoCard}><PackageCheck size={20} /><div><strong>Pending — это нормально</strong><p>После выкупа геймпасса Robux лежат у Roblox в Pending — с нашей стороны всё, дальше решает Roblox.</p><a href="https://www.roblox.com/transactions" target="_blank" rel="noopener noreferrer">Транзакции Roblox <ArrowRight size={15} /></a></div></section>
           </aside>
         </div>
 

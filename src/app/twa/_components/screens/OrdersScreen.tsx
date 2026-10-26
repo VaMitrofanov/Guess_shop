@@ -22,8 +22,6 @@ import {
   orderFlag as sharedOrderFlag,
   nextStepFor as sharedNextStep,
   primaryActionFor as sharedPrimaryAction,
-  fmtUnlockDate,
-  robuxUnlockAt,
   packDuplicates,
   readinessFor,
   READINESS_STEPS,
@@ -2481,11 +2479,6 @@ function OrderCard({
      читается как «висит шестой день», хотя спрашивают всегда одно: КОГДА выкупили.
      Поэтому у него на месте возраста стоит дата выкупа. */
   const boughtAt = order.status === "COMPLETED" ? order.completedAt : null;
-  /* Робуксы лежат у Roblox в Pending пять дней — ровно эту дату клиенту назвали
-     в сообщении о выкупе, и ровно с ней он приходит в поддержку («долго в
-     обработке»). Пока срок не вышел, он и есть ответ; после — строка уходит. */
-  const robuxUnlock = boughtAt ? robuxUnlockAt(boughtAt) : null;
-  const robuxPending = !!robuxUnlock && robuxUnlock.getTime() > Date.now();
   /* Кто закрыл заказ. `purchaserUsername` — аккаунт донора у автовыкупа;
      `completedBy` — админ, нажавший «Выкуплено». Раньше на их месте стояло
      безличное «вручную», и рядом, через точку, шло имя КЛИЕНТА — строка
@@ -2652,7 +2645,6 @@ function OrderCard({
         {orderedSplit.length > 1 && <span>{orderedSplit.length} {orderedSplit.length < 5 ? "пасса" : "пассов"}</span>}
         {nickIsGuess && <span>вероятный ник</span>}
         {order.status === "COMPLETED" && <span>выкуп: {boughtBy ?? "вручную"}</span>}
-        {robuxPending && <span>робуксы {fmtUnlockDate(robuxUnlock!)}</span>}
         <span>{shortName}</span>
       </span>
       {/* Несколько пассов: какие куплены и какой следующий — прямо в ленте. */}
@@ -3219,12 +3211,12 @@ function OrderCard({
             </span>
           </DataRow>
         )}
-        {/* Ответ на «когда придут робуксы»: тот же срок, что назвали клиенту. */}
-        {robuxUnlock && (
+        {/* Ответ на «когда придут робуксы» — тот же, что получил клиент: срока нет
+            (с 26.10.2026), робуксы в Pending, дальше решает Roblox. */}
+        {boughtAt && (
           <DataRow icon="💎">
-            <span style={{ color: robuxPending ? C.textPrimary : C.textSecondary }}>
-              {robuxPending ? "Робуксы выйдут из Pending" : "Робуксы разблокированы"}{" "}
-              <span style={{ fontWeight: 600 }}>{fmtUnlockDate(robuxUnlock)}</span>
+            <span style={{ color: C.textSecondary }}>
+              Робуксы в Pending у Roblox — с нашей стороны всё, срок решает Roblox
             </span>
           </DataRow>
         )}

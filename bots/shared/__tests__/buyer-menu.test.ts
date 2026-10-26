@@ -84,25 +84,17 @@ describe("экран целиком", () => {
     expect(text).not.toContain("DIR-");
   });
 
-  it("выполненный заказ — блок, а не строчка, и с датой выхода робуксов", () => {
-    const text = menu({
-      active: [],
-      lastCompleted: order({ status: "COMPLETED", completedAt: new Date(NOW.getTime() - 2 * DAY) }),
-    }).text;
-    expect(text).toContain("ГОТОВО");
-    expect(text).toContain("выкуплен");
-    // Выкуп + 7 дней (максимум Roblox) = 23 октября.
-    expect(text).toContain("Робуксы в Pending у Roblox");
-    expect(text).toContain("23 октября");
-  });
-
-  it("когда срок Pending вышел — не обещает ожидание, а отправляет в Transactions", () => {
-    const text = menu({
-      active: [],
-      lastCompleted: order({ status: "COMPLETED", completedAt: new Date(NOW.getTime() - 9 * DAY) }),
-    }).text;
-    expect(text).toContain("Срок заморозки Roblox прошёл");
-    expect(text).toContain("Transactions");
+  it("выполненный заказ — блок: «в Pending, с нашей стороны всё», без срока (26.10.2026)", () => {
+    for (const ago of [2, 9]) {
+      const text = menu({
+        active: [],
+        lastCompleted: order({ status: "COMPLETED", completedAt: new Date(NOW.getTime() - ago * DAY) }),
+      }).text;
+      expect(text).toContain("ГОТОВО");
+      expect(text).toContain("выкуплен");
+      expect(text).toContain("Робуксы в Pending у Roblox — с нашей стороны всё");
+      expect(text).not.toMatch(/ориентир|7 дней|Срок заморозки/);
+    }
   });
 
   it("три активных заказа: подробно один, остальные — кнопкой (О4)", () => {

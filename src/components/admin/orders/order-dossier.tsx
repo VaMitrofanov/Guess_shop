@@ -9,8 +9,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ageBasis, ageTone, fmtAge, fmtUnlockDate, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
-  primaryActionFor, robuxUnlockAt, nextStepFor, sourceLabel, readinessFor, READINESS_STEPS,
+  ageBasis, ageTone, fmtAge, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
+  primaryActionFor, nextStepFor, sourceLabel, readinessFor, READINESS_STEPS,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
@@ -370,8 +370,8 @@ export default function OrderDossier({
                 <div>
                   <div className={styles.kvKey}>Робуксы</div>
                   <div className={styles.kvValue}>
-                    {fmtUnlockDate(robuxUnlockAt(order.completedAt))}
-                    <small> из Pending</small>
+                    В Pending у Roblox
+                    <small> · срок решает Roblox</small>
                   </div>
                 </div>
               )}
