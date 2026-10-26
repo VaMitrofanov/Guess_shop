@@ -82,14 +82,14 @@ import { countPreviousOrders } from "../shared/order-loyalty";
 import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
-import { buildCompletedMessages } from "../shared/completed-messages";
+import { buildCompletedMessages, COMPLETED_MSG1_BUTTON } from "../shared/completed-messages";
 import {
   buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
   loadRobuxEtaOrders, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
-  activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText,
+  activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText, ROBUX_CONFIRM,
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, EXPLICIT_REVIEW_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
 import { recordCompletedNotice } from "../shared/notice-delivery";
@@ -1869,6 +1869,7 @@ async function replyRobuxEta(ctx: any, tgId: string, opts: { forceFull?: boolean
   // Самопроверка доступна сразу (26.10.2026): срока больше нет, проблема
   // видна только по числу в Pending Robux.
   const rows = [
+    [Markup.button.callback(ROBUX_CONFIRM.label, ROBUX_CONFIRM.command)],
     [Markup.button.url("🔍 Открыть Transactions", ROBLOX_TRANSACTIONS_URL)],
     [Markup.button.callback(NO_ROBUX_BUTTON, "rbx_chk")],
   ];
@@ -5888,7 +5889,10 @@ export function registerCallbacks(bot: Telegraf): void {
       if (data === PHOTO_KIND_CMD.pending) {
         await ctx.reply(pendingPhotoReplyText("html"), {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback(NO_ROBUX_BUTTON, "rbx_chk")]]),
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback(ROBUX_CONFIRM.label, ROBUX_CONFIRM.command)],
+            [Markup.button.callback(NO_ROBUX_BUTTON, "rbx_chk")],
+          ]),
         });
         return;
       }
@@ -5922,7 +5926,11 @@ export function registerCallbacks(bot: Telegraf): void {
     }
     if (data === "rbx_pend") {
       await ctx.answerCbQuery().catch(() => {});
-      await ctx.reply(robuxPendingSeenText("html"), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+      await ctx.reply(robuxPendingSeenText("html"), {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([[Markup.button.callback(ROBUX_CONFIRM.label, ROBUX_CONFIRM.command)]]),
+      });
       return;
     }
     if (data === "rbx_low") {
@@ -7827,7 +7835,10 @@ export async function notifyUserCompleted(
   if (user.tgId) {
     channel = "tg";
     try {
-      await bot.telegram.sendMessage(user.tgId, m.tgMsg1, { parse_mode: "HTML" });
+      await bot.telegram.sendMessage(user.tgId, m.tgMsg1, {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback(COMPLETED_MSG1_BUTTON.label, COMPLETED_MSG1_BUTTON.command)]]),
+      });
       delivered = true;
     } catch (err) {
       console.warn("[TG] сообщение о выкупе не доставлено:", (err as Error)?.message ?? err);
@@ -7842,7 +7853,12 @@ export async function notifyUserCompleted(
     }
   } else if (user.vkId) {
     channel = "vk";
-    delivered = Boolean(await vkSend(user.vkId, m.vkMsg1));
+    delivered = Boolean(await vkSend(user.vkId, m.vkMsg1, {
+      keyboard: JSON.stringify({ inline: true, buttons: [[{
+        action: { type: "text", label: COMPLETED_MSG1_BUTTON.label, payload: JSON.stringify({ command: COMPLETED_MSG1_BUTTON.command }) },
+        color: "positive",
+      }]] }),
+    }));
     const vkKb = JSON.stringify({
       inline: true,
       buttons: m.buttons.map((b) => [{

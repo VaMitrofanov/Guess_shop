@@ -18,6 +18,11 @@ import { buyerStepEventText } from "../../../../bots/shared/buyer-step";
 import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
+import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/lib/buyout-summary";
+
+const TONE_CLASS: Record<BuyoutTone, string> = {
+  green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
+};
 
 type Tab = "overview" | "events" | "payment" | "audit";
 
@@ -25,11 +30,6 @@ interface EventRow { id: string; type: string; payload: unknown; createdAt: stri
 
 /* Статусы инструментов геймпасса больше не копируются сюда: и «разбить», и
    «ключ» решает общий `@/lib/gamepass-tools` (он же — у TWA и у правки). */
-
-/** Дата и время события — там, где «сколько прошло» не отвечает на вопрос. */
-function fmtWhen(iso: string): string {
-  return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "");
-}
 
 const EVENT_LABELS: Record<string, string> = {
   ORDER_CREATED: "Заказ создан",
@@ -137,6 +137,7 @@ export default function OrderDossier({
   const ids = gamepassIdsOf(order);
   const singleId = gamepassIdOf(order);
   const payment = order.paymentAttempts?.[0];
+  const buyout = buildBuyoutSummary(order as unknown as BuyoutOrderInput);
   const parts = order.splitGamepasses ?? [];
   const href = contactHref(order);
 
@@ -327,6 +328,30 @@ export default function OrderDossier({
       <div className={styles.dossierBody}>
         {tab === "overview" && (
           <>
+            {/* ✅ Выкуплен — первым: когда, кто, сколько списано, дошло ли до
+                клиента, что он ответил (тот же блок, что в TWA, 27.10.2026). */}
+            {buyout && (
+              <section className={`${styles.buyout}${buyout.attention ? ` ${styles.buyoutAttention}` : ""}`} aria-label="Заказ выкуплен">
+                <div className={styles.buyoutHead}>
+                  <span className={styles.buyoutMark} aria-hidden="true">✓</span>
+                  <span>
+                    <div className={styles.buyoutTitle}>ВЫКУПЛЕН</div>
+                    <div className={styles.buyoutWhen}>{buyout.when} <small>· {buyout.ago}</small></div>
+                  </span>
+                </div>
+                <dl className={styles.buyoutGrid}>
+                  {buyout.rows.map((row) => (
+                    <div key={row.key}>
+                      <dt>{row.label}</dt>
+                      <dd className={TONE_CLASS[row.tone]}>
+                        {row.value}
+                        {row.sub?.map((line) => <small key={line}>{line}</small>)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
             {order.priorityAt && (
               <div className={`${styles.box} ${styles.boxPrio}`}>
                 <div className={styles.boxHead}>⚡ Выкупать первым<em>{order.priorityBy ?? ""}</em></div>
@@ -352,29 +377,7 @@ export default function OrderDossier({
               <div><div className={styles.kvKey}>Оплачено</div><div className={styles.kvValue}>{payment ? rub(payment.amountKopecks) : rub(order.saleAmountKopecks)}</div></div>
               <div><div className={styles.kvKey}>Создан</div><div className={styles.kvValue}>{fmtAge(order.createdAt)} назад</div></div>
               <div><div className={styles.kvKey}>В очереди</div><div className={styles.kvValue}>{order.pendingAt ? `${fmtAge(order.pendingAt)}` : "—"}</div></div>
-              {/* «Когда выкупили» и «когда придут робуксы» — два вопроса, с
-                  которыми к заказу возвращаются чаще всего. Оба ответа лежали в
-                  базе и не показывались нигде. */}
-              {order.status === "COMPLETED" && (
-                <div>
-                  <div className={styles.kvKey}>Выкуплен</div>
-                  <div className={styles.kvValue}>
-                    {order.completedAt ? fmtWhen(order.completedAt) : "—"}
-                    {(order.purchaserUsername ?? order.completedBy) && (
-                      <small> · {order.purchaserUsername ?? order.completedBy}</small>
-                    )}
-                  </div>
-                </div>
-              )}
-              {order.status === "COMPLETED" && order.completedAt && (
-                <div>
-                  <div className={styles.kvKey}>Робуксы</div>
-                  <div className={styles.kvValue}>
-                    В Pending у Roblox
-                    <small> · срок решает Roblox</small>
-                  </div>
-                </div>
-              )}
+              {/* «Выкуплен» и «Робуксы» — в блоке «✅ Выкуплен» выше. */}
               <div><div className={styles.kvKey}>Источник</div><div className={styles.kvValue}>{sourceLabel(order.orderSource)}</div></div>
             </div>
 

@@ -136,6 +136,8 @@ export function buildRobuxEtaReply(
   lines.push("");
   lines.push(`Числа нет или там 0 — нажми «${NO_ROBUX_BUTTON}», проверим вместе.`);
   lines.push("");
+  lines.push(confirmHintLine(fmt));
+  lines.push("");
   lines.push(infoLine(fmt));
   return { text: lines.join("\n") };
 }
@@ -229,6 +231,7 @@ export function robuxPendingSeenText(fmt: RobuxEtaFormat): string {
     `Число в Pending Robux — это твои робуксы. С нашей стороны всё сделано, дальше решает Roblox: ` +
     `когда перевести их на баланс, он определяет сам, и ускорить это не может ни наша поддержка, ни мы.\n\n` +
     `Ничего делать не нужно: как только Roblox их отпустит, робуксы сами появятся на балансе.\n\n` +
+    `${confirmHintLine(fmt)}\n\n` +
     infoLine(fmt)
   );
 }
@@ -391,7 +394,7 @@ export function robuxSurveyText(fmt: RobuxEtaFormat, amount: number): string {
 
 /** Ответ на «✅ Уже на балансе». */
 export function robuxSurveyGotText(): string {
-  return "🙌 Отлично, робуксы дошли! Спасибо, что ответил — это помогает нам следить, как Roblox сейчас переводит робуксы.";
+  return "🙌 Отлично, робуксы дошли! Спасибо, что подтвердил — это очень важно для нас.\n\nЗахочешь ещё — в меню есть покупка напрямую, без карты WB 💎";
 }
 
 // ── «Что на скриншоте?» (26.10.2026) ────────────────────────────────────────
@@ -419,7 +422,8 @@ export function pendingPhotoReplyText(fmt: RobuxEtaFormat): string {
     `👍 Спасибо! Посмотри на строку ${b(fmt, "Pending Robux")}:\n\n` +
     `✅ там сумма заказа или больше (или робуксы уже на балансе) — ${b(fmt, "всё в порядке")}. ` +
     `С нашей стороны всё сделано, на баланс робуксы переведёт сам Roblox.\n\n` +
-    `❌ там 0 или меньше суммы, и на балансе пусто — нажми «${NO_ROBUX_BUTTON}», проверим вместе.`
+    `❌ там 0 или меньше суммы, и на балансе пусто — нажми «${NO_ROBUX_BUTTON}», проверим вместе.\n\n` +
+    confirmHintLine(fmt)
   );
 }
 
@@ -427,3 +431,32 @@ export function pendingPhotoReplyText(fmt: RobuxEtaFormat): string {
 export const PHOTO_KIND_TTL_MS = 60 * 60_000;
 /** Сколько после нажатия «📸 Прислать отзыв» фото сразу считается отзывом. */
 export const EXPLICIT_REVIEW_TTL_MS = 6 * 60 * 60_000;
+
+// ── «✅ Робуксы поступили» (27.10.2026) ─────────────────────────────────────
+/*
+ * Владелец: подтверждение «робуксы дошли» — самое важное для нас. Кнопка стоит
+ * в сообщении о выкупе, в ответе «где робуксы?», в ответе «в Pending — всё
+ * в порядке» и в рассылке `scripts/broadcast-robux-confirm.mjs`. Команда та же,
+ * что у ответа опроса «уже на балансе» (`rbx_s_got`): одно нажатие — одна
+ * запись `OrderEvent` ROBUX_SURVEY_GOT, которую видит карточка заказа.
+ */
+export const ROBUX_CONFIRM = { command: SURVEY_CMD.got, label: "✅ Робуксы поступили" } as const;
+
+/** Строка-просьба под текстом, где стоит кнопка. */
+export function confirmHintLine(fmt: RobuxEtaFormat): string {
+  return `🙏 Когда робуксы появятся на балансе — нажми ${b(fmt, `«${ROBUX_CONFIRM.label}»`)}. Это очень важно для нас.`;
+}
+
+/** Рассылка «нажми, когда поступят» (или если уже поступили). */
+export function robuxConfirmText(fmt: RobuxEtaFormat, amount: number): string {
+  return (
+    `💎 ${b(fmt, `Робуксы за заказ на ${amount} R$ уже на балансе?`)}\n\n` +
+    `Нажми ${b(fmt, `«${ROBUX_CONFIRM.label}»`)}, как только они появятся на балансе Roblox — или прямо сейчас, если уже появились. ` +
+    `Это очень важно для нас 🙏\n\n` +
+    `Пока робуксы в ${b(fmt, "Pending")} — всё в порядке: с нашей стороны всё сделано, на баланс их переведёт сам Roblox. ` +
+    `Кнопка никуда не денется — нажми её, когда они придут.`
+  );
+}
+
+/** «Не вижу робуксов» под рассылкой — ведёт на самопроверку `rbx_chk`. */
+export const NO_ROBUX_SHORT_BUTTON = "🤔 Не вижу робуксов";

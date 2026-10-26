@@ -462,6 +462,25 @@
 .boxIce { border-color: rgba(100, 210, 255, .28); background: rgba(100, 210, 255, .06); }
 .boxPrio { border-color: rgba(255, 214, 10, .3); background: rgba(255, 214, 10, .07); }
 
+/* ✅ Блок «Выкуплен» (27.10.2026) — первым в досье выкупленного заказа. */
+.buyout { padding: 16px 18px; border: 1px solid rgba(64, 212, 126, .32); border-radius: 16px; background: rgba(64, 212, 126, .07); }
+.buyoutAttention { border-color: rgba(255, 159, 10, .45); }
+.buyoutHead { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.buyoutMark { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--o-green); color: #04160b; font-size: 19px; font-weight: 900; }
+.buyoutTitle { color: var(--o-green); font-size: 15px; font-weight: 850; letter-spacing: .08em; }
+.buyoutWhen { color: #e5e5ea; font-size: 15px; }
+.buyoutWhen small { color: #75757d; font-size: 14px; }
+.buyoutGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; margin: 0; }
+.buyoutGrid > div { min-width: 0; }
+.buyoutGrid dt { margin-bottom: 3px; color: #75757d; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.buyoutGrid dd { margin: 0; font-size: 14.5px; line-height: 1.4; }
+.buyoutGrid dd small { display: block; margin-top: 2px; color: #a1a1a8; font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 12.5px; }
+.toneGreen { color: var(--o-green); }
+.toneRed { color: var(--o-red); font-weight: 700; }
+.toneOrange { color: var(--o-orange); }
+.toneNeutral { color: #e5e5ea; }
+.toneMuted { color: #75757d; }
+
 /* ── «Другие пассы на аккаунте»: вторичный блок карточки заказа ─────────────
    Список пассов ника — не факты заказа, а витрина, из которой заказ можно
    починить, поэтому он отбит вниз тёмной полосой и приглушён. Без этого

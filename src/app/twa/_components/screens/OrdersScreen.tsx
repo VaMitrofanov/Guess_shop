@@ -30,6 +30,7 @@ import {
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
 import { MAX_SPLIT_PARTS } from "@/lib/order-gamepass-split";
+import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/lib/buyout-summary";
 
 /** ❄️ Цвет заморозки. Живёт в теме — здесь только короткий псевдоним. */
 const ICE = C.ice;
@@ -124,6 +125,11 @@ interface Order {
   /** Кто нажал «Выкуплено» — выводится из `OrderEvent` на сервере. У автовыкупа
    *  пусто: там покупателя называет `purchaserUsername` (аккаунт донора). */
   completedBy?: string | null;
+  /** Факты о выкупе из журнала: списано, ответ на опрос, обращения после
+   *  выкупа (сервер, `buyoutFactsFromEvents`, 27.10.2026). */
+  buyoutFacts?: BuyoutOrderInput["buyoutFacts"];
+  /** Цена продажи (копейки): WB — цена у маркетплейса, прямой — счёт. */
+  saleAmountKopecks?: number | null;
   /** Оплата прямого заказа подтверждена. null у прямого = вне очереди выкупа. */
   paidAt: string | null;
   takenAt: string | null;
@@ -562,6 +568,65 @@ function extractGamepassId(url: string | null): string | null {
 type ActionResult = { ok: boolean; error?: string };
 
 /* ───────────── DataRow ───────────── */
+/* ── ✅ Блок «Выкуплен» (27.10.2026) ─────────────────────────────────────────
+   Первое, что видно в открытом выкупленном заказе: когда, кто, сколько
+   списано, дошло ли уведомление, что ответил покупатель. Строки собирает
+   общий `buildBuyoutSummary` — тот же блок стоит в досье на сайте. */
+const BUYOUT_TONE: Record<BuyoutTone, string> = {
+  green: C.green, red: C.red, orange: C.orange, neutral: C.textPrimary, muted: C.textTertiary,
+};
+
+function BuyoutBlock({ order, onResend, resendBusy }: { order: Order; onResend: () => void; resendBusy: boolean }) {
+  const sum = buildBuyoutSummary(order as unknown as BuyoutOrderInput);
+  if (!sum) return null;
+  const noticeFailed = sum.rows.some(r => r.key === "notice" && r.tone === "red");
+  return (
+    <section className="twa-buyout" aria-label="Заказ выкуплен" style={{
+      margin: 0, padding: "14px 14px 12px", borderRadius: 16,
+      background: `${C.green}14`, border: `1px solid ${(sum.attention ? C.orange : C.green)}55`,
+    }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <span aria-hidden="true" style={{
+          width: 34, height: 34, borderRadius: 17, display: "grid", placeItems: "center",
+          background: C.green, color: "#04160b", fontSize: 18, fontWeight: 800, flex: "0 0 auto",
+        }}>✓</span>
+        <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+          <strong style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".04em", color: C.green }}>ВЫКУПЛЕН</strong>
+          <span style={{ fontSize: 15, color: C.textPrimary }}>
+            {sum.when} <span style={{ color: C.textTertiary }}>· {sum.ago}</span>
+          </span>
+        </span>
+      </header>
+      <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 7, margin: 0 }}>
+        {sum.rows.map(row => (
+          <div key={row.key} style={{ display: "contents" }}>
+            <dt style={{ fontSize: 14, color: C.textTertiary, paddingTop: 1 }}>{row.label}</dt>
+            <dd style={{ margin: 0, minWidth: 0 }}>
+              <span style={{ fontSize: 15, color: BUYOUT_TONE[row.tone], fontWeight: row.tone === "red" ? 700 : 500, lineHeight: 1.35 }}>
+                {row.value}
+              </span>
+              {row.sub?.map(line => (
+                <span key={line} style={{ display: "block", fontSize: 14, color: C.textSecondary, fontFamily: MONO, marginTop: 2 }}>{line}</span>
+              ))}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {/* «Клиент говорит, что ничего не получал» — ответ в один тап. */}
+      <button type="button" className="twa-press-sm" disabled={resendBusy}
+        onClick={e => { e.stopPropagation(); onResend(); }}
+        style={{
+          width: "100%", marginTop: 12, padding: "10px", borderRadius: 10,
+          border: `1px solid ${noticeFailed ? C.red + "88" : C.border}`,
+          background: noticeFailed ? `${C.red}1a` : "transparent", color: noticeFailed ? C.red : C.textSecondary,
+          fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: resendBusy ? 0.5 : 1,
+        }}>
+        {resendBusy ? "Отправляю…" : noticeFailed ? "📨 Отправить уведомление ещё раз" : "📨 Повторить уведомление о выкупе"}
+      </button>
+    </section>
+  );
+}
+
 function DataRow({ icon, children, copyText: ct }: {
   icon: string; children: React.ReactNode; copyText?: string;
 }) {
@@ -2484,9 +2549,6 @@ function OrderCard({
      безличное «вручную», и рядом, через точку, шло имя КЛИЕНТА — строка
      читалась как «выкуп вручную Анфисой» (49ANALQ). */
   const boughtBy = order.purchaserUsername ?? order.completedBy ?? null;
-  /* Машинная строка следа доставки. Читаем её, а не «отправляли ли мы»: до
-     08.09.2026 отправка ничего о себе не сообщала. */
-  const noticeFailed = (order.adminNote ?? "").includes("[УВЕД-НЕ-ДОШЛО");
 
   /* ── Четыре строки и три крупные цели ────────────────────────────────────
      Карточка обслуживает ручной цикл выкупа: скопировал ID → купил в доноре →
@@ -2619,9 +2681,11 @@ function OrderCard({
         <b style={{ color: tabBadge?.color ?? sourceMeta?.color ?? C.accent }}>
           {tabBadge?.label ?? sourceMeta?.label ?? order.orderSource}
         </b>
-        <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>
-          {boughtAt ? fmtTxDate(boughtAt) : fmtAge(timeRef)}
-        </small>
+        {boughtAt ? (
+          <small style={{ color: C.green, fontWeight: 700 }}>✅ выкуплен {fmtTxDate(boughtAt)}</small>
+        ) : (
+          <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>{fmtAge(timeRef)}</small>
+        )}
         {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
         {/* ⚡ виден прямо в ленте: иначе «подняли наверх» проверяется только
             тем, что заказ оказался сверху, — а это же место занимает и просто
@@ -2912,9 +2976,11 @@ function OrderCard({
         <span className="twa-oc-top">
           {sourceMeta && <b style={{ color: sourceMeta.color }}>{sourceMeta.label}</b>}
           {tabBadge && tabBadge.label !== sourceMeta?.label && <b style={{ color: tabBadge.color }}>{tabBadge.label}</b>}
-          <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>
-            {boughtAt ? fmtTxDate(boughtAt) : fmtAge(timeRef)}
-          </small>
+          {boughtAt ? (
+            <small style={{ color: C.green, fontWeight: 700 }}>✅ выкуплен {fmtTxDate(boughtAt)}</small>
+          ) : (
+            <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>{fmtAge(timeRef)}</small>
+          )}
           {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
           {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
           <em className="twa-os-buyer">{shortName}</em>
@@ -2925,7 +2991,7 @@ function OrderCard({
           {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
           {queueAge && <span>🛒 {queueAge} в очереди</span>}
         </span>
-        {order.status !== "REJECTED" && <ReadinessTrack r={readiness} labeled />}
+        {order.status !== "REJECTED" && order.status !== "COMPLETED" && <ReadinessTrack r={readiness} labeled />}
       </div>
 
       <div className="twa-os-body">
@@ -2952,6 +3018,11 @@ function OrderCard({
         </div>
       )}
 
+
+        {/* 0. Выкуплен — первым: когда, кто, сколько, дошло ли до клиента. */}
+        {order.status === "COMPLETED" && (
+          <BuyoutBlock order={order} resendBusy={resendBusy} onResend={() => resendCompletedNotice()} />
+        )}
 
         {/* 1. Ник Roblox — крупно, тап копирует. По нику проверяют аккаунт и
             ищут пасс; на сайте на этом месте стоит ID пасса (там выкупают с
@@ -3197,84 +3268,8 @@ function OrderCard({
       )}
 
         <div style={{ padding: "0 16px" }}>
-        {/* Кто и когда выкупил. Условие «не на вкладке Готово» стояло тут потому,
-            что там покупателя называет заголовок аккордеона — но у одиночной
-            карточки заголовка нет, и строка исчезала вместе с ним. */}
-        {order.status === "COMPLETED" && (currentTab !== "DONE" || solo) && (
-          <DataRow icon="💳" copyText={boughtBy ?? undefined}>
-            <span style={{ color: C.textSecondary }}>
-              Выкуп:{" "}
-              <span style={{ fontWeight: 600, color: boughtBy ? "#e5e5ea" : C.textTertiary }}>
-                {boughtBy ?? "Ручные"}
-              </span>
-              {boughtAt && <span style={{ color: C.textTertiary }}> · {fmtTxDate(boughtAt)}</span>}
-            </span>
-          </DataRow>
-        )}
-        {/* Ответ на «когда придут робуксы» — тот же, что получил клиент: срока нет
-            (с 26.10.2026), робуксы в Pending, дальше решает Roblox. */}
-        {boughtAt && (
-          <DataRow icon="💎">
-            <span style={{ color: C.textSecondary }}>
-              Робуксы в Pending у Roblox — с нашей стороны всё, срок решает Roblox
-            </span>
-          </DataRow>
-        )}
-        {/* Дошло ли до покупателя «заказ выкуплен». Строку пишет сам сервер
-            после отправки; пока её нет — заказ закрыт до появления следа. */}
-        {order.status === "COMPLETED" && noticeFailed && (
-          <DataRow icon="📵">
-            <span style={{ color: C.red, fontWeight: 600 }}>Покупатель НЕ извещён о выкупе</span>
-          </DataRow>
-        )}
-        {order.status === "COMPLETED" && order.reviewStatus && (() => {
-          const granted = order.user.reviewBonusGrantedAt;
-          if (order.reviewStatus === "PENDING") {
-            return (
-              <DataRow icon="📸">
-                <span style={{ color: C.yellow, fontWeight: 600 }}>Ждёт отзыв</span>
-                <span style={{ fontSize: 14, color: C.textTertiary }}> · скрин = +100 R$</span>
-              </DataRow>
-            );
-          }
-          const bal = order.user.balance ?? 0;
-          if (bal > 0 && granted) {
-            const expiry = new Date(new Date(granted).getTime() + 30 * 86_400_000);
-            return (
-              <DataRow icon="✅">
-                <span style={{ color: C.green, fontWeight: 600 }}>+100 R$ начислен</span>
-                <span style={{ fontSize: 14, color: C.textTertiary }}>
-                  {" · "}баланс {bal} R$ до {expiry.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
-                </span>
-              </DataRow>
-            );
-          }
-          return (
-            <DataRow icon="💳">
-              <span style={{ color: C.textTertiary, fontWeight: 600 }}>Бонус использован</span>
-            </DataRow>
-          );
-        })()}
-
-        {/* 📨 Повтор уведомления о выкупе. Стоит у КАЖДОГО закрытого заказа, а не
-            только у провалившегося: «клиент говорит, что ничего не получал» —
-            обычный разговор, и ответ на него должен быть в один тап. */}
-        {order.status === "COMPLETED" && (
-          <button
-            className="twa-press-sm"
-            disabled={resendBusy}
-            onClick={e => { e.stopPropagation(); resendCompletedNotice(); }}
-            style={{
-              width: "100%", marginTop: 8, padding: "10px", borderRadius: 10,
-              border: `1px solid ${noticeFailed ? C.red + "77" : C.border}`,
-              background: "transparent", color: noticeFailed ? C.red : C.textSecondary,
-              fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: resendBusy ? 0.5 : 1,
-            }}
-          >
-            {resendBusy ? "Отправляю…" : noticeFailed ? "📨 Отправить уведомление ещё раз" : "📨 Повторить уведомление о выкупе"}
-          </button>
-        )}
-
+        {/* Кто/когда/Pending/уведомление/отзыв и повтор уведомления — в блоке
+            «✅ Выкуплен» наверху шторки (BuyoutBlock, 27.10.2026). */}
         </div>
       {/* Rejection reason for ALL tab */}
       {(currentTab === "ALL" || currentTab === "REJECTED") && order.status === "REJECTED" && order.rejectionReason && (

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { fmtUnlockDate } from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
-import { PENDING_INFO_URL } from "../../bots/shared/robux-eta";
+import { PENDING_INFO_URL, ROBUX_CONFIRM, confirmHintLine } from "../../bots/shared/robux-eta";
 import {
   BUYER_STEP_COMMANDS,
   buyerStepMessage,
@@ -140,12 +140,14 @@ function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages 
     `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
     `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}`;
+    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
+    confirmHintLine("html");
   const vkMsg1 =
     `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
     `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}`;
+    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
+    confirmHintLine("plain");
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
   const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";
@@ -275,7 +277,10 @@ export async function notifyOrderCompleted(
 
   if (user.tgId) {
     channel = "tg";
-    delivered = await tgPost(user.tgId, m.tgMsg1);
+    // Под первым сообщением — «✅ Робуксы поступили» (зеркало ботов, 27.10.2026).
+    delivered = await tgPost(user.tgId, m.tgMsg1, {
+      reply_markup: { inline_keyboard: [[{ text: ROBUX_CONFIRM.label, callback_data: ROBUX_CONFIRM.command }]] },
+    });
     bonusDelivered = await tgPost(user.tgId, m.tgMsg2, {
       reply_markup: { inline_keyboard: m.buttons.map((b) => [{ text: b.label, callback_data: b.command }]) },
     });
@@ -283,7 +288,12 @@ export async function notifyOrderCompleted(
     // и фолбэк в photo-handler работают без предустановленного состояния.
   } else if (user.vkId) {
     channel = "vk";
-    delivered = await vkPost(user.vkId, m.vkMsg1);
+    delivered = await vkPost(user.vkId, m.vkMsg1, {
+      keyboard: JSON.stringify({ inline: true, buttons: [[{
+        action: { type: "text", label: ROBUX_CONFIRM.label, payload: JSON.stringify({ command: ROBUX_CONFIRM.command }) },
+        color: "positive",
+      }]] }),
+    });
     const vkKb = JSON.stringify({
       inline: true,
       buttons: m.buttons.map((b) => [{

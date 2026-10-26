@@ -12,7 +12,8 @@ import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purch
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, PRICE_TOL, checkGamepassPrice, expectedGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
-import { ORDER_STATUS_EVENT, recordOrderStatusChange } from "@/lib/order-status-event";
+import { recordOrderStatusChange } from "@/lib/order-status-event";
+import { BUYOUT_EVENT_TYPES, buyoutFactsFromEvents, type BuyoutEventRow } from "@/lib/buyout-summary";
 import { recordCompletedNotice } from "@/lib/notice-delivery";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
@@ -533,8 +534,10 @@ export async function GET(req: NextRequest) {
        переходов, поэтому берём его оттуда: работает и на старых заказах, в
        отличие от нового поля в `WbOrder`. Запрос уходит в той же волне, что и
        остальная обвязка страницы, — лишнего похода в Сингапур не добавляет. */
-    const manualCompletedIds: string[] = orders
-      .filter((o) => o.status === "COMPLETED" && !o.purchaserUsername)
+    /* С 27.10.2026 — для ВСЕХ выкупленных: карточка показывает блок «Выкуплен»
+       (кто, сколько списано, ответ на опрос, обращения после выкупа). */
+    const completedIds: string[] = orders
+      .filter((o) => o.status === "COMPLETED")
       .map((o) => o.id);
 
     const [clusterOrders, codeRecords, firstOrderRows, statusEvents] = await Promise.all([
@@ -570,28 +573,28 @@ export async function GET(req: NextRequest) {
             _min: { createdAt: true },
           })
         : [],
-      manualCompletedIds.length > 0
+      completedIds.length > 0
         ? prisma.orderEvent.findMany({
-            where: { orderId: { in: manualCompletedIds }, type: ORDER_STATUS_EVENT },
+            where: { orderId: { in: completedIds }, type: { in: BUYOUT_EVENT_TYPES } },
             orderBy: { createdAt: "desc" },
-            select: { orderId: true, payload: true },
+            select: { orderId: true, type: true, payload: true, createdAt: true },
           })
         : [],
     ]);
 
-    if (manualCompletedIds.length > 0) {
-      // Последний переход в COMPLETED и есть тот, кто закрыл заказ: события
-      // отсортированы по убыванию, поэтому первое встреченное — оно.
-      const completedByOrder = new Map<string, string>();
-      for (const event of statusEvents) {
-        const payload = (event.payload ?? {}) as { to?: string; actor?: string };
-        if (payload.to !== "COMPLETED" || !payload.actor) continue;
-        if (completedByOrder.has(event.orderId)) continue;
-        // `admin:Sergei` → `Sergei`; бот и воркер остаются как есть.
-        completedByOrder.set(event.orderId, payload.actor.replace(/^admin:/, ""));
-      }
+    if (completedIds.length > 0) {
+      const facts = buyoutFactsFromEvents(statusEvents as BuyoutEventRow[]);
       for (const order of orders) {
-        if (completedByOrder.has(order.id)) order.completedBy = completedByOrder.get(order.id);
+        const f = facts.get(order.id);
+        if (!f) continue;
+        // Ручное закрытие не пишет `purchaserUsername` — актор из журнала.
+        if (f.by && !order.purchaserUsername) order.completedBy = f.by;
+        order.buyoutFacts = {
+          gross: f.gross,
+          survey: f.survey,
+          surveyAt: f.surveyAt,
+          supportAfter: f.supportAfter(order.completedAt),
+        };
       }
     }
 

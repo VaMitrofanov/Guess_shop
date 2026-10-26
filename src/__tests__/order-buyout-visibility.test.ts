@@ -30,13 +30,13 @@ describe("Найденная карточка говорит о состояни
     expect(screen).toContain("const tabBadge = solo || currentTab === \"ALL\"");
   });
 
-  it("строка «Выкуп: …» не исчезает вместе с заголовком аккордеона", () => {
-    expect(screen).toContain("order.status === \"COMPLETED\" && (currentTab !== \"DONE\" || solo)");
+  it("блок «✅ Выкуплен» стоит в шторке у любого выкупленного заказа (27.10.2026)", () => {
+    expect(screen).toContain("{order.status === \"COMPLETED\" && (\n          <BuyoutBlock");
   });
 
   it("у закрытого заказа на месте возраста стоит дата выкупа", () => {
     expect(screen).toContain("const boughtAt = order.status === \"COMPLETED\" ? order.completedAt : null;");
-    expect(screen).toContain("{boughtAt ? fmtTxDate(boughtAt) : fmtAge(timeRef)}");
+    expect(screen).toContain("✅ выкуплен {fmtTxDate(boughtAt)}");
   });
 
   it("«вручную» уступает имени того, кто закрыл заказ", () => {

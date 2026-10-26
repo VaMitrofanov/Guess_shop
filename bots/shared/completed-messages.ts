@@ -21,7 +21,7 @@
 
 /* Тексты про Pending — в `robux-eta`. `fmtDateRu` реэкспортируется под старым
    именем для остальных модулей ботов. */
-import { fmtDateRu, PENDING_INFO_URL } from "./robux-eta";
+import { fmtDateRu, PENDING_INFO_URL, ROBUX_CONFIRM, confirmHintLine } from "./robux-eta";
 export { fmtDateRu };
 
 export type CompletedButton = {
@@ -50,6 +50,9 @@ export interface CompletedMessagesInput {
   discountGranted: boolean;
 }
 
+/** Кнопка под первым сообщением (о выкупе) — «✅ Робуксы поступили», 27.10.2026. */
+export const COMPLETED_MSG1_BUTTON = ROBUX_CONFIRM;
+
 export interface CompletedMessages {
   kind: "review_pitch" | "bonus_reminder" | "tier2" | "thanks";
   /** HTML-версии для TG. */
@@ -74,12 +77,14 @@ export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMe
     `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
     `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}`;
+    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
+    confirmHintLine("html");
   const vkMsg1 =
     `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
     `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}`;
+    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
+    confirmHintLine("plain");
 
   const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
   const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";

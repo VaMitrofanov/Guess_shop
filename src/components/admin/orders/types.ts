@@ -1,5 +1,6 @@
 import type { OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 import type { Tone } from "@/lib/order-presentation";
+import type { BuyoutOrderInput } from "@/lib/buyout-summary";
 
 /** Заказ в том виде, в котором его отдаёт `/api/admin/orders`. */
 export interface AdminOrder {
@@ -30,6 +31,8 @@ export interface AdminOrder {
   completedAt?: string | null;
   /** Кто нажал «Выкуплено» (у автовыкупа пусто — там `purchaserUsername`). */
   completedBy?: string | null;
+  /** Факты о выкупе из журнала (списано, опрос, обращения) — 27.10.2026. */
+  buyoutFacts?: BuyoutOrderInput["buyoutFacts"];
   remindersSent?: number | null;
   robloxUsername: string | null;
   probableNick: string | null;
@@ -46,6 +49,7 @@ export interface AdminOrder {
     name: string | null;
     username: string | null;
     balance?: number | null;
+    reviewBonusGrantedAt?: string | null;
   };
 }
 

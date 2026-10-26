@@ -86,7 +86,7 @@ import {
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
-  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText,
+  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText, ROBUX_CONFIRM,
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
 
@@ -1077,6 +1077,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await ctx.reply({
         message: pendingPhotoReplyText("plain"),
         keyboard: Keyboard.builder()
+          .textButton({ label: ROBUX_CONFIRM.label, payload: { command: ROBUX_CONFIRM.command }, color: "positive" })
+          .row()
           .textButton({ label: NO_ROBUX_BUTTON, payload: { command: "rbx_chk" }, color: "secondary" })
           .inline(),
       });
@@ -1111,7 +1113,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     msgPayload.command = surveyCmd === SURVEY_CMD.pending ? "rbx_pend" : "rbx_low";
   }
   if (msgPayload?.command === "rbx_pend") {
-    await ctx.reply(robuxPendingSeenText("plain"));
+    await ctx.reply({
+      message: robuxPendingSeenText("plain"),
+      keyboard: Keyboard.builder()
+        .textButton({ label: ROBUX_CONFIRM.label, payload: { command: ROBUX_CONFIRM.command }, color: "positive" })
+        .inline(),
+    });
     return;
   }
   if (msgPayload?.command === "rbx_low") {
@@ -5268,6 +5275,8 @@ async function replyVkRobuxEta(ctx: MessageContext, vkUserId: number, opts: { fo
   const short = !opts.forceFull && isRepeatEtaQuestion(`vk:${vkUserId}`) ? buildRobuxEtaShort(orders, "plain") : null;
   // Самопроверка доступна сразу (26.10.2026) — срока больше нет.
   const kb = Keyboard.builder()
+    .textButton({ label: ROBUX_CONFIRM.label, payload: { command: ROBUX_CONFIRM.command }, color: "positive" })
+    .row()
     .urlButton({ label: "🔍 Открыть Transactions", url: ROBLOX_TRANSACTIONS_URL })
     .row()
     .textButton({ label: NO_ROBUX_BUTTON, payload: { command: "rbx_chk" }, color: "secondary" });

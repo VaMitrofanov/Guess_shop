@@ -18,6 +18,8 @@ import {
   robuxSurveyText,
   surveyButtons,
   SURVEY_CMD,
+  ROBUX_CONFIRM,
+  robuxConfirmText,
   PHOTO_KIND_CMD,
   PHOTO_KIND_BUTTONS,
   photoKindQuestionText,
@@ -229,5 +231,21 @@ describe("«что на скриншоте?» (26.10.2026, YS3NU3X)", () => {
   it("кнопки влезают в лимит VK и не пересекаются с другими командами", () => {
     for (const l of Object.values(PHOTO_KIND_BUTTONS)) expect(l.length).toBeLessThanOrEqual(40);
     for (const c of Object.values(PHOTO_KIND_CMD)) expect(Object.values(SURVEY_CMD)).not.toContain(c);
+  });
+});
+
+describe("«✅ Робуксы поступили» (27.10.2026)", () => {
+  it("кнопка — та же команда, что «уже на балансе» в опросе, и влезает в VK", () => {
+    expect(ROBUX_CONFIRM.command).toBe(SURVEY_CMD.got);
+    expect(ROBUX_CONFIRM.label.length).toBeLessThanOrEqual(40);
+  });
+
+  it("просьба нажать есть в ответе «где робуксы?», в «в Pending — всё ок» и в рассылке; срока нет", () => {
+    const eta = buildRobuxEtaReply([{ amount: 800, completedAt: BOUGHT }], "plain", new Date(BOUGHT.getTime() + D))!.text;
+    expect(eta).toContain(ROBUX_CONFIRM.label);
+    expect(robuxPendingSeenText("plain")).toContain(ROBUX_CONFIRM.label);
+    const t = robuxConfirmText("html", 800);
+    expect(t).toContain("800 R$");
+    expect(t).not.toMatch(NO_DEADLINE);
   });
 });
