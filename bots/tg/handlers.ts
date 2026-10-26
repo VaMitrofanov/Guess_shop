@@ -83,6 +83,7 @@ import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, 
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, COMPLETED_MSG1_BUTTON } from "../shared/completed-messages";
+import { checkPendingScreenshot, pendingOkReplyText, type PendingCheck } from "../shared/pending-ocr";
 import {
   buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
   loadRobuxEtaOrders, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
@@ -418,8 +419,24 @@ async function deliverSupportIntakeTg(
   const hint = intake?.wbCode
     ? { wbCode: intake.wbCode, denomination: intake.denomination }
     : await supportOrderHint(ctx);
-  const said = clipProblemText(text) || (photoFileId ? "(прислал скриншот без текста)" : "(без описания)");
+  let said = clipProblemText(text) || (photoFileId ? "(прислал скриншот без текста)" : "(без описания)");
   const display = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name ?? `tg:${tgId}`);
+
+  // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами
+  // (локальный Tesseract, 27.10.2026). Менеджер получает его в любом случае.
+  let ocr: PendingCheck | null = null;
+  if (photoFileId && intake?.contextKey === ROBUX_LOW_PENDING_CONTEXT) {
+    try {
+      const order = hint.wbCode
+        ? await (db as any).wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
+        : null;
+      const link = await bot.telegram.getFileLink(photoFileId);
+      ocr = await checkPendingScreenshot(String(link), order?.amount ?? hint.denomination, order?.robloxUsername);
+      said = `${said}\n\n${ocr.note}`;
+    } catch (err) {
+      console.warn("[TG] автопроверка скрина Pending:", (err as Error)?.message ?? err);
+    }
+  }
 
   await notifySupportShown({
     platform: "TG",
@@ -436,6 +453,7 @@ async function deliverSupportIntakeTg(
       contextKey: intake?.contextKey ?? "general",
       robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
       photo: !!photoFileId,
+      ...(ocr ? { ocr: ocr.verdict, ocrPending: ocr.read.pending } : {}),
     },
   });
   // Скриншот — отдельным сообщением тем же админам: половина обращений «не
@@ -443,9 +461,17 @@ async function deliverSupportIntakeTg(
   if (photoFileId) {
     for (const adminId of ADMIN_IDS) {
       try {
-        await bot.telegram.sendPhoto(adminId, photoFileId, { caption: `🖼 Скриншот к обращению ${display}` });
+        await bot.telegram.sendPhoto(adminId, photoFileId, {
+          caption: `🖼 Скриншот к обращению ${display}${ocr ? `\n${ocr.note}` : ""}`,
+        });
       } catch {}
     }
+  }
+  if (ocr?.verdict === "ok" && ocr.read.pending !== null) {
+    await ctx.reply(pendingOkReplyText(ocr.read.pending), {
+      ...Markup.inlineKeyboard([[Markup.button.callback(ROBUX_CONFIRM.label, ROBUX_CONFIRM.command)]]),
+    });
+    return;
   }
   await ctx.reply(intakeAckText("TG"), {
     parse_mode: "HTML",

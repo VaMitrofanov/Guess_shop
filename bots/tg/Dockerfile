@@ -47,8 +47,13 @@ WORKDIR /app
 # зовёт `curl … || wget … || exit 1`; в `bookworm-slim` нет ни того, ни другого,
 # поэтому включённая проба падала бы всегда и держала контейнер «нездоровым»
 # честнее, чем он есть. ~1 МБ на образ (07.09.2026).
+# tesseract-ocr — автопроверка скриншота Transactions после «в Pending меньше
+# суммы» (bots/shared/pending-ocr.ts, 27.10.2026): число в строке Pending Robux
+# читаем локально, без внешних сервисов. eng + rus — Roblox бывает в обеих
+# локализациях. ~25 МБ на образ.
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates curl \
+       tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/*
 
 # GetState/Cancel use the same T-Bank endpoint as Web Init. Its certificate

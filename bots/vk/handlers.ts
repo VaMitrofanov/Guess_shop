@@ -90,6 +90,8 @@ import {
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
 
+import { checkPendingScreenshot, pendingOkReplyText, type PendingCheck } from "../shared/pending-ocr";
+
 /** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
 const vkPendingPhotoKind = new Map<number, { url: string; at: number }>();
 import { requoteForPass } from "../shared/direct-requote";
@@ -278,7 +280,22 @@ async function deliverSupportIntake(
   const intake = await takeIntake(intakeDb, intakeSubject(vkUserId));
   const firstName = await vkGetName(vkUserId);
   const hint = intake?.wbCode ? { wbCode: intake.wbCode, denom: intake.denomination } : await supportOrderHint(vkUserId);
-  const said = clipProblemText(text) || (photoUrl ? "(прислал скриншот без текста)" : "(без описания)");
+  let said = clipProblemText(text) || (photoUrl ? "(прислал скриншот без текста)" : "(без описания)");
+
+  // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами
+  // (локальный Tesseract, 27.10.2026, зеркало TG). Менеджер получает его всегда.
+  let ocr: PendingCheck | null = null;
+  if (photoUrl && intake?.contextKey === ROBUX_LOW_PENDING_CONTEXT) {
+    try {
+      const order = hint.wbCode
+        ? await (db as any).wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
+        : null;
+      ocr = await checkPendingScreenshot(photoUrl, order?.amount ?? hint.denom, order?.robloxUsername);
+      said = `${said}\n\n${ocr.note}`;
+    } catch (err) {
+      console.warn("[VK] автопроверка скрина Pending:", (err as Error)?.message ?? err);
+    }
+  }
 
   await notifySupportShown({
     platform: "VK",
@@ -296,8 +313,19 @@ async function deliverSupportIntake(
       contextKey: intake?.contextKey ?? "general",
       robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
       photo: !!photoUrl,
+      ...(ocr ? { ocr: ocr.verdict, ocrPending: ocr.read.pending } : {}),
     },
   });
+  if (ocr?.verdict === "ok" && ocr.read.pending !== null) {
+    // Робуксы на скрине на месте — бот не замолкает в «живую поддержку».
+    await ctx.reply({
+      message: pendingOkReplyText(ocr.read.pending),
+      keyboard: Keyboard.builder()
+        .textButton({ label: ROBUX_CONFIRM.label, payload: { command: ROBUX_CONFIRM.command }, color: "positive" })
+        .inline(),
+    });
+    return;
+  }
   await pauseSupport(vkUserId, "клиент описал проблему");
   await ctx.reply(intakeAckText("VK"));
 }
