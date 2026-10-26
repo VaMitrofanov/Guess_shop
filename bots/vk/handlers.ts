@@ -87,7 +87,11 @@ import {
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
   activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText,
+  PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
+
+/** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
+const vkPendingPhotoKind = new Map<number, { url: string; at: number }>();
 import { requoteForPass } from "../shared/direct-requote";
 import { priceMismatchText } from "../shared/direct-gamepass-copy";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
@@ -1065,6 +1069,30 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     });
     return;
   }
+  // «Что на скриншоте?» (26.10.2026, зеркало TG).
+  if (msgPayload?.command === PHOTO_KIND_CMD.review || msgPayload?.command === PHOTO_KIND_CMD.pending) {
+    const held = vkPendingPhotoKind.get(vkUserId);
+    vkPendingPhotoKind.delete(vkUserId);
+    if (msgPayload.command === PHOTO_KIND_CMD.pending) {
+      await ctx.reply({
+        message: pendingPhotoReplyText("plain"),
+        keyboard: Keyboard.builder()
+          .textButton({ label: NO_ROBUX_BUTTON, payload: { command: "rbx_chk" }, color: "secondary" })
+          .inline(),
+      });
+      return;
+    }
+    if (!held || Date.now() - held.at > PHOTO_KIND_TTL_MS) {
+      const hu = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, balance: true, reviewBonusGrantedAt: true } }).catch(() => null);
+      const he = hu ? await resolveReviewEligibility(hu) : null;
+      if (he?.kind === "eligible") setState(vkUserId, { type: "AWAITING_REVIEW", orderId: he.orderId });
+      await ctx.reply("📸 Пришли скриншот отзыва ещё раз — фотографией, не файлом.");
+      return;
+    }
+    await handleReviewScreenshot(ctx, vkUserId, undefined, held.url);
+    return;
+  }
+
   // Опрос «пришли ли робуксы?» (рассылка 26.10.2026): считаем ответ, дальше —
   // те же ветки, что у самопроверки (зеркало TG).
   const surveyCmd = msgPayload?.command;
@@ -1290,9 +1318,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const intakePhoto = messageHasPhoto(ctx);
     // Ввод флоу выигрывает у описания: «помогите, вот ссылка» должно доехать до
     // квеста, а скриншот отзыва/оплаты — до своей ветки, а не в поддержку.
+    // Скриншот, который бот сам попросил («в Pending меньше суммы»), — всегда
+    // менеджеру, даже если человек может получить бонус за отзыв (EP8VZDU, 26.10).
     const intakeIsFlow =
       looksLikeFlowInput(text, { passId: extractPassId(text) !== null, expectsNick: intakeAwaitsNick }) ||
-      (intakePhoto && await hasPendingProofPhoto(vkUserId));
+      (intakePhoto && !intakeNeedsScreenshot(intake.contextKey) && await hasPendingProofPhoto(vkUserId));
     if (!intakeIsFlow && intakeNeedsScreenshot(intake.contextKey) && !intakePhoto) {
       // «В Pending меньше номинала» — только со скриншотом (владелец, 24.10.2026).
       await ctx.reply(robuxScreenshotRepeatText());
@@ -2051,6 +2081,23 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   if (messageHasPhoto(ctx)) {
     console.log(`[VK] photo routing: vkUserId=${vkUserId} state=${state?.type ?? "none"}`);
+    // Отзыв ли это? Сразу — только после кнопки «📸 Прислать отзыв»
+    // (AWAITING_REVIEW). Иначе спрашиваем: скрин Pending уходил как отзыв (26.10).
+    if (state?.type !== "AWAITING_REVIEW" && await hasPendingProofPhoto(vkUserId)) {
+      const url = await extractPhotoUrl(ctx);
+      if (url) {
+        vkPendingPhotoKind.set(vkUserId, { url, at: Date.now() });
+        await ctx.reply({
+          message: photoKindQuestionText("plain"),
+          keyboard: Keyboard.builder()
+            .textButton({ label: PHOTO_KIND_BUTTONS.review, payload: { command: PHOTO_KIND_CMD.review }, color: "positive" })
+            .row()
+            .textButton({ label: PHOTO_KIND_BUTTONS.pending, payload: { command: PHOTO_KIND_CMD.pending }, color: "secondary" })
+            .inline(),
+        });
+        return;
+      }
+    }
     await handleReviewScreenshot(ctx, vkUserId, state?.type === "AWAITING_REVIEW" ? state.orderId : undefined);
     return;
   }
@@ -4914,11 +4961,13 @@ async function handleDirectPaymentScreenshot(
 async function handleReviewScreenshot(
   ctx: MessageContext,
   vkUserId: number,
-  knownOrderId?: string
+  knownOrderId?: string,
+  /** URL уже извлечён (ответ «🎁 Отзыв на WB» на вопрос «что на скриншоте?»). */
+  heldUrl?: string,
 ): Promise<void> {
   console.log(`[VK] handleReviewScreenshot: vkUserId=${vkUserId} knownOrderId=${knownOrderId ?? "none"}`);
 
-  const url = await extractPhotoUrl(ctx);
+  const url = heldUrl ?? await extractPhotoUrl(ctx);
   console.log(`[VK] handleReviewScreenshot: url=${url ? "found" : "NOT_FOUND"}`);
 
   if (!url) {

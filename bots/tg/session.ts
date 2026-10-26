@@ -33,6 +33,13 @@ export const pendingLink = new Map<number, LinkState>();
  * Key: Telegram numeric user ID → WbOrder.id they should review.
  */
 export const pendingReview = new Map<number, string>();
+/** Человек САМ нажал «📸 Прислать отзыв» (или «пришли новый» после отказа):
+ *  tgId → момент нажатия. Только тогда фото сразу идёт как отзыв; иначе бот
+ *  спрашивает «что на скриншоте?» (26.10.2026, YS3NU3X). `pendingReview`
+ *  ставится и автоматически после выкупа, поэтому сигналом не служит. */
+export const explicitReviewAt = new Map<number, number>();
+/** Фото, ждущее ответа «что на нём»: tgId → file_id + заказ + момент. */
+export const pendingPhotoKind = new Map<number, { fileId: string; orderId: string; at: number }>();
 
 // ── Direct order session states ───────────────────────────────────────────────
 

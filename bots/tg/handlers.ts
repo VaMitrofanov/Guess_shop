@@ -30,7 +30,7 @@ import {
   type SupportIntakeDb,
 } from "../shared/support-intake";
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, heldGameKeys, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
+import { pendingLink, pendingReview, explicitReviewAt, pendingPhotoKind, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, heldGameKeys, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -90,6 +90,7 @@ import {
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
   activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText,
+  PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, EXPLICIT_REVIEW_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
 import { recordCompletedNotice } from "../shared/notice-delivery";
 import { requoteForPass } from "../shared/direct-requote";
@@ -4918,9 +4919,13 @@ export function registerPhoto(bot: Telegraf): void {
     //     обращений — «не вижу геймпасс», и это картинка. Ждёт ли флоу фото
     //     явно (отзыв/оплата) — выше и ниже; здесь только открытое ожидание
     //     поддержки, и оно уступает явному ожиданию отзыва.
-    if (!pendingReview.has(ctx.from.id)) {
+    //     Явное ожидание = человек сам нажал «📸 Прислать отзыв» (`explicitReviewAt`):
+    //     `pendingReview` ставится и автоматически после выкупа, и из-за него
+    //     скрин после «в Pending меньше суммы» уходил в отзывы (26.10.2026).
+    const reviewExplicit = Date.now() - (explicitReviewAt.get(ctx.from.id) ?? 0) <= EXPLICIT_REVIEW_TTL_MS;
+    {
       const intakePhoto = await readIntake(intakeDb, { tgId });
-      if (intakePhoto) {
+      if (intakePhoto && (!reviewExplicit || intakeNeedsScreenshot(intakePhoto.contextKey))) {
         const fileId = ctx.message.photo.at(-1)!.file_id;
         await deliverSupportIntakeTg(bot, ctx, ctx.message.caption ?? "", fileId);
         return;
@@ -4955,10 +4960,37 @@ export function registerPhoto(bot: Telegraf): void {
       orderId = elig.orderId;
     }
 
-    pendingReview.delete(ctx.from.id);
-
     // Telegram file_id of the largest photo size
     const fileId = ctx.message.photo.at(-1)!.file_id;
+
+    // Отзыв ли это? Сразу — только если человек сам нажал «📸 Прислать отзыв».
+    // Иначе спрашиваем: скрин Pending/Transactions уходил админам как отзыв и
+    // приносил +100 R$ (YS3NU3X, 26.10.2026).
+    if (!reviewExplicit) {
+      pendingPhotoKind.set(ctx.from.id, { fileId, orderId, at: Date.now() });
+      await ctx.reply(photoKindQuestionText("html"), {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(PHOTO_KIND_BUTTONS.review, PHOTO_KIND_CMD.review)],
+          [Markup.button.callback(PHOTO_KIND_BUTTONS.pending, PHOTO_KIND_CMD.pending)],
+        ]),
+      });
+      return;
+    }
+    await submitReviewPhotoTg(bot, ctx, user, orderId, fileId);
+  });
+
+  bot.on("document", async (ctx) => {
+    await ctx.reply(
+      "📸 Пожалуйста, отправь скриншот в виде фотографии (сжатым изображением), а не файлом (документом)."
+    );
+  });
+}
+
+/** Фото-отзыв → карточка админам (вынесено 26.10.2026 для ответа «🎁 Отзыв на WB»). */
+async function submitReviewPhotoTg(bot: Telegraf, ctx: any, user: any, orderId: string, fileId: string): Promise<void> {
+    pendingReview.delete(ctx.from.id);
+    explicitReviewAt.delete(ctx.from.id);
 
     await ctx.reply(
       "✅ Скриншот получен! Ожидай решения администратора — обычно это занимает до 30 минут."
@@ -4986,13 +5018,6 @@ export function registerPhoto(bot: Telegraf): void {
         } catch {}
       }
     }
-  });
-
-  bot.on("document", async (ctx) => {
-    await ctx.reply(
-      "📸 Пожалуйста, отправь скриншот в виде фотографии (сжатым изображением), а не файлом (документом)."
-    );
-  });
 }
 
 export function registerAdmin(bot: Telegraf): void {
@@ -5855,6 +5880,29 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       return;
     }
+    // «Что на скриншоте?» (26.10.2026): отзыв → карточка админам, Pending → подсказка.
+    if (data === PHOTO_KIND_CMD.review || data === PHOTO_KIND_CMD.pending) {
+      const held = pendingPhotoKind.get(ctx.from.id);
+      pendingPhotoKind.delete(ctx.from.id);
+      await ctx.answerCbQuery().catch(() => {});
+      if (data === PHOTO_KIND_CMD.pending) {
+        await ctx.reply(pendingPhotoReplyText("html"), {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback(NO_ROBUX_BUTTON, "rbx_chk")]]),
+        });
+        return;
+      }
+      if (!held || Date.now() - held.at > PHOTO_KIND_TTL_MS) {
+        await ctx.reply("📸 Пришли скриншот отзыва ещё раз — фотографией, не файлом.");
+        explicitReviewAt.set(ctx.from.id, Date.now());
+        return;
+      }
+      const photoUser = await (db as any).user.findUnique({ where: { tgId } });
+      if (!photoUser) return;
+      await submitReviewPhotoTg(bot as any, ctx, photoUser, held.orderId, held.fileId);
+      return;
+    }
+
     // Опрос «пришли ли робуксы?» (рассылка 26.10.2026): считаем ответ, дальше —
     // те же ветки, что у самопроверки.
     if (data === SURVEY_CMD.got || data === SURVEY_CMD.pending || data === SURVEY_CMD.none) {
@@ -7614,6 +7662,7 @@ export function registerCallbacks(bot: Telegraf): void {
         const elig = await resolveReviewEligibility(tgUser);
         if (elig.kind === "eligible") {
           pendingReview.set(ctx.from.id, elig.orderId);
+          explicitReviewAt.set(ctx.from.id, Date.now());
         } else if (elig.kind === "already_granted" || elig.kind === "active_order") {
           // Ветвление вместо обещания бонуса, который не начислится
           await ctx.reply(
@@ -7892,6 +7941,7 @@ async function notifyReviewRejected(
       });
       // Restore review state so the next photo from this user is processed
       pendingReview.set(parseInt(user.tgId), orderId);
+      explicitReviewAt.set(parseInt(user.tgId), Date.now());
     } catch { }
   } else if (user.vkId) {
     await vkSend(user.vkId, vkMsg + "\n\nЕсли нужна помощь — https://t.me/RobloxBank_PA");

@@ -393,3 +393,37 @@ export function robuxSurveyText(fmt: RobuxEtaFormat, amount: number): string {
 export function robuxSurveyGotText(): string {
   return "🙌 Отлично, робуксы дошли! Спасибо, что ответил — это помогает нам следить, как Roblox сейчас переводит робуксы.";
 }
+
+// ── «Что на скриншоте?» (26.10.2026) ────────────────────────────────────────
+/*
+ * До 26.10 любое фото от человека с невыплаченным бонусом за отзыв считалось
+ * отзывом: после опроса «проверь Pending» люди присылали скрин Transactions,
+ * он уходил админам карточкой отзыва, и за него начислялись +100 R$ (YS3NU3X).
+ * Теперь, если человек сам не нажимал «📸 Прислать отзыв», бот спрашивает.
+ */
+export const PHOTO_KIND_CMD = { review: "ph_review", pending: "ph_pend" } as const;
+
+export const PHOTO_KIND_BUTTONS = { review: "🎁 Отзыв на WB", pending: "💎 Pending / Transactions" } as const;
+
+export function photoKindQuestionText(fmt: RobuxEtaFormat): string {
+  return (
+    `📸 ${b(fmt, "Что на скриншоте?")}\n\n` +
+    `• ${b(fmt, "Отзыв на Wildberries")} — отправлю менеджеру, после проверки начислим бонус.\n` +
+    `• ${b(fmt, "Страница Transactions / Pending")} — подскажу, всё ли в порядке с робуксами.`
+  );
+}
+
+/** Ответ на «это скрин Pending / Transactions». */
+export function pendingPhotoReplyText(fmt: RobuxEtaFormat): string {
+  return (
+    `👍 Спасибо! Посмотри на строку ${b(fmt, "Pending Robux")}:\n\n` +
+    `✅ там сумма заказа или больше (или робуксы уже на балансе) — ${b(fmt, "всё в порядке")}. ` +
+    `С нашей стороны всё сделано, на баланс робуксы переведёт сам Roblox.\n\n` +
+    `❌ там 0 или меньше суммы, и на балансе пусто — нажми «${NO_ROBUX_BUTTON}», проверим вместе.`
+  );
+}
+
+/** Фото, ждущее ответа «что на нём» — живёт в памяти бота не дольше часа. */
+export const PHOTO_KIND_TTL_MS = 60 * 60_000;
+/** Сколько после нажатия «📸 Прислать отзыв» фото сразу считается отзывом. */
+export const EXPLICIT_REVIEW_TTL_MS = 6 * 60 * 60_000;

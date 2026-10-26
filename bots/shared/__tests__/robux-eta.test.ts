@@ -18,6 +18,10 @@ import {
   robuxSurveyText,
   surveyButtons,
   SURVEY_CMD,
+  PHOTO_KIND_CMD,
+  PHOTO_KIND_BUTTONS,
+  photoKindQuestionText,
+  pendingPhotoReplyText,
   type RobuxEtaDb,
 } from "../robux-eta";
 
@@ -209,5 +213,21 @@ describe("опрос «пришли ли робуксы?» (26.10.2026)", () => 
     for (const label of Object.values(surveyButtons(10000))) expect(label.length).toBeLessThanOrEqual(40);
     expect(Object.values(SURVEY_CMD)).not.toContain("rbx_pend");
     expect(Object.values(SURVEY_CMD)).not.toContain("rbx_low");
+  });
+});
+
+describe("«что на скриншоте?» (26.10.2026, YS3NU3X)", () => {
+  it("вопрос называет оба варианта, ответ про Pending — без срока и с самопроверкой", () => {
+    const q = photoKindQuestionText("plain");
+    expect(q).toContain("Отзыв на Wildberries");
+    expect(q).toContain("Transactions / Pending");
+    const a = pendingPhotoReplyText("html");
+    expect(a).not.toMatch(NO_DEADLINE);
+    expect(a).toContain(NO_ROBUX_BUTTON);
+  });
+
+  it("кнопки влезают в лимит VK и не пересекаются с другими командами", () => {
+    for (const l of Object.values(PHOTO_KIND_BUTTONS)) expect(l.length).toBeLessThanOrEqual(40);
+    for (const c of Object.values(PHOTO_KIND_CMD)) expect(Object.values(SURVEY_CMD)).not.toContain(c);
   });
 });
