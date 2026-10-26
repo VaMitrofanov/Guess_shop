@@ -251,10 +251,18 @@ export function robuxPendingWhereText(fmt: RobuxEtaFormat, c: SelfCheckContext =
 
 /** Контекст обращения: «в Pending меньше номинала» — только со скриншотом. */
 export const ROBUX_LOW_PENDING_CONTEXT = "robux_low_pending";
+/** Повтор после «это не страница Transactions» (27.10.2026): второй скрин —
+ *  уже менеджеру, без новых просьб, чтобы человек не застрял в цикле. */
+export const ROBUX_LOW_PENDING_RETRY_CONTEXT = "robux_low_pending_retry";
+
+/** Скрин нужно прочитать автопроверкой (оба шага «меньше номинала»). */
+export function isPendingScreenshotContext(contextKey: string | null | undefined): boolean {
+  return contextKey === ROBUX_LOW_PENDING_CONTEXT || contextKey === ROBUX_LOW_PENDING_RETRY_CONTEXT;
+}
 
 /** Обращение этого контекста принимается только со скриншотом. */
 export function intakeNeedsScreenshot(contextKey: string | null | undefined): boolean {
-  return contextKey === ROBUX_LOW_PENDING_CONTEXT;
+  return isPendingScreenshotContext(contextKey);
 }
 
 /** Просьба о скриншоте после «меньше номинала». */

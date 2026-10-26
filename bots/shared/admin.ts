@@ -91,6 +91,7 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   general:        "Общий вопрос",
   robux_overdue:  "Робуксов нет — самопроверка Pending",
   robux_low_pending: "Робуксов нет: в Pending меньше номинала (самопроверка, скрин Transactions приложен)",
+  robux_low_pending_retry: "Робуксов нет: второй скрин после «это не Transactions» (самопроверка)",
   // Item 7 Phase E — nick-search dead-ends
   nick_not_found: "Ник Roblox не найден",
   place_closed:   "Закрытый плейс / нет публичных геймпассов",

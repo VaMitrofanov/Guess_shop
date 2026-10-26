@@ -83,7 +83,7 @@ import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, 
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, COMPLETED_MSG1_BUTTON } from "../shared/completed-messages";
-import { checkPendingScreenshot, pendingOkReplyText, type PendingCheck } from "../shared/pending-ocr";
+import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
 import {
   buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
   loadRobuxEtaOrders, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
@@ -91,6 +91,7 @@ import {
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
   activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText, ROBUX_CONFIRM,
+  isPendingScreenshotContext, ROBUX_LOW_PENDING_RETRY_CONTEXT,
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, EXPLICIT_REVIEW_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
 import { recordCompletedNotice } from "../shared/notice-delivery";
@@ -425,7 +426,7 @@ async function deliverSupportIntakeTg(
   // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами
   // (локальный Tesseract, 27.10.2026). Менеджер получает его в любом случае.
   let ocr: PendingCheck | null = null;
-  if (photoFileId && intake?.contextKey === ROBUX_LOW_PENDING_CONTEXT) {
+  if (photoFileId && isPendingScreenshotContext(intake?.contextKey)) {
     try {
       const order = hint.wbCode
         ? await (db as any).wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
@@ -433,6 +434,15 @@ async function deliverSupportIntakeTg(
       const link = await bot.telegram.getFileLink(photoFileId);
       ocr = await checkPendingScreenshot(String(link), order?.amount ?? hint.denomination, order?.robloxUsername);
       said = `${said}\n\n${ocr.note}`;
+      // Не та страница — один раз просим Transactions, менеджера пока не зовём.
+      if (isWrongPage(ocr) && intake?.contextKey === ROBUX_LOW_PENDING_CONTEXT) {
+        await openIntake(intakeDb, { tgId }, {
+          platform: "TG", contextKey: ROBUX_LOW_PENDING_RETRY_CONTEXT,
+          wbCode: hint.wbCode ?? undefined, denomination: hint.denomination ?? undefined,
+        });
+        await ctx.reply(wrongPageReplyText("html"), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+        return;
+      }
     } catch (err) {
       console.warn("[TG] автопроверка скрина Pending:", (err as Error)?.message ?? err);
     }

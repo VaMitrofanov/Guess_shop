@@ -161,11 +161,20 @@ function runTesseract(image: Buffer, psm: number, lang: string): Promise<string 
   });
 }
 
-/** Скачать картинку (TG file link / VK CDN) с потолком размера. */
-export async function fetchImage(url: string): Promise<Buffer | null> {
+/**
+ * Скачать картинку (TG file link / VK CDN) с потолком размера. CDN VK на частые
+ * запросы отвечает 429 HTML-страницей — её нельзя принять за картинку
+ * (27.10.2026): проверяем тип и один раз повторяем через 2 с.
+ */
+export async function fetchImage(url: string, attempt = 1): Promise<Buffer | null> {
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!r.ok) return null;
+    const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    const type = r.headers.get("content-type") ?? "";
+    if ((r.status === 429 || r.status >= 500) && attempt < 2) {
+      await new Promise((res) => setTimeout(res, 2_000));
+      return fetchImage(url, attempt + 1);
+    }
+    if (!r.ok || !type.startsWith("image/")) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     return buf.length > 0 && buf.length <= MAX_IMAGE_BYTES ? buf : null;
   } catch {
@@ -197,4 +206,27 @@ export async function checkPendingScreenshot(url: string, amount: number | null 
   }
   const verdict = pendingVerdict(best, amount);
   return { verdict, read: best, note: pendingCheckNote(best, verdict, amount) };
+}
+
+/**
+ * На скрине нет строки Pending вообще — это не страница Transactions (часто
+ * присылают магазин робуксов или профиль). Один раз просим правильный скрин.
+ */
+export function isWrongPage(check: PendingCheck): boolean {
+  return check.verdict === "unreadable" && !check.read.labelFound;
+}
+
+export function wrongPageReplyText(fmt: "html" | "plain"): string {
+  const b = (s: string) => (fmt === "html" ? `<b>${s}</b>` : s);
+  const link = fmt === "html"
+    ? `<a href="https://www.roblox.com/transactions">roblox.com/transactions</a>`
+    : "https://www.roblox.com/transactions";
+  return (
+    `🤖 На скриншоте не видно строки ${b("Pending Robux")} — похоже, это другая страница.\n\n` +
+    `Нужна именно страница транзакций:\n` +
+    `1. Открой ${link} в браузере (в приложении Roblox её нет).\n` +
+    `2. Войди в аккаунт, на который делали заказ.\n` +
+    `3. Тип — ${b("Summary")}, в таблице строка ${b("Pending Robux")} с числом.\n\n` +
+    `📸 Пришли скриншот этой страницы сюда — я сразу проверю.`
+  );
 }

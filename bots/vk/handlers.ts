@@ -87,10 +87,11 @@ import {
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
   activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText, ROBUX_CONFIRM,
+  isPendingScreenshotContext, ROBUX_LOW_PENDING_RETRY_CONTEXT,
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
 
-import { checkPendingScreenshot, pendingOkReplyText, type PendingCheck } from "../shared/pending-ocr";
+import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
 
 /** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
 const vkPendingPhotoKind = new Map<number, { url: string; at: number }>();
@@ -285,13 +286,22 @@ async function deliverSupportIntake(
   // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами
   // (локальный Tesseract, 27.10.2026, зеркало TG). Менеджер получает его всегда.
   let ocr: PendingCheck | null = null;
-  if (photoUrl && intake?.contextKey === ROBUX_LOW_PENDING_CONTEXT) {
+  if (photoUrl && isPendingScreenshotContext(intake?.contextKey)) {
     try {
       const order = hint.wbCode
         ? await (db as any).wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
         : null;
       ocr = await checkPendingScreenshot(photoUrl, order?.amount ?? hint.denom, order?.robloxUsername);
       said = `${said}\n\n${ocr.note}`;
+      // Не та страница — один раз просим Transactions, менеджера пока не зовём.
+      if (isWrongPage(ocr) && intake?.contextKey === ROBUX_LOW_PENDING_CONTEXT) {
+        await openIntake(intakeDb, intakeSubject(vkUserId), {
+          platform: "VK", contextKey: ROBUX_LOW_PENDING_RETRY_CONTEXT,
+          wbCode: hint.wbCode ?? undefined, denomination: hint.denom ?? undefined,
+        });
+        await ctx.reply(wrongPageReplyText("plain"));
+        return;
+      }
     } catch (err) {
       console.warn("[VK] автопроверка скрина Pending:", (err as Error)?.message ?? err);
     }

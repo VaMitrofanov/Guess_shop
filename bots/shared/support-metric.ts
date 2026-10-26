@@ -34,7 +34,7 @@ export type SupportMetricClient = {
 };
 
 /** Контексты обращений, которые сами по себе про робуксы. */
-const ROBUX_CONTEXTS = new Set(["robux_overdue", "robux_low_pending"]);
+const ROBUX_CONTEXTS = new Set(["robux_overdue", "robux_low_pending", "robux_low_pending_retry"]);
 
 export function isRobuxSupportContext(contextKey: string | null | undefined): boolean {
   return ROBUX_CONTEXTS.has(contextKey ?? "");

@@ -1,4 +1,5 @@
-import { numbersIn, readPendingFromText, pendingVerdict, pendingCheckNote, pendingOkReplyText } from "../pending-ocr";
+import { numbersIn, readPendingFromText, pendingVerdict, pendingCheckNote, pendingOkReplyText, isWrongPage, wrongPageReplyText } from "../pending-ocr";
+import { intakeNeedsScreenshot, isPendingScreenshotContext, ROBUX_LOW_PENDING_RETRY_CONTEXT } from "../robux-eta";
 
 describe("числа в строке", () => {
   it.each([
@@ -65,5 +66,29 @@ describe("тексты", () => {
     expect(pendingCheckNote({ labelFound: true, pending: 1000, nickSeen: true }, "ok", 1000)).toContain("✅ в Pending 1000");
     expect(pendingCheckNote({ labelFound: true, pending: 0, nickSeen: false }, "low", 500)).toContain("НЕ найден");
     expect(pendingOkReplyText(1000)).toContain("Pending Robux — 1000");
+  });
+});
+
+describe("не та страница (EP8VZDU прислал магазин робуксов, 27.10.2026)", () => {
+  it("нет строки Pending → просим Transactions; есть строка без числа → это не «не та страница»", () => {
+    const shop = readPendingFromText("Robux packages\n22 500 22,99 тыс. ₽\n10 000 11,39 тыс. ₽", null);
+    const check = { verdict: pendingVerdict(shop, 500), read: shop, note: "" };
+    expect(isWrongPage(check)).toBe(true);
+    const blurred = { labelFound: true, pending: null, nickSeen: null };
+    expect(isWrongPage({ verdict: "unreadable", read: blurred, note: "" })).toBe(false);
+    expect(wrongPageReplyText("plain")).toContain("roblox.com/transactions");
+  });
+
+  it("второй скрин тоже требует фото и идёт через автопроверку", () => {
+    expect(intakeNeedsScreenshot(ROBUX_LOW_PENDING_RETRY_CONTEXT)).toBe(true);
+    expect(isPendingScreenshotContext(ROBUX_LOW_PENDING_RETRY_CONTEXT)).toBe(true);
+    expect(isPendingScreenshotContext("general")).toBe(false);
+  });
+});
+
+describe("настоящие скрины из VK (27.10.2026), текст Tesseract", () => {
+  it("E474ZKP: телефон, тёмная тема — Pending 1,000", () => {
+    const t = "My Transactions\nwere4662\nMy Balance: © 2 Buy Robux\nSummary\nIncoming Robux Amount\nSales of Goods © 0\nTotal © 0\nPending Robux © 1,000\nOutgoing Robux Amount";
+    expect(readPendingFromText(t, "were4662")).toEqual({ labelFound: true, pending: 1000, nickSeen: true });
   });
 });
