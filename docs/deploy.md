@@ -224,6 +224,13 @@ ssh root@<RF> 'journalctl --since "-25 min" | grep -i oom'
 Если ретраи начнут падать подряд — поднимать swap или ограничивать heap сборки, а не
 гонять деплой по кругу.
 
+**27.10.2026 — корень найден: две сборки разом.** В Coolify у RF-хоста стояло
+`Concurrent Builds = 2`, и правка `src/**` + `bots/shared/**` собирала Web и VK_bot
+параллельно: Web падал на `npm ci` с `exit code 255` три волны подряд (24.10, 26.10, 27.10).
+Теперь `Concurrent Builds = 1` (Servers → localhost → Advanced): сборки встают в очередь,
+волна дольше на несколько минут, но без падений. На HK-хосте (одно приложение) значение не
+важно.
+
 ### Автодеплой по push может не сработать молча (31.07.2026)
 
 31.07 коммит уехал в `main` на GitHub, но Coolify не создал ни одной записи деплоя за
@@ -736,7 +743,47 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 - Мониторить доступность из РФ можно через check-host.net API (ru-ноды) — датацентровые ноды
   ≠ розничные провайдеры с ТСПУ, для реальной картины просить клиентов проверить без VPN.
 
-## Путь до Neon: прямой или через релей в Сингапуре (17.10.2026)
+## Хосты и что где живёт (27.10.2026)
+
+| Хост | Что на нём |
+|---|---|
+| **RF** (Coolify-панель, 4 ГБ + своп 4 ГБ) | Web, Guide, VK_bot; `neon-route` (выбор пути до Neon) |
+| **HK** (Гонконг, 1 ГБ + своп 4 ГБ, Debian 13) | `TG_bot_HK` — TG-бот (polling, все кроны, воркеры WB/автовыкупа) **и мост** `bots/shared/bridge.ts` на `:3000`; `neon-relay.service` |
+| SG (Сингапур) | **выведен 27.10**: `TG_bot` остановлен, автодеплой выключен; держится 2–3 дня для отката. На нём же — браузерный выкуп донора (за флагом, не переносился) |
+
+Адреса — только в `HANDOFF.md` и в env. `VALIDATOR_SOURCE_URL` (адрес моста) стоит у всех
+пяти приложений Coolify.
+
+### Переезд TG-бота и моста SG → HK (27.10.2026)
+
+Зачем: SG дороже, а нагрузки на нём ~300 МБ. Как прошло (порядок пригодится для следующего
+переезда):
+
+1. Хост: ключ по SSH, `PasswordAuthentication no`, своп 4 ГБ (без него сборка TG-бота на 1 ГБ
+   не влезет — пик 545 МБ + своп), сервер в Coolify с тем же ключом, что у SG (`panicky-puffin…`;
+   «localhost's key» даёт `Permission denied (publickey)`).
+2. `neon-relay.service` — копия юнита с SG (bind на свой адрес, ACCEPT только RF). Проверка с
+   RF: `openssl s_client -starttls postgres -servername <endpoint> -connect <HK>:5433` →
+   `Verify return code: 0`.
+3. TG-бот: Coolify → TG_bot → Resource Operations → **Clone** на HK (34 env копируются),
+   затем `DISABLE_POLLING=true` — в этом режиме процесс только мост: ни `bot.launch()`, ни
+   кронов, ни воркеров WB DBS (всё стартует в `startReviewReminderCron`, только в polling).
+   Проверка моста изнутри контейнера (`/check-pass`), ключ наружу не выходит.
+4. Волна: `VALIDATOR_SOURCE_URL` → HK у всех приложений; SG-бот **stop + автодеплой off**
+   (иначе следующий пуш поднимет второй polling → 409); у HK `DISABLE_POLLING=false` и
+   restart; Web/Guide/VK — **Restart** (не Redeploy: env рантаймовый, сборка не нужна);
+   `RELAY_HOST` в `/etc/neon-route.conf` на RF.
+5. Проверка: `getWebhookInfo` → `pending_update_count: 0` (бот разбирает апдейты), в логах HK
+   идут `tg-proxy`/`check-pass` от Web и VK, у Web/VK/Guide ноль ошибок моста.
+
+⚠️ **Env Coolify менять только через модель** (`$e->value = …; $e->save()`) или
+`encrypt(...)`. Значения в БД зашифрованы; `->update(['value' => 'false'])` записало открытый
+текст, и restart упал `DecryptException` — бот простоял ~2 минуты, пока SG уже был остановлен.
+
+**Откат:** HK `TG_bot_HK` stop → SG `TG_bot` start (+ автодеплой on), `VALIDATOR_SOURCE_URL`
+обратно, Restart Web/Guide/VK, `RELAY_HOST` из `/etc/neon-route.conf.bak-sg-2026-10-27`.
+
+## Путь до Neon: прямой или через релей (17.10.2026; релей переехал SG → HK 27.10)
 
 Прод стоит в РФ, Neon — в Сингапуре, и транзит РФ→AWS `ap-southeast-1` **деградирует
 эпизодами**. 17.10 с 14:00 до 16:55 UTC round-trip вырос 210 → 590 мс, а рукопожатие
@@ -754,8 +801,8 @@ TCP+TLS+SCRAM — до 19,5 с, из-за чего админка отдавал
 
 | Где | Что стоит |
 |---|---|
-| SG-хост | `neon-relay.service` — `socat` слушает `5433` и гонит байты в эндпоинт пулера Neon `:5432` |
-| SG-хост, фаервол | `INPUT`: ACCEPT только с IP РФ-хоста, DROP для всех остальных. Правила ставит сам юнит в `ExecStartPre`, поэтому порт не может открыться без них |
+| HK-хост (до 27.10 — SG) | `neon-relay.service` — `socat` слушает `5433` и гонит байты в эндпоинт пулера Neon `:5432` |
+| HK-хост, фаервол | `INPUT`: ACCEPT только с IP РФ-хоста, DROP для всех остальных. Правила ставит сам юнит в `ExecStartPre`, поэтому порт не может открыться без них |
 | РФ-хост | `/root/neon-route.sh` (копия в репо — `scripts/neon-route.sh`) плюс `/etc/neon-route.conf` с адресами; DNAT-цепочка `NEON_RELAY` в `nat/PREROUTING` |
 
 Адреса хостов и эндпоинтов — только в `/etc/neon-route.conf` на машине и в `HANDOFF.md`;

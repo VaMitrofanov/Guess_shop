@@ -17,9 +17,10 @@
 
 - **Web** — Next.js: сайт `/guide`, все `/api/*`, TWA-админка `/twa`.
 - **Guide** — отдельный билд гейта (`Dockerfile.guide`, `next.config.guide.ts`), обслуживает только `/guide?source=wb`.
-- **TG-бот** — Telegraf-процесс.
+- **TG-бот** — Telegraf-процесс. С 27.10.2026 живёт на HK-хосте (Coolify `TG_bot_HK`), до этого — на SG.
 - **VK-бот** — vk-io-процесс. Уведомления менеджерам он шлёт **через Telegram** (у VK нет своего интерфейса для менеджеров) — см. `bots/shared/notify.ts`.
-- **Bridge** — прокси для обхода блокировок. На текущий момент Roblox API отвечает
+- **Bridge** — прокси для обхода блокировок (`bots/shared/bridge.ts`, порт 3000 внутри процесса
+  TG-бота, HK-хост; адрес — `VALIDATOR_SOURCE_URL`). На текущий момент Roblox API отвечает
   и напрямую из РФ; `/tg-proxy` всё ещё используется VK-ботом для `api.telegram.org`.
   Перед изменениями перепроверяй доступность `curl`-ом.
 - **Browser purchase-service (SG host, systemd)** — single-flight bridge к настоящему
@@ -135,7 +136,7 @@ bots/
     roblox.ts           валидация геймпасса (богаче, чем lib/roblox: private/managed/age)
     notify.ts           tgSend / vkSend / tgSendPhoto
     gamepass-search.ts  поиск по нику (union: user_not_found / no_gamepasses / ok)
-    bridge.ts           HTTP-прокси (Singapore)
+    bridge.ts           HTTP-прокси (в процессе TG-бота; HK-хост с 27.10.2026, до этого SG)
     db.ts               Prisma-клиент для ботов (Pool=3)
   tg/
     handlers.ts         весь TG-бот (~5500 строк)
