@@ -79,6 +79,26 @@ describe("Номер заказа WB ведёт к самому заказу", (
   });
 });
 
+describe("Код доставки WB тоже ведёт к заказу", () => {
+  /* Покупатель называет заказ то номером, то кодом из приложения WB. Открытым
+     текстом кода у нас нет (после receive — PURGED), поэтому ищем по codeHmac. */
+  const helper = readFileSync(join(process.cwd(), "src/lib/wb-order-number-search.ts"), "utf8");
+
+  it("ищем точным совпадением отпечатка, а не по тексту", () => {
+    expect(helper).toContain('wbSecretHmac(digits, "delivery-code")');
+    expect(helper).toContain("where: { codeHmac: hmac }");
+  });
+
+  it("номер и код доставки сливаются в одни коды гейта", () => {
+    expect(helper).toContain("dbsOrdersForDeliveryCode(digits).then((found) => found.codes)");
+  });
+
+  it("строка DBS в поиске находится и по коду доставки", () => {
+    expect(searchRoute).toContain("await dbsOrdersForDeliveryCode(digits)");
+    expect(searchRoute).toContain("{ id: { in: byDeliveryCode.ids } }");
+  });
+});
+
 describe("Найденное показывается даже при пустой ленте", () => {
   it("живая выдача вынесена из ветки со списком", () => {
     expect(screen).toContain("const liveResults = query ? (");

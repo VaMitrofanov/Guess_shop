@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import type { Prisma } from "@prisma/client";
 import { getOrderMatchReason } from "@/lib/twa-search-match";
-import { gateCodesForWbOrderNumber } from "@/lib/wb-order-number-search";
+import { dbsOrdersForDeliveryCode, gateCodesForWbOrderNumber } from "@/lib/wb-order-number-search";
 import { WB_FUNNEL_LABEL } from "@/lib/wb-delivery-labels";
 import { wbFunnelStep } from "../../../../../bots/shared/wb-delivery-policy";
 
@@ -112,11 +112,14 @@ export async function GET(req: NextRequest) {
   // Заказы DBS живут в своей таблице и до 30.08.2026 искались только со своего
   // экрана: номер `#31401299` и имя покупателя из чата WB не находились больше
   // ниоткуда. Поиск один на приложение — значит и они в нём.
+  // Код доставки WB (5–7 цифр) ищется по отпечатку: открытым текстом его нет.
+  const byDeliveryCode = wantDb && /^[\d\s-]+$/.test(query) ? await dbsOrdersForDeliveryCode(digits) : { ids: [] };
   const dbsPromise = !wantDb ? Promise.resolve([]) : prisma.wbMarketplaceOrder.findMany({
     where: {
       isTest: false,
       OR: [
         ...(digits.length >= 3 ? [{ wbOrderId: { contains: digits } }] : []),
+        ...(byDeliveryCode.ids.length ? [{ id: { in: byDeliveryCode.ids } }] : []),
         { buyerName: { contains: clean, mode: "insensitive" as const } },
         { wbCode: { code: { contains: query.toUpperCase() } } },
       ],
