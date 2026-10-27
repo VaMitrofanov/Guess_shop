@@ -6,11 +6,10 @@ import {
   wbDeliverySecretIsLive,
   wbOrderAgeHours,
 } from "./wb-delivery-policy";
-import { wbCancelAcceptedMessage, wbCancelResumedMessage } from "./wb-gate-link";
+import { wbCancelAcceptedMessage } from "./wb-gate-link";
 import {
   notifyDbsCancelRequested,
   notifyDbsCancelResumed,
-  notifyDbsCancelTooLate,
   notifyDbsCodeCaptured,
 } from "./wb-delivery-admin-notify";
 import { holdByCode, releaseByCode } from "./order-hold";
@@ -25,9 +24,12 @@ import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 
    Теперь у заказа есть флажок `cancelRequestedAt`. Пока он стоит, код доставки
    распознаётся как обычно, но НЕ уходит в WB — бот приносит его оператору, и
-   тот отклоняет заказ в кабинете WB. Включается словом «отмена» в чате WB
-   (покупатель может вернуть словом «продолжить») или кнопкой в TWA / на сайте
-   (вернуть может только оператор).
+   тот отклоняет заказ в кабинете WB.
+
+   Включает и снимает режим ТОЛЬКО оператор (решение владельца 27.10.2026):
+   сообщением из кабинета WB, начинающимся с «Отмена…» / «Продолжаем…», или
+   кнопкой в TWA / на сайте. Слова покупателя («отмените», «передумал») режим
+   не трогают — это обычное сообщение оператору.
 
    Доставку, которая уже закрыта, этот режим не трогает: там кодом ничего не
    сделать, остаётся возврат через WB, и оператора об этом предупреждают.
@@ -35,26 +37,11 @@ import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 
 type Db = PrismaClient;
 
-export const WB_CANCEL_BY_BUYER = "buyer";
 /** Оператор включил отмену своим сообщением из кабинета WB. */
 export const WB_CANCEL_BY_SELLER_CHAT = "чат WB";
 const HOLD_REASON = "Отмена заказа WB";
 
 export type WbCancelIntent = "cancel" | "resume" | null;
-
-/* `\b` в JS не видит кириллицу, поэтому граница слова — «не буква». */
-const RESUME_RE = /(?:^|[^\p{L}])(?:продолж|не\s+(?:надо\s+|нужно\s+|хочу\s+)?(?:отмен|отказ))/iu;
-const CANCEL_RE = /(?:^|[^\p{L}])(?:отмен|отказ|передумал|верн(?:ите|уть)\s+(?:мне\s+)?(?:деньги|средства)|возврат\s+(?:денег|средств))/iu;
-
-/** Что покупатель хочет сказать про отмену. Отрицание («не отменяйте»)
- * читается как «продолжить» — проверяется первым. */
-export function detectWbCancelIntent(text: string): WbCancelIntent {
-  const clean = text.trim();
-  if (!clean) return null;
-  if (RESUME_RE.test(clean)) return "resume";
-  if (CANCEL_RE.test(clean)) return "cancel";
-  return null;
-}
 
 /* Команда оператора из кабинета WB — сообщение продавца, которое НАЧИНАЕТСЯ
    со слова: «Отмена…», «Оформляем отмену…» / «Продолжаем…», «Отмена снята…».
@@ -126,7 +113,6 @@ export async function requestWbOrderCancel(
   input: {
     orderId: string;
     actor: string;
-    buyerMessage?: string | null;
     /** Оператор уже сам написал покупателю — своё сообщение бот не шлёт. */
     silent?: boolean;
   },
@@ -135,9 +121,6 @@ export async function requestWbOrderCancel(
   if (!order) return { ok: false, error: "Заказ не найден", code: "NOT_FOUND" };
   if (order.cancelledAt) return { ok: false, error: "Заказ уже отменён на WB", code: "ALREADY_CANCELLED" };
   if (order.completedAt) {
-    if (input.actor === WB_CANCEL_BY_BUYER && input.buyerMessage) {
-      notifyDbsCancelTooLate(await dbsRef(db, order.id, order.wbOrderId), input.buyerMessage);
-    }
     return {
       ok: false,
       error: "Доставка уже закрыта на WB — отменить кодом нельзя, только возврат через WB",
@@ -154,27 +137,25 @@ export async function requestWbOrderCancel(
   if (claimed.count !== 1) return { ok: true, already: true, hasCode: Boolean(code), askedBuyer: false };
 
   await note(db, order.id, "CANCEL_REQUESTED", `cancel:${order.id}:${now.getTime()}`, input.actor, {
-    by: input.actor === WB_CANCEL_BY_BUYER ? "buyer" : "operator",
+    by: input.actor,
     hasCode: Boolean(code),
   });
 
   // Гейт мог уйти раньше (ручная выдача) — его нельзя оставлять рабочим.
   let buyoutDone = false;
   if (order.wbCode?.code) {
-    await holdByCode(db, { wbCode: order.wbCode.code, reason: HOLD_REASON, actor: input.actor === WB_CANCEL_BY_BUYER ? "покупатель (чат WB)" : input.actor })
+    await holdByCode(db, { wbCode: order.wbCode.code, reason: HOLD_REASON, actor: input.actor })
       .catch(() => {});
     const buyout = await db.wbOrder.findUnique({ where: { wbCode: order.wbCode.code }, select: { status: true } }).catch(() => null);
     buyoutDone = buyout?.status === "COMPLETED";
   }
 
-  const byBuyer = input.actor === WB_CANCEL_BY_BUYER;
   const askedBuyer = input.silent
     ? true
-    : await sendToBuyer(order, wbCancelAcceptedMessage({ hasCode: Boolean(code), byBuyer }));
+    : await sendToBuyer(order, wbCancelAcceptedMessage({ hasCode: Boolean(code) }));
   notifyDbsCancelRequested(await dbsRef(db, order.id, order.wbOrderId), {
     by: input.actor,
     deliveryCode: code,
-    buyerMessage: input.buyerMessage ?? null,
     buyoutDone,
     askedBuyer,
   });
@@ -183,46 +164,39 @@ export async function requestWbOrderCancel(
 }
 
 export type WbResumeResult =
-  | { ok: true; changed: boolean }
+  | { ok: true; changed: true }
   | { ok: false; error: string; code: "NOT_FOUND" | "NOT_IN_CANCEL" };
 
-/** Снять режим отмены. Покупатель снимает только свою отмену — отмену,
- * включённую оператором, словом «продолжить» не перебить. */
+/** Снять режим отмены (только оператор). Покупателю бот ничего не пишет:
+ * оператор либо уже написал сам из кабинета, либо напишет. */
 export async function resumeWbOrderCancel(
   db: Db,
   input: { orderId: string; actor: string },
 ): Promise<WbResumeResult> {
   const order = await loadOrder(db, input.orderId);
   if (!order) return { ok: false, error: "Заказ не найден", code: "NOT_FOUND" };
-  const byBuyer = input.actor === WB_CANCEL_BY_BUYER;
   const cleared = await db.wbMarketplaceOrder.updateMany({
     where: {
       id: order.id,
       cancelRequestedAt: { not: null },
       cancelledAt: null,
-      ...(byBuyer ? { cancelRequestedBy: WB_CANCEL_BY_BUYER } : {}),
     },
     data: { cancelRequestedAt: null, cancelRequestedBy: null },
   });
-  if (cleared.count !== 1) {
-    return byBuyer
-      ? { ok: true, changed: false }
-      : { ok: false, error: "Заказ не в режиме отмены", code: "NOT_IN_CANCEL" };
-  }
+  if (cleared.count !== 1) return { ok: false, error: "Заказ не в режиме отмены", code: "NOT_IN_CANCEL" };
   await note(db, order.id, "CANCEL_RESUMED", `cancel-resume:${order.id}:${Date.now()}`, input.actor, {
-    by: byBuyer ? "buyer" : "operator",
+    by: input.actor,
   });
 
   // Снимаем только свою заморозку: чужая причина (гейт выкупа, проверка) остаётся.
   if (order.wbCode?.code) {
     const hold = await db.orderHold.findUnique({ where: { wbCode: order.wbCode.code }, select: { reason: true, releasedAt: true } }).catch(() => null);
     if (hold && !hold.releasedAt && hold.reason === HOLD_REASON) {
-      await releaseByCode(db, { wbCode: order.wbCode.code, actor: byBuyer ? "покупатель (чат WB)" : input.actor }).catch(() => {});
+      await releaseByCode(db, { wbCode: order.wbCode.code, actor: input.actor }).catch(() => {});
     }
   }
 
   const code = liveCode(order.deliverySecret);
-  if (byBuyer) await sendToBuyer(order, wbCancelResumedMessage(Boolean(code)));
   const ref = await dbsRef(db, order.id, order.wbOrderId);
   notifyDbsCancelResumed(ref, input.actor);
   // Код у нас, но окно автозакрытия прошло — закрывать будет человек, и без

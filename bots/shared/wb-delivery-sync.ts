@@ -93,11 +93,9 @@ import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
 import {
-  detectWbCancelIntent,
   detectWbOperatorCommand,
   requestWbOrderCancel,
   resumeWbOrderCancel,
-  WB_CANCEL_BY_BUYER,
   WB_CANCEL_BY_SELLER_CHAT,
 } from "./wb-cancel-mode";
 
@@ -1281,7 +1279,7 @@ async function tryAutoRequestCode(
     },
   });
   if (!fresh || fresh.completedAt || fresh.cancelledAt || fresh.lastErrorCode) return;
-  // Покупатель открыл чат словом «отмена» — ему уже ответил режим отмены.
+  // Заказ в режиме отмены — код просил оператор, второй запрос не нужен.
   if (fresh.cancelRequestedAt) return;
   // The buyer may have opened with the code itself — never ask for what we hold.
   if (wbDeliverySecretIsLive(fresh.deliverySecret)) return;
@@ -1436,19 +1434,11 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
 
     if (order) await rememberBuyerName(db, order, wbChatClientName(event), out);
 
-    // «Отмена» / «продолжить» в чате WB. Разбирается ДО захвата кода: в
-    // сообщении «отмените, код 123456» код уже обязан уйти оператору, а не в WB.
-    const cancelIntent = isNewEvent && order && isBuyerSender(event.sender) && rawText
-      && !order.cancelledAt ? detectWbCancelIntent(rawText) : null;
-    if (order && cancelIntent === "cancel") {
-      await requestWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_BUYER, buyerMessage: rawText })
-        .catch((err) => console.error("[WbDbsSync] режим отмены:", safeErrorCode(err)));
-    } else if (order && cancelIntent === "resume" && order.cancelRequestedAt) {
-      await resumeWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_BUYER })
-        .catch((err) => console.error("[WbDbsSync] снятие отмены:", safeErrorCode(err)));
-    }
-    // Та же команда от оператора — сообщением из кабинета WB, без TWA. Своё
-    // сообщение покупателю бот не дублирует: оператор только что написал сам.
+    // Режим отмены включает ТОЛЬКО оператор (решение владельца 27.10.2026):
+    // сообщением из кабинета WB, которое начинается с «Отмена…», — или кнопкой
+    // в TWA. «Отмените» от покупателя — обычное сообщение оператору. Разбирается
+    // ДО захвата кода: код, пришедший следом, уже обязан уйти оператору, а не в WB.
+    // Своё сообщение покупателю бот не дублирует: оператор только что написал сам.
     const operatorCommand = isNewEvent && order && !isBuyerSender(event.sender) && rawText
       && !order.cancelledAt ? detectWbOperatorCommand(rawText) : null;
     if (order && operatorCommand === "cancel") {
@@ -1458,14 +1448,12 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
       await resumeWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_SELLER_CHAT })
         .catch((err) => console.error("[WbDbsSync] снятие отмены из кабинета WB:", safeErrorCode(err)));
     }
-    // «Как продолжить?» вне режима отмены — обычный вопрос человеку.
-    const cancelHandled = cancelIntent === "cancel" || (cancelIntent === "resume" && Boolean(order?.cancelRequestedAt));
 
     // Код доставки — не «сообщение покупателя»: его целиком обрабатывает
     // автоматика, оператору делать по нему нечего, а в карточке он и так виден
     // строкой «код получен». Отдельное уведомление на него было чистым шумом
     // ровно там, где заказ идёт лучше всего.
-    if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !cancelHandled
+    if (isNewEvent && isBuyerSender(event.sender) && order && rawText
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.completedAt && !order.cancelledAt) {
       notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText);
     }

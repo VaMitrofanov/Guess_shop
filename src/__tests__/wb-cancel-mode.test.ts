@@ -1,7 +1,7 @@
 jest.mock("../../bots/shared/wb-delivery-api", () => ({ sendBuyerChatMessage: jest.fn() }));
 jest.mock("../../bots/shared/wb-dbs-thread", () => ({ dbsRef: jest.fn(), refreshDbsCard: jest.fn() }));
 
-import { detectWbCancelIntent, detectWbOperatorCommand } from "../../bots/shared/wb-cancel-mode";
+import { detectWbOperatorCommand } from "../../bots/shared/wb-cancel-mode";
 import {
   canReceiveWbOrder,
   wbReceiveGracePending,
@@ -9,7 +9,6 @@ import {
 } from "../../bots/shared/wb-delivery-policy";
 import {
   wbCancelAcceptedMessage,
-  wbCancelResumedMessage,
   wbCodeRecheckMessage,
   wbCodeRequestMessage,
   wbCodeRetryMessage,
@@ -19,37 +18,16 @@ import {
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-describe("Слово «отмена» в чате WB", () => {
-  it.each([
-    "Отмените заказ пожалуйста",
-    "хочу отменить",
-    "отмена",
-    "Оформите отказ",
-    "я передумал",
-    "верните деньги",
-    "Хочу возврат денег",
-    "отмена, код 123 456",
-  ])("«%s» — отмена", (text) => {
-    expect(detectWbCancelIntent(text)).toBe("cancel");
+describe("Покупатель отмену не включает", () => {
+  const sync = readFileSync(join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");
+
+  it("команда читается только из сообщений продавца", () => {
+    expect(sync).toContain("!isBuyerSender(event.sender) && rawText\n      && !order.cancelledAt ? detectWbOperatorCommand(rawText)");
+    expect(sync).not.toContain("detectWbCancelIntent");
   });
 
-  it.each([
-    "продолжить",
-    "Продолжаем",
-    "не отменяйте",
-    "не надо отменять, я разобрался",
-    "Не хочу отменять",
-  ])("«%s» — продолжить", (text) => {
-    expect(detectWbCancelIntent(text)).toBe("resume");
-  });
-
-  it.each([
-    "123456",
-    "Здравствуйте, где мои робуксы?",
-    "Как создать геймпасс",
-    "",
-  ])("«%s» — ни то ни другое", (text) => {
-    expect(detectWbCancelIntent(text)).toBeNull();
+  it("«отмените заказ» в середине фразы — не команда", () => {
+    expect(detectWbOperatorCommand("Здравствуйте, отмените заказ")).toBeNull();
   });
 });
 
@@ -80,12 +58,11 @@ describe("Режим отмены не даёт закрыть доставку"
   });
 });
 
-describe("Сообщение покупателю", () => {
-  it("просит код текстом, «продолжить» — только если отменил сам покупатель", () => {
-    const own = wbCancelAcceptedMessage({ hasCode: false, byBuyer: true });
-    expect(own).toContain("код доставки");
-    expect(own).toContain("«продолжить»");
-    expect(wbCancelAcceptedMessage({ hasCode: false, byBuyer: false })).not.toContain("продолжить");
+describe("Сообщение покупателю (кнопка в TWA)", () => {
+  it("просит код текстом и не предлагает «продолжить»", () => {
+    const text = wbCancelAcceptedMessage({ hasCode: false });
+    expect(text).toContain("код доставки");
+    expect(text).not.toContain("продолжить");
   });
 });
 
@@ -93,7 +70,7 @@ describe("Воркер: порядок проверок", () => {
   const sync = readFileSync(join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");
 
   it("«отмена» разбирается до захвата кода в том же сообщении", () => {
-    expect(sync.indexOf("detectWbCancelIntent(rawText)")).toBeLessThan(sync.indexOf("await captureDeliveryCode(db, order, deliveryCode"));
+    expect(sync.indexOf("detectWbOperatorCommand(rawText)")).toBeLessThan(sync.indexOf("await captureDeliveryCode(db, order, deliveryCode"));
   });
 
   it("свип автозакрытия и алерт «застрял» не трогают режим отмены", () => {
@@ -133,9 +110,8 @@ describe("Команда оператора из кабинета WB", () => {
       wbCodeRetryMessage(),
       wbGateMessage("ABC1234", 500, "https://robloxbank.ru"),
       ...[1, 2, 3].map((level) => wbGateReminderMessage("ABC1234", 500, level, "https://robloxbank.ru")),
-      ...[true, false].flatMap((hasCode) => [true, false].map((byBuyer) => wbCancelAcceptedMessage({ hasCode, byBuyer }))),
-      wbCancelResumedMessage(true),
-      wbCancelResumedMessage(false),
+      wbCancelAcceptedMessage({ hasCode: true }),
+      wbCancelAcceptedMessage({ hasCode: false }),
     ];
     for (const text of own) expect(detectWbOperatorCommand(text)).toBeNull();
   });

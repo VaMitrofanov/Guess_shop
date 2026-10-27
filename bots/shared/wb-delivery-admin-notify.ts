@@ -406,7 +406,7 @@ export function notifyDbsCodeRejected(ref: DbsRef, askedBuyer: boolean) {
 /* ── Режим отмены (27.10.2026) ───────────────────────────────────────────── */
 
 function cancelWho(by: string): string {
-  return by === "buyer" ? "покупатель написал в чате WB" : `оператор (${escapeHtml(by)})`;
+  return `оператор (${escapeHtml(by)})`;
 }
 
 /** Отмена включена. Код доставки, если он уже у нас, — прямо в сообщении:
@@ -414,14 +414,10 @@ function cancelWho(by: string): string {
 export function notifyDbsCancelRequested(ref: DbsRef, input: {
   by: string;
   deliveryCode: string | null;
-  buyerMessage?: string | null;
   /** Заказ на выкуп уже выкуплен — робуксы ушли, отмена требует решения. */
   buyoutDone?: boolean;
   askedBuyer: boolean;
 }) {
-  const preview = input.buyerMessage
-    ? (input.buyerMessage.length > 120 ? input.buyerMessage.slice(0, 117) + "…" : input.buyerMessage)
-    : null;
   broadcast({
     marker: input.deliveryCode || input.buyoutDone ? "urgent" : "action",
     zone: "DBS",
@@ -429,7 +425,6 @@ export function notifyDbsCancelRequested(ref: DbsRef, input: {
     lines: [
       refLine(ref),
       `Кто: ${cancelWho(input.by)}`,
-      preview ? `<i>${escapeHtml(preview)}</i>` : null,
       input.deliveryCode ? `Код доставки: <code>${escapeHtml(input.deliveryCode)}</code>` : null,
       input.buyoutDone ? "<b>Выкуп уже сделан — робуксы ушли</b>" : null,
     ].filter((line): line is string => Boolean(line)),
@@ -460,18 +455,6 @@ export function notifyDbsCancelResumed(ref: DbsRef, by: string) {
     title: "отмена снята",
     lines: [refLine(ref), `Кто: ${cancelWho(by)}`],
     next: "заказ идёт обычным путём: код доставки закроет доставку, гейт уйдёт сам",
-  }, ref);
-}
-
-/** Просят отменить, а доставка уже закрыта — кодом тут ничего не сделать. */
-export function notifyDbsCancelTooLate(ref: DbsRef, buyerMessage: string) {
-  const preview = buyerMessage.length > 120 ? buyerMessage.slice(0, 117) + "…" : buyerMessage;
-  broadcast({
-    marker: "action",
-    zone: "DBS",
-    title: "просят отмену, но доставка уже закрыта",
-    lines: [refLine(ref), `<i>${escapeHtml(preview)}</i>`],
-    next: "отмена кодом невозможна — только возврат через WB. Ответить покупателю вручную",
   }, ref);
 }
 

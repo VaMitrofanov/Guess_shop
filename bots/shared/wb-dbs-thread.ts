@@ -348,7 +348,7 @@ function dbsCardHeadline(
   // Режим отмены важнее любой другой строки: пока он стоит, код доставки не
   // закрывает доставку, и оператор должен видеть, чего ждёт заказ.
   if (order.cancelRequestedAt && !order.completedAt) {
-    const who = order.cancelRequestedBy === "buyer" ? "покупатель просит отмену" : "отмена заказа";
+    const who = "отмена заказа";
     return hasLiveSecret
       ? { marker: "urgent", title: `${who} — код получен`, next: "отклонить заказ в кабинете WB кодом из консоли DBS" }
       : { marker: "action", title: who, next: "ждём от покупателя код доставки — придёт сюда, доставку бот не закроет" };

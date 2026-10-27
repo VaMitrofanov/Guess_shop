@@ -48,7 +48,7 @@ export type WbDeliveryOrderDto = {
   cancelledAt: string | null;
   /** Режим отмены: код доставки не закрывает доставку, а уходит оператору. */
   cancelRequestedAt: string | null;
-  /** `buyer` — попросил в чате WB; иначе — оператор. */
+  /** Кто включил: `чат WB` или админ из TWA / сайта. */
   cancelRequestedBy: string | null;
   chatId: string | null;
   chatReady: boolean;
