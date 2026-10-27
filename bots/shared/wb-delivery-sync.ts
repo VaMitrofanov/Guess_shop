@@ -92,7 +92,14 @@ import { revokeGateCode } from "./wb-code-revocation";
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
-import { detectWbCancelIntent, requestWbOrderCancel, resumeWbOrderCancel, WB_CANCEL_BY_BUYER } from "./wb-cancel-mode";
+import {
+  detectWbCancelIntent,
+  detectWbOperatorCommand,
+  requestWbOrderCancel,
+  resumeWbOrderCancel,
+  WB_CANCEL_BY_BUYER,
+  WB_CANCEL_BY_SELLER_CHAT,
+} from "./wb-cancel-mode";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -1439,6 +1446,17 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     } else if (order && cancelIntent === "resume" && order.cancelRequestedAt) {
       await resumeWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_BUYER })
         .catch((err) => console.error("[WbDbsSync] снятие отмены:", safeErrorCode(err)));
+    }
+    // Та же команда от оператора — сообщением из кабинета WB, без TWA. Своё
+    // сообщение покупателю бот не дублирует: оператор только что написал сам.
+    const operatorCommand = isNewEvent && order && !isBuyerSender(event.sender) && rawText
+      && !order.cancelledAt ? detectWbOperatorCommand(rawText) : null;
+    if (order && operatorCommand === "cancel") {
+      await requestWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_SELLER_CHAT, silent: true })
+        .catch((err) => console.error("[WbDbsSync] отмена из кабинета WB:", safeErrorCode(err)));
+    } else if (order && operatorCommand === "resume" && order.cancelRequestedAt) {
+      await resumeWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_SELLER_CHAT })
+        .catch((err) => console.error("[WbDbsSync] снятие отмены из кабинета WB:", safeErrorCode(err)));
     }
     // «Как продолжить?» вне режима отмены — обычный вопрос человеку.
     const cancelHandled = cancelIntent === "cancel" || (cancelIntent === "resume" && Boolean(order?.cancelRequestedAt));

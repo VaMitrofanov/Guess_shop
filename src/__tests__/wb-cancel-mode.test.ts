@@ -1,13 +1,21 @@
 jest.mock("../../bots/shared/wb-delivery-api", () => ({ sendBuyerChatMessage: jest.fn() }));
 jest.mock("../../bots/shared/wb-dbs-thread", () => ({ dbsRef: jest.fn(), refreshDbsCard: jest.fn() }));
 
-import { detectWbCancelIntent } from "../../bots/shared/wb-cancel-mode";
+import { detectWbCancelIntent, detectWbOperatorCommand } from "../../bots/shared/wb-cancel-mode";
 import {
   canReceiveWbOrder,
   wbReceiveGracePending,
   WB_RECEIVE_GRACE_MS,
 } from "../../bots/shared/wb-delivery-policy";
-import { wbCancelAcceptedMessage } from "../../bots/shared/wb-gate-link";
+import {
+  wbCancelAcceptedMessage,
+  wbCancelResumedMessage,
+  wbCodeRecheckMessage,
+  wbCodeRequestMessage,
+  wbCodeRetryMessage,
+  wbGateMessage,
+  wbGateReminderMessage,
+} from "../../bots/shared/wb-gate-link";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -95,5 +103,40 @@ describe("Воркер: порядок проверок", () => {
   it("отмена проверяется раньше паузы и окна", () => {
     const fn = sync.slice(sync.indexOf("async function tryAutoReceive"));
     expect(fn.indexOf('skip: "cancel_requested"')).toBeLessThan(fn.indexOf('skip: "grace"'));
+  });
+});
+
+describe("Команда оператора из кабинета WB", () => {
+  it.each([
+    "Отмена",
+    "отмена заказа",
+    "Оформляем отмену, пришлите код доставки",
+    "Отменяем заказ",
+  ])("«%s» — отмена", (text) => {
+    expect(detectWbOperatorCommand(text)).toBe("cancel");
+  });
+
+  it.each(["Продолжаем", "Отмена снята, ждём код", "продолжить"])("«%s» — продолжить", (text) => {
+    expect(detectWbOperatorCommand(text)).toBe("resume");
+  });
+
+  it("слово не в начале — не команда (обычная переписка)", () => {
+    expect(detectWbOperatorCommand("Здравствуйте! Если нужна отмена — напишите")).toBeNull();
+  });
+
+  /* Сообщения самого бота возвращаются в ленту от имени продавца. Если хоть
+     одно из них сойдёт за команду, бот сам себе включит или снимет отмену. */
+  it("ни одно сообщение бота не читается как команда", () => {
+    const own = [
+      wbCodeRequestMessage(),
+      wbCodeRecheckMessage(),
+      wbCodeRetryMessage(),
+      wbGateMessage("ABC1234", 500, "https://robloxbank.ru"),
+      ...[1, 2, 3].map((level) => wbGateReminderMessage("ABC1234", 500, level, "https://robloxbank.ru")),
+      ...[true, false].flatMap((hasCode) => [true, false].map((byBuyer) => wbCancelAcceptedMessage({ hasCode, byBuyer }))),
+      wbCancelResumedMessage(true),
+      wbCancelResumedMessage(false),
+    ];
+    for (const text of own) expect(detectWbOperatorCommand(text)).toBeNull();
   });
 });

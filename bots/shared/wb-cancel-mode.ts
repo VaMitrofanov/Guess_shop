@@ -36,6 +36,8 @@ import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 type Db = PrismaClient;
 
 export const WB_CANCEL_BY_BUYER = "buyer";
+/** Оператор включил отмену своим сообщением из кабинета WB. */
+export const WB_CANCEL_BY_SELLER_CHAT = "чат WB";
 const HOLD_REASON = "Отмена заказа WB";
 
 export type WbCancelIntent = "cancel" | "resume" | null;
@@ -51,6 +53,21 @@ export function detectWbCancelIntent(text: string): WbCancelIntent {
   if (!clean) return null;
   if (RESUME_RE.test(clean)) return "resume";
   if (CANCEL_RE.test(clean)) return "cancel";
+  return null;
+}
+
+/* Команда оператора из кабинета WB — сообщение продавца, которое НАЧИНАЕТСЯ
+   со слова: «Отмена…», «Оформляем отмену…» / «Продолжаем…», «Отмена снята…».
+   Только начало строки: бот сам пишет в тот же чат («Приняли запрос на
+   отмену…», «Хорошо, заказ не отменяем…»), и его сообщения возвращаются
+   в ленту тоже от имени продавца. Ни одно из них так не начинается — это
+   закреплено тестом. */
+const OPERATOR_RESUME_RE = /^\s*(?:продолж|отмена\s+снята|снимаем\s+отмен)/iu;
+const OPERATOR_CANCEL_RE = /^\s*(?:отмен|оформля(?:ем|ю)\s+отмен|оформим\s+отмен)/iu;
+
+export function detectWbOperatorCommand(text: string): WbCancelIntent {
+  if (OPERATOR_RESUME_RE.test(text)) return "resume";
+  if (OPERATOR_CANCEL_RE.test(text)) return "cancel";
   return null;
 }
 
@@ -106,7 +123,13 @@ export type WbCancelResult =
 /** Включить режим отмены. Идемпотентно: повторное «отмена» ничего не шлёт. */
 export async function requestWbOrderCancel(
   db: Db,
-  input: { orderId: string; actor: string; buyerMessage?: string | null },
+  input: {
+    orderId: string;
+    actor: string;
+    buyerMessage?: string | null;
+    /** Оператор уже сам написал покупателю — своё сообщение бот не шлёт. */
+    silent?: boolean;
+  },
 ): Promise<WbCancelResult> {
   const order = await loadOrder(db, input.orderId);
   if (!order) return { ok: false, error: "Заказ не найден", code: "NOT_FOUND" };
@@ -145,7 +168,9 @@ export async function requestWbOrderCancel(
   }
 
   const byBuyer = input.actor === WB_CANCEL_BY_BUYER;
-  const askedBuyer = await sendToBuyer(order, wbCancelAcceptedMessage({ hasCode: Boolean(code), byBuyer }));
+  const askedBuyer = input.silent
+    ? true
+    : await sendToBuyer(order, wbCancelAcceptedMessage({ hasCode: Boolean(code), byBuyer }));
   notifyDbsCancelRequested(await dbsRef(db, order.id, order.wbOrderId), {
     by: input.actor,
     deliveryCode: code,
