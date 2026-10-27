@@ -16,6 +16,7 @@ import {
   MessageCircle,
   PackageCheck,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -498,6 +499,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
       <div className={css.detailStatus}><span>WB</span><strong>{wbSupplierStatusLabel(order.supplierStatus)}</strong><small>{wbSupplierStatusLabel(order.wbStatus)}</small></div>
     </section>
     <div className={css.mobileFlags}><span className={data.environment.cryptoReady ? css.flagOn : css.flagOff}>шифрование</span><span className={data.environment.chatSendEnabled ? css.flagOn : css.flagOff}>чат {data.environment.chatSendEnabled ? "on" : "off"}</span><span className={data.environment.mutationsEnabled ? css.flagOn : css.flagOff}>WB {data.environment.mutationsEnabled ? "on" : "off"}</span></div>
+    {order.cancelRequestedAt && !order.cancelledAt && <div className={css.mobileError}><Ban /><div><strong>{order.cancelRequestedBy === "buyer" ? "Покупатель просит отмену" : "Режим отмены"}</strong><span>{order.deliveryCode.valid ? "Код доставки получен — «Показать» ниже, отклоните заказ этим кодом в кабинете WB. Доставку бот не закрывает." : "Ждём код доставки от покупателя: он придёт в Telegram, доставку бот не закроет."}</span></div></div>}
     {order.lastErrorCode && <div className={css.mobileError}><AlertTriangle /><div><strong>Остановитесь и сверьте WB</strong><span>{order.lastErrorCode}</span></div></div>}
     {order.unserved && <div className={css.mobileError}><AlertTriangle /><div><strong>Покупатель не получил код</strong><span>{order.blockedReason}</span></div></div>}
     {!order.unserved && !order.lastErrorCode && order.blockedReason && <div className={css.mobileError}><AlertTriangle /><div><strong>{order.cancelledAt ? "Отменён, но код на руках" : "Действия недоступны"}</strong><span>{order.blockedReason}</span></div></div>}
@@ -528,6 +530,8 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
       <button disabled={!order.permissions.deliver || Boolean(busy)} onClick={() => onConfirm({ action: "deliver", title: "Передать в доставку?", body: "WB переведёт заказ в статус «в доставке».", cta: "Передать", facts: [["Покупатель", order.buyerName ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Truck /> В доставку</button>
       {order.permissions.markServedExternally && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "mark_served_externally", title: "Выдано вне системы?", body: "Обязательство закроется без выпуска кода. Действие попадёт в аудит.", cta: "Закрыть заказ", facts: [["Покупатель", order.buyerName ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Check /> Выдано вне системы</button>}
       {order.permissions.markGateSent && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "mark_gate_sent", title: "Гейт отправлен вручную?", body: "Отметьте только если ссылка и код действительно ушли покупателю из кабинета WB.", cta: "Зафиксировать", facts: [["Код гейта", order.activationCode ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Send /> Гейт отправлен вручную</button>}
+      {order.permissions.requestCancel && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "request_cancel", title: "Отменить заказ?", body: "Бот попросит у покупателя код доставки и НЕ закроет им доставку — код придёт в Telegram, отклоните заказ им в кабинете WB. Если гейт уже выдан, он будет заморожен.", cta: "Включить отмену", facts: [["Покупатель", order.buyerName ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Ban /> Отменить заказ</button>}
+      {order.permissions.resumeCancel && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "resume_cancel", title: "Снять отмену?", body: "Заказ пойдёт обычным путём: код доставки закроет доставку, гейт уйдёт покупателю сам.", cta: "Снять отмену", facts: [["Покупатель", order.buyerName ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><RotateCcw /> Снять отмену</button>}
       {order.permissions.revokeGate && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "revoke_gate", title: "Аннулировать код?", body: "Заказ отменён на WB, деньги вернулись покупателю. Код перестанет активироваться на сайте и в ботах, а заказ уйдёт из «Нужна проверка».", cta: "Аннулировать", facts: [["Код гейта", order.activationCode ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Ban /> Аннулировать код</button>}
     </section>
 

@@ -38,6 +38,8 @@ export type WbDeliveryPolicyOrder = {
   /** Когда ссылка с кодом ушла покупателю. Отличает «только что выдали» от
    * «выдали две недели назад и тишина». */
   gateSentAt?: Date | string | null;
+  /** Режим отмены: код доставки не закрывает доставку, а уходит оператору. */
+  cancelRequestedAt?: Date | string | null;
 };
 
 /** Сутки и два напоминания — после этого «покупатель идёт по воронке» перестаёт
@@ -388,6 +390,21 @@ export function wbAutoReceiveWithinWindow(
   return received - placed <= WB_AUTO_RECEIVE_ORDER_AGE_MS;
 }
 
+/** Пауза между приходом кода и автозакрытием (решение владельца 27.10.2026).
+ *
+ * Покупатель пишет «отмените» и следом код — а бот закрывал доставку за две
+ * секунды (заказ 5890328310, 27.09). Две минуты дают слову «отмена», пришедшему
+ * рядом с кодом, переключить заказ в режим отмены до того, как код уйдёт в WB.
+ * WB даёт на закрытие около часа, так что пауза ничего не стоит. */
+export const WB_RECEIVE_GRACE_MS = 2 * 60_000;
+
+/** Код пришёл слишком недавно — закрывать доставку ещё рано. */
+export function wbReceiveGracePending(codeReceivedAt: Date | string, now = new Date()): boolean {
+  const received = new Date(codeReceivedAt).getTime();
+  if (Number.isNaN(received)) return false;
+  return now.getTime() - received < WB_RECEIVE_GRACE_MS;
+}
+
 /** Возраст заказа в часах на момент прихода кода — для текста уведомления. */
 export function wbOrderAgeHours(order: WbOrderPlacement, at: Date | string = new Date()): number {
   const placed = wbOrderPlacedAt(order).getTime();
@@ -470,6 +487,7 @@ export function canReceiveWbOrder(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     !order.completedAt &&
     !order.cancelledAt &&
+    !order.cancelRequestedAt &&
     order.hasLiveSecret &&
     (order.secretFailedAttempts ?? 0) < WB_RECEIVE_MAX_ATTEMPTS &&
     /deliver/i.test(order.supplierStatus),

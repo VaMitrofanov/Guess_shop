@@ -48,6 +48,7 @@ import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { dbsRef, refreshDbsCard } from "../../bots/shared/wb-dbs-thread";
 import { revokeGateCode } from "../../bots/shared/wb-code-revocation";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
+import { requestWbOrderCancel, resumeWbOrderCancel } from "../../bots/shared/wb-cancel-mode";
 import { wbChatSafeText, wbCodeRequestMessage, wbGateMessage, wbGateShortUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
 import { notifyDbsBuyerUnlinked } from "../../bots/shared/wb-delivery-admin-notify";
@@ -151,6 +152,8 @@ export const WbDeliveryActionSchema = z.object({
     "preview_gamepass",
     "create_internal_order",
     "revoke_gate",
+    "request_cancel",
+    "resume_cancel",
   ]),
   orderId: z.string().min(1).max(80).optional(),
   code: z.string().trim().regex(/^\d{5,7}$/).optional(),
@@ -282,6 +285,8 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
     updatedAt: order.updatedAt.toISOString(),
     completedAt: iso(order.completedAt),
     cancelledAt: iso(order.cancelledAt),
+    cancelRequestedAt: iso(order.cancelRequestedAt),
+    cancelRequestedBy: order.cancelRequestedBy ?? null,
     chatId: chat?.chatId ?? null,
     chatReady,
     deliveryCode: {
@@ -339,6 +344,10 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
       // delivery code sets it, and «разобраться» with the buyer starts with
       // writing to them.
       sendMessage: !order.cancelledAt && chatReady,
+      // Режим отмены: код доставки не закрывает доставку, а приходит оператору
+      // на отказ. Включить можно, пока доставка не закрыта.
+      requestCancel: !terminal && !order.cancelRequestedAt,
+      resumeCancel: !order.cancelledAt && Boolean(order.cancelRequestedAt),
     },
     chat: (chat?.events ?? []).map((event) => ({
       id: event.id,
@@ -1456,6 +1465,26 @@ export async function performWbDeliveryAction(
     await audit(order.id, "GATE_REVOKED", actor, { activationCode: result.code, isTest: order.isTest });
     await refreshDbsCard(db, order.id).catch(() => {});
     return { ok: true, message: `Код ${result.code} аннулирован — предъявить его больше нельзя`, orderId: order.id };
+  }
+  if (input.action === "request_cancel") {
+    const result = await requestWbOrderCancel(db, { orderId: order.id, actor });
+    if (!result.ok) throw new WbDeliveryWorkflowError(result.error, 409, result.code);
+    return {
+      ok: true,
+      message: result.already
+        ? "Заказ уже в режиме отмены"
+        : result.hasCode
+          ? "Режим отмены включён — код доставки уже у нас, он пришёл в Telegram; отклоните заказ в кабинете WB"
+          : result.askedBuyer
+            ? "Режим отмены включён — покупателя попросили прислать код доставки"
+            : "Режим отмены включён, но сообщение покупателю не ушло — попросите код вручную",
+      orderId: order.id,
+    };
+  }
+  if (input.action === "resume_cancel") {
+    const result = await resumeWbOrderCancel(db, { orderId: order.id, actor });
+    if (!result.ok) throw new WbDeliveryWorkflowError(result.error, 409, result.code);
+    return { ok: true, message: "Отмена снята — заказ идёт обычным путём", orderId: order.id };
   }
   if (input.action === "send_message") {
     if (!input.message) throw new WbDeliveryWorkflowError("Введите сообщение", 400, "MESSAGE_REQUIRED");

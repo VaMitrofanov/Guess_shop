@@ -118,6 +118,9 @@ const CARD_STEP: Record<string, string> = {
   BUYER_LINKED: "покупатель привязан",
   BUYER_SIGNED_IN: "вошёл на сайт",
   WB_ORDER_CANCELLED: "отменён на WB",
+  CANCEL_REQUESTED: "запрошена отмена",
+  CANCEL_RESUMED: "отмена снята — продолжаем",
+  CANCEL_CODE_HELD: "код для отмены получен",
 };
 
 /** Кто пришёл по гейту — из последнего события входа.
@@ -325,6 +328,8 @@ function dbsCardHeadline(
   order: {
     cancelledAt: Date | null;
     completedAt: Date | null;
+    cancelRequestedAt?: Date | null;
+    cancelRequestedBy?: string | null;
     lastErrorCode: string | null;
     gateState: string;
     chatState: string;
@@ -339,6 +344,14 @@ function dbsCardHeadline(
 ): Pick<DbsCardState, "marker" | "title" | "next"> {
   if (order.cancelledAt) {
     return { marker: "cancelled", title: "отменён на WB", next: "деньги вернулись покупателю" };
+  }
+  // Режим отмены важнее любой другой строки: пока он стоит, код доставки не
+  // закрывает доставку, и оператор должен видеть, чего ждёт заказ.
+  if (order.cancelRequestedAt && !order.completedAt) {
+    const who = order.cancelRequestedBy === "buyer" ? "покупатель просит отмену" : "отмена заказа";
+    return hasLiveSecret
+      ? { marker: "urgent", title: `${who} — код получен`, next: "отклонить заказ в кабинете WB кодом из консоли DBS" }
+      : { marker: "action", title: who, next: "ждём от покупателя код доставки — придёт сюда, доставку бот не закроет" };
   }
   if (!order.denominationSnapshot) {
     return { marker: "urgent", title: "номинал не найден", next: "добавить товар в каталог — иначе гейт не выпустить" };

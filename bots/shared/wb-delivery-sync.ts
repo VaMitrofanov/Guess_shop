@@ -63,6 +63,7 @@ import {
   wbReceiveRetryDue,
   wbReceiveRetryDueAt,
   wbReceiveRetriesExhausted,
+  wbReceiveGracePending,
   WB_RECEIVE_MAX_ATTEMPTS,
   WB_RECEIVE_RECHECK_AFTER_ATTEMPTS,
   WB_RECEIVE_RETRY_HORIZON_MS,
@@ -74,6 +75,7 @@ import {
   notifyDbsCodeRecheck,
   notifyDbsCodeRejected,
   notifyDbsAutoReceiveFailed,
+  notifyDbsCancelCode,
   notifyDbsOrderCancelled,
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
@@ -90,6 +92,7 @@ import { revokeGateCode } from "./wb-code-revocation";
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
+import { detectWbCancelIntent, requestWbOrderCancel, resumeWbOrderCancel, WB_CANCEL_BY_BUYER } from "./wb-cancel-mode";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -458,6 +461,10 @@ export type AutoReceiveSkip =
   | "wb_rejected"
   /** WB не ответил внятно: повторять вслепую нельзя, решает человек. */
   | "wb_unknown"
+  /** Режим отмены: код уходит оператору на отказ, а не в `receive`. */
+  | "cancel_requested"
+  /** Код пришёл меньше двух минут назад — ждём, не напишет ли покупатель «отмена». */
+  | "grace"
   | null;
 
 /** Исход попытки закрыть доставку.
@@ -497,11 +504,18 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
   // Заказ уже закрыт — своим ли `receive`, или руками в кабинете WB. Обязательство
   // перед покупателем от этого не исчезает: гейт по такому заказу отдавать можно.
   if (order.completedAt) return { closed: true, skip: null };
+  // Режим отмены: этим же кодом оператор оформит отказ, закрывать нельзя.
+  if (order.cancelRequestedAt) return { closed: false, skip: "cancel_requested" };
   // Старше окна — код у нас есть, но доставку закрывает человек. Это решение
   // владельца, а не оптимизация: заказ, который лежит без кода четвёртый час,
   // уже разбирают руками, и «закрыть или отклонить» — часть того разбора.
   if (!wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)) {
     return { closed: false, skip: "order_too_old" };
+  }
+  // Пауза после прихода кода: «отмена», пришедшая следом, успевает включить
+  // режим отмены. Закроет заказ свип `retryAutoReceive`, как только пауза пройдёт.
+  if (wbReceiveGracePending(order.deliverySecret.receivedAt)) {
+    return { closed: false, skip: "grace" };
   }
   if (wbReceiveRetriesExhausted(order.deliverySecret)) {
     return { closed: false, skip: "too_many_attempts" };
@@ -738,6 +752,7 @@ async function retryAutoReceive(db: Db) {
       isTest: false,
       completedAt: null,
       cancelledAt: null,
+      cancelRequestedAt: null,
       deliverySecret: {
         is: {
           consumedAt: null,
@@ -965,6 +980,7 @@ async function alertStuckDeliveries(db: Db) {
       isTest: false,
       completedAt: null,
       cancelledAt: null,
+      cancelRequestedAt: null,
       deliveryAlertedAt: null,
       deliverySecret: { is: { consumedAt: null, receivedAt: { lt: cutoff }, expiresAt: { gt: new Date() } } },
     },
@@ -1167,7 +1183,12 @@ async function captureDeliveryCode(
   // Тихий успех живёт только в карточке. Отдельным сообщением уходит лишь то,
   // что требует человека: редактирование сообщения в Telegram не даёт
   // уведомления, и пропуск закрытия обязан прозвенеть.
-  if (skip) {
+  if (skip === "cancel_requested") {
+    // Код ровно для этого и просили: отказ на WB оформляется им.
+    await audit(db, order.id, "CANCEL_CODE_HELD", `cancel-code:${idempotencyKey}`, { chatId });
+    notifyDbsCancelCode(await dbsRef(db, order.id, order.wbOrderId), code);
+    await refreshDbsCard(db, order.id).catch(() => {});
+  } else if (skip && skip !== "grace") {
     notifyDbsCodeCaptured(await dbsRef(db, order.id, order.wbOrderId), skip, skip === "order_too_old"
       // Код в сообщении — это и есть смысл уведомления: решение принимает
       // человек, а закрыть доставку в кабинете WB без кода он не сможет.
@@ -1253,6 +1274,8 @@ async function tryAutoRequestCode(
     },
   });
   if (!fresh || fresh.completedAt || fresh.cancelledAt || fresh.lastErrorCode) return;
+  // Покупатель открыл чат словом «отмена» — ему уже ответил режим отмены.
+  if (fresh.cancelRequestedAt) return;
   // The buyer may have opened with the code itself — never ask for what we hold.
   if (wbDeliverySecretIsLive(fresh.deliverySecret)) return;
   const chat = fresh.chats?.[0];
@@ -1406,11 +1429,25 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
 
     if (order) await rememberBuyerName(db, order, wbChatClientName(event), out);
 
+    // «Отмена» / «продолжить» в чате WB. Разбирается ДО захвата кода: в
+    // сообщении «отмените, код 123456» код уже обязан уйти оператору, а не в WB.
+    const cancelIntent = isNewEvent && order && isBuyerSender(event.sender) && rawText
+      && !order.cancelledAt ? detectWbCancelIntent(rawText) : null;
+    if (order && cancelIntent === "cancel") {
+      await requestWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_BUYER, buyerMessage: rawText })
+        .catch((err) => console.error("[WbDbsSync] режим отмены:", safeErrorCode(err)));
+    } else if (order && cancelIntent === "resume" && order.cancelRequestedAt) {
+      await resumeWbOrderCancel(db, { orderId: order.id, actor: WB_CANCEL_BY_BUYER })
+        .catch((err) => console.error("[WbDbsSync] снятие отмены:", safeErrorCode(err)));
+    }
+    // «Как продолжить?» вне режима отмены — обычный вопрос человеку.
+    const cancelHandled = cancelIntent === "cancel" || (cancelIntent === "resume" && Boolean(order?.cancelRequestedAt));
+
     // Код доставки — не «сообщение покупателя»: его целиком обрабатывает
     // автоматика, оператору делать по нему нечего, а в карточке он и так виден
     // строкой «код получен». Отдельное уведомление на него было чистым шумом
     // ровно там, где заказ идёт лучше всего.
-    if (isNewEvent && isBuyerSender(event.sender) && order && rawText
+    if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !cancelHandled
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.completedAt && !order.cancelledAt) {
       notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText);
     }

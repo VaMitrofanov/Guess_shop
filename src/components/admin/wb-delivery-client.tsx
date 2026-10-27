@@ -19,6 +19,7 @@ import {
   MessageCircle,
   PackageCheck,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -399,6 +400,7 @@ export default function WbDeliveryClient({
                   {selected.permissions.sendGate && <ActionCard icon={<Send />} title="Отправить ссылку и код" text="Покупатель получит готовую ссылку на гейт и свой 7-значный код." button="Отправить покупателю" busy={busy === "send_gate"} onClick={() => void act("send_gate")} />}
                   {selected.permissions.receive && <ActionCard icon={<PackageCheck />} title="Завершить выдачу на WB" text="Зашифрованный код будет отправлен в WB один раз и сразу удалён после успеха." button="Завершить заказ" danger busy={busy === "receive"} onClick={() => void act("receive")} />}
                   {selected.stage === "complete" && !selected.unserved && <div className={css.doneCard}><CheckCircle2 /><div><strong>Заказ полностью завершён</strong><span>WB подтвердил выдачу, секретный код очищен.</span></div></div>}
+                  {selected.cancelRequestedAt && !selected.cancelledAt && <div className={css.holdCard}><Ban /><div><strong>{selected.cancelRequestedBy === "buyer" ? "Покупатель просит отмену" : "Режим отмены"}</strong><span>{selected.deliveryCode.valid ? "Код доставки получен (он в Telegram) — отклоните заказ этим кодом в кабинете WB. Доставку бот не закрывает." : "Ждём код доставки от покупателя: он придёт в Telegram, доставку бот не закроет."}</span></div></div>}
                   {selected.stage === "attention" && <div className={css.holdCard}><AlertTriangle /><div><strong>Нужна ручная сверка</strong><span>Не повторяйте последнее действие вслепую. Нажмите «Синхронизировать» и сверьте кабинет WB.</span></div></div>}
                 </div>
 
@@ -438,6 +440,8 @@ export default function WbDeliveryClient({
                   <button title={statusHint(selected, "confirm")} disabled={!selected.permissions.confirm || Boolean(busy)} onClick={() => void act("confirm")}><Check /> Подтвердить сборку</button>
                   <button title={statusHint(selected, "deliver")} disabled={!selected.permissions.deliver || Boolean(busy)} onClick={() => void act("deliver")}><Truck /> Передать в доставку</button>
                   {selected.permissions.markServedExternally && <button title="Заказ был выдан покупателю другим способом или закрыт до появления этого раздела" disabled={Boolean(busy)} onClick={() => window.confirm("Покупатель по этому заказу уже получил свой товар вне этой системы?") && void act("mark_served_externally")}><Check /> Выдано вне системы</button>}
+                  {selected.permissions.requestCancel && <button title="Код доставки покупателя придёт в Telegram и НЕ закроет доставку — им оформляется отказ в кабинете WB" disabled={Boolean(busy)} onClick={() => window.confirm("Включить режим отмены? Бот попросит у покупателя код доставки и не закроет им доставку.") && void act("request_cancel")}><Ban /> Отменить заказ</button>}
+                  {selected.permissions.resumeCancel && <button title="Заказ пойдёт обычным путём" disabled={Boolean(busy)} onClick={() => window.confirm("Снять отмену? Код доставки закроет доставку, гейт уйдёт сам.") && void act("resume_cancel")}><RotateCcw /> Снять отмену</button>}
                   {selected.permissions.revokeGate && <button title="Заказ отменён на WB — код перестанет активироваться на сайте и в ботах" disabled={Boolean(busy)} onClick={() => window.confirm(`Аннулировать код ${selected.activationCode ?? ""}? Деньги по заказу вернулись покупателю, активировать код больше будет нельзя.`) && void act("revoke_gate")}><Ban /> Аннулировать код</button>}
                   {selected.permissions.markGateSent
                     ? <button disabled={Boolean(busy)} onClick={() => window.confirm("Вы действительно отправили покупателю ссылку и код вручную в кабинете WB?") && void act("mark_gate_sent")}><Send /> Отметить отправленным</button>

@@ -46,6 +46,10 @@ export type WbDeliveryOrderDto = {
   updatedAt: string;
   completedAt: string | null;
   cancelledAt: string | null;
+  /** Режим отмены: код доставки не закрывает доставку, а уходит оператору. */
+  cancelRequestedAt: string | null;
+  /** `buyer` — попросил в чате WB; иначе — оператор. */
+  cancelRequestedBy: string | null;
   chatId: string | null;
   chatReady: boolean;
   deliveryCode: {
@@ -95,6 +99,10 @@ export type WbDeliveryOrderDto = {
     deliver: boolean;
     receive: boolean;
     sendMessage: boolean;
+    /** Включить режим отмены (доставка ещё не закрыта). */
+    requestCancel: boolean;
+    /** Снять режим отмены. */
+    resumeCancel: boolean;
   };
   chat: WbDeliveryChatEventDto[];
   audit: WbDeliveryAuditDto[];
@@ -226,7 +234,9 @@ export type WbDeliveryAction =
   | "receive"
   | "preview_gamepass"
   | "create_internal_order"
-  | "revoke_gate";
+  | "revoke_gate"
+  | "request_cancel"
+  | "resume_cancel";
 
 /** What the console learned about a game pass before an operator commits to
  * opening a buyout order on it. */

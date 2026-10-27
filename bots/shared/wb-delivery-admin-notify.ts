@@ -286,6 +286,15 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
     marker: "urgent",
     text: "<b>исход неизвестен — сверить кабинет WB</b>, повторять вслепую нельзя",
   },
+  // Обычный путь — отдельные сообщения режима отмены; это запасной текст.
+  cancel_requested: {
+    marker: "urgent",
+    text: "заказ в режиме отмены — доставку бот не закрывает, отклонить заказ в кабинете WB кодом из консоли DBS",
+  },
+  grace: {
+    marker: "action",
+    text: "пауза 2 минуты перед закрытием — вдруг покупатель следом пишет «отмена»; закроется само",
+  },
 };
 
 /** Заказ старше окна автозакрытия: бот не тронул доставку и отдаёт решение
@@ -391,6 +400,78 @@ export function notifyDbsCodeRejected(ref: DbsRef, askedBuyer: boolean) {
     next: askedBuyer
       ? "покупателя попросили прислать код заново — гейт придержан до закрытия доставки"
       : "<b>разобраться вручную</b>: просить код заново больше не будем, покупатель без выдачи",
+  }, ref);
+}
+
+/* ── Режим отмены (27.10.2026) ───────────────────────────────────────────── */
+
+function cancelWho(by: string): string {
+  return by === "buyer" ? "покупатель написал в чате WB" : `оператор (${escapeHtml(by)})`;
+}
+
+/** Отмена включена. Код доставки, если он уже у нас, — прямо в сообщении:
+ * без него отказ в кабинете WB не оформить. */
+export function notifyDbsCancelRequested(ref: DbsRef, input: {
+  by: string;
+  deliveryCode: string | null;
+  buyerMessage?: string | null;
+  /** Заказ на выкуп уже выкуплен — робуксы ушли, отмена требует решения. */
+  buyoutDone?: boolean;
+  askedBuyer: boolean;
+}) {
+  const preview = input.buyerMessage
+    ? (input.buyerMessage.length > 120 ? input.buyerMessage.slice(0, 117) + "…" : input.buyerMessage)
+    : null;
+  broadcast({
+    marker: input.deliveryCode || input.buyoutDone ? "urgent" : "action",
+    zone: "DBS",
+    title: "запрошена отмена заказа",
+    lines: [
+      refLine(ref),
+      `Кто: ${cancelWho(input.by)}`,
+      preview ? `<i>${escapeHtml(preview)}</i>` : null,
+      input.deliveryCode ? `Код доставки: <code>${escapeHtml(input.deliveryCode)}</code>` : null,
+      input.buyoutDone ? "<b>Выкуп уже сделан — робуксы ушли</b>" : null,
+    ].filter((line): line is string => Boolean(line)),
+    next: input.deliveryCode
+      ? "отклонить заказ в кабинете WB этим кодом. Доставку бот НЕ закроет, гейт заморожен"
+      : input.askedBuyer
+        ? "покупателя попросили прислать код доставки — придёт сюда же, доставку бот НЕ закроет"
+        : "<b>сообщение покупателю не ушло</b> — попросить код доставки вручную",
+  }, ref);
+}
+
+/** Код доставки пришёл, когда отмена уже включена. */
+export function notifyDbsCancelCode(ref: DbsRef, deliveryCode: string) {
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: "код для отмены получен",
+    lines: [refLine(ref), `Код доставки: <code>${escapeHtml(deliveryCode)}</code>`],
+    next: "отклонить заказ в кабинете WB этим кодом — доставку бот не закрывал",
+  }, ref);
+}
+
+/** Отмену сняли: дальше заказ идёт обычным путём. */
+export function notifyDbsCancelResumed(ref: DbsRef, by: string) {
+  broadcast({
+    marker: "progress",
+    zone: "DBS",
+    title: "отмена снята",
+    lines: [refLine(ref), `Кто: ${cancelWho(by)}`],
+    next: "заказ идёт обычным путём: код доставки закроет доставку, гейт уйдёт сам",
+  }, ref);
+}
+
+/** Просят отменить, а доставка уже закрыта — кодом тут ничего не сделать. */
+export function notifyDbsCancelTooLate(ref: DbsRef, buyerMessage: string) {
+  const preview = buyerMessage.length > 120 ? buyerMessage.slice(0, 117) + "…" : buyerMessage;
+  broadcast({
+    marker: "action",
+    zone: "DBS",
+    title: "просят отмену, но доставка уже закрыта",
+    lines: [refLine(ref), `<i>${escapeHtml(preview)}</i>`],
+    next: "отмена кодом невозможна — только возврат через WB. Ответить покупателю вручную",
   }, ref);
 }
 
