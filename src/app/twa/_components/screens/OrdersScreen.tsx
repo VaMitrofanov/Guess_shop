@@ -50,6 +50,7 @@ type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" 
    поэтому prisma в клиентский бандл не попадает (значение отсюда импортировать
    нельзя). */
 import type { FilterTab } from "@/lib/order-queue";
+import { forgetRecentSearches, loadRecentSearches, rememberRecentSearch } from "@/lib/recent-searches";
 import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
@@ -3479,15 +3480,27 @@ function OrderCard({
 }
 
 /* ───────────── Search ───────────── */
-function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
+/* Недавние поиски (28.10.2026): с несколькими заказами работают параллельно и
+   каждый раз заново копировали код. Пока поле в фокусе и пустое, под ним —
+   последние запросы; тап повторяет поиск. Только localStorage этого устройства. */
+function SearchBar({ value, onChange, inputRef, recent = [], onClearRecent }: {
+  value: string;
+  onChange: (v: string) => void;
+  inputRef?: React.Ref<HTMLInputElement>;
+  recent?: string[];
+  onClearRecent?: () => void;
+}) {
   const [local, setLocal] = useState(value);
+  const [focused, setFocused] = useState(false);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => {
     const t = setTimeout(() => { if (local !== value) onChange(local); }, 250);
     return () => clearTimeout(t);
   }, [local]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const showRecent = focused && !local && recent.length > 0;
   return (
+    <>
     <div style={{
       display: "flex", alignItems: "center", gap: 8,
       background: "rgba(118,118,128,0.24)",
@@ -3503,6 +3516,15 @@ function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v:
         ref={inputRef}
         value={local}
         onChange={e => setLocal(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        // «Найти» на клавиатуре: искать сразу, без паузы набора, и убрать клавиатуру.
+        onKeyDown={e => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          if (local !== value) onChange(local);
+          e.currentTarget.blur();
+        }}
         enterKeyHint="search"
         placeholder="Ник, @username, WB-код, ссылка, ID"
         style={{
@@ -3527,6 +3549,38 @@ function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v:
         </button>
       )}
     </div>
+    {showRecent && (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", padding: "8px 2px 0" }}>
+        <span style={{ fontSize: 13, color: C.textTertiary, marginRight: 2 }}>Недавние</span>
+        {recent.map(item => (
+          <button
+            key={item}
+            type="button"
+            className="twa-press-sm"
+            // pointerdown, а не click: иначе blur поля прячет список раньше тапа.
+            onPointerDown={e => {
+              e.preventDefault(); haptic.select(); setLocal(item); onChange(item);
+              // Запрос выбран — клавиатура больше не нужна, нужны результаты.
+              (document.activeElement as HTMLElement | null)?.blur();
+            }}
+            style={{
+              border: "none", borderRadius: 999, padding: "7px 11px", maxWidth: "100%",
+              background: "rgba(255,255,255,0.09)", color: C.textPrimary,
+              fontSize: 14, fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {item}
+          </button>
+        ))}
+        {onClearRecent && (
+          <button type="button" onPointerDown={e => { e.preventDefault(); onClearRecent(); }}
+            style={{ border: "none", background: "transparent", color: C.textTertiary, fontSize: 13, padding: "7px 4px", fontFamily: "inherit" }}>
+            очистить
+          </button>
+        )}
+      </div>
+    )}
+    </>
   );
 }
 
@@ -3637,6 +3691,8 @@ export default function OrdersScreen({
   // требовал выбрать, чем заняться, — сегмента, который это позволял, больше нет.
   const [filter, setFilter] = useState<FilterTab>(initialQuery ? "ALL" : (initialTab as FilterTab) || "BUYOUT");
   const [query, setQuery] = useState(initialQuery ?? "");
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  useEffect(() => { setRecentSearches(loadRecentSearches("twa")); }, []);
   // Вкладка «Все»: по умолчанию хронологическая лента (новые сверху),
   // подборка «Требуют внимания» — по кнопке «⚠ Внимание (N)» (решение 2026-07-06).
   const [allView, setAllView] = useState<"attention" | "list">("list");
@@ -3801,6 +3857,15 @@ export default function OrdersScreen({
 
   /* Поиск: с курсором по 🔍 в шапке и по «＋ → Найти». Лента прокручивается к
      началу — поиск живёт её первым блоком. */
+  /* В недавние попадает запрос, который нашёл заказы и простоял 1,5 с:
+     промежуточные «AB», «AB1» при наборе туда не нужны. */
+  const foundTotal = query ? data?.total ?? 0 : 0;
+  useEffect(() => {
+    if (!query.trim() || foundTotal === 0) return;
+    const timer = window.setTimeout(() => setRecentSearches(rememberRecentSearch("twa", query)), 1500);
+    return () => window.clearTimeout(timer);
+  }, [query, foundTotal]);
+
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const focusSearch = useCallback(() => {
     listScrollRef.current?.scrollTo({ top: 0 });
@@ -4380,12 +4445,20 @@ export default function OrdersScreen({
       {/* Content. Поиск, «Создать заказ» и срезы — первым блоком ленты, а не
           над ней: при прокрутке они уезжают и не съедают экран (21.10).
           Вернуться к ним — кнопкой «Наверх». */}
-      <div ref={listScrollRef} onScroll={onListScroll} style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+      {/* Палец повёл ленту — клавиатура поиска уходит, как в приложениях iOS
+          (28.10.2026: после ввода запроса она закрывала пол-экрана, и
+          прокрутка её не убирала). Только поле поиска: формы в карточках
+          свою клавиатуру держат. */}
+      <div ref={listScrollRef} onScroll={onListScroll}
+        onTouchMove={() => { if (document.activeElement === searchInputRef.current) searchInputRef.current?.blur(); }}
+        style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
       {/* Premium Calm: three primary modes, compact status strip and secondary filters in a sheet. */}
       <div className="twa-orders-toolbar twa-orders-toolbar-calm is-inline">
         <div className="twa-orders-search-row">
           <div className="twa-orders-search-wrap">
-            <SearchBar value={query} onChange={setQuery} inputRef={searchInputRef} />
+            <SearchBar value={query} onChange={setQuery} inputRef={searchInputRef}
+              recent={recentSearches}
+              onClearRecent={() => { forgetRecentSearches("twa"); setRecentSearches([]); }} />
           </div>
         </div>
         {/* «Создать заказ» переехал в центральную «＋» нижней панели (21.10):

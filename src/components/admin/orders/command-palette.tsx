@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtAge, grossOf } from "@/lib/order-presentation";
 import { AdminOrder, SLICE_META, gamepassIdsOf, num } from "./types";
+import { loadRecentSearches, rememberRecentSearch } from "@/lib/recent-searches";
 import styles from "./orders.module.css";
 
 type Command = "export" | "complete" | "hold" | "copy-id" | "split" | "edit" | "priority" | "help";
@@ -39,8 +40,11 @@ export default function CommandPalette({
   const [searching, setSearching] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  /* Недавние поиски (28.10.2026): пока поле пустое — последние запросы, из
+     которых открывали заказ. Только localStorage этого браузера. */
+  const [recent, setRecent] = useState<string[]>([]);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { inputRef.current?.focus(); setRecent(loadRecentSearches("admin")); }, []);
 
   useEffect(() => {
     const term = value.trim();
@@ -71,8 +75,14 @@ export default function CommandPalette({
         id: `order-${order.id}`,
         label: `${order.wbCode} · ${order.robloxUsername ?? order.probableNick ?? "без ника"}`,
         hint: `${num(grossOf(order.amount))} R$ · ${order.status} · ${fmtAge(order.createdAt)}`,
-        run: () => onOpenOrder(order.id),
+        run: () => { rememberRecentSearch("admin", value); onOpenOrder(order.id); },
       });
+    }
+
+    if (value.trim().length < 2) {
+      for (const query of recent) {
+        list.push({ id: `recent-${query}`, label: `🕘 ${query}`, hint: "повторить поиск", run: () => setValue(query) });
+      }
     }
 
     if (cursorOrder) {
@@ -104,7 +114,7 @@ export default function CommandPalette({
     return term.length < 2
       ? list
       : list.filter(row => row.id.startsWith("order-") || row.label.toLowerCase().includes(term));
-  }, [found, cursorOrder, slice, value, onOpenOrder, onSlice, onCommand]);
+  }, [found, recent, cursorOrder, slice, value, onOpenOrder, onSlice, onCommand]);
 
   useEffect(() => { setActive(0); }, [rows.length]);
 
@@ -115,8 +125,11 @@ export default function CommandPalette({
     if (event.key === "Enter") { event.preventDefault(); rows[active]?.run(); }
   }, [rows, active, onClose]);
 
-  const orderRows = rows.filter(row => row.id.startsWith("order-"));
-  const commandRows = rows.filter(row => !row.id.startsWith("order-"));
+  // «Недавние» идут в первой группе: это тоже путь к заказу, а не команда.
+  const isOrderRow = (row: Row) => row.id.startsWith("order-") || row.id.startsWith("recent-");
+  const orderRows = rows.filter(isOrderRow);
+  const commandRows = rows.filter(row => !isOrderRow(row));
+  const recentOnly = orderRows.length > 0 && orderRows.every(row => row.id.startsWith("recent-"));
 
   return (
     <div className={styles.paletteBackdrop} onMouseDown={event => event.target === event.currentTarget && onClose()}>
@@ -135,7 +148,7 @@ export default function CommandPalette({
         </div>
 
         <div className={styles.paletteList}>
-          {orderRows.length > 0 && <div className={styles.paletteGroup}>Заказы</div>}
+          {orderRows.length > 0 && <div className={styles.paletteGroup}>{recentOnly ? "Недавние поиски" : "Заказы"}</div>}
           {orderRows.map((row, index) => (
             <button
               key={row.id}
