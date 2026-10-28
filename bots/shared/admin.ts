@@ -628,6 +628,8 @@ export const CB = {
   // rev_reason: was 69 b max — shortened to rr: (61 b max with "notpub" key).
   reviewRejectReason: (orderId: string, userId: string, key: string) =>
     `rr:${orderId}:${userId}:${key}`,
+  // «✏️ Своя причина»: следующее сообщение админа уходит покупателю (≤ 55 b).
+  reviewRejectCustom: (orderId: string, userId: string) => `rrt:${orderId}:${userId}`,
 
   // Preset order rejection reasons — ord_rr:{orderId}:{key} (≤ 43 b with CUID + 8-char key)
   orderRejectReason:  (orderId: string, key: string) => `ord_rr:${orderId}:${key}`,

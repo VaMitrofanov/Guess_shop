@@ -2366,6 +2366,9 @@ function OrderCard({
   const [expanded, setExpanded] = useState(false);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /* 📨 Инструкция покупателю — своя кнопка карточки (28.10.2026). Раньше
+     пряталась в «Инструментах пасса», и о ней не знали. */
+  const [instrOpen, setInstrOpen] = useState(false);
   /* Форма, к которой нужно подкрутить лист. Формы заморозки, разбиения,
      перемещения и отмены — не шторки, а блоки в КОНЦЕ длинного досье. Открытые
      из меню «···» они оказывались ниже видимой части, и «нажал — ничего не
@@ -2521,6 +2524,7 @@ function OrderCard({
      досье сайта и в правке; до 19.10.2026 каждая поверхность считала их сама и
      они разъехались (ключ был доступнее, чем его показывали). */
   const tools = gamepassToolsFor(order);
+  const canInstruct = tools.some(t => t.id === "ask");
   const canTool = (id: GamepassToolId) => tools.some(item => item.id === id);
   const isSplittable = canTool("split");
   // ⚡ Поднять можно то, что стоит в очереди. Замороженный заказ выключен из
@@ -2815,6 +2819,12 @@ function OrderCard({
           <i>{copied === "pass" ? "✓" : "⧉"}</i><span>ID</span>
         </button>
       )}
+      {canInstruct && (
+        <button type="button" className="twa-oc-more twa-press-sm" aria-label="Инструкция покупателю"
+          onClick={() => { haptic.select(); setInstrOpen(true); }}>
+          📨
+        </button>
+      )}
       <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
         onClick={() => { haptic.select(); setMenuOpen(true); }}>
         ···
@@ -2878,6 +2888,12 @@ function OrderCard({
             <span>{copySlot.hint && gpwLoading ? "Ищу пасс…" : copySlot.label}</span>
           </button>
         ) : <span style={{ flex: 1 }} />}
+        {canInstruct && (
+          <button type="button" className="twa-oc-more twa-press-sm" aria-label="Инструкция покупателю"
+            onClick={e => { e.stopPropagation(); haptic.select(); setInstrOpen(true); }}>
+            📨
+          </button>
+        )}
         <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
           onClick={e => { e.stopPropagation(); haptic.select(); setMenuOpen(true); }}>
           ···
@@ -3443,6 +3459,20 @@ function OrderCard({
           onContact={() => { haptic.impact("light"); openContact(order.user); }}
         />
       </section>
+    </BottomSheet>
+
+    {/* 📨 Шторка инструкции. `twa-form-sheet` держит её над карточкой-
+        просмотром: из закреплённого низа она открывается поверх неё. */}
+    <BottomSheet
+      open={instrOpen}
+      onClose={() => setInstrOpen(false)}
+      ariaLabel="Инструкция покупателю"
+      className="twa-form-sheet"
+    >
+      <div style={{ padding: "4px 16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>📨 Инструкция покупателю</div>
+        {instrOpen && <AskBuyerForm key={order.id} order={order} token={token} bare onClose={() => setInstrOpen(false)} />}
+      </div>
     </BottomSheet>
     </>
   );

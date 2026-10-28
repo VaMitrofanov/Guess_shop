@@ -73,10 +73,13 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   // созданным пассом попадает прямо в поле Pass ID, без экрана выбора способа.
   // `place` (20.10.2026) — «📸 Шаги с картинками» из ботов после «нет игры»:
   // раздел «создай плейс в Studio» открыт сразу, до проверки ника.
+  // `sale` (28.10.2026) — «💰 Продажа и цена» из админки: пасс есть, но не
+  // продаётся или стоит не столько. Раздел Sales с кадрами открыт сразу.
   const initialStage = stage === "key" ? ("key" as const)
     : stage === "passid" ? ("passid" as const)
       : stage === "place" ? ("place" as const)
-        : undefined;
+        : stage === "sale" ? ("sale" as const)
+          : undefined;
 
   return (
     <>

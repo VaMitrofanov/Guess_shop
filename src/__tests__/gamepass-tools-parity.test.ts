@@ -37,7 +37,7 @@ const SURFACES = [
 
 describe("список инструментов", () => {
   it("пять инструментов, и ключ первый — им заказ закрывается за минуту", () => {
-    expect(GAMEPASS_TOOLS.map(tool => tool.id)).toEqual(["key", "link", "nick", "ask", "split"]);
+    expect(GAMEPASS_TOOLS.map(tool => tool.id)).toEqual(["ask", "key", "link", "nick", "split"]);
   });
 
   it("у каждого есть значок, имя и объяснение «зачем»", () => {
@@ -70,7 +70,7 @@ describe("предусловия — те же, что на сервере", () 
   });
 
   it("живому заказу доступно всё", () => {
-    expect(gamepassToolsFor(order()).map(t => t.id)).toEqual(["key", "link", "nick", "ask", "split"]);
+    expect(gamepassToolsFor(order()).map(t => t.id)).toEqual(["ask", "key", "link", "nick", "split"]);
     expect(gamepassToolsRefusal(order())).toBeNull();
   });
 
@@ -97,7 +97,7 @@ describe("предусловия — те же, что на сервере", () 
 
   it("без ника нет поиска пассов и разбивки, но ключ и ссылка есть", () => {
     const noNick = order({ robloxUsername: null, probableNick: null });
-    expect(gamepassToolsFor(noNick).map(t => t.id)).toEqual(["key", "link", "ask"]);
+    expect(gamepassToolsFor(noNick).map(t => t.id)).toEqual(["ask", "key", "link"]);
     expect(gamepassToolsRefusal(noNick)).toContain("Ника Roblox нет");
   });
 
@@ -124,7 +124,7 @@ describe("предусловия — те же, что на сервере", () 
   it("📨 просить у покупателя можно, только пока ход за ним", () => {
     expect(hasGamepassTool(order({ status: "AWAITING_GAMEPASS" }), "ask")).toBe(true);
     expect(hasGamepassTool(order({ status: "REJECTED" }), "ask")).toBe(true);
-    expect(hasGamepassTool(order({ status: "PENDING" }), "ask")).toBe(false);
+    expect(hasGamepassTool(order({ status: "PENDING" }), "ask")).toBe(true);
     expect(hasGamepassTool(order({ status: "IN_PROGRESS" }), "ask")).toBe(false);
   });
 });

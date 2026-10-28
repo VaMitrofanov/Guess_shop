@@ -30,7 +30,7 @@ import {
   type SupportIntakeDb,
 } from "../shared/support-intake";
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "../shared/wb-code-revocation";
-import { pendingLink, pendingReview, explicitReviewAt, pendingPhotoKind, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, heldGameKeys, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
+import { pendingLink, pendingReview, explicitReviewAt, pendingPhotoKind, pendingRejectionReason, pendingReviewRejectReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, pendingApiKey, pendingDirectKey, heldGameKeys, questPlans, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -73,6 +73,7 @@ import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
+import { escapeReviewReason, normalizeCustomReviewReason, REVIEW_REJECT_REASONS, reviewRejectReasonText } from "../shared/review-reject";
 
 /** Узкие представления `db` для шага геймпасса — без `any`. */
 const stepDb = db as unknown as BuyerStepClient;
@@ -2463,6 +2464,21 @@ export function registerText(bot: Telegraf): void {
       if (await replyRobuxEta(ctx, tgId).catch((err) => { console.error("[TG] robux-eta failed:", err); return false; })) return;
       // Заказ ещё не выкуплен — ответ не таймер, а этап заказа (24.10.2026).
       if (await replyActiveOrderStage(ctx, tgId).catch(() => false)) return;
+    }
+
+    // 0r. Своя причина отказа по скриншоту отзыва («✏️ Своя причина»).
+    const reviewReject = isAdmin ? pendingReviewRejectReason.get(ctx.from.id) : undefined;
+    if (reviewReject) {
+      const reason = normalizeCustomReviewReason(text);
+      if (!reason) { await ctx.reply("Причина пустая — напиши её текстом или нажми «❌ Отмена»."); return; }
+      pendingReviewRejectReason.delete(ctx.from.id);
+      const adminName = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "админ";
+      await notifyReviewRejected(bot, reviewReject.userId, reviewReject.orderId, reason);
+      await ctx.reply(
+        `❌ Отзыв отклонён — ${escapeReviewReason(adminName)}\nЗаказ <code>${(await orderCode(reviewReject.orderId)) ?? "?"}</code>\nПричина: ${escapeReviewReason(reason)}`,
+        { parse_mode: "HTML" },
+      );
+      return;
     }
 
     // 1. ADMIN REJECTION REASON flow
@@ -7632,9 +7648,9 @@ export function registerCallbacks(bot: Telegraf): void {
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("📸 Скриншот нечёткий", CB.reviewRejectReason(orderId, userId, "blur"))],
-            [Markup.button.callback("⏳ Отзыв ещё не опубликован", CB.reviewRejectReason(orderId, userId, "notpub"))],
-            [Markup.button.callback("📦 Не тот товар", CB.reviewRejectReason(orderId, userId, "wrong"))],
+            ...REVIEW_REJECT_REASONS.map((r) => [Markup.button.callback(r.button, CB.reviewRejectReason(orderId, userId, r.key))]),
+            [Markup.button.callback("✏️ Своя причина", CB.reviewRejectCustom(orderId, userId))],
+            [Markup.button.callback("❌ Отмена", CB.cancelReviewReject(orderId, userId))],
           ])
         }
       ); } catch { }
@@ -7645,6 +7661,8 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── ❌ xrn: admin cancelled review rejection ─────────────────────────
     if (data.startsWith("xrn:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
+      // Иначе следующее сообщение админа ушло бы покупателю причиной отказа.
+      pendingReviewRejectReason.delete(ctx.from.id);
       try { await ctx.editMessageText("✅ Отклонение отзыва отменено."); } catch { }
       await ctx.answerCbQuery("Отменено").catch(() => {});
       return;
@@ -7658,21 +7676,33 @@ export function registerCallbacks(bot: Telegraf): void {
       const userId  = parts[2];
       const key     = parts[3];
 
-      const reasonMap: Record<string, string> = {
-        blur:   "Скриншот нечёткий",
-        notpub: "Отзыв ещё не опубликован",
-        wrong:  "Не тот товар",
-      };
-      const reason = reasonMap[key] ?? key;
+      const reason = reviewRejectReasonText(key) ?? key;
+      pendingReviewRejectReason.delete(ctx.from.id);
 
       // Update admin card
-      const caption = `❌ Отзыв отклонён — ${adminTag}\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>\nПричина: ${reason}`;
+      const caption = `❌ Отзыв отклонён — ${adminTag}\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>\nПричина: ${escapeReviewReason(reason)}`;
       try { await ctx.editMessageText(caption, { parse_mode: "HTML" }); } catch { }
 
       // Notify user and restore review state
       await notifyReviewRejected(bot, userId, orderId, reason);
 
       await ctx.answerCbQuery("✅ Отзыв отклонён").catch(() => {});
+      return;
+    }
+
+    // ── ✏️ rrt: своя причина отказа по отзыву — ждём текст админа ─────────
+    if (data.startsWith("rrt:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
+      const [, orderId, userId] = data.split(":");
+      // Два режима ввода сразу не живут: причина заказа съела бы этот текст.
+      pendingRejectionReason.delete(ctx.from.id);
+      pendingReviewRejectReason.set(ctx.from.id, { orderId, userId });
+      try { await ctx.editMessageText(
+        `✏️ Напиши причину отказа по отзыву для заказа <code>${(await orderCode(orderId)) ?? "?"}</code> — одним сообщением.\n\n` +
+        `Покупатель увидит: «📸 Скриншот не подошёл: <i>твой текст</i>» и сможет прислать новый.`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelReviewReject(orderId, userId))]]) },
+      ); } catch { }
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -7978,7 +8008,7 @@ async function notifyReviewRejected(
   if (!user) return;
 
   const tgMsg =
-    `📸 Скриншот не подошёл: <b>${reason}</b>.\n\n` +
+    `📸 Скриншот не подошёл: <b>${escapeReviewReason(reason)}</b>.\n\n` +
     `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (действует на любой номинал)! 🎁`;
 
   const vkMsg =

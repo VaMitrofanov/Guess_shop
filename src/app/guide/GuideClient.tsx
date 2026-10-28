@@ -2957,7 +2957,7 @@ export default function GuideClient({
   /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE, читается на сервере). */
   keyAutoEnabled?: boolean;
   /** `?stage=key` — открыть ветку ключа сразу после проверки аккаунта. */
-  initialStage?: "key" | "passid" | "place";
+  initialStage?: "key" | "passid" | "place" | "sale";
 }) {
   // Both modes open the instruction directly (no gate/intro/bot/DB/session).
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),

@@ -26,6 +26,7 @@ import { getOrInitSessionId } from "@/lib/wb-session";
 import { tgBotHref, vkBotHref } from "@/lib/bot-links";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import PlaceSteps from "./PlaceSteps";
+import SaleSteps from "./SaleSteps";
 import {
   coveredRobux,
   createTargetsFor,
@@ -88,7 +89,7 @@ export default function GamepassCheck({
   /** Метод «пасс по ключу» включён (флаг GAMEPASS_AUTOCREATE). */
   keyAutoEnabled?: boolean;
   /** `?stage=key` — человек пришёл по ссылке, которая ключ и просит. */
-  initialStage?: "key" | "passid" | "place";
+  initialStage?: "key" | "passid" | "place" | "sale";
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
@@ -517,6 +518,7 @@ export default function GamepassCheck({
               Статичные шаги: проверка ника им не нужна, поэтому раздел стоит
               сверху сразу. Ниже — обычная проверка, чтобы вставить ключ. */}
           {initialStage === "place" && <PlaceSteps />}
+          {initialStage === "sale" && <SaleSteps amount={amount} />}
 
           {/* ── Пройденное: строкой сверху, а не экраном ─────────────────── */}
           {phase === "result" && (

@@ -53,8 +53,9 @@ describe("что прислал покупатель — без знания ш�
 describe("сообщение «попросить у покупателя»", () => {
   const order = { wbCode: "AB12CD3", amount: 500, robloxUsername: "lox23_limon" };
 
-  it("шесть вариантов, у каждого значок, имя и подсказка", () => {
-    expect(BUYER_STEP_OPTIONS.map((o) => o.kind)).toEqual(["link", "key", "nick", "create", "place", "custom"]);
+  it("вся инструкция сверху, ниже части, у каждого значок, имя и подсказка", () => {
+    expect(BUYER_STEP_OPTIONS.map((o) => o.kind)).toEqual(["create", "key", "link", "passid", "sale", "nick", "place", "custom"]);
+    expect(BUYER_STEP_OPTIONS.map((o) => o.group)).toEqual(["whole", "part", "part", "part", "part", "part", "part", "custom"]);
     for (const option of BUYER_STEP_OPTIONS) {
       expect(option.icon.length).toBeGreaterThan(0);
       expect(option.hint.length).toBeGreaterThan(10);
@@ -68,6 +69,20 @@ describe("сообщение «попросить у покупателя»", ()
       expect(msg.html.toLowerCase()).toMatch(/сюда/);
       expect(msg.buttons.length).toBeGreaterThan(0);
     }
+  });
+
+  it("💰 продажа и цена: точная цена пасса и ссылка на раздел гайда", () => {
+    const msg = buyerStepMessage("sale", order);
+    expect(msg.html).toContain(`${Math.ceil(order.amount / 0.7)} R$`);
+    expect(msg.html).toContain("Item for Sale");
+    const urls = msg.buttons.flat().filter((b): b is { label: string; url: string } => "url" in b).map((b) => b.url);
+    expect(urls.some((u) => u.includes("stage=sale"))).toBe(true);
+  });
+
+  it("🔢 Pass ID ведёт в поле Pass ID гайда", () => {
+    const urls = buyerStepMessage("passid", order).buttons.flat()
+      .filter((b): b is { label: string; url: string } => "url" in b).map((b) => b.url);
+    expect(urls.some((u) => u.includes("stage=passid"))).toBe(true);
   });
 
   it("клавиатуры влезают в лимиты VK (≤6 рядов, ≤10 кнопок, подпись ≤40)", () => {
@@ -140,7 +155,7 @@ describe("события заказа", () => {
     expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "key", channel: "tg" })).toContain("в Telegram");
     expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "link", channel: null })).toContain("не доставлено");
     // «Pass ID» не превращается в «pass id» (хвост 20.10).
-    expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "link", channel: "tg" })).toContain("Pass ID");
+    expect(buyerStepEventText(BUYER_STEP_EVENT.SENT, { kind: "passid", channel: "tg" })).toContain("Pass ID");
     expect(buyerStepEventText(BUYER_STEP_EVENT.DEAD_END, { reason: "key_format" })).toContain("ключ");
     expect(buyerStepEventText("ORDER_CREATED", {})).toBeNull();
   });

@@ -104,6 +104,8 @@ export default function OrdersWorkspace({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursor, setCursor] = useState(0);
   const [openId, setOpenId] = useState<string | null>(initialOrderId);
+  /** Клавиша `M`: какой заказ и когда просили раскрыть «📨 Инструкцию». */
+  const [instruct, setInstruct] = useState<{ id: string; n: number } | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
@@ -734,6 +736,13 @@ export default function OrdersWorkspace({
       const key = event.key.toLowerCase();
       // `I` — правка (Изменить). `E` занята «пометить ошибкой», и путать их нельзя.
       if (key === "i" && cursorOrder) { event.preventDefault(); setEditId(cursorOrder.id); return; }
+      // `M` — 📨 инструкция покупателю (Message): досье рядом и форма раскрыта.
+      if (key === "m" && cursorOrder) {
+        event.preventDefault();
+        setOpenId(cursorOrder.id); setMode("split");
+        setInstruct({ id: cursorOrder.id, n: Date.now() });
+        return;
+      }
       if (key === "r" && cursorOrder?.status === "ERROR") { event.preventDefault(); void restore(cursorOrder); return; }
       if (key === "f" && cursorOrder) { event.preventDefault(); void toggleHold(cursorOrder); return; }
       if (key === "e" && cursorOrder) { event.preventDefault(); void setError(cursorOrder); return; }
@@ -1004,6 +1013,7 @@ export default function OrdersWorkspace({
             onToast={(text, error) => showToast({ text, error })}
             onChanged={() => void load(1, false)}
             initialTool={initialTool === "nick" && openOrder.id === initialOrderId ? "nick" : null}
+            instructSignal={instruct?.id === openOrder.id ? instruct.n : undefined}
           />
         )}
 
@@ -1119,6 +1129,7 @@ export default function OrdersWorkspace({
                 ["E", "пометить ошибкой"],
                 ["P", "⚡ вперёд очереди / обратно"],
                 ["F", "заморозить / разморозить"],
+                ["M", "📨 отправить покупателю инструкцию или её часть"],
                 ["S", "разбить выкуп на несколько пассов"],
                 ["C", "скопировать ID геймпасса"],
                 ["⇧ C", "скопировать код ВБ"],

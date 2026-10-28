@@ -24,7 +24,8 @@ import {
   type GamepassToolId,
   type GamepassToolOrder,
 } from "@/lib/gamepass-tools";
-import { BUYER_STEP_OPTIONS, type BuyerStepKind } from "../../../../bots/shared/buyer-step";
+import { BUYER_STEP_OPTIONS, type BuyerStepKind, type BuyerStepOrder } from "../../../../bots/shared/buyer-step";
+import { BuyerMessagePreview } from "@/components/buyer-message-preview";
 import { num } from "./types";
 import styles from "./orders.module.css";
 
@@ -284,7 +285,7 @@ export function KeyCreateBox({
   );
 }
 /* ─────────────────────────────────────────────────────────────────────────────
-   📨 «Попросить у покупателя» — бот присылает ему нужный шаг с кнопками.
+   📨 «Инструкция покупателю» — бот присылает ему всю инструкцию или её часть.
 
    Жалоба поддержки 20.10.2026: покупатель ткнул не туда или пропустил шаг, и
    теперь не может вставить ссылку или ключ. Поддержка всё объяснила словами, а
@@ -292,26 +293,32 @@ export function KeyCreateBox({
    сообщение ровно с этим шагом. Тексты и кнопки — `bots/shared/buyer-step`,
    общие с ботами; ответ бот примет и без кнопки.
 
-   Над выбором — след: что уже просили и где бот покупателя не понял. Это и
-   есть ответ на «почему он застрял», без раскопок в переписке.
+   28.10.2026: сначала выбор, потом превью того, что придёт, потом отправка.
+   Под формой — след: что уже отправляли и где бот покупателя не понял.
    ───────────────────────────────────────────────────────────────────────── */
+type StepTrailRow = { at: string; type: string; text: string };
+type StepTrailResponse = {
+  trail?: StepTrailRow[];
+  channel?: "tg" | "vk" | null;
+  stepOrder?: BuyerStepOrder | null;
+  blocked?: string | null;
+};
+
 export function AskBuyerBox({
   orderId, post, onToast,
 }: {
   orderId: string;
-  post: (payload: Record<string, unknown>) => Promise<{ trail?: { at: string; type: string; text: string }[]; channel?: string | null }>;
+  post: (payload: Record<string, unknown>) => Promise<StepTrailResponse & { channel?: string | null }>;
   onToast: (text: string, error?: boolean) => void;
 }) {
-  const [trail, setTrail] = useState<{ at: string; type: string; text: string }[] | null>(null);
-  const [custom, setCustom] = useState(false);
+  const [data, setData] = useState<StepTrailResponse | null>(null);
+  const [kind, setKind] = useState<BuyerStepKind>("create");
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState<BuyerStepKind | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const loadTrail = useCallback(async () => {
-    try {
-      const data = await post({ action: "buyer-step-trail" });
-      setTrail(data.trail ?? []);
-    } catch { setTrail([]); }
+  const load = useCallback(async () => {
+    try { setData(await post({ action: "buyer-step-trail" })); }
+    catch { setData({ trail: [] }); }
   }, [post]);
 
   // Форма живёт ключом `orderId` у родителя: на соседнем заказе она
@@ -320,74 +327,91 @@ export function AskBuyerBox({
     let alive = true;
     (async () => {
       try {
-        const data = await post({ action: "buyer-step-trail" });
-        if (alive) setTrail(data.trail ?? []);
-      } catch { if (alive) setTrail([]); }
+        const next = await post({ action: "buyer-step-trail" });
+        if (alive) setData(next);
+      } catch { if (alive) setData({ trail: [] }); }
     })();
     return () => { alive = false; };
   }, [orderId, post]);
 
-  async function send(kind: BuyerStepKind) {
-    if (busy) return;
-    if (kind === "custom" && !custom) { setCustom(true); return; }
-    setBusy(kind);
+  const channel = data?.channel === "vk" ? "vk" : data?.channel === "tg" ? "tg" : null;
+  const where = channel === "vk" ? "VK" : "Telegram";
+  const blocked = data?.blocked ?? null;
+  const cannotSend = busy || !!blocked || (kind === "custom" && !text.trim());
+
+  async function send() {
+    if (cannotSend) return;
+    setBusy(true);
     try {
-      const data = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
-      onToast(`📨 Отправлено покупателю (${String(data.channel).toUpperCase()})`);
-      setCustom(false); setText("");
+      const result = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
+      onToast(`📨 Отправлено покупателю (${result.channel === "vk" ? "VK" : "Telegram"})`);
+      setText("");
     } catch (err) {
       onToast(err instanceof Error ? err.message : "Не отправилось", true);
     } finally {
-      setBusy(null);
-      void loadTrail();
+      setBusy(false);
+      void load();
     }
   }
 
+  const option = (o: (typeof BUYER_STEP_OPTIONS)[number]) => (
+    <button
+      key={o.kind}
+      type="button"
+      className={`${styles.gpTool}${kind === o.kind ? ` ${styles.gpToolOn}` : ""}`}
+      onClick={() => setKind(o.kind)}
+      aria-pressed={kind === o.kind}
+    >
+      <span className={styles.gpToolIcon}>{o.icon}</span>
+      <span><b>{o.label}</b><em>{o.hint}</em></span>
+    </button>
+  );
+
   return (
     <div className={styles.keyForm}>
-      {trail && trail.length > 0 && (
-        <div className={styles.keyPlan}>
-          {trail.slice(0, 5).map((row, index) => (
-            <div key={`${row.at}-${index}`} className={styles.keyPlanRow}>
-              <span style={{ color: "var(--o-muted)", minWidth: 92 }}>
-                {new Date(row.at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
-              </span>
-              <span style={{ color: row.type === "BOT_DEAD_END" ? "#ffd60a" : undefined }}>{row.text}</span>
-            </div>
-          ))}
+      {blocked && <div style={{ color: "var(--o-orange)", fontSize: 13.5 }}>{blocked}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+          <span className={styles.kvKey}>Целиком</span>
+          <div className={styles.gpTools}>{BUYER_STEP_OPTIONS.filter(o => o.group === "whole").map(option)}</div>
+          <span className={styles.kvKey}>Часть инструкции</span>
+          <div className={styles.gpTools}>{BUYER_STEP_OPTIONS.filter(o => o.group !== "whole").map(option)}</div>
         </div>
-      )}
-      <div className={styles.gpTools}>
-        {BUYER_STEP_OPTIONS.map(option => (
-          <button
-            key={option.kind}
-            type="button"
-            className={`${styles.gpTool}${option.kind === "custom" && custom ? ` ${styles.gpToolOn}` : ""}`}
-            onClick={() => void send(option.kind)}
-            disabled={busy !== null}
-          >
-            <span className={styles.gpToolIcon}>{option.icon}</span>
-            <span>
-              <b>{busy === option.kind ? "Отправляем…" : option.label}</b>
-              <em>{option.hint}</em>
-            </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+          {kind === "custom" && (
+            <label>
+              <span className={styles.kvKey}>Текст покупателю — к нему добавятся кнопки инструкции и ссылки</span>
+              <textarea
+                value={text}
+                onChange={event => setText(event.target.value)}
+                onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void send(); } }}
+                rows={3}
+                maxLength={1000}
+                autoFocus
+                placeholder="Например: пасс стоит 1100, а нужно 1143 — поправь цену, пожалуйста"
+              />
+            </label>
+          )}
+          {data?.stepOrder
+            ? <BuyerMessagePreview kind={kind} order={data.stepOrder} customText={text} channel={channel} />
+            : <p className={styles.hint}>Загружаем превью…</p>}
+          <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => void send()} disabled={cannotSend}>
+            {busy ? "Отправляем…" : `📨 Отправить в ${where}`}
           </button>
-        ))}
+          {data?.trail && data.trail.length > 0 && (
+            <div className={styles.keyPlan}>
+              {data.trail.slice(0, 5).map((row, index) => (
+                <div key={`${row.at}-${index}`} className={styles.keyPlanRow}>
+                  <span style={{ color: "var(--o-muted)", minWidth: 92 }}>
+                    {new Date(row.at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(",", "")}
+                  </span>
+                  <span style={{ color: row.type === "BOT_DEAD_END" ? "#ffd60a" : undefined }}>{row.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      {custom && (
-        <>
-          <label>
-            <span className={styles.kvKey}>Текст покупателю — к нему добавятся кнопки инструкции и ссылки</span>
-            <textarea value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={1000} placeholder="Например: пасс скрыт — пришли, пожалуйста, его Pass ID" />
-          </label>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button type="button" className={styles.btn} onClick={() => { setCustom(false); setText(""); }}>Отмена</button>
-            <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={() => void send("custom")} disabled={!text.trim() || busy !== null}>
-              {busy === "custom" ? "Отправляем…" : "Отправить"}
-            </button>
-          </div>
-        </>
-      )}
       <p className={styles.hint}>Бот напишет покупателю новым сообщением. Ник, ссылку, Pass ID или ключ он примет и без кнопки.</p>
     </div>
   );

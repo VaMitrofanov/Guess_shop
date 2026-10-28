@@ -25,7 +25,8 @@ import {
   type GamepassToolId,
   type GamepassToolOrder,
 } from "@/lib/gamepass-tools";
-import { BUYER_STEP_OPTIONS, type BuyerStepKind } from "../../../../bots/shared/buyer-step";
+import { BUYER_STEP_OPTIONS, type BuyerStepKind, type BuyerStepOrder } from "../../../../bots/shared/buyer-step";
+import { BuyerMessagePreview } from "@/components/buyer-message-preview";
 
 /** Что формам нужно о заказе. `Order` экрана «Заказы» и цель листа подходят обе. */
 export interface ToolOrder extends GamepassToolOrder {
@@ -387,21 +388,29 @@ export function GamepassToolRows({
   );
 }
 
-/* ── 📨 Попросить у покупателя ────────────────────────────────────────────────
+/* ── 📨 Инструкция покупателю ────────────────────────────────────────────────
    Бот присылает покупателю новое сообщение ровно с нужным шагом (20.10.2026:
-   поддержка объясняла словами, а кнопку в боте человек не находил). Тексты и
-   кнопки — `bots/shared/buyer-step`, общие с ботами и сайтом. Над выбором —
-   след: что уже просили и где бот покупателя не понял.
+   поддержка объясняла словами, а кнопку в боте человек не находил). 28.10.2026
+   меню стало отдельной кнопкой карточки: сверху вся инструкция, ниже её части,
+   под выбором — превью ровно того, что придёт, и одна кнопка отправки.
+   Тексты и кнопки — `bots/shared/buyer-step`, общие с ботами и сайтом.
    ────────────────────────────────────────────────────────────────────────── */
-export function AskBuyerForm({ order, token, onClose }: {
+type StepTrailRow = { at: string; type: string; text: string };
+
+export function AskBuyerForm({ order, token, onClose, bare }: {
   order: Pick<ToolOrder, "id">;
   token: string;
   onClose: () => void;
+  /** Внутри своей шторки: без рамки и заголовка блока. */
+  bare?: boolean;
 }) {
-  const [trail, setTrail] = useState<{ at: string; type: string; text: string }[] | null>(null);
-  const [custom, setCustom] = useState(false);
+  const [trail, setTrail] = useState<StepTrailRow[] | null>(null);
+  const [stepOrder, setStepOrder] = useState<BuyerStepOrder | null>(null);
+  const [channel, setChannel] = useState<"tg" | "vk" | null>(null);
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const [kind, setKind] = useState<BuyerStepKind>("create");
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState<BuyerStepKind | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const post = async (payload: Record<string, unknown>) => {
     const r = await fetch("/api/twa/orders", {
@@ -414,53 +423,127 @@ export function AskBuyerForm({ order, token, onClose }: {
     return d;
   };
 
-  const loadTrail = async () => {
-    try { setTrail((await post({ action: "buyer-step-trail" })).trail ?? []); }
-    catch { setTrail([]); }
+  const load = async (alive: () => boolean = () => true) => {
+    try {
+      const d = await post({ action: "buyer-step-trail" });
+      if (!alive()) return;
+      setTrail(d.trail ?? []);
+      setStepOrder(d.stepOrder ?? null);
+      setChannel(d.channel ?? null);
+      setBlocked(d.blocked ?? null);
+    } catch { if (alive()) setTrail([]); }
   };
 
   // Форма монтируется заново на каждом заказе (`key` у родителя).
   useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        const d = await post({ action: "buyer-step-trail" });
-        if (alive) setTrail(d.trail ?? []);
-      } catch { if (alive) setTrail([]); }
-    })();
+    void load(() => alive);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.id, token]);
 
-  async function send(kind: BuyerStepKind) {
-    if (busy) return;
-    if (kind === "custom" && !custom) { setCustom(true); return; }
-    setBusy(kind);
+  async function send() {
+    if (busy || blocked) return;
+    if (kind === "custom" && !text.trim()) { toast("Впиши текст сообщения", "error"); return; }
+    setBusy(true);
     haptic.impact("light");
     try {
       const d = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
       haptic.notify("success");
-      toast(`📨 Отправлено покупателю (${String(d.channel).toUpperCase()})`, "success");
+      toast(`📨 Отправлено покупателю (${d.channel === "vk" ? "VK" : "Telegram"})`, "success");
       onClose();
     } catch (err) {
       haptic.notify("error");
       toast(err instanceof Error ? err.message : "Не отправилось", "error");
-      void loadTrail();
+      void load();
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
+  const whole = BUYER_STEP_OPTIONS.filter(o => o.group === "whole");
+  const parts = BUYER_STEP_OPTIONS.filter(o => o.group === "part");
+  const customOpt = BUYER_STEP_OPTIONS.find(o => o.group === "custom");
+  const tile = (on: boolean) => ({
+    display: "flex", flexDirection: "column" as const, gap: 2, textAlign: "left" as const,
+    padding: "10px 11px", borderRadius: 12, cursor: "pointer", fontFamily: "inherit", color: "#fff",
+    border: `1px solid ${on ? C.accent : C.hairline}`, boxShadow: on ? `0 0 0 1px ${C.accent} inset` : "none",
+    background: on ? `${C.accent}1a` : "transparent", minHeight: 62,
+  });
+  const where = channel === "vk" ? "VK" : "Telegram";
+
   return (
-    <div onClick={e => e.stopPropagation()} style={{
+    <div onClick={e => e.stopPropagation()} style={bare ? { display: "flex", flexDirection: "column", gap: 10 } : {
       padding: "12px 13px 13px", borderRadius: 12,
       border: `1px solid ${C.accent}44`, background: `${C.accent}0f`,
-      display: "flex", flexDirection: "column", gap: 9,
+      display: "flex", flexDirection: "column", gap: 10,
     }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.accent }}>📨 Попросить у покупателя</div>
+      {!bare && <div style={{ fontSize: 15, fontWeight: 700, color: C.accent }}>📨 Инструкция покупателю</div>}
       <div style={{ fontSize: 14, color: C.textSecondary }}>
-        Бот напишет ему новым сообщением с нужной кнопкой. Ник, ссылку, Pass ID или ключ он примет и без кнопки.
+        {channel ? `Придёт в ${where} от бота.` : "Канал покупателя уточняется…"} Ник, ссылку, Pass ID или ключ бот примет и без кнопки.
       </div>
+      {blocked && (
+        <div style={{ fontSize: 14, color: C.orange, background: `${C.orange}14`, borderRadius: 10, padding: "9px 11px" }}>{blocked}</div>
+      )}
+
+      {whole.map(option => (
+        <button key={option.kind} type="button" onClick={() => { haptic.select(); setKind(option.kind); }}
+          style={{ ...tile(kind === option.kind), flexDirection: "row", alignItems: "center", gap: 10, minHeight: 0, padding: "12px" }}>
+          <span style={{ fontSize: 22 }}>{option.icon}</span>
+          <span>
+            <span style={{ display: "block", fontSize: 15, fontWeight: 700 }}>{option.label}</span>
+            <span style={{ display: "block", fontSize: 14, color: C.textTertiary }}>{option.hint}</span>
+          </span>
+        </button>
+      ))}
+
+      <div style={{ fontSize: 13, letterSpacing: ".06em", textTransform: "uppercase", color: C.textTertiary, fontWeight: 600 }}>Часть инструкции</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {parts.map(option => (
+          <button key={option.kind} type="button" onClick={() => { haptic.select(); setKind(option.kind); }} style={tile(kind === option.kind)}>
+            <span style={{ fontSize: 14.5, fontWeight: 650 }}>{option.icon} {option.label}</span>
+            <span style={{ fontSize: 14, color: C.textTertiary, lineHeight: 1.3 }}>{option.hint}</span>
+          </button>
+        ))}
+      </div>
+      {customOpt && (
+        <button type="button" onClick={() => { haptic.select(); setKind("custom"); }}
+          style={{ ...tile(kind === "custom"), minHeight: 0 }}>
+          <span style={{ fontSize: 14.5, fontWeight: 650 }}>{customOpt.icon} {customOpt.label}</span>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>{customOpt.hint}</span>
+        </button>
+      )}
+      {kind === "custom" && (
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          rows={3}
+          maxLength={1000}
+          autoFocus
+          placeholder="Текст покупателю — к нему добавятся кнопки инструкции и ссылки"
+          style={{
+            width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+            color: "#fff", fontSize: 16, padding: "12px", outline: "none",
+            fontFamily: "inherit", boxSizing: "border-box", resize: "vertical",
+          }}
+        />
+      )}
+
+      {stepOrder && <BuyerMessagePreview kind={kind} order={stepOrder} customText={text} channel={channel} />}
+
+      <button
+        type="button"
+        onClick={() => void send()}
+        disabled={busy || !!blocked || (kind === "custom" && !text.trim())}
+        style={{
+          padding: "13px", borderRadius: 12, border: "none", cursor: "pointer",
+          background: C.accent, color: "#120f1c", fontSize: 15, fontWeight: 700, fontFamily: "inherit",
+          opacity: busy || blocked || (kind === "custom" && !text.trim()) ? 0.5 : 1,
+        }}
+      >
+        {busy ? "Отправляем…" : `Отправить в ${where}`}
+      </button>
+
       {trail && trail.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 14 }}>
           {trail.slice(0, 4).map((row, i) => (
@@ -471,52 +554,6 @@ export function AskBuyerForm({ order, token, onClose }: {
             </div>
           ))}
         </div>
-      )}
-      {BUYER_STEP_OPTIONS.map(option => (
-        <button
-          key={option.kind}
-          onClick={() => void send(option.kind)}
-          disabled={busy !== null}
-          style={{
-            display: "flex", gap: 10, alignItems: "center", textAlign: "left",
-            padding: "10px 12px", borderRadius: 10, cursor: "pointer",
-            border: `1px solid ${option.kind === "custom" && custom ? `${C.accent}66` : C.hairline}`,
-            background: "transparent", color: "#fff", fontFamily: "inherit",
-          }}
-        >
-          <span style={{ fontSize: 18 }}>{option.icon}</span>
-          <span>
-            <span style={{ display: "block", fontSize: 15, fontWeight: 600 }}>{busy === option.kind ? "Отправляем…" : option.label}</span>
-            <span style={{ display: "block", fontSize: 14, color: C.textTertiary }}>{option.hint}</span>
-          </span>
-        </button>
-      ))}
-      {custom && (
-        <>
-          <textarea
-            value={text}
-            onChange={e => setText(e.target.value)}
-            rows={3}
-            maxLength={1000}
-            placeholder="Текст покупателю — к нему добавятся кнопки инструкции и ссылки"
-            style={{
-              width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-              color: "#fff", fontSize: 16, padding: "12px", outline: "none",
-              fontFamily: "inherit", boxSizing: "border-box", resize: "vertical",
-            }}
-          />
-          <button
-            onClick={() => void send("custom")}
-            disabled={!text.trim() || busy !== null}
-            style={{
-              padding: "12px", borderRadius: 10, border: "none", cursor: "pointer",
-              background: C.accent, color: "#fff", fontSize: 15, fontWeight: 700, fontFamily: "inherit",
-              opacity: !text.trim() || busy !== null ? 0.5 : 1,
-            }}
-          >
-            {busy === "custom" ? "Отправляем…" : "Отправить"}
-          </button>
-        </>
       )}
     </div>
   );

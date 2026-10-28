@@ -39,6 +39,14 @@ export interface GamepassTool {
 /** Порядок = порядок показа. Менять только вместе с обеими админками. */
 export const GAMEPASS_TOOLS: readonly GamepassTool[] = [
   {
+    // 20.10.2026: поддержка объясняла словами, а нужную кнопку в боте
+    // покупатель не находил. Бот присылает ему новое сообщение с ней.
+    id: "ask",
+    icon: "📨",
+    label: "Инструкция покупателю",
+    hint: "вся инструкция или её часть — бот пришлёт с кнопками",
+  },
+  {
     id: "key",
     icon: "🔑",
     label: "Ключ покупателя",
@@ -55,14 +63,6 @@ export const GAMEPASS_TOOLS: readonly GamepassTool[] = [
     icon: "🔎",
     label: "Пассы ника",
     hint: "посмотреть, что выставлено на аккаунте",
-  },
-  {
-    // 20.10.2026: поддержка объясняла словами, а нужную кнопку в боте
-    // покупатель не находил. Бот присылает ему новое сообщение с ней.
-    id: "ask",
-    icon: "📨",
-    label: "Попросить у покупателя",
-    hint: "бот пришлёт ему нужный шаг с кнопками",
   },
   {
     id: "split",
@@ -95,8 +95,15 @@ export interface GamepassToolOrder {
 
 /** Статусы, в которых сервер принимает ключ и привязку (`attach-gamepass`). */
 export const GAMEPASS_ATTACHABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
-/** Статусы, в которых сервер шлёт покупателю шаг (`send-step`): ход за ним. */
-export const BUYER_STEP_STATUSES = ["AWAITING_GAMEPASS", "REJECTED"];
+/**
+ * Статусы, в которых сервер шлёт покупателю инструкцию (`send-step`).
+ *
+ * «К выкупу» добавлен 28.10.2026: пасс привязан, но бывает не той цены или
+ * снят с продажи, и покупателя надо вернуть к шагу. «Ошибки» здесь нет: боты
+ * не считают такой заказ рабочим, и кнопка в сообщении ответила бы покупателю
+ * «активного заказа нет».
+ */
+export const BUYER_STEP_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "PENDING"];
 /** Статусы, в которых сервер принимает разбивку (`set-gamepass-split`). */
 export const GAMEPASS_SPLITTABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
 

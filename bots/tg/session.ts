@@ -100,6 +100,11 @@ export const pendingDirectPaymentEmail = new Map<number, {
  * Key: Admin Telegram ID → WbOrder.id
  */
 export const pendingRejectionReason = new Map<number, string>();
+/**
+ * Админ пишет свою причину отказа по скриншоту отзыва («✏️ Своя причина»).
+ * Key: Admin Telegram ID → заказ и покупатель из карточки отзыва.
+ */
+export const pendingReviewRejectReason = new Map<number, { orderId: string; userId: string }>();
 
 // ── Admin dashboard session states ───────────────────────────────────────────
 

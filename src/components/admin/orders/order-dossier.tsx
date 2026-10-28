@@ -47,7 +47,7 @@ const EVENT_LABELS: Record<string, string> = {
 
 export default function OrderDossier({
   order, live, packDupIn = null, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onEdit, onToast, onChanged,
-  initialTool = null,
+  initialTool = null, instructSignal,
 }: {
   order: AdminOrder;
   live?: LiveCheck;
@@ -67,6 +67,8 @@ export default function OrderDossier({
   onChanged: () => void;
   /** Инструмент, раскрытый сразу: ссылкой `?tool=` сюда ведёт полная карточка. */
   initialTool?: GamepassToolId | null;
+  /** Меняется по клавише `M` в ленте — раскрыть «📨 Инструкцию покупателю». */
+  instructSignal?: number;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [events, setEvents] = useState<EventRow[] | null>(null);
@@ -91,6 +93,15 @@ export default function OrderDossier({
     // иначе пассы чужого ника выглядят как пассы этого.
     setPicker(null); setPickerNote(null); setShowRest(false); setTool(initialTool);
   }, [order.id, order.adminNote, initialTool]);
+
+  /* 📨 Клавиша `M` в ленте: раскрыть инструкцию и подвести к ней глаз.
+     Эффект стоит ПОСЛЕ сброса выше — на новом заказе он не должен затереть «ask». */
+  const askRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!instructSignal) return;
+    setTool("ask");
+    requestAnimationFrame(() => askRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  }, [instructSignal, order.id]);
 
 
   const post = useCallback(async (payload: Record<string, unknown>) => {
@@ -294,6 +305,13 @@ export default function OrderDossier({
           {/* Правка — рядом с главным действием: чаще всего в досье приходят
               именно дописать ник или ID пасса, которого не нашёл поиск. */}
           <button type="button" className={styles.btn} onClick={onEdit}>✎ Правка <kbd>I</kbd></button>
+          {/* 📨 Своя кнопка с 28.10.2026: в «Инструментах пасса» о ней не знали. */}
+          {hasGamepassTool(order, "ask") && (
+            <button type="button" className={styles.btn} onClick={() => {
+              setTool("ask");
+              requestAnimationFrame(() => askRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+            }}>📨 Инструкция <kbd>M</kbd></button>
+          )}
           <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onHold}>
             {order.heldAt ? "❄ Разморозить" : "❄ Заморозить"} <kbd>F</kbd>
           </button>
@@ -462,7 +480,9 @@ export default function OrderDossier({
                 <KeyCreateBox order={order} post={post} onToast={onToast} onChanged={onChanged} />
               )}
 
-              {tool === "ask" && <AskBuyerBox key={order.id} orderId={order.id} post={post} onToast={onToast} />}
+              <div ref={askRef}>
+                {tool === "ask" && <AskBuyerBox key={order.id} orderId={order.id} post={post} onToast={onToast} />}
+              </div>
 
               {tool === "nick" && (
                 <>

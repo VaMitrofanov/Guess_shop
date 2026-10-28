@@ -3065,7 +3065,7 @@ export async function POST(req: NextRequest) {
 
   // ── 👁 GP-watch из карточки: live-поиск ГП по вероятному нику + пинг клиенту ─
   // Кнопка «Найти ГП и оповестить» / «Оповестить ещё раз» во вкладке «Ждут ссылку».
-  /* ── 📨 Попросить у покупателя шаг геймпасса ─────────────────────────────
+  /* ── 📨 Инструкция покупателю: вся или её часть ──────────────────────────
      Поддержка объясняет словами, а где в боте нужная кнопка, покупатель не
      находит (20.10.2026). Бот присылает ему новое сообщение ровно с нужными
      кнопками; ответ бот принимает и без кнопки (`classifyBuyerInput`).
@@ -3112,7 +3112,7 @@ export async function POST(req: NextRequest) {
   }
 
   /* ── Что просили у покупателя и где бот его не понял ────────────────────
-     Отдельно от `order-events`: форме «📨 Попросить» нужны только эти два
+     Отдельно от `order-events`: меню «📨 Инструкция» нужны только эти
      типа, и грузятся они по открытию формы, а не на каждую карточку. */
   if (action === "buyer-step-trail") {
     const events = await prisma.orderEvent.findMany({
@@ -3121,6 +3121,13 @@ export async function POST(req: NextRequest) {
       take: 8,
       select: { type: true, payload: true, createdAt: true },
     });
+    // Превью строит клиент тем же `buyerStepMessage`, что и отправку: ему
+    // нужны поля заказа, канал доставки и причина, если слать нельзя.
+    const blocked = order.heldAt ? "❄️ Заказ заморожен — сначала разморозь"
+      : unpaidDirect ? UNPAID_DIR_ERROR
+        : !BUYER_STEP_STATUSES.includes(order.status) ? `Заказ в статусе «${order.status}» — у покупателя ничего не просим`
+          : !order.user?.tgId && !order.user?.vkId ? "У покупателя нет ни Telegram, ни VK — написать некуда"
+            : null;
     return NextResponse.json({
       ok: true,
       trail: events.map((event) => ({
@@ -3128,6 +3135,15 @@ export async function POST(req: NextRequest) {
         type: event.type,
         text: buyerStepEventText(event.type, event.payload) ?? event.type,
       })),
+      stepOrder: {
+        wbCode: order.wbCode,
+        amount: order.amount,
+        isDirectOrder: order.isDirectOrder,
+        robloxUsername: order.robloxUsername,
+        probableNick: order.probableNick,
+      },
+      channel: order.user?.tgId ? "tg" : order.user?.vkId ? "vk" : null,
+      blocked,
     });
   }
 

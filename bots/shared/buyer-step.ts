@@ -75,10 +75,14 @@ export function classifyBuyerInput(raw: string): BuyerInput {
 
 /* ── 2. Что админка просит у покупателя ───────────────────────────────── */
 
-export type BuyerStepKind = "nick" | "link" | "key" | "create" | "place" | "custom";
+export type BuyerStepKind = "create" | "key" | "link" | "passid" | "sale" | "nick" | "place" | "custom";
+
+/** Где пункт стоит в меню: вся инструкция, её часть или свои слова. */
+export type BuyerStepGroup = "whole" | "part" | "custom";
 
 export interface BuyerStepOption {
   kind: BuyerStepKind;
+  group: BuyerStepGroup;
   icon: string;
   /** Имя в меню админки. */
   label: string;
@@ -86,14 +90,22 @@ export interface BuyerStepOption {
   hint: string;
 }
 
-/** Порядок = порядок в меню админки (TWA и сайт). */
+/**
+ * Порядок = порядок в меню «📨 Инструкция» (TWA и сайт).
+ *
+ * 28.10.2026: меню стало отдельной кнопкой карточки, а не пунктом в
+ * «Инструментах пасса». Пишут покупатели, которые вернулись в бота и не
+ * нашли нужную кнопку, поэтому сверху вся инструкция, ниже её части.
+ */
 export const BUYER_STEP_OPTIONS: readonly BuyerStepOption[] = [
-  { kind: "link", icon: "🔗", label: "Прислать ссылку или Pass ID", hint: "пасс уже создан — пусть пришлёт его" },
-  { kind: "key", icon: "🔑", label: "Прислать ключ", hint: "создадим пасс сами — ссылка на шаги с картинками" },
-  { kind: "nick", icon: "🔎", label: "Прислать ник Roblox", hint: "посмотрим аккаунт и соберём заказ" },
-  { kind: "create", icon: "📖", label: "Создать пасс по инструкции", hint: "личная инструкция с его кодом" },
-  { kind: "place", icon: "🆕", label: "Создать плейс (новый аккаунт)", hint: "нет игры — шаги Roblox Studio с картинками" },
-  { kind: "custom", icon: "✍️", label: "Свой текст", hint: "ваши слова + кнопки инструкции и ссылки" },
+  { kind: "create", group: "whole", icon: "📖", label: "Вся инструкция", hint: "личная ссылка с его кодом" },
+  { kind: "key", group: "part", icon: "🔑", label: "Ключ", hint: "как получить и прислать — пасс создадим сами" },
+  { kind: "link", group: "part", icon: "🔗", label: "Ссылка на пасс", hint: "пасс уже создан — пусть пришлёт" },
+  { kind: "passid", group: "part", icon: "🔢", label: "Где Pass ID", hint: "скрины, где взять число" },
+  { kind: "sale", group: "part", icon: "💰", label: "Продажа и цена", hint: "Item for Sale и точная цена пасса" },
+  { kind: "nick", group: "part", icon: "🔎", label: "Ник Roblox", hint: "посмотрим аккаунт и соберём заказ" },
+  { kind: "place", group: "part", icon: "🆕", label: "Нет игры", hint: "плейс в Roblox Studio с картинками" },
+  { kind: "custom", group: "custom", icon: "✍️", label: "Свой текст", hint: "ваши слова + кнопки инструкции" },
 ] as const;
 
 export function isBuyerStepKind(value: unknown): value is BuyerStepKind {
@@ -136,7 +148,7 @@ function esc(text: string): string {
 }
 
 /** Личная инструкция; `stage` открывает нужную ветку сразу после проверки ника. */
-export function buyerGuideUrl(order: BuyerStepOrder, stage?: "key" | "passid"): string {
+export function buyerGuideUrl(order: BuyerStepOrder, stage?: "key" | "passid" | "sale"): string {
   const code = order.wbCode?.trim() ?? "";
   if (order.isDirectOrder || !isCorridorCode(code)) return `${SITE}/guide?source=direct`;
   const nick = (order.robloxUsername ?? order.probableNick ?? "").trim();
@@ -190,6 +202,30 @@ export function buyerStepMessage(kind: BuyerStepKind, order: BuyerStepOrder, cus
           `${head}🔑 <b>Пришли сюда ключ из Roblox</b> — одним сообщением. Геймпасс создадим сами, пароль не нужен.\n\n` +
           `Как получить ключ — по кнопке, там каждое нажатие с картинкой. Скопируй его целиком кнопкой <b>Copy Key To Clipboard</b>.`,
         buttons: [[{ label: "📸 Как получить ключ", url: buyerGuideUrl(order, "key") }]],
+      };
+    case "passid":
+      return {
+        html:
+          `${head}🔢 <b>Где взять Pass ID</b>\n\n` +
+          `Creator Hub → твоя игра → Monetization → <b>Passes</b>. В таблице есть колонка <b>Pass ID</b> — это число. ` +
+          `Скопируй его и пришли сюда одним сообщением.\n\n${priceLine}`,
+        buttons: [
+          [{ label: "📸 Показать на скрине", url: buyerGuideUrl(order, "passid") }],
+          [{ label: "🔢 Прислать Pass ID", action: "link" }],
+        ],
+      };
+    case "sale":
+      return {
+        html:
+          `${head}💰 <b>Включи продажу и поставь цену</b>\n\n` +
+          `Открой геймпасс → <b>Sales</b> → включи <b>Item for Sale</b> (ползунок синий) → ` +
+          (price ? `цена <b>${price} R$</b>` : "цена, которую назвал бот") +
+          ` → <b>Managed pricing</b> выключен → <b>Save Changes</b>.\n\n` +
+          `Пока пасс не продаётся или стоит другую сумму, мы не сможем его выкупить. Как сохранишь — пришли сюда ссылку на него.`,
+        buttons: [
+          [{ label: "📸 Где это в Roblox", url: buyerGuideUrl(order, "sale") }],
+          [{ label: "🔗 Готово — прислать ссылку", action: "link" }],
+        ],
       };
     case "nick":
       return {
@@ -325,7 +361,7 @@ export function buyerStepEventText(type: string, payload: unknown): string | nul
     const channel = p.channel === "tg" ? "в Telegram" : p.channel === "vk" ? "во ВКонтакте" : "— не доставлено";
     // Только первая буква строчная: «Pass ID» и «Roblox» остаются как есть.
     const what = option ? option.label.charAt(0).toLowerCase() + option.label.slice(1) : String(p.kind);
-    return `📨 Попросили у покупателя: ${what} ${channel}`;
+    return `📨 Отправили покупателю: ${what} ${channel}`;
   }
   if (type === PLACE_HELP_EVENT) {
     const via = p.via === "site" ? "на сайте" : p.via === "vk-bot" ? "во ВКонтакте" : "в Telegram";

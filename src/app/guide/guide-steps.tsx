@@ -665,3 +665,38 @@ export default function GuideSteps({
     </div>
   );
 }
+
+/**
+ * Кадры раздела Sales без подписей цены — для «💰 Продажа и цена»
+ * (`SaleSteps`, `?stage=sale`). Живут здесь, чтобы кадры инструкции
+ * оставались в одном файле (тест guide-order-flow).
+ */
+export function SaleScreens() {
+  return (
+    <>
+    <div className="wbi-how">
+      <b>С телефона</b>
+      <figure className="wbi-figure wbi-shot">
+        <img src="/guide/wb-step7-menu.png" alt="Боковое меню пасса: пункт Sales" loading="lazy" decoding="async" />
+        <figcaption>В боковом меню пасса выбери <b>Sales</b>.</figcaption>
+      </figure>
+      <figure className="wbi-figure wbi-shot">
+        <img src="/guide/wb-step6-sales.png" alt="Вкладка Sales: Item for sale, Price, Managed pricing, Save Changes" loading="lazy" decoding="async" />
+        <figcaption><b>Item for sale</b> включён, в <b>Price</b> — твоя цена, <b>Managed pricing</b> отключён, внизу <b>Save Changes</b>.</figcaption>
+      </figure>
+    </div>
+
+    <div className="wbi-how">
+      <b>С компьютера</b>
+      <figure className="wbi-figure wbi-wide">
+        <img src="/guide/wb-pc-passmenu.jpg" alt="Страница пасса: в меню слева пункт Sales" loading="lazy" decoding="async" />
+        <figcaption>Открой пасс — в меню слева выбери <b>Sales</b>.</figcaption>
+      </figure>
+      <figure className="wbi-figure wbi-wide">
+        <img src="/guide/wb-pc-salestab.jpg" alt="Вкладка Sales на компьютере: Item for sale, Price, Managed pricing, Save Changes" loading="lazy" decoding="async" />
+        <figcaption>То же самое на компьютере: продажа, цена, Managed pricing выключен, <b>Save Changes</b>.</figcaption>
+      </figure>
+    </div>
+    </>
+  );
+}
