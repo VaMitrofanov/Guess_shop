@@ -1,3 +1,4 @@
+import type { JourneyEventRow } from "@/lib/buyer-journey";
 import type { OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 import type { Tone } from "@/lib/order-presentation";
 import type { BuyoutOrderInput } from "@/lib/buyout-summary";
@@ -36,6 +37,9 @@ export interface AdminOrder {
   remindersSent?: number | null;
   robloxUsername: string | null;
   probableNick: string | null;
+  probableNickAt?: string | null;
+  /** 🧭 События пути покупателя (до 12 последних) — только у незакрытых. */
+  journeyEvents?: JourneyEventRow[];
   purchaserUsername: string | null;
   orderSource: string;
   reviewStatus?: "PENDING" | "SUBMITTED" | null;

@@ -1965,6 +1965,12 @@ html.twa-route-active [contenteditable="true"] {
 .twa-rd-step > small.is-now { color: #f7f5ff; }
 .twa-rd-step > small.is-wait, .twa-rd-step > small.is-bad { color: inherit; }
 .twa-rd.is-labeled { margin-top: 4px; }
+/* 🧭 Путь покупателя (28.10.2026): та же полоса, но 5 шагов, а над ней
+   в ленте — строка «чего ждём» вместо слова готовности. */
+.twa-jr:not(.is-labeled) { flex-direction: column; align-items: stretch; gap: 6px; }
+.twa-jr-segs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.twa-jr-now { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; }
+.twa-jr-now > small { font-size: 13px; font-weight: 600; opacity: .85; }
 @keyframes twa-rd-shim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @keyframes twa-rd-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(48,209,88,.6); } 50% { box-shadow: 0 0 0 5px rgba(48,209,88,0); } }
 @media (prefers-reduced-motion: reduce) {
@@ -2006,8 +2012,8 @@ html.twa-route-active [contenteditable="true"] {
 /* «Свернуть» — крупная цель (44 px), а не стрелка 32 px в углу: в неё не попадали. */
 .twa-os-collapse { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px 0 9px; border: 0; border-radius: 12px; background: rgba(255,255,255,.09); color: #e3def0; font-size: 14px; font-weight: 600; line-height: 1; }
 .twa-os-collapse > span { font-size: 18px; margin-top: -4px; }
-.twa-os-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: 12px; background: rgba(255,255,255,.05); }
-.twa-os-tabs > button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; color: #aaa4b8; font-size: 14px; font-weight: 600; }
+.twa-os-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: rgba(255,255,255,.05); }
+.twa-os-tabs > button { min-height: 34px; min-width: 0; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: #aaa4b8; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .twa-os-tabs > button.is-on { background: rgba(255,255,255,.1); color: #f7f5ff; }
 
 .twa-os-head { display: flex; flex-direction: column; gap: 6px; padding: 4px 16px 0; }

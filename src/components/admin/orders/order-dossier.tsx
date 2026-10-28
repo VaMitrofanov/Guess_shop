@@ -7,14 +7,16 @@
    подряд — три вкладки рядом с очередью.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ageBasis, ageTone, fmtAge, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
-  primaryActionFor, nextStepFor, sourceLabel, readinessFor, READINESS_STEPS,
+  primaryActionFor, nextStepFor, sourceLabel,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
-import { buyerStepEventText } from "../../../../bots/shared/buyer-step";
+import { buyerStepEventText, type BuyerStepKind } from "../../../../bots/shared/buyer-step";
+import { buyerJourney, type JourneyEventRow, type JourneyNext } from "@/lib/buyer-journey";
+import { BuyerJourneyPanel, JourneySteps } from "./buyer-journey-panel";
 import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
@@ -140,7 +142,50 @@ export default function OrderDossier({
   const action = primaryActionFor(order, live);
   const [moreActions, setMoreActions] = useState(false);
   const next = nextStepFor(order, live, order.remindersSent ?? 0, { packDupIn });
-  const readiness = readinessFor(order as never, live);
+  /* 🧭 Путь покупателя. Лента приносит до 12 событий, досье догружает все. */
+  const [journeyEvents, setJourneyEvents] = useState<JourneyEventRow[] | null>(null);
+  const [journeyTick, setJourneyTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void post({ action: "buyer-journey" })
+      .then((d: { events?: JourneyEventRow[] }) => { if (alive && Array.isArray(d.events)) setJourneyEvents(d.events); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [order.id, post, journeyTick]);
+  useEffect(() => { setJourneyEvents(null); }, [order.id]);
+  useEffect(() => {
+    const onStale = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === order.id) setJourneyTick(n => n + 1);
+    };
+    window.addEventListener("admin:journey-stale", onStale);
+    return () => window.removeEventListener("admin:journey-stale", onStale);
+  }, [order.id]);
+  const journey = useMemo(() => buyerJourney({
+    status: order.status, wbCode: order.wbCode, createdAt: order.createdAt, isDirectOrder: order.isDirectOrder,
+    paidAt: order.paidAt, robloxUsername: order.robloxUsername, probableNick: order.probableNick,
+    probableNickAt: order.probableNickAt ?? null, gamepassUrl: order.gamepassUrl,
+    splitCount: order.splitGamepasses?.length ?? 0, completedAt: order.completedAt ?? null,
+    heldAt: order.heldAt, heldReason: order.heldReason, buyoutErrorCode: order.buyoutErrorCode,
+    orderSource: order.orderSource,
+    channel: order.user?.tgId ? "tg" : order.user?.vkId ? "vk" : null,
+  }, journeyEvents ?? order.journeyEvents ?? [], live), [order, journeyEvents, live]);
+  /** Какой пункт «📨 Инструкции» открыть выбранным («Следующий шаг»). */
+  const [askKind, setAskKind] = useState<BuyerStepKind | undefined>(undefined);
+  function openAsk(kind: BuyerStepKind | undefined) {
+    setAskKind(kind);
+    setTool("ask");
+    requestAnimationFrame(() => askRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  }
+  function runJourneyNext(nextStep: JourneyNext) {
+    if (nextStep.kind === "nick-passes") {
+      setTool("nick");
+      if (!picker) void loadPicker();
+      return;
+    }
+    if (nextStep.kind === "step") { openAsk(nextStep.step); return; }
+    if (href) window.open(href, "_blank", "noopener");
+    else onToast("У покупателя нет контакта для лички", true);
+  }
   const [idCopied, setIdCopied] = useState(false);
   /* Флаг под пассом — только то, чего не сказали заголовок блока и строка
      цены: «цена не сходится» и «продаётся, цена сходится» там уже есть. */
@@ -246,23 +291,8 @@ export default function OrderDossier({
           {!order.robloxUsername && order.probableNick && " (вероятный)"} · {clientLabel(order)}
           {href && <> · <a href={href} target="_blank" rel="noreferrer">написать</a></>}
         </div>
-        {order.status !== "REJECTED" && (
-          <div className={styles.readiness} aria-label={`Готовность: ${readiness.label}`}>
-            {readiness.steps.map((step, i) => {
-              const tint = step === "wait" || step === "bad" ? TONE_COLOR[readiness.tone] : undefined;
-              const partial = i === 3 && step === "now" && readiness.buyoutShare > 0;
-              return (
-                <div key={READINESS_STEPS[i]} className={styles.readyStep} style={tint ? { color: tint } : undefined}>
-                  <span
-                    className={`${styles.readySeg} ${styles[`seg_${step}`] ?? ""} ${partial ? styles.segPartial : ""}`}
-                    style={partial ? { ["--share" as string]: `${Math.round(readiness.buyoutShare * 100)}%` } : tint ? { background: tint } : undefined}
-                  />
-                  <small className={styles[`lbl_${step}`] ?? ""}>{step === "done" ? "✓ " : ""}{READINESS_STEPS[i]}{step === "now" ? " ← сейчас" : ""}</small>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* 🧭 Полоса пути (5 шагов) на месте полосы готовности — 28.10.2026. */}
+        {order.status !== "REJECTED" && <JourneySteps journey={journey} />}
         {/* ID пасса — главное в досье: на компьютере выкупают вставкой ID.
             Крупная плашка, клик (или C) копирует. В TWA на этом месте ник. */}
         {ids.length > 0 && (
@@ -288,7 +318,7 @@ export default function OrderDossier({
             <span className={styles.idHeroIcon} aria-hidden="true">{idCopied ? "✓" : "⧉"}<kbd>C</kbd></span>
           </button>
         )}
-        {next && next.tone !== "green" && (
+        {next && next.tone !== "green" && !journey.next && (
           <div className={styles.nextStep} style={{ color: TONE_COLOR[next.tone] }}>
             <span>👉 Дальше:</span> {next.text}
           </div>
@@ -334,6 +364,15 @@ export default function OrderDossier({
             {moreActions ? "Скрыть" : "··· Ещё"}
           </button>
         </div>
+
+        {/* 🧭 Путь покупателя: чего ждём, касания, «Следующий шаг» и вся история. */}
+        {order.status !== "REJECTED" && (
+          <BuyerJourneyPanel
+            journey={journey}
+            onNext={runJourneyNext}
+            onOther={hasGamepassTool(order, "ask") ? () => openAsk(undefined) : undefined}
+          />
+        )}
       </div>
 
       <nav className={styles.tabs} aria-label="Разделы досье">
@@ -481,7 +520,7 @@ export default function OrderDossier({
               )}
 
               <div ref={askRef}>
-                {tool === "ask" && <AskBuyerBox key={order.id} orderId={order.id} post={post} onToast={onToast} />}
+                {tool === "ask" && <AskBuyerBox key={`${order.id}-${askKind ?? ""}`} orderId={order.id} post={post} onToast={onToast} initialKind={askKind} />}
               </div>
 
               {tool === "nick" && (

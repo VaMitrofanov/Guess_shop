@@ -397,18 +397,20 @@ export function GamepassToolRows({
    ────────────────────────────────────────────────────────────────────────── */
 type StepTrailRow = { at: string; type: string; text: string };
 
-export function AskBuyerForm({ order, token, onClose, bare }: {
+export function AskBuyerForm({ order, token, onClose, bare, initialKind }: {
   order: Pick<ToolOrder, "id">;
   token: string;
   onClose: () => void;
   /** Внутри своей шторки: без рамки и заголовка блока. */
   bare?: boolean;
+  /** Пункт, выбранный сразу («Следующий шаг» пути покупателя). */
+  initialKind?: BuyerStepKind;
 }) {
   const [trail, setTrail] = useState<StepTrailRow[] | null>(null);
   const [stepOrder, setStepOrder] = useState<BuyerStepOrder | null>(null);
   const [channel, setChannel] = useState<"tg" | "vk" | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [kind, setKind] = useState<BuyerStepKind>("create");
+  const [kind, setKind] = useState<BuyerStepKind>(initialKind ?? "create");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -451,6 +453,8 @@ export function AskBuyerForm({ order, token, onClose, bare }: {
       const d = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
       haptic.notify("success");
       toast(`📨 Отправлено покупателю (${d.channel === "vk" ? "VK" : "Telegram"})`, "success");
+      // Путь покупателя в карточке перечитает события (OrdersScreen).
+      window.dispatchEvent(new CustomEvent("twa:journey-stale", { detail: order.id }));
       onClose();
     } catch (err) {
       haptic.notify("error");

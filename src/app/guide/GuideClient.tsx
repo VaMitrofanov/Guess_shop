@@ -2973,6 +2973,20 @@ export default function GuideClient({
   const [prefilledCode, setPrefilledCode] = useState<string>("");
   const [isRestoring, setIsRestoring] = useState(isWB && !directInstruction);
 
+  /* 👀 «Открыл инструкцию» для «Пути покупателя» в карточке заказа
+     (28.10.2026). Один раз на открытие личной ссылки; сервер сам режет
+     повторы до раза в час. Тестовые и превью-заходы не считаем. */
+  useEffect(() => {
+    if (!wbCodeFromUrl || testMode || previewMode) return;
+    void fetch("/api/wb-code/opened", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: wbCodeFromUrl, stage: initialStage ?? null }),
+      keepalive: true,
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wbCodeFromUrl]);
+
   useEffect(() => {
     if (!isWB || directInstruction) return;
     const restoreSession = async () => {

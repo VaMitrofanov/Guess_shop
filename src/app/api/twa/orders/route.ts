@@ -56,6 +56,7 @@ import { notifyBuyerStep, notifyGamepassCreatedForBuyer } from "@/lib/twa-notify
 import { BUYER_STEP_EVENT, buyerStepEventText, isBuyerStepKind } from "../../../../../bots/shared/buyer-step";
 import { PLACE_HELP_EVENT } from "../../../../../bots/shared/no-place";
 import { BUYER_STEP_STATUSES } from "@/lib/gamepass-tools";
+import { JOURNEY_EVENT_TYPES, trimJourneyPayload } from "@/lib/buyer-journey";
 import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
 import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
@@ -540,7 +541,14 @@ export async function GET(req: NextRequest) {
       .filter((o) => o.status === "COMPLETED")
       .map((o) => o.id);
 
-    const [clusterOrders, codeRecords, firstOrderRows, statusEvents] = await Promise.all([
+    /* «Путь покупателя» (28.10.2026): события незакрытых заказов страницы —
+       в той же волне запросов, лишнего похода в базу не добавляют. Клиент
+       складывает из них строку «чего ждём» и полосу шагов. */
+    const journeyIds: string[] = orders
+      .filter((o) => !["COMPLETED", "REJECTED"].includes(o.status))
+      .map((o) => o.id);
+
+    const [clusterOrders, codeRecords, firstOrderRows, statusEvents, journeyRows] = await Promise.all([
       // «Заказ №N из M» у покупателя — один заход в базу, а не два.
       // Через Prisma это `findMany` с вложенным `user`, и вложенность стоит
       // ОТДЕЛЬНОГО запроса за пользователями: с базой в Сингапуре это лишние
@@ -580,7 +588,28 @@ export async function GET(req: NextRequest) {
             select: { orderId: true, type: true, payload: true, createdAt: true },
           })
         : [],
+      journeyIds.length > 0
+        ? prisma.orderEvent.findMany({
+            where: { orderId: { in: journeyIds }, type: { in: [...JOURNEY_EVENT_TYPES] } },
+            orderBy: { createdAt: "desc" },
+            take: journeyIds.length * 12,
+            select: { orderId: true, type: true, payload: true, createdAt: true },
+          })
+        : [],
     ]);
+
+    if (journeyIds.length > 0) {
+      const byOrder = new Map<string, { type: string; payload: Record<string, unknown>; createdAt: Date }[]>();
+      for (const row of journeyRows as { orderId: string; type: string; payload: unknown; createdAt: Date }[]) {
+        const list = byOrder.get(row.orderId) ?? [];
+        if (list.length >= 12) continue;
+        list.push({ type: row.type, payload: trimJourneyPayload(row.payload), createdAt: row.createdAt });
+        byOrder.set(row.orderId, list);
+      }
+      for (const order of orders) {
+        if (journeyIds.includes(order.id)) order.journeyEvents = byOrder.get(order.id) ?? [];
+      }
+    }
 
     if (completedIds.length > 0) {
       const facts = buyoutFactsFromEvents(statusEvents as BuyoutEventRow[]);
@@ -3114,6 +3143,21 @@ export async function POST(req: NextRequest) {
   /* ── Что просили у покупателя и где бот его не понял ────────────────────
      Отдельно от `order-events`: меню «📨 Инструкция» нужны только эти
      типа, и грузятся они по открытию формы, а не на каждую карточку. */
+  /* ── 🧭 «Вся история» пути покупателя ─────────────────────────────────
+     Лента отдаёт по 12 последних событий; здесь — все, по запросу. */
+  if (action === "buyer-journey") {
+    const events = await prisma.orderEvent.findMany({
+      where: { orderId, type: { in: [...JOURNEY_EVENT_TYPES] } },
+      orderBy: { createdAt: "asc" },
+      take: 300,
+      select: { type: true, payload: true, createdAt: true },
+    });
+    return NextResponse.json({
+      ok: true,
+      events: events.map((event) => ({ type: event.type, payload: trimJourneyPayload(event.payload), createdAt: event.createdAt })),
+    });
+  }
+
   if (action === "buyer-step-trail") {
     const events = await prisma.orderEvent.findMany({
       where: { orderId, type: { in: [BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END, PLACE_HELP_EVENT] } },

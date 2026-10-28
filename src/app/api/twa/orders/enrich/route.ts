@@ -3,6 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { computeEnrichment } from "@/lib/order-enrich";
 import { checkVkReachable } from "@/lib/vk-reach";
+import { JOURNEY_EVENT_TYPES, trimJourneyPayload } from "@/lib/buyer-journey";
 
 // Заказ ещё «живой» — недостижимость клиента блокирует работу менеджера.
 const VK_CHECK_STATUSES = new Set([
@@ -28,14 +29,24 @@ export async function GET(req: NextRequest) {
   const ids = idsParam.split(",").map(s => s.trim()).filter(Boolean).slice(0, 60);
   if (ids.length === 0) return NextResponse.json({ enrich: {} });
 
-  const orders = await (prisma as any).wbOrder.findMany({
-    where: { id: { in: ids } },
-    select: {
-      id: true, userId: true, status: true, isDirectOrder: true,
-      wbCode: true, createdAt: true, robloxUsername: true,
-      user: { select: { tgId: true, vkId: true } },
-    },
-  });
+  /* 🧭 События пути покупателя (28.10.2026) — параллельно с заказами, тем же
+     заходом в базу: лента TWA грузится облегчённой, путь приезжает здесь. */
+  const [orders, journeyRows] = await Promise.all([
+    (prisma as any).wbOrder.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true, userId: true, status: true, isDirectOrder: true,
+        wbCode: true, createdAt: true, robloxUsername: true,
+        user: { select: { tgId: true, vkId: true } },
+      },
+    }),
+    prisma.orderEvent.findMany({
+      where: { orderId: { in: ids }, type: { in: [...JOURNEY_EVENT_TYPES] } },
+      orderBy: { createdAt: "desc" },
+      take: ids.length * 12,
+      select: { orderId: true, type: true, payload: true, createdAt: true },
+    }),
+  ]);
 
   const vkIds = orders
     .filter((o: any) => o.user?.vkId && !o.user?.tgId && VK_CHECK_STATUSES.has(o.status))
@@ -52,6 +63,19 @@ export async function GET(req: NextRequest) {
     const unreachable = reach.get(vkId) === false;
     if (enrich[o.id]) (enrich[o.id] as any).vkUnreachable = unreachable;
     else (enrich as any)[o.id] = { userOrderNumber: null, userOrderTotal: null, reviewStatus: null, vkUnreachable: unreachable };
+  }
+
+  const byOrder = new Map<string, { type: string; payload: Record<string, unknown>; createdAt: Date }[]>();
+  for (const row of journeyRows) {
+    const list = byOrder.get(row.orderId) ?? [];
+    if (list.length >= 12) continue;
+    list.push({ type: row.type, payload: trimJourneyPayload(row.payload), createdAt: row.createdAt });
+    byOrder.set(row.orderId, list);
+  }
+  for (const o of orders) {
+    if (["COMPLETED", "REJECTED"].includes(o.status)) continue;
+    const entry = (enrich as any)[o.id] ?? ((enrich as any)[o.id] = { userOrderNumber: null, userOrderTotal: null, reviewStatus: null });
+    entry.journeyEvents = byOrder.get(o.id) ?? [];
   }
 
   return NextResponse.json({ enrich });

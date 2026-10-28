@@ -24,8 +24,6 @@ import {
   primaryActionFor as sharedPrimaryAction,
   packDuplicates,
   readinessFor,
-  READINESS_STEPS,
-  type Readiness,
   type Tone,
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
@@ -51,6 +49,9 @@ type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" 
    нельзя). */
 import type { FilterTab } from "@/lib/order-queue";
 import { forgetRecentSearches, loadRecentSearches, rememberRecentSearch } from "@/lib/recent-searches";
+import { buyerJourney, type JourneyEventRow, type JourneyNext } from "@/lib/buyer-journey";
+import type { BuyerStepKind } from "../../../../../bots/shared/buyer-step";
+import { JourneyBlock, JourneyHistorySheet, JourneyTrack } from "../BuyerJourney";
 import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
@@ -138,6 +139,9 @@ interface Order {
   remindersSent?: number | null;
   robloxUsername: string | null;
   probableNick: string | null;
+  probableNickAt?: string | null;
+  /** 🧭 События пути покупателя (до 12 последних) — только у незакрытых. */
+  journeyEvents?: JourneyEventRow[];
   gpWatchNotifiedPassId: string | null;
   /** П3: клиент ответил «❌ Не мой ник» на GP-watch-пинг — дожимать вручную. */
   gpWatchDeclinedAt: string | null;
@@ -198,6 +202,8 @@ interface EnrichValue {
   userOrderTotal: number | null;
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   vkUnreachable?: boolean | null;
+  /** 🧭 События пути покупателя — только у незакрытых. */
+  journeyEvents?: JourneyEventRow[];
 }
 
 /** Живая проверка ГП (gp-live-check): фактическая цена vs ожидаемая по номиналу. */
@@ -313,44 +319,9 @@ function orderPassIds(order: Order): string[] {
   return id ? [id] : [];
 }
 
-/* ── Готовность: слово состояния и четыре отрезка ────────────────────────────
-   Оплата → Ник → Пасс → Выкуп. В ленте над полоской стоит одно слово
-   («Готов к выкупу», «Ждём пасс»), в шторке под каждым отрезком — его имя.
-   Отрезок «Выкуп» у готового заказа переливается: дальше ход за админом.
-   Правило — общий `readinessFor`, здесь только краска. */
-function ReadinessTrack({ r, labeled }: { r: Readiness; labeled?: boolean }) {
-  const color = TONE[r.tone];
-  return (
-    <span className={`twa-rd${labeled ? " is-labeled" : ""}`}>
-      {!labeled && (
-        <span className="twa-rd-label" style={{ color }}>
-          <i className={r.ready ? "is-live" : ""} style={{ background: color }} />{r.label}
-        </span>
-      )}
-      <span className="twa-rd-segs">
-        {r.steps.map((step, i) => {
-          const partial = i === 3 && step === "now" && r.buyoutShare > 0;
-          const tint = step === "wait" || step === "bad" ? color : undefined;
-          return (
-            <span key={READINESS_STEPS[i]} className="twa-rd-step" style={labeled && tint ? { color: tint } : undefined}>
-              <span
-                className={`twa-rd-seg is-${step}${partial ? " is-partial" : ""}`}
-                style={partial
-                  ? { ["--share" as string]: `${Math.round(r.buyoutShare * 100)}%` }
-                  : tint ? { background: tint } : undefined}
-              />
-              {labeled && (
-                <small className={`is-${step}`}>
-                  {step === "done" ? "✓ " : ""}{READINESS_STEPS[i]}{step === "now" ? " ← ты" : ""}
-                </small>
-              )}
-            </span>
-          );
-        })}
-      </span>
-    </span>
-  );
-}
+/* Полоса готовности (4 шага) заменена полосой пути покупателя (5 шагов) —
+   `JourneyTrack` в `../BuyerJourney`, 28.10.2026. `readinessFor` остаётся:
+   по нему карточка решает «готов к выкупу». */
 
 /* ───────────── Time formatting ───────────── */
 
@@ -2188,11 +2159,12 @@ function OrderMenuSheet({
 }
 
 /** Разделы полной шторки заказа — чипы под заметками и вкладки в шапке. */
-type SheetSectionId = "gamepass" | "order" | "history";
+type SheetSectionId = "journey" | "gamepass" | "order" | "history";
 const SHEET_SECTIONS: { id: SheetSectionId; label: string }[] = [
+  { id: "journey", label: "🧭 Путь" },
   { id: "gamepass", label: "🧩 Пасс" },
   { id: "order", label: "⚙️ Заказ" },
-  { id: "history", label: "👤 История" },
+  { id: "history", label: "👤 Клиент" },
 ];
 
 /* ── Карточка покупателя в шторке ────────────────────────────────────────────
@@ -2370,6 +2342,8 @@ function OrderCard({
   /* 📨 Инструкция покупателю — своя кнопка карточки (28.10.2026). Раньше
      пряталась в «Инструментах пасса», и о ней не знали. */
   const [instrOpen, setInstrOpen] = useState(false);
+  /** Какой пункт выбран при открытии — «Следующий шаг» открывает его сразу. */
+  const [instrKind, setInstrKind] = useState<BuyerStepKind | undefined>(undefined);
   /* Форма, к которой нужно подкрутить лист. Формы заморозки, разбиения,
      перемещения и отмены — не шторки, а блоки в КОНЦЕ длинного досье. Открытые
      из меню «···» они оказывались ниже видимой части, и «нажал — ничего не
@@ -2580,10 +2554,44 @@ function OrderCard({
   const nickIsGuess = !order.robloxUsername && !!order.probableNick;
   const flag = cardFlag(order, live, reminders, packDupIn);
   const readiness = readinessFor(order as never, live);
+  /* 🧭 Путь покупателя (28.10.2026): полоса из 5 шагов + «чего ждём». */
+  const journeyOrder = useMemo(() => ({
+    id: order.id, status: order.status, wbCode: order.wbCode, createdAt: order.createdAt,
+    isDirectOrder: order.isDirectOrder, paidAt: order.paidAt, robloxUsername: order.robloxUsername,
+    probableNick: order.probableNick, probableNickAt: order.probableNickAt ?? null,
+    gamepassUrl: order.gamepassUrl, splitCount: order.splitGamepasses?.length ?? 0,
+    completedAt: order.completedAt, heldAt: order.heldAt, heldReason: order.heldReason,
+    buyoutErrorCode: order.buyoutErrorCode, orderSource: order.orderSource,
+    channel: order.user?.tgId ? "tg" as const : order.user?.vkId ? "vk" as const : null,
+  }), [order]);
+  const journey = useMemo(
+    () => buyerJourney(journeyOrder, order.journeyEvents ?? [], live),
+    [journeyOrder, order.journeyEvents, live],
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
+  /* «Следующий шаг»: пассы ника — раскрыть инструмент в шторке; часть
+     инструкции — шторка «📨» с уже выбранным пунктом; написать — личка. */
+  function runJourneyNext(next: JourneyNext) {
+    if (next.kind === "nick-passes") {
+      setExpanded(true);
+      setTool("nick");
+      jumpTo("gamepass");
+      return;
+    }
+    if (next.kind === "step") {
+      setInstrKind(next.step);
+      setInstrOpen(true);
+      return;
+    }
+    haptic.impact("light");
+    openContact(order.user);
+  }
   /* Готовая к выкупу карточка подсвечена целиком: в очереди на девяносто
      заказов её видно боковым зрением, а не по чтению строки. Зелёный флаг
      «пасс продаётся» в ленте при этом лишний — то же говорит слово «Готов». */
-  const feedFlag = flag && !(readiness.ready && flag.tone === "green") ? flag : null;
+  // Строка пути уже говорит «пасс снят / цена не та» — флаг ниже её не повторяет.
+  const feedFlag = flag && !(readiness.ready && flag.tone === "green")
+    && !(journey.now.tone === "bad" && (flag.tone === "red" || flag.tone === "orange")) ? flag : null;
   /* Разбитый заказ: части отмечаются по одной с карточки, ID — следующей
      части. «Выкуплено» появится, когда отмечена последняя. */
   const canMarkPart = !order.heldAt && ["PENDING", "IN_PROGRESS"].includes(order.status) && !!nextPart;
@@ -2701,7 +2709,7 @@ function OrderCard({
         {codeChip()}
       </span>
       {/* Готовность — до ника: в очереди глаз ищет сначала «что с заказом». */}
-      {!isDoneState && <ReadinessTrack r={readiness} />}
+      {!isDoneState && <JourneyTrack journey={journey} />}
       <span className="twa-oc-main">
         <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "Ник не указан"}</strong>
         <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
@@ -2822,7 +2830,7 @@ function OrderCard({
       )}
       {canInstruct && (
         <button type="button" className="twa-oc-more twa-press-sm" aria-label="Инструкция покупателю"
-          onClick={() => { haptic.select(); setInstrOpen(true); }}>
+          onClick={() => { haptic.select(); setInstrKind(undefined); setInstrOpen(true); }}>
           📨
         </button>
       )}
@@ -2891,7 +2899,7 @@ function OrderCard({
         ) : <span style={{ flex: 1 }} />}
         {canInstruct && (
           <button type="button" className="twa-oc-more twa-press-sm" aria-label="Инструкция покупателю"
-            onClick={e => { e.stopPropagation(); haptic.select(); setInstrOpen(true); }}>
+            onClick={e => { e.stopPropagation(); haptic.select(); setInstrKind(undefined); setInstrOpen(true); }}>
             📨
           </button>
         )}
@@ -3008,7 +3016,7 @@ function OrderCard({
           {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
           {queueAge && <span>🛒 {queueAge} в очереди</span>}
         </span>
-        {order.status !== "REJECTED" && order.status !== "COMPLETED" && <ReadinessTrack r={readiness} labeled />}
+        {order.status !== "REJECTED" && order.status !== "COMPLETED" && <JourneyTrack journey={journey} labeled />}
       </div>
 
       <div className="twa-os-body">
@@ -3111,6 +3119,17 @@ function OrderCard({
             </div>
           );
         })()}
+
+        {/* 🧭 Путь покупателя: чего ждём, касания, «Следующий шаг». Между
+            пассом и заметками (макет «Карточка заказа v2», 28.10.2026). */}
+        {order.status !== "REJECTED" && (
+          <JourneyBlock
+            journey={journey}
+            onHistory={() => setHistoryOpen(true)}
+            onNext={runJourneyNext}
+            onOther={canInstruct ? () => { setInstrKind(undefined); setInstrOpen(true); } : undefined}
+          />
+        )}
 
         {/* 3. Заметки. */}
         <NotesEditor order={order} onSave={onSaveNote} />
@@ -3462,6 +3481,19 @@ function OrderCard({
       </section>
     </BottomSheet>
 
+    {/* 🧭 «Вся история» пути покупателя — тоже поверх карточки. */}
+    {historyOpen && (
+      <JourneyHistorySheet
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        order={journeyOrder}
+        live={live}
+        token={token}
+        initialEvents={order.journeyEvents ?? []}
+        title={`Путь · ${order.wbCode}`}
+      />
+    )}
+
     {/* 📨 Шторка инструкции. `twa-form-sheet` держит её над карточкой-
         просмотром: из закреплённого низа она открывается поверх неё. */}
     <BottomSheet
@@ -3472,7 +3504,7 @@ function OrderCard({
     >
       <div style={{ padding: "4px 16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>📨 Инструкция покупателю</div>
-        {instrOpen && <AskBuyerForm key={order.id} order={order} token={token} bare onClose={() => setInstrOpen(false)} />}
+        {instrOpen && <AskBuyerForm key={`${order.id}-${instrKind ?? ""}`} order={order} token={token} bare initialKind={instrKind} onClose={() => setInstrOpen(false)} />}
       </div>
     </BottomSheet>
     </>
@@ -3970,6 +4002,21 @@ export default function OrdersScreen({
     onActionDone?.();
   }, [serverTab, query, fetchOrders, onActionDone]);
 
+  /* 🧭 После «📨 Отправить» путь заказа устарел: сбрасываем его из кэша
+     обогащения, и эффект ниже дотягивает свежие события. */
+  const [enrichTick, setEnrichTick] = useState(0);
+  useEffect(() => {
+    const onStale = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (!id) return;
+      enrichCache.current.delete(id);
+      requestedRef.current.delete(id);
+      setEnrichTick(n => n + 1);
+    };
+    window.addEventListener("twa:journey-stale", onStale);
+    return () => window.removeEventListener("twa:journey-stale", onStale);
+  }, []);
+
   useEffect(() => {
     const need = allOrders
       .filter(o => !enrichCache.current.has(o.id) && !requestedRef.current.has(o.id))
@@ -3990,7 +4037,7 @@ export default function OrdersScreen({
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [allOrders, token]);
+  }, [allOrders, token, enrichTick]);
 
   // gp-live-check для карточек с геймпассом в выкупных статусах (сервер отдаёт
   // expected/livePrice/priceMismatch, режет пачку до 30). Ошибки не критичны.

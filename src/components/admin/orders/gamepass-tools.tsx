@@ -305,14 +305,16 @@ type StepTrailResponse = {
 };
 
 export function AskBuyerBox({
-  orderId, post, onToast,
+  orderId, post, onToast, initialKind,
 }: {
   orderId: string;
+  /** Пункт, выбранный сразу («Следующий шаг» пути покупателя). */
+  initialKind?: BuyerStepKind;
   post: (payload: Record<string, unknown>) => Promise<StepTrailResponse & { channel?: string | null }>;
   onToast: (text: string, error?: boolean) => void;
 }) {
   const [data, setData] = useState<StepTrailResponse | null>(null);
-  const [kind, setKind] = useState<BuyerStepKind>("create");
+  const [kind, setKind] = useState<BuyerStepKind>(initialKind ?? "create");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -346,6 +348,8 @@ export function AskBuyerBox({
       const result = await post({ action: "send-step", kind, text: kind === "custom" ? text : undefined });
       onToast(`📨 Отправлено покупателю (${result.channel === "vk" ? "VK" : "Telegram"})`);
       setText("");
+      // Досье перечитает путь покупателя.
+      window.dispatchEvent(new CustomEvent("admin:journey-stale", { detail: orderId }));
     } catch (err) {
       onToast(err instanceof Error ? err.message : "Не отправилось", true);
     } finally {
