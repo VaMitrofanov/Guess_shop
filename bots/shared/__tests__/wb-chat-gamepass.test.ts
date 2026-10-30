@@ -6,6 +6,8 @@ const mockCard = jest.fn();
 const mockAttached = jest.fn();
 const mockRejected = jest.fn();
 const mockAudit = jest.fn();
+const mockCreate = jest.fn();
+const mockBuyerChat = jest.fn();
 
 jest.mock("../roblox", () => ({ getGamepassDetails: (...a: unknown[]) => mockDetails(...a) }));
 jest.mock("../admin", () => ({ sendAdminOrderCard: (...a: unknown[]) => mockCard(...a) }));
@@ -13,6 +15,8 @@ jest.mock("../wb-delivery-admin-notify", () => ({
   notifyDbsChatGamepassAttached: (...a: unknown[]) => mockAttached(...a),
   notifyDbsChatGamepassRejected: (...a: unknown[]) => mockRejected(...a),
 }));
+jest.mock("../dbs-buyout-order", () => ({ createDbsBuyoutOrder: (...a: unknown[]) => mockCreate(...a) }));
+jest.mock("../wb-chat-notify", () => ({ notifyBuyerViaWbChat: (...a: unknown[]) => mockBuyerChat(...a) }));
 jest.mock("../order-audit", () => ({
   auditGamepassSubmitted: (...a: unknown[]) => mockAudit(...a),
   ORDER_AUDIT_TYPE: {},
@@ -65,6 +69,11 @@ beforeEach(() => {
   mockAttached.mockReset();
   mockRejected.mockReset();
   mockAudit.mockReset();
+  mockCreate.mockReset().mockResolvedValue({
+    id: "new_1", amount: 800, status: "PENDING", platform: "TG", orderSource: "WB_DBS",
+    wbCode: "PXGLH7F", userId: "admin", createdAt: new Date(),
+  });
+  mockBuyerChat.mockReset().mockResolvedValue({ sent: true });
 });
 
 describe("findGamepassRefInChatText", () => {
@@ -223,7 +232,104 @@ describe("tryAttachGamepassFromChat", () => {
   });
 });
 
+/* 31.10.2026, PXGLH7F: покупатель без Telegram и VK прислал пасс в чат WB, а
+   заказа по коду не было — пасс молча терялся. Теперь бот создаёт заказ сам. */
+describe("заказа по коду нет — создаём из чата", () => {
+  const mp = {
+    id: "mp1", wbOrderId: "6159519276", cancelledAt: null, claimOpenedAt: null,
+    denominationSnapshot: 800, finalPriceKopecks: 78700, priceKopecks: 78700, wbCodeId: "code1",
+    wbCode: { userId: null, status: "AVAILABLE", isUsed: false },
+  };
+  const pxRef = { wbOrderId: "6159519276", code: "PXGLH7F" };
+  const noOrderDb = (over: Record<string, unknown> = {}, mpOver: Record<string, unknown> = {}) => makeDb({
+    wbOrder: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    wbMarketplaceOrder: { findFirst: jest.fn().mockResolvedValue({ ...mp, ...mpOver }) },
+    $transaction: jest.fn(),
+    ...over,
+  });
+  const pass = { id: "2060358355", name: "На 800 робуксов", price: 1143, creatorId: 4948262834, creatorName: "anya2918", isActive: true };
+
+  test("годный пасс — заказ в «К выкупу» на номинал DBS, ник владельца, ответ покупателю", async () => {
+    mockDetails.mockResolvedValue(pass);
+    const out = await tryAttachGamepassFromChat(asDb(noOrderDb()), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" });
+    expect(out).toMatchObject({ kind: "attached", gamepassId: "2060358355", nick: "anya2918", wbCode: "PXGLH7F" });
+    expect(mockCreate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      activationCode: "PXGLH7F", wbCodeId: "code1", denomination: 800, gamepassId: "2060358355",
+      nick: "anya2918", saleAmountKopecks: 78700,
+    }));
+    expect(mockAttached).toHaveBeenCalledWith(pxRef, expect.objectContaining({ created: true, amount: 800 }));
+    expect(mockBuyerChat).toHaveBeenCalledWith(expect.anything(), "PXGLH7F", expect.stringContaining("anya2918"), { skipIfClaimOpen: true });
+    expect(mockCard).toHaveBeenCalled();
+  });
+
+  test("отмена или открытый возврат — заказ не создаём", async () => {
+    mockDetails.mockResolvedValue(pass);
+    for (const mpOver of [{ cancelledAt: new Date() }, { claimOpenedAt: new Date() }]) {
+      const out = await tryAttachGamepassFromChat(asDb(noOrderDb({}, mpOver)), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" });
+      expect(out.kind).toBe("skipped");
+    }
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test("код погашен — заказ уже был, второй не создаём", async () => {
+    mockDetails.mockResolvedValue(pass);
+    const out = await tryAttachGamepassFromChat(asDb(noOrderDb({}, { wbCode: { userId: null, status: "CLAIMED", isUsed: true } })),
+      { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" });
+    expect(out.kind).toBe("skipped");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test("код заморожен — не создаём, оператору причина", async () => {
+    mockDetails.mockResolvedValue(pass);
+    const db = noOrderDb({ orderHold: { findUnique: jest.fn().mockResolvedValue({ releasedAt: null }) } });
+    const out = await tryAttachGamepassFromChat(asDb(db), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" });
+    expect(out.kind).toBe("rejected");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(String(mockRejected.mock.calls[0][1].reason)).toMatch(/заморожен/);
+  });
+
+  test("не та цена или пасс не в продаже — оператору, без заказа", async () => {
+    mockDetails.mockResolvedValue({ ...pass, price: 715 });
+    expect((await tryAttachGamepassFromChat(asDb(noOrderDb()), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" })).kind).toBe("rejected");
+    mockDetails.mockResolvedValue({ ...pass, isActive: false });
+    expect((await tryAttachGamepassFromChat(asDb(noOrderDb()), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" })).kind).toBe("rejected");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test("на пасс уже есть живой заказ — второй не создаём", async () => {
+    mockDetails.mockResolvedValue(pass);
+    const db = noOrderDb({
+      wbOrder: { findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(1) },
+    });
+    const out = await tryAttachGamepassFromChat(asDb(db), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" });
+    expect(out.kind).toBe("rejected");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test("гонка двух сообщений: уникальный код не дал второй заказ — тихо отступаем", async () => {
+    mockDetails.mockResolvedValue(pass);
+    mockCreate.mockRejectedValue(new Error("Unique constraint failed on the fields: (`wbCode`)"));
+    const out = await tryAttachGamepassFromChat(asDb(noOrderDb()), { ref: pxRef, wbCode: "PXGLH7F", text: "2060358355" });
+    expect(out.kind).toBe("skipped");
+    expect(mockAttached).not.toHaveBeenCalled();
+  });
+});
+
 describe("воркер зовёт разбор", () => {
+  const sync = fs.readFileSync(path.join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");
+
+  test("пасс разбирается и после закрытия доставки (31.10.2026)", () => {
+    // `completedAt` у DBS — «доставка закрыта»: с ним в условии подстановка
+    // не сработала ни разу, потому что пасс всегда приходит после кода.
+    const line = sync.slice(sync.indexOf("findGamepassRefInChatText(rawText, order.nmId) &&") - 120,
+      sync.indexOf("findGamepassRefInChatText(rawText, order.nmId) &&") + 80);
+    expect(line).not.toContain("completedAt");
+  });
+
   const source = fs.readFileSync(path.join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");
 
   test("только на сообщениях покупателя и только когда в тексте что-то есть", () => {

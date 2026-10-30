@@ -53,6 +53,7 @@ import { wbChatSafeText, wbCodeRequestMessage, wbGateMessage, wbGateShortUrl, wb
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
 import { notifyDbsBuyerUnlinked } from "../../bots/shared/wb-delivery-admin-notify";
 import { WB_QUEUE_SECTIONS, WB_STAGE_LABEL, WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
+import { createDbsBuyoutOrder } from "../../bots/shared/dbs-buyout-order";
 
 const db = prisma;
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
@@ -1106,40 +1107,17 @@ async function createInternalOrder(
   const stamp = new Date().toISOString().slice(0, 10);
   const mark = `[DBS MANUAL ${stamp} от ${actor}] заказ WB #${order.wbOrderId}, геймпасс добавлен вручную из раздела DBS`;
 
-  const created = await db.$transaction(async (tx) => {
-    const wbOrder = await tx.wbOrder.create({
-      data: {
-        amount: denomination,
-        gamepassUrl: preview.gamepassUrl,
-        gamepassId: preview.gamepassId,
-        robloxUsername: nick,
-        status: "PENDING",
-        // The buyer talked to us in the WB chat, not in a messenger of ours;
-        // TG is the platform every service-owned order already uses.
-        platform: "TG",
-        wbCode: activationCode!,
-        orderSource: "WB_DBS",
-        adminNote: mark,
-        pendingAt: new Date(),
-        saleAmountKopecks: order.finalPriceKopecks ?? order.priceKopecks ?? undefined,
-        user: order.wbCode?.userId
-          ? { connect: { id: order.wbCode.userId } }
-          : { connectOrCreate: { where: { tgId: "admin" }, create: { tgId: "admin", name: "Admin (DBS)" } } },
-      },
-    });
-    // Parity with a real activation: the code is spent and cannot be redeemed
-    // a second time by the buyer who still has it in their WB chat.
-    await tx.wbCode.update({
-      where: { id: order.wbCodeId! },
-      data: {
-        isUsed: true,
-        status: "CLAIMED",
-        usedAt: new Date(),
-        ...(nick ? { robloxNick: nick } : {}),
-        selectedGamepassId: preview.gamepassId,
-      },
-    });
-    return wbOrder;
+  // Та же запись, что у бота, который создаёт заказ из пасса в чате WB (31.10.2026).
+  const created = await createDbsBuyoutOrder(db, {
+    activationCode: activationCode!,
+    wbCodeId: order.wbCodeId!,
+    wbCodeUserId: order.wbCode?.userId ?? null,
+    denomination,
+    saleAmountKopecks: order.finalPriceKopecks ?? order.priceKopecks ?? null,
+    gamepassId: preview.gamepassId,
+    gamepassUrl: preview.gamepassUrl,
+    nick,
+    adminNote: mark,
   });
 
   await audit(order.id, "INTERNAL_ORDER_CREATED", actor, {

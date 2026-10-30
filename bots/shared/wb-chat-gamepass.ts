@@ -21,6 +21,13 @@
  * 3. **Молчим, когда не уверены.** Число, которое Roblox не признал пассом
  *    (телефон, номер заказа WB), не порождает ни действия, ни уведомления.
  * 4. **Заморозку уважаем.** Замороженный заказ не собирается автоматикой.
+ * 5. **Нет заказа — создаём** (31.10.2026). Покупатель без Telegram и VK не
+ *    может пройти сайт и шлёт пасс в чат WB. Раньше такой пасс молча терялся
+ *    (PXGLH7F: оператор попросил ID, покупатель прислал, заказа так и не
+ *    появилось). Теперь бот после тех же проверок создаёт заказ сам — той же
+ *    функцией, что кнопка в консоли DBS, — и отвечает покупателю в чате.
+ *    Чего бот НЕ делает: не создаёт заказ при отмене, открытом возврате,
+ *    заморозке кода и при пассе, на который уже есть живой заказ.
  *
  * Оператор узнаёт о каждой подстановке отдельным сообщением — требование
  * владельца: «обязательно нужен увед, что в такой-то заказ поставил такой-то
@@ -33,6 +40,9 @@ import { countPreviousOrders } from "./order-loyalty";
 import { sendAdminOrderCard } from "./admin";
 import { notifyDbsChatGamepassAttached, notifyDbsChatGamepassRejected } from "./wb-delivery-admin-notify";
 import type { DbsRef } from "./wb-delivery-admin-notify";
+import { createDbsBuyoutOrder } from "./dbs-buyout-order";
+import { notifyBuyerViaWbChat } from "./wb-chat-notify";
+import { wbChatSafeText } from "./wb-gate-link";
 
 /**
  * Ссылки на пасс: самый надёжный признак, ищем в любом месте строки.
@@ -108,6 +118,18 @@ interface ChatOrderRow {
   heldAt: Date | null;
 }
 
+interface ChatMarketplaceRow {
+  id: string;
+  wbOrderId: string;
+  cancelledAt: Date | null;
+  claimOpenedAt: Date | null;
+  denominationSnapshot: number | null;
+  finalPriceKopecks: number | null;
+  priceKopecks: number | null;
+  wbCodeId: string | null;
+  wbCode: { userId: string | null; status: string | null; isUsed: boolean } | null;
+}
+
 interface ChatBuyerRow {
   tgId: string | null;
   vkId: string | null;
@@ -128,6 +150,9 @@ export type ChatGamepassDb = {
     count: (args: Args) => Promise<number>;
   };
   wbCode: { updateMany: (args: Args) => Promise<{ count: number }> };
+  /** Заказ маркетплейса по коду — нужен, только когда нашего заказа ещё нет. */
+  wbMarketplaceOrder?: { findFirst: (args: Args) => Promise<ChatMarketplaceRow | null> };
+  $transaction?: unknown;
   orderHold: { findUnique: (args: Args) => Promise<{ releasedAt: Date | null } | null> };
   user: { findUnique: (args: Args) => Promise<ChatBuyerRow | null> };
 };
@@ -163,9 +188,12 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
     })
     .catch(() => null);
 
-  // Заказа ещё нет или он уже собран — подставлять некуда. Молчим: покупатель
-  // мог прислать ссылку «на всякий случай» уже после того, как оформил заказ.
-  if (!order || order.status !== "AWAITING_GAMEPASS") return { kind: "skipped" };
+  // Заказа нет — покупатель не проходил сайт (нет Telegram и VK): создаём его
+  // сами после тех же проверок (31.10.2026, PXGLH7F).
+  if (!order) return createOrderFromChat(db, input, gamepassId);
+  // Заказ уже собран — подставлять некуда. Молчим: покупатель мог прислать
+  // ссылку «на всякий случай» уже после того, как оформил заказ.
+  if (order.status !== "AWAITING_GAMEPASS") return { kind: "skipped" };
   if (order.heldAt) return { kind: "skipped" };
 
   const active = await db.orderHold
@@ -181,31 +209,19 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
   if (details.validationSkipped) return { kind: "skipped" };
 
   const expectedPrice = Math.ceil(order.amount / 0.7);
-  const reject = (reason: string): ChatGamepassOutcome => {
-    notifyDbsChatGamepassRejected(input.ref, { gamepassId, reason, expectedPrice });
-    return { kind: "rejected", gamepassId, reason };
-  };
-
-  // Закрытый плейс сам по себе больше не отказ: выкуп ручной, и если Roblox
-  // подтверждает продажу и цену, заказ собирается (решение владельца 13.09.2026,
-  // проверка первоисточника — в `getGamepassDetailsDirect`). Признаки остаются
-  // причиной отказа только когда пасс и правда не продаётся.
-  if (!details.isActive) {
-    if (details.isNotInCatalog) return reject("пасса нет в каталоге — скорее всего игра закрыта");
-    if (details.isGamePrivate) return reject("игра закрыта (private) — выкупить нельзя");
-    return reject("пасс не выставлен на продажу");
+  const verdict = checkChatPass(details, expectedPrice);
+  if (!verdict.ok) {
+    notifyDbsChatGamepassRejected(input.ref, { gamepassId, reason: verdict.reason, expectedPrice });
+    return { kind: "rejected", gamepassId, reason: verdict.reason };
   }
-  if (Math.abs(details.price - expectedPrice) > PRICE_TOLERANCE) {
-    return reject(`цена ${details.price} R$ вместо ${expectedPrice} R$`);
-  }
-
-  const creator = details.creatorName?.trim();
-  if (!creator) return reject("Roblox не отдал владельца пасса");
+  const creator = verdict.creator;
 
   // Робуксы уйдут ВЛАДЕЛЬЦУ пасса. Расхождение с подтверждённым ником заказа —
   // не мелочь, а другой человек на том конце: решает оператор, не автоматика.
   if (order.robloxUsername && order.robloxUsername.toLowerCase() !== creator.toLowerCase()) {
-    return reject(`пасс принадлежит ${creator}, а в заказе ник ${order.robloxUsername}`);
+    const reason = `пасс принадлежит ${creator}, а в заказе ник ${order.robloxUsername}`;
+    notifyDbsChatGamepassRejected(input.ref, { gamepassId, reason, expectedPrice });
+    return { kind: "rejected", gamepassId, reason };
   }
 
   const gamepassUrl = `https://www.roblox.com/game-pass/${gamepassId}`;
@@ -253,8 +269,151 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
   await sendBuyoutCard(db, order, gamepassUrl, creator).catch((err: unknown) => {
     console.warn("[wb-chat-gamepass] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
   });
+  await confirmToBuyer(db, order.wbCode, order.amount, creator);
 
   return { kind: "attached", gamepassId, price: details.price, nick: creator, wbCode: order.wbCode };
+}
+
+/** Что Roblox сказал о пассе — годится ли он для заказа на этот номинал. */
+type PassDetails = NonNullable<Awaited<ReturnType<typeof getGamepassDetails>>>;
+type PassVerdict = { ok: true; creator: string } | { ok: false; reason: string };
+
+export function checkChatPass(details: PassDetails, expectedPrice: number): PassVerdict {
+  // Закрытый плейс сам по себе больше не отказ: выкуп ручной, и если Roblox
+  // подтверждает продажу и цену, заказ собирается (решение владельца 13.09.2026,
+  // проверка первоисточника — в `getGamepassDetailsDirect`). Признаки остаются
+  // причиной отказа только когда пасс и правда не продаётся.
+  if (!details.isActive) {
+    if (details.isNotInCatalog) return { ok: false, reason: "пасса нет в каталоге — скорее всего игра закрыта" };
+    if (details.isGamePrivate) return { ok: false, reason: "игра закрыта (private) — выкупить нельзя" };
+    return { ok: false, reason: "пасс не выставлен на продажу" };
+  }
+  if (Math.abs(details.price - expectedPrice) > PRICE_TOLERANCE) {
+    return { ok: false, reason: `цена ${details.price} R$ вместо ${expectedPrice} R$` };
+  }
+  const creator = details.creatorName?.trim();
+  if (!creator) return { ok: false, reason: "Roblox не отдал владельца пасса" };
+  return { ok: true, creator };
+}
+
+/** Статусы, в которых пасс уже занят живым заказом. */
+const LIVE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"];
+
+/**
+ * Заказа по коду нет — создать его из пасса, присланного в чат WB.
+ *
+ * Те же проверки, что у кнопки в консоли DBS, но без «создать принудительно»:
+ * всё сомнительное уходит оператору с причиной.
+ */
+async function createOrderFromChat(
+  db: ChatGamepassDb,
+  input: AttachInput,
+  gamepassId: string,
+): Promise<ChatGamepassOutcome> {
+  if (!db.wbMarketplaceOrder || !db.$transaction) return { kind: "skipped" };
+  const mp = await db.wbMarketplaceOrder.findFirst({
+    where: { wbCode: { code: input.wbCode }, isTest: false },
+    orderBy: { firstSeenAt: "desc" },
+    select: {
+      id: true, wbOrderId: true, cancelledAt: true, claimOpenedAt: true,
+      denominationSnapshot: true, finalPriceKopecks: true, priceKopecks: true, wbCodeId: true,
+      wbCode: { select: { userId: true, status: true, isUsed: true } },
+    },
+  }).catch(() => null);
+  // Отменён или покупатель просит деньги назад — заказ не открываем.
+  if (!mp || mp.cancelledAt || mp.claimOpenedAt || !mp.wbCodeId || !mp.denominationSnapshot) return { kind: "skipped" };
+  // Код погашен или аннулирован — значит, заказ уже был или быть не должен.
+  if (mp.wbCode?.isUsed || (mp.wbCode?.status && mp.wbCode.status !== "AVAILABLE")) return { kind: "skipped" };
+
+  const denomination = mp.denominationSnapshot;
+  const expectedPrice = Math.ceil(denomination / 0.7);
+  const reject = (reason: string): ChatGamepassOutcome => {
+    notifyDbsChatGamepassRejected(input.ref, { gamepassId, reason, expectedPrice });
+    return { kind: "rejected", gamepassId, reason };
+  };
+
+  const hold = await db.orderHold
+    .findUnique({ where: { wbCode: input.wbCode }, select: { releasedAt: true } })
+    .catch(() => null);
+  if (hold && !hold.releasedAt) return reject("код заморожен — заказ не создан, решает оператор");
+
+  const details = await getGamepassDetails(gamepassId).catch(() => null);
+  if (!details) return { kind: "skipped" };
+  if (details.validationSkipped) return { kind: "skipped" };
+  const verdict = checkChatPass(details, expectedPrice);
+  if (!verdict.ok) return reject(verdict.reason);
+
+  const busy = await db.wbOrder
+    .count({ where: { gamepassId, status: { in: LIVE_ORDER_STATUSES } } })
+    .catch(() => 0);
+  if (busy > 0) return reject("на этот пасс уже есть живой заказ — заказ не создан");
+
+  const gamepassUrl = `https://www.roblox.com/game-pass/${gamepassId}`;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const created = await createDbsBuyoutOrder(db, {
+    activationCode: input.wbCode,
+    wbCodeId: mp.wbCodeId,
+    wbCodeUserId: mp.wbCode?.userId ?? null,
+    denomination,
+    saleAmountKopecks: mp.finalPriceKopecks ?? mp.priceKopecks ?? null,
+    gamepassId,
+    gamepassUrl,
+    nick: verdict.creator,
+    adminNote: `[DBS CHAT ${stamp}] заказ WB #${mp.wbOrderId}: покупатель прислал пасс в чат WB, заказ создан автоматически`,
+  }).catch((err: unknown) => {
+    // Уникальность `wbCode` — защёлка от гонки двух сообщений подряд.
+    console.warn("[wb-chat-gamepass] заказ из чата не создан:", err instanceof Error ? err.message : err);
+    return null;
+  });
+  if (!created) return { kind: "skipped" };
+
+  void auditGamepassSubmitted(db as unknown as OrderAuditClient, {
+    gamepassId,
+    via: "wb-chat",
+    orderId: created.id,
+    wbCode: input.wbCode,
+    creatorName: verdict.creator,
+    price: details.price,
+  });
+  notifyDbsChatGamepassAttached(input.ref, {
+    wbCode: input.wbCode,
+    gamepassId,
+    nick: verdict.creator,
+    price: details.price,
+    amount: denomination,
+    created: true,
+  });
+  const row: ChatOrderRow = {
+    id: created.id,
+    amount: created.amount,
+    status: created.status,
+    platform: created.platform,
+    orderSource: created.orderSource,
+    wbCode: created.wbCode,
+    robloxUsername: verdict.creator,
+    gamepassUrl,
+    userId: created.userId,
+    createdAt: created.createdAt,
+    heldAt: null,
+  };
+  await sendBuyoutCard(db, row, gamepassUrl, verdict.creator).catch((err: unknown) => {
+    console.warn("[wb-chat-gamepass] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
+  });
+  await confirmToBuyer(db, input.wbCode, denomination, verdict.creator);
+  return { kind: "attached", gamepassId, price: details.price, nick: verdict.creator, wbCode: input.wbCode };
+}
+
+/**
+ * Ответ покупателю в чат WB: пасс принят. Без него человек, приславший пасс,
+ * не знает, дошло ли (PXGLH7F написал «??» и ждал сутки). Не ушло — не беда:
+ * оператор видит заказ и уведомление.
+ */
+async function confirmToBuyer(db: ChatGamepassDb, wbCode: string, amount: number, nick: string): Promise<void> {
+  const text = wbChatSafeText(
+    `Геймпасс принят, спасибо! ${amount} R$ поставлены в очередь на зачисление на аккаунт ${nick}. `
+    + "Как только робуксы будут отправлены, напишем сюда же.",
+  );
+  await notifyBuyerViaWbChat(db as never, wbCode, text, { skipIfClaimOpen: true }).catch(() => undefined);
 }
 
 /** Обычная карточка выкупа — та же, что у заказа из бота или с сайта. */

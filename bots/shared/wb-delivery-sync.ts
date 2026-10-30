@@ -1469,8 +1469,14 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     // автоматика, оператору делать по нему нечего, а в карточке он и так виден
     // строкой «код получен». Отдельное уведомление на него было чистым шумом
     // ровно там, где заказ идёт лучше всего.
+    /* `completedAt` у DBS — «доставка закрыта», а это НАЧАЛО нашей работы:
+       код получен, дальше покупатель шлёт ник и пасс. До 31.10.2026 после
+       закрытия доставки его сообщения админам не приходили вовсе — «??» от
+       PXGLH7F, ждавшего сутки, никто не увидел. Теперь молчим, только когда
+       и наш выкуп по коду завершён. */
     if (isNewEvent && isBuyerSender(event.sender) && order && rawText
-      && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.completedAt && !order.cancelledAt) {
+      && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.cancelledAt
+      && (!order.completedAt || !(await buyoutFinished(db, order.wbCodeId)))) {
       notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText);
     }
 
@@ -1491,8 +1497,11 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     // Разбор текста — в процессе и бесплатно; в базу идём только когда в
     // сообщении действительно что-то похожее на пасс (каждый заход в Neon с
     // прод-хоста стоит ~200 мс, а сообщений в чатах несоизмеримо больше).
+    // Без `completedAt`: доставка закрывается, как только покупатель прислал
+    // код, а пасс приходит ПОСЛЕ — с этим условием подстановка из чата не
+    // сработала ни разу с 07.09 по 31.10.2026 (0 событий `via: wb-chat`).
     if (isNewEvent && order && isBuyerSender(event.sender) && rawText
-      && findGamepassRefInChatText(rawText, order.nmId) && !order.completedAt && !order.cancelledAt) {
+      && findGamepassRefInChatText(rawText, order.nmId) && !order.cancelledAt) {
       const ref = await dbsRef(db, order.id, order.wbOrderId);
       if (ref.code) {
         const outcome = await tryAttachGamepassFromChat(db as unknown as ChatGamepassDb, { ref, wbCode: ref.code, text: rawText, nmId: order.nmId })
@@ -1847,6 +1856,15 @@ const CLAIM_REFUND_GRANTED = 5;
  * только правилу отзыва; у обычного WB-заказа их нет — тогда работает лишь
  * правило висяка. Заморозка — тот же `holdByCode`, что и у ручной.
  */
+/** Наш выкуп по коду этого DBS-заказа уже закрыт (выкуплен или отменён). */
+async function buyoutFinished(db: Db, wbCodeId: string | null | undefined): Promise<boolean> {
+  if (!wbCodeId) return false;
+  const code = await db.wbCode.findUnique({ where: { id: wbCodeId }, select: { code: true } }).catch(() => null);
+  if (!code) return false;
+  const own = await db.wbOrder.findUnique({ where: { wbCode: code.code }, select: { status: true } }).catch(() => null);
+  return own?.status === "COMPLETED" || own?.status === "REJECTED";
+}
+
 const DBS_GATE_SELECT = {
   id: true, nmId: true, buyerName: true, createdAt: true, wbOrderId: true,
   denominationSnapshot: true, adminCardMessages: true, cancelledAt: true, isTest: true,

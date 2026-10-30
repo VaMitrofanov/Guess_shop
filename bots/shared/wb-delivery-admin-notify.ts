@@ -653,19 +653,23 @@ export function notifyDbsUnknownDeliveryCode(who: string, digits: string) {
  */
 export function notifyDbsChatGamepassAttached(
   ref: DbsRef,
-  info: { wbCode: string; gamepassId: string; nick: string; price: number; amount: number },
+  info: { wbCode: string; gamepassId: string; nick: string; price: number; amount: number; created?: boolean },
 ) {
   broadcast({
     marker: "progress",
     zone: "DBS",
-    title: "геймпасс из чата WB подставлен в заказ",
+    // `created` — заказа по коду не было (покупатель без Telegram и VK): бот
+    // создал его сам, как кнопка в консоли DBS (31.10.2026, PXGLH7F).
+    title: info.created ? "заказ создан из геймпасса в чате WB" : "геймпасс из чата WB подставлен в заказ",
     lines: [
       refLine(ref),
       `🔑 Код: <code>${escapeHtml(info.wbCode)}</code>`,
       `🎫 Pass ID: <code>${escapeHtml(info.gamepassId)}</code> · <b>${info.price} R$</b>`,
       `🎮 Владелец пасса: <b>${escapeHtml(info.nick)}</b> — робуксы уйдут сюда`,
       `💎 Номинал заказа: <b>${info.amount} R$</b>`,
-      "Покупатель прислал пасс в переписку WB; цену и владельца сверили у Roblox.",
+      info.created
+        ? "Покупатель не заходил на сайт — прислал пасс в переписку WB. Цену и владельца сверили у Roblox, заказ поставлен в «К выкупу», покупателю ответили в чате."
+        : "Покупатель прислал пасс в переписку WB; цену и владельца сверили у Roblox.",
     ],
     next: "карточка выкупа придёт следом — выкупить и нажать «ВЫКУПЛЕНО»",
   }, ref);
