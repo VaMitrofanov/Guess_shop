@@ -9,7 +9,9 @@ import {
   STALE_BUYOUT_DAYS,
   decideGate,
   isStaleForBuyout,
+  isGateReviewHold,
   matchBadReview,
+  matchFixedReview,
   runBuyoutGate,
   type GateOrder,
   type WbFeedback,
@@ -91,6 +93,13 @@ describe("decideGate", () => {
     expect(d?.reason).toMatch(/подтвердите/i);
   });
 
+  it("заказ без пасса (staleCheck=false) ловится по отзыву, но не как висяк — W3QKRAA", () => {
+    const fresh = decideGate(order({ staleCheck: false }), [feedback()], NOW);
+    expect(fresh?.rule).toBe("bad_review");
+    expect(fresh?.review?.productValuation).toBe(1);
+    expect(decideGate(order({ staleCheck: false, createdAt: daysAgo(40), buyerName: "Никто" }), [feedback()], NOW)).toBeNull();
+  });
+
   it("свежий чистый заказ — ничего", () => {
     expect(decideGate(order({ buyerName: "Никто" }), [feedback()], NOW)).toBeNull();
   });
@@ -103,7 +112,7 @@ describe("runBuyoutGate", () => {
       frozen,
       deps: {
         loadBuyableOrders: async () => orders,
-        loadNegativeFeedbacks: async () => feedbacks,
+        loadFeedbacks: async () => ({ feedbacks, complete: true }),
         freeze: async (code: string, reason: string) => { frozen.push({ code, reason }); },
         now: NOW,
       },
@@ -132,7 +141,7 @@ describe("runBuyoutGate", () => {
     let called = 0;
     await runBuyoutGate({
       loadBuyableOrders: async () => [],
-      loadNegativeFeedbacks: async () => { called += 1; return []; },
+      loadFeedbacks: async () => { called += 1; return { feedbacks: [], complete: true }; },
       freeze: async () => {},
       now: NOW,
     });
@@ -141,7 +150,7 @@ describe("runBuyoutGate", () => {
 
   it("молчание feedbacks-api не роняет гейт (висяк всё равно ловится)", async () => {
     const { deps } = setup([order({ wbCode: "STALE00", createdAt: daysAgo(40), buyerName: "Т" })], []);
-    const res = await runBuyoutGate({ ...deps, loadNegativeFeedbacks: async () => { throw new Error("WB 500"); } });
+    const res = await runBuyoutGate({ ...deps, loadFeedbacks: async () => { throw new Error("WB 500"); } });
     expect(res.frozen.map((f) => f.rule)).toEqual(["stale"]);
   });
 
@@ -154,3 +163,68 @@ describe("runBuyoutGate", () => {
     expect(res.skippedByCap).toBe(5);
   });
 });
+
+/* 30.10.2026: правка отзыва у WB — новый отзыв, связанный со старым
+   (`parentFeedbackId` / `childFeedbackId`). Решает последняя версия. */
+describe("исправленный отзыв", () => {
+  // W3QKRAA: ★1 в 08:53, переписан на ★5 в 13:53.
+  const one = feedback({ id: "OLD", createdDate: "2026-09-20T10:00:00Z", childFeedbackId: "NEW" });
+  const five = feedback({ id: "NEW", productValuation: 5, createdDate: "2026-09-20T15:00:00Z", parentFeedbackId: "OLD" });
+
+  it("★1, переписанная на ★5, плохой больше не считается", () => {
+    expect(matchBadReview(order(), [one, five])).toBeNull();
+    expect(matchFixedReview(order(), [one, five])).toEqual({ review: five, was: one });
+  });
+
+  it("★5, переписанная на ★1, — плохой (обратная правка)", () => {
+    const good = feedback({ id: "A", productValuation: 5, childFeedbackId: "B" });
+    const bad = feedback({ id: "B", productValuation: 1, parentFeedbackId: "A" });
+    expect(matchBadReview(order(), [good, bad])?.id).toBe("B");
+    expect(matchFixedReview(order(), [good, bad])).toBeNull();
+  });
+
+  it("новая версия не пришла в выдаче — доверяем той, что видим (не размораживаем вслепую)", () => {
+    expect(matchBadReview(order(), [one])?.id).toBe("OLD");
+    expect(matchFixedReview(order(), [one])).toBeNull();
+  });
+
+  it("тёзка с ★5 не размораживает того, кто стоит на ★1", () => {
+    const other = feedback({ id: "X", productValuation: 1 });
+    expect(matchFixedReview(order(), [one, five, other])).toBeNull();
+  });
+
+  it("просто ★5 без плохой истории — не «исправление»", () => {
+    expect(matchFixedReview(order(), [feedback({ id: "G", productValuation: 5 })])).toBeNull();
+  });
+
+  it("свой замок гейт узнаёт, перебитый заявкой или человеком — нет", () => {
+    const d = decideGate(order(), [feedback()], NOW)!;
+    expect(isGateReviewHold({ reason: d.reason, createdBy: "гейт выкупа" })).toBe(true);
+    expect(isGateReviewHold({ reason: d.reason, createdBy: "автозащита" })).toBe(false);
+    expect(isGateReviewHold({ reason: "заказ висит 30 дн.", createdBy: "гейт выкупа" })).toBe(false);
+  });
+
+  const run = (holds: GateOrder[], feedbacks: WbFeedback[], complete = true) => {
+    const released: string[] = [];
+    return runBuyoutGate({
+      loadBuyableOrders: async () => [],
+      loadReviewHolds: async () => holds,
+      loadFeedbacks: async () => ({ feedbacks, complete }),
+      freeze: async () => {},
+      release: async (code) => { released.push(code); },
+      now: NOW,
+    }).then((res) => ({ res, released }));
+  };
+
+  it("свип снимает замок, когда отзыв исправлен", async () => {
+    const { res, released } = await run([order({ wbCode: "W3QKRAA" })], [one, five]);
+    expect(released).toEqual(["W3QKRAA"]);
+    expect(res.released[0]).toMatchObject({ wbCode: "W3QKRAA", was: { productValuation: 1 }, review: { productValuation: 5 } });
+  });
+
+  it("неполная выдача WB — не размораживаем (потерянной могла быть свежая ★1)", async () => {
+    const { released } = await run([order({ wbCode: "W3QKRAA" })], [one, five], false);
+    expect(released).toEqual([]);
+  });
+});
+

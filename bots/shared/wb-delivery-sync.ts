@@ -26,7 +26,7 @@ import {
   receiveDbsOrder,
   sendBuyerChatMessage,
   WbDeliveryApiError,
-  fetchNegativeFeedbacks,
+  fetchGateFeedbacks,
 } from "./wb-delivery-api";
 import {
   deliveryWindow,
@@ -82,10 +82,12 @@ import {
   notifyDbsGateUndelivered,
   notifyWbBuyerClaim,
   notifyWbClaimResolved,
+  notifyBuyoutGateBadReview,
+  notifyBuyoutGateReviewFixed,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
-import { activeHoldCodes, holdByCode, holdForProblem, type ProblemHoldResult } from "./order-hold";
-import { runBuyoutGate, type GateOrder } from "./buyout-gate";
+import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
+import { GATE_ACTOR, isGateReviewHold, runBuyoutGate, type GateOrder, type WbFeedback } from "./buyout-gate";
 import { revokeGateCode } from "./wb-code-revocation";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
@@ -109,6 +111,9 @@ const CLIENTS_STREAM = "wb-dbs-clients";
 const REMINDERS_STREAM = "wb-dbs-gate-reminders";
 const CLAIMS_STREAM = "wb-dbs-claims";
 const BUYOUT_GATE_STREAM = "wb-dbs-buyout-gate";
+/** Насколько старые DBS-заказы гейт сверяет с плохими отзывами. Дальше отзыв
+ *  тёзки уже почти наверняка про другой заказ, а выкупать там давно нечего. */
+const BAD_REVIEW_WINDOW_DAYS = 60;
 const HEARTBEAT_KEY = "wb-dbs-sync";
 const LEASE_MS = 45_000;
 /** How far back a closed order is still re-checked for a late cancellation or
@@ -1832,54 +1837,163 @@ const CLAIM_REFUND_GRANTED = 5;
  * правило висяка. Заморозка — тот же `holdByCode`, что и у ручной.
  */
 async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
-  const candidates = await db.wbOrder.findMany({
-    where: {
-      status: "PENDING",
-      isTest: false,
-      heldAt: null,
-      gamepassUrl: { not: null },
-    },
-    select: { wbCode: true, createdAt: true },
-    orderBy: { createdAt: "asc" },
-    take: 200,
-  });
-  if (candidates.length === 0) return;
-
-  // «Никогда не морозившийся» = нет строки `OrderHold` (у OrderHold нет
-  // Prisma-связи с WbOrder, ключ общий — `wbCode`). Снятую руками заморозку
-  // (releasedAt) не воскрешаем: строка осталась, и заказ мы пропускаем.
-  const everHeld = new Set(
-    (await db.orderHold.findMany({
-      where: { wbCode: { in: candidates.map((o) => o.wbCode) } },
+  /* Два источника кандидатов (30.10.2026):
+     • `PENDING` с пассом — оба правила (отзыв и висяк);
+     • любой невыкупленный DBS-заказ за окно — только правило отзыва. Раньше
+       их не было вовсе, и ★1 от застрявшего на шаге «создайте пасс» (W3QKRAA)
+       ничего не морозила: замок встал лишь через 40 минут, с заявкой на
+       возврат. Заказа у кода может ещё не быть — заморозка по коду сядет и
+       на будущий. */
+  const [pending, dbsOpen] = await Promise.all([
+    db.wbOrder.findMany({
+      where: { status: "PENDING", isTest: false, heldAt: null, gamepassUrl: { not: null } },
       select: { wbCode: true },
-    })).map((h) => h.wbCode),
-  );
-  const orders = candidates.filter((o) => !everHeld.has(o.wbCode));
-  if (orders.length === 0) return;
+      orderBy: { createdAt: "asc" },
+      take: 200,
+    }),
+    db.wbMarketplaceOrder.findMany({
+      where: {
+        isTest: false,
+        cancelledAt: null,
+        buyerName: { not: null },
+        wbCodeId: { not: null },
+        createdAt: { gte: new Date(Date.now() - BAD_REVIEW_WINDOW_DAYS * 86_400_000) },
+      },
+      select: { wbCode: { select: { code: true } } },
+      take: 2000,
+    }),
+  ]);
+  const pendingCodes = new Set(pending.map((o) => o.wbCode));
+  const candidateCodes = [...new Set([
+    ...pendingCodes,
+    ...dbsOpen.flatMap((d) => (d.wbCode?.code ? [d.wbCode.code] : [])),
+  ])];
 
-  const codes = orders.map((o) => o.wbCode);
-  const dbs = await db.wbMarketplaceOrder.findMany({
-    where: { wbCode: { code: { in: codes } } },
-    select: { nmId: true, buyerName: true, wbCode: { select: { code: true } } },
+  /* Замки гейта по отзыву — кандидаты на разморозку, если покупатель отзыв
+     исправил. Только те, что гейт поставил сам и никто не перебил: заявка на
+     возврат или человек переписывают `createdBy`, и тогда решает уже не гейт. */
+  const reviewHolds = (await db.orderHold.findMany({
+    where: { releasedAt: null, createdBy: GATE_ACTOR },
+    select: { wbCode: true, reason: true, createdBy: true },
+    take: 500,
+  })).filter(isGateReviewHold);
+  const reviewHoldCodes = new Set(reviewHolds.map((h) => h.wbCode));
+
+  const allCodes = [...new Set([...candidateCodes, ...reviewHoldCodes])];
+  if (allCodes.length === 0) return;
+
+  // Морозим только коды без истории заморозок — снятую руками заморозку не
+  // воскрешаем. Исключение — замок, который снял сам гейт по исправленному
+  // отзыву: если покупатель вернёт ★1, заказ должен замёрзнуть снова.
+  const holdRows = await db.orderHold.findMany({
+    where: { wbCode: { in: allCodes } },
+    select: { wbCode: true, releasedAt: true, releasedBy: true },
   });
+  const gateReleased = new Set(holdRows.filter((h) => h.releasedAt && h.releasedBy === GATE_ACTOR).map((h) => h.wbCode));
+  const blocked = new Set(holdRows.filter((h) => !gateReleased.has(h.wbCode)).map((h) => h.wbCode));
+
+  const [dbs, internal] = await Promise.all([
+    db.wbMarketplaceOrder.findMany({
+      where: { wbCode: { code: { in: allCodes } } },
+      select: {
+        nmId: true, buyerName: true, createdAt: true, wbOrderId: true,
+        denominationSnapshot: true, adminCardMessages: true,
+        wbCode: { select: { code: true } },
+      },
+    }),
+    db.wbOrder.findMany({
+      where: { wbCode: { in: allCodes } },
+      select: { wbCode: true, status: true, createdAt: true, heldAt: true },
+    }),
+  ]);
   const dbsByCode = new Map(dbs.map((d) => [d.wbCode?.code ?? "", d]));
+  const internalByCode = new Map(internal.map((o) => [o.wbCode, o]));
 
-  const gateOrders: GateOrder[] = orders.map((o) => {
-    const meta = dbsByCode.get(o.wbCode);
-    return { wbCode: o.wbCode, createdAt: o.createdAt, nmId: meta?.nmId ?? null, buyerName: meta?.buyerName ?? null };
-  });
+  const toGateOrder = (code: string): GateOrder => {
+    const meta = dbsByCode.get(code);
+    const own = internalByCode.get(code);
+    const createdAt = [meta?.createdAt, own?.createdAt]
+      .filter((d): d is Date => d instanceof Date)
+      .sort((a, b) => a.getTime() - b.getTime())[0] ?? new Date();
+    return {
+      wbCode: code,
+      createdAt,
+      nmId: meta?.nmId ?? null,
+      buyerName: meta?.buyerName ?? null,
+      // Висяк — только у PENDING с пассом и только если гейт его ещё не
+      // отпускал: исправивший отзыв по нашей просьбе на связи, подтверждать нечего.
+      staleCheck: pendingCodes.has(code) && !gateReleased.has(code),
+    };
+  };
+
+  const gateOrders: GateOrder[] = [];
+  for (const code of candidateCodes) {
+    if (blocked.has(code)) continue;
+    const own = internalByCode.get(code);
+    // Выкупленный — морозить нечего; закрытый — выкупа и так не будет.
+    if (own && (own.status === "COMPLETED" || own.status === "REJECTED" || own.heldAt)) continue;
+    // Без DBS-карточки отзыв не сверить, а висяк смотрим только у PENDING.
+    if (!dbsByCode.has(code) && !pendingCodes.has(code)) continue;
+    gateOrders.push(toGateOrder(code));
+  }
+  gateOrders.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const holdOrders = [...reviewHoldCodes].filter((c) => dbsByCode.has(c)).map(toGateOrder);
 
   const res = await runBuyoutGate({
     loadBuyableOrders: async () => gateOrders,
-    loadNegativeFeedbacks: fetchNegativeFeedbacks,
+    loadReviewHolds: async () => holdOrders,
+    loadFeedbacks: fetchGateFeedbacks,
     freeze: async (wbCode, reason) => {
-      await holdByCode(db, { wbCode, reason, actor: "гейт выкупа" });
+      await holdByCode(db, { wbCode, reason, actor: GATE_ACTOR });
+    },
+    release: async (wbCode) => {
+      await releaseByCode(db, { wbCode, actor: GATE_ACTOR });
     },
   });
   out.gateFrozen += res.frozen.length;
+  const refFor = (code: string) => {
+    const meta = dbsByCode.get(code);
+    return {
+      wbOrderId: meta?.wbOrderId ?? null,
+      code,
+      denomination: meta?.denominationSnapshot ?? null,
+      buyerName: meta?.buyerName ?? null,
+      cardMessages: (meta?.adminCardMessages as Record<string, number> | null) ?? null,
+      internalStatus: internalByCode.get(code)?.status ?? null,
+    };
+  };
   for (const d of res.frozen) {
     console.log(`[WbDbsSync] гейт заморозил ${d.wbCode} (${d.rule}): ${d.reason}`);
+    // Висяк — рутина, о нём говорит вкладка «Заморожены». Плохой отзыв —
+    // человек, которого надо увидеть сразу.
+    if (d.rule !== "bad_review" || !d.review) continue;
+    notifyBuyoutGateBadReview({
+      ...refFor(d.wbCode),
+      stars: Number(d.review.productValuation ?? 0),
+      text: badReviewText(d.review),
+      reviewedAt: d.review.createdDate ? new Date(d.review.createdDate) : null,
+      refrozen: gateReleased.has(d.wbCode),
+    });
   }
+  for (const r of res.released) {
+    console.log(`[WbDbsSync] гейт разморозил ${r.wbCode}: отзыв ★${r.was.productValuation} → ★${r.review.productValuation}`);
+    notifyBuyoutGateReviewFixed({
+      ...refFor(r.wbCode),
+      starsBefore: Number(r.was.productValuation ?? 0),
+      starsAfter: Number(r.review.productValuation ?? 0),
+      text: badReviewText(r.review),
+      reviewedAt: r.review.createdDate ? new Date(r.review.createdDate) : null,
+    });
+  }
+}
+
+/** Текст отзыва целиком: у WB он бывает разложен на «достоинства/недостатки». */
+function badReviewText(review: WbFeedback): string | null {
+  const r = review as WbFeedback & { pros?: string; cons?: string };
+  const parts = [r.text, r.pros ? `+ ${r.pros}` : null, r.cons ? `− ${r.cons}` : null]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean);
+  return parts.length ? parts.join("\n") : null;
 }
 
 /** Заморозка по заявке. Ошибка не роняет синк: алерт важнее, а последний

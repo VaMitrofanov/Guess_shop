@@ -155,6 +155,119 @@ export function notifyWbBuyerClaim(input: {
   return Promise.resolve();
 }
 
+/**
+ * Покупатель поставил 1–3★ ещё до выкупа — гейт заморозил заказ (30.10.2026).
+ *
+ * Раньше такая заморозка была молчаливой, а гейт к тому же не видел заказы без
+ * пасса: W3QKRAA написал «★1, не смог создать геймпасс, игнорят», и узнали мы о
+ * нём только из заявки на возврат через 40 минут. Совпадение — по имени и
+ * товару, имя на WB не уникально, поэтому в тексте прямо сказано, как снять.
+ */
+export function notifyBuyoutGateBadReview(input: {
+  wbOrderId: string | null;
+  code: string;
+  denomination: number | null;
+  buyerName: string | null;
+  cardMessages?: Record<string, number> | null;
+  /** Статус нашего заказа (`null` — покупатель ещё не вводил код). */
+  internalStatus: string | null;
+  stars: number;
+  text: string | null;
+  reviewedAt: Date | null;
+  /** Гейт уже отпускал этот заказ по исправленному отзыву, а покупатель вернул плохую оценку. */
+  refrozen?: boolean;
+}): void {
+  const ref: DbsRef = {
+    wbOrderId: input.wbOrderId ?? "",
+    code: input.code,
+    denomination: input.denomination,
+    buyerName: input.buyerName,
+    cardMessages: input.cardMessages ?? null,
+  };
+  const text = clipReview(input.text);
+  const when = reviewWhen(input.reviewedAt);
+  const outcome: ClaimHoldOutcome = input.internalStatus === null
+    ? "held_code"
+    : input.internalStatus === "IN_PROGRESS" ? "held_in_progress" : "held";
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: input.refrozen ? "отзыв снова плохой — заказ заморожен" : "плохой отзыв до выкупа",
+    lines: [
+      refLine(ref),
+      `${starsLine(input.stars)}${when ? ` · ${when}` : ""}`,
+      text ? `💬 <i>${escapeHtml(text)}</i>` : null,
+      claimHoldLine(outcome),
+      "🔕 Напоминания по гейту для этого заказа остановлены",
+    ],
+    next: "ответить на отзыв и в чате WB. Совпадение по имени и товару — если это другой покупатель, снять заморозку в карточке",
+  }, ref);
+}
+
+function starsLine(stars: number): string {
+  const n = Math.max(0, Math.min(5, Math.round(stars)));
+  return "★".repeat(n) + "☆".repeat(5 - n);
+}
+
+function clipReview(text: string | null): string | null {
+  return text && text.length > 600 ? text.slice(0, 597) + "…" : text;
+}
+
+function reviewWhen(at: Date | null): string | null {
+  if (!at || !Number.isFinite(at.getTime())) return null;
+  const day = at.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit" });
+  return `${day} ${mskTime(at)}`;
+}
+
+/**
+ * Покупатель переписал плохой отзыв на хороший — гейт снял свою заморозку.
+ *
+ * Обычно это итог нашей же просьбы, поэтому сообщение — не тревога, а «можно
+ * выкупать». Снимается только замок самого гейта: заявку на возврат или ручную
+ * заморозку исправленный отзыв не отменяет.
+ */
+export function notifyBuyoutGateReviewFixed(input: {
+  wbOrderId: string | null;
+  code: string;
+  denomination: number | null;
+  buyerName: string | null;
+  cardMessages?: Record<string, number> | null;
+  internalStatus: string | null;
+  starsBefore: number;
+  starsAfter: number;
+  text: string | null;
+  reviewedAt: Date | null;
+}): void {
+  const ref: DbsRef = {
+    wbOrderId: input.wbOrderId ?? "",
+    code: input.code,
+    denomination: input.denomination,
+    buyerName: input.buyerName,
+    cardMessages: input.cardMessages ?? null,
+  };
+  const when = reviewWhen(input.reviewedAt);
+  const text = clipReview(input.text);
+  const next = input.internalStatus === null
+    ? "покупатель ещё не вводил код — заказ пойдёт обычным путём"
+    : input.internalStatus === "PENDING"
+      ? "заказ снова в очереди «К выкупу»"
+      : input.internalStatus === "AWAITING_GAMEPASS"
+        ? "ждём геймпасс — дальше обычным путём"
+        : `заказ в статусе ${escapeHtml(input.internalStatus)} — проверить карточку`;
+  broadcast({
+    marker: "progress",
+    zone: "DBS",
+    title: "отзыв исправлен — заказ разморожен",
+    lines: [
+      refLine(ref),
+      `${starsLine(input.starsBefore)} → ${starsLine(input.starsAfter)}${when ? ` · ${when}` : ""}`,
+      text ? `💬 <i>${escapeHtml(text)}</i>` : null,
+      "🔓 Заморозку гейта снял сам гейт",
+    ],
+    next,
+  }, ref);
+}
+
 /** Чем кончилась отмена для НАШЕЙ стороны заказа.
  *
  * `already_delivered` появился 12.09.2026: до него исход считался только когда

@@ -99,39 +99,57 @@ export function wbDeliveryApiReadiness() {
 
 /** Отзыв WB в сыром виде — берём только то, что нужно гейту выкупа. */
 const FeedbackSchema = z.object({
+  id: z.string().optional(),
   productValuation: z.number().optional(),
   userName: z.string().optional(),
   nmId: z.number().optional(),
   productDetails: z.object({ nmId: z.number().optional() }).partial().optional(),
   createdDate: z.string().optional(),
   text: z.string().optional(),
+  pros: z.string().optional(),
+  cons: z.string().optional(),
+  // Правка отзыва у WB — НОВЫЙ отзыв, связанный со старым: parent → child.
+  parentFeedbackId: z.string().nullable().optional(),
+  childFeedbackId: z.string().nullable().optional(),
 }).passthrough();
 const FeedbacksListSchema = z.object({
   data: z.object({ feedbacks: z.array(FeedbackSchema).optional().default([]) }).partial().optional(),
 }).passthrough();
 
 /**
- * Плохие отзывы (оценка ≤ 3) со всего кабинета — для гейта выкупа.
+ * Все отзывы кабинета — для гейта выкупа (и плохие, и хорошие).
  *
- * Тянем обе половины (отвеченные и нет) одним широким `take`: у магазина этого
- * размера отзывов сотни, не тысячи. Сеть молчит — отдаём пусто, гейт тогда
- * просто ничего не блокирует по отзыву (fail-open: лучше не заморозить, чем
- * заморозить вслепую).
+ * Хорошие нужны с 30.10.2026: покупатель, переписавший ★1 на ★5 (часто по
+ * нашей просьбе), должен получить разморозку, а понять это можно только по
+ * цепочке версий `parentFeedbackId → childFeedbackId`. Правленые отзывы WB
+ * уводит в архив, поэтому берём три выборки и склеиваем по `id`.
+ *
+ * `complete=false` — хоть одна выборка не пришла. Морозить по неполным данным
+ * можно (плохой отзыв от этого не перестаёт быть плохим), а размораживать —
+ * нет: потерянной могла оказаться как раз новая версия с ★1.
  */
-export async function fetchNegativeFeedbacks(): Promise<Array<z.infer<typeof FeedbackSchema>>> {
+export async function fetchGateFeedbacks(): Promise<{
+  feedbacks: Array<z.infer<typeof FeedbackSchema>>;
+  complete: boolean;
+}> {
   const base = "https://feedbacks-api.wildberries.ru/api/v1/feedbacks";
-  const out: Array<z.infer<typeof FeedbackSchema>> = [];
-  for (const isAnswered of ["true", "false"]) {
-    const page = await requestJson(
-      "marketplace",
-      `${base}?isAnswered=${isAnswered}&take=5000&skip=0&order=dateDesc`,
-      FeedbacksListSchema,
-    ).catch(() => null);
-    for (const f of page?.data?.feedbacks ?? []) {
-      if (Number(f.productValuation ?? 5) <= 3) out.push(f);
+  const urls = [
+    `${base}?isAnswered=true&take=5000&skip=0&order=dateDesc`,
+    `${base}?isAnswered=false&take=5000&skip=0&order=dateDesc`,
+    `${base}/archive?take=5000&skip=0&order=dateDesc`,
+  ];
+  const byId = new Map<string, z.infer<typeof FeedbackSchema>>();
+  const noId: Array<z.infer<typeof FeedbackSchema>> = [];
+  let complete = true;
+  for (const url of urls) {
+    const page = await requestJson("marketplace", url, FeedbacksListSchema).catch(() => null);
+    if (!page) { complete = false; continue; }
+    for (const f of page.data?.feedbacks ?? []) {
+      if (f.id) byId.set(f.id, f);
+      else noId.push(f);
     }
   }
-  return out;
+  return { feedbacks: [...byId.values(), ...noId], complete };
 }
 
 export async function fetchNewDbsOrders() {
