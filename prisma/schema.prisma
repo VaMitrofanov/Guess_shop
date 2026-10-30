@@ -581,6 +581,51 @@ model OrderHold {
   @@index([releasedAt])
 }
 
+/// Событие риска по заказу (30.10.2026): плохой отзыв, исправленный отзыв,
+/// заявка на возврат. Лента раздела «Риски» и история в досье покупателя.
+/// Пишет только воркер DBS (свип гейта), `dedupeKey` делает запись идемпотентной.
+/// `resolvedAt` — человек (или автоматика) решил, что делать больше нечего.
+model RiskEvent {
+  id          String    @id @default(cuid())
+  /// BAD_REVIEW | REVIEW_FIXED | CLAIM_OPENED | CLAIM_RESOLVED
+  kind        String
+  dedupeKey   String    @unique
+  wbCode      String?
+  wbOrderId   String?
+  buyerName   String?
+  /// Имя покупателя в нижнем регистре без лишних пробелов — ключ досье.
+  buyerKey    String?
+  nmId        Int?
+  amount      Int?
+  stars       Int?
+  starsBefore Int?
+  text        String?
+  feedbackId  String?
+  /// Что гейт сделал с заказом: frozen | released | none.
+  action      String?
+  occurredAt  DateTime
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  resolvedBy  String?
+
+  @@index([resolvedAt, occurredAt])
+  @@index([wbCode])
+  @@index([buyerKey])
+}
+
+/// Отметка «проблемный покупатель» (30.10.2026). Ключ — имя с WB: другого
+/// идентификатора покупателя WB не даёт, поэтому отметка — подсказка
+/// оператору, а не блокировка (у тёзок она тоже всплывёт).
+model BuyerFlag {
+  id          String   @id @default(cuid())
+  buyerKey    String   @unique
+  displayName String
+  note        String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 /// Одна часть разбитого выкупа: заказ закрывается несколькими геймпассами.
 ///
 /// Зачем: покупателю бывает удобнее (или он уже успел) выставить несколько

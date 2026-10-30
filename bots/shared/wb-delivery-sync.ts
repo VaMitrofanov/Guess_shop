@@ -87,7 +87,18 @@ import {
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
-import { GATE_ACTOR, isGateReviewHold, runBuyoutGate, type GateOrder, type WbFeedback } from "./buyout-gate";
+import { GATE_ACTOR, isGateReviewHold, matchBadReview, matchFixedReview, runBuyoutGate, type GateOrder, type WbFeedback } from "./buyout-gate";
+import {
+  autoResolveRiskEvents,
+  badReviewEvent,
+  claimEvents,
+  recordRiskEvents,
+  reviewBelongsInFeed,
+  reviewFixedEvent,
+  reviewText,
+  type RiskEventInput,
+  type RiskOrder,
+} from "./risk-events";
 import { revokeGateCode } from "./wb-code-revocation";
 // Живая карточка вынесена в свой модуль: её читают и воркер, и VK-бот, и сайт,
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
@@ -1836,15 +1847,28 @@ const CLAIM_REFUND_GRANTED = 5;
  * только правилу отзыва; у обычного WB-заказа их нет — тогда работает лишь
  * правило висяка. Заморозка — тот же `holdByCode`, что и у ручной.
  */
+const DBS_GATE_SELECT = {
+  id: true, nmId: true, buyerName: true, createdAt: true, wbOrderId: true,
+  denominationSnapshot: true, adminCardMessages: true, cancelledAt: true, isTest: true,
+  claimOpenedAt: true, claimReason: true, claimResolvedAt: true,
+  wbCode: { select: { code: true } },
+} as const;
+
 async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
-  /* Два источника кандидатов (30.10.2026):
+  const now = new Date();
+  /* Кандидаты (30.10.2026):
      • `PENDING` с пассом — оба правила (отзыв и висяк);
      • любой невыкупленный DBS-заказ за окно — только правило отзыва. Раньше
        их не было вовсе, и ★1 от застрявшего на шаге «создайте пасс» (W3QKRAA)
        ничего не морозила: замок встал лишь через 40 минут, с заявкой на
        возврат. Заказа у кода может ещё не быть — заморозка по коду сядет и
-       на будущий. */
-  const [pending, dbsOpen] = await Promise.all([
+       на будущий;
+     • замки самого гейта по отзыву — кандидаты на разморозку, если покупатель
+       отзыв исправил. Заявка на возврат или человек переписывают `createdBy`,
+       и такой замок гейт уже не трогает.
+     Те же DBS-заказы окна кормят ленту «Риски» — включая выкупленные: увидеть
+     того, кто поставил ★1, нужно и тогда, когда тратить уже нечего. */
+  const [pending, dbsWindow, reviewHoldRows] = await Promise.all([
     db.wbOrder.findMany({
       where: { status: "PENDING", isTest: false, heldAt: null, gamepassUrl: { not: null } },
       select: { wbCode: true },
@@ -1854,59 +1878,50 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     db.wbMarketplaceOrder.findMany({
       where: {
         isTest: false,
-        cancelledAt: null,
-        buyerName: { not: null },
         wbCodeId: { not: null },
-        createdAt: { gte: new Date(Date.now() - BAD_REVIEW_WINDOW_DAYS * 86_400_000) },
+        createdAt: { gte: new Date(now.getTime() - BAD_REVIEW_WINDOW_DAYS * 86_400_000) },
       },
-      select: { wbCode: { select: { code: true } } },
-      take: 2000,
+      select: DBS_GATE_SELECT,
+      take: 3000,
+    }),
+    db.orderHold.findMany({
+      where: { releasedAt: null, createdBy: GATE_ACTOR },
+      select: { wbCode: true, reason: true, createdBy: true },
+      take: 500,
     }),
   ]);
   const pendingCodes = new Set(pending.map((o) => o.wbCode));
-  const candidateCodes = [...new Set([
-    ...pendingCodes,
-    ...dbsOpen.flatMap((d) => (d.wbCode?.code ? [d.wbCode.code] : [])),
-  ])];
+  const reviewHoldCodes = new Set(reviewHoldRows.filter(isGateReviewHold).map((h) => h.wbCode));
 
-  /* Замки гейта по отзыву — кандидаты на разморозку, если покупатель отзыв
-     исправил. Только те, что гейт поставил сам и никто не перебил: заявка на
-     возврат или человек переписывают `createdBy`, и тогда решает уже не гейт. */
-  const reviewHolds = (await db.orderHold.findMany({
-    where: { releasedAt: null, createdBy: GATE_ACTOR },
-    select: { wbCode: true, reason: true, createdBy: true },
-    take: 500,
-  })).filter(isGateReviewHold);
-  const reviewHoldCodes = new Set(reviewHolds.map((h) => h.wbCode));
+  const dbsByCode = new Map(dbsWindow.flatMap((d) => (d.wbCode?.code ? [[d.wbCode.code, d] as const] : [])));
+  // Замок гейта или PENDING-заказ мог родиться из DBS-заказа старше окна.
+  const missing = [...new Set([...pendingCodes, ...reviewHoldCodes])].filter((c) => !dbsByCode.has(c));
+  if (missing.length > 0) {
+    const extra = await db.wbMarketplaceOrder.findMany({
+      where: { wbCode: { code: { in: missing } } },
+      select: DBS_GATE_SELECT,
+    });
+    for (const d of extra) if (d.wbCode?.code) dbsByCode.set(d.wbCode.code, d);
+  }
 
-  const allCodes = [...new Set([...candidateCodes, ...reviewHoldCodes])];
+  const allCodes = [...new Set([...pendingCodes, ...dbsByCode.keys(), ...reviewHoldCodes])];
   if (allCodes.length === 0) return;
 
   // Морозим только коды без истории заморозок — снятую руками заморозку не
   // воскрешаем. Исключение — замок, который снял сам гейт по исправленному
   // отзыву: если покупатель вернёт ★1, заказ должен замёрзнуть снова.
-  const holdRows = await db.orderHold.findMany({
-    where: { wbCode: { in: allCodes } },
-    select: { wbCode: true, releasedAt: true, releasedBy: true },
-  });
-  const gateReleased = new Set(holdRows.filter((h) => h.releasedAt && h.releasedBy === GATE_ACTOR).map((h) => h.wbCode));
-  const blocked = new Set(holdRows.filter((h) => !gateReleased.has(h.wbCode)).map((h) => h.wbCode));
-
-  const [dbs, internal] = await Promise.all([
-    db.wbMarketplaceOrder.findMany({
-      where: { wbCode: { code: { in: allCodes } } },
-      select: {
-        nmId: true, buyerName: true, createdAt: true, wbOrderId: true,
-        denominationSnapshot: true, adminCardMessages: true,
-        wbCode: { select: { code: true } },
-      },
+  const [holdRows, internal] = await Promise.all([
+    db.orderHold.findMany({
+      where: { wbCode: { in: allCodes } },
+      select: { wbCode: true, releasedAt: true, releasedBy: true },
     }),
     db.wbOrder.findMany({
       where: { wbCode: { in: allCodes } },
       select: { wbCode: true, status: true, createdAt: true, heldAt: true },
     }),
   ]);
-  const dbsByCode = new Map(dbs.map((d) => [d.wbCode?.code ?? "", d]));
+  const gateReleased = new Set(holdRows.filter((h) => h.releasedAt && h.releasedBy === GATE_ACTOR).map((h) => h.wbCode));
+  const blocked = new Set(holdRows.filter((h) => !gateReleased.has(h.wbCode)).map((h) => h.wbCode));
   const internalByCode = new Map(internal.map((o) => [o.wbCode, o]));
 
   const toGateOrder = (code: string): GateOrder => {
@@ -1914,7 +1929,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     const own = internalByCode.get(code);
     const createdAt = [meta?.createdAt, own?.createdAt]
       .filter((d): d is Date => d instanceof Date)
-      .sort((a, b) => a.getTime() - b.getTime())[0] ?? new Date();
+      .sort((a, b) => a.getTime() - b.getTime())[0] ?? now;
     return {
       wbCode: code,
       createdAt,
@@ -1927,22 +1942,27 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   };
 
   const gateOrders: GateOrder[] = [];
-  for (const code of candidateCodes) {
-    if (blocked.has(code)) continue;
+  for (const code of allCodes) {
+    if (blocked.has(code) || reviewHoldCodes.has(code)) continue;
+    const meta = dbsByCode.get(code);
     const own = internalByCode.get(code);
+    if (meta?.isTest || meta?.cancelledAt) continue;
     // Выкупленный — морозить нечего; закрытый — выкупа и так не будет.
     if (own && (own.status === "COMPLETED" || own.status === "REJECTED" || own.heldAt)) continue;
-    // Без DBS-карточки отзыв не сверить, а висяк смотрим только у PENDING.
-    if (!dbsByCode.has(code) && !pendingCodes.has(code)) continue;
+    // Без имени отзыв не сверить, а висяк смотрим только у PENDING.
+    if (!meta?.buyerName && !pendingCodes.has(code)) continue;
     gateOrders.push(toGateOrder(code));
   }
   gateOrders.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const holdOrders = [...reviewHoldCodes].filter((c) => dbsByCode.has(c)).map(toGateOrder);
 
+  // Отзывы — один раз на прогон: ими пользуются и гейт, и лента.
+  const loaded = await fetchGateFeedbacks().catch(() => ({ feedbacks: [] as WbFeedback[], complete: false }));
+
   const res = await runBuyoutGate({
     loadBuyableOrders: async () => gateOrders,
     loadReviewHolds: async () => holdOrders,
-    loadFeedbacks: fetchGateFeedbacks,
+    loadFeedbacks: async () => loaded,
     freeze: async (wbCode, reason) => {
       await holdByCode(db, { wbCode, reason, actor: GATE_ACTOR });
     },
@@ -1970,7 +1990,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     notifyBuyoutGateBadReview({
       ...refFor(d.wbCode),
       stars: Number(d.review.productValuation ?? 0),
-      text: badReviewText(d.review),
+      text: reviewText(d.review),
       reviewedAt: d.review.createdDate ? new Date(d.review.createdDate) : null,
       refrozen: gateReleased.has(d.wbCode),
     });
@@ -1981,19 +2001,89 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
       ...refFor(r.wbCode),
       starsBefore: Number(r.was.productValuation ?? 0),
       starsAfter: Number(r.review.productValuation ?? 0),
-      text: badReviewText(r.review),
+      text: reviewText(r.review),
       reviewedAt: r.review.createdDate ? new Date(r.review.createdDate) : null,
     });
   }
+
+  await syncRiskFeed(db, {
+    now,
+    dbsByCode,
+    internalByCode,
+    toGateOrder,
+    feedbacks: loaded.feedbacks,
+    feedbacksComplete: loaded.complete,
+    frozenByReview: new Set([
+      ...[...reviewHoldCodes].filter((c) => !res.released.some((r) => r.wbCode === c)),
+      ...res.frozen.filter((d) => d.rule === "bad_review").map((d) => d.wbCode),
+    ]),
+    released: new Set(res.released.map((r) => r.wbCode)),
+  }).catch((error) => {
+    console.error(`[WbDbsSync] лента рисков не обновилась: ${safeErrorCode(error)}`);
+  });
 }
 
-/** Текст отзыва целиком: у WB он бывает разложен на «достоинства/недостатки». */
-function badReviewText(review: WbFeedback): string | null {
-  const r = review as WbFeedback & { pros?: string; cons?: string };
-  const parts = [r.text, r.pros ? `+ ${r.pros}` : null, r.cons ? `− ${r.cons}` : null]
-    .map((p) => (p ?? "").trim())
-    .filter(Boolean);
-  return parts.length ? parts.join("\n") : null;
+/**
+ * Лента «Риски»: события по DBS-заказам окна (30.10.2026). Не трогает ни
+ * заказы, ни заморозки — только пишет, что видит, и разбирает то, по чему
+ * делать больше нечего. Ошибка здесь не должна валить гейт.
+ */
+async function syncRiskFeed(db: Db, input: {
+  now: Date;
+  dbsByCode: Map<string, {
+    id: string; nmId: number; buyerName: string | null; createdAt: Date; wbOrderId: string;
+    denominationSnapshot: number | null; cancelledAt: Date | null; isTest: boolean;
+    claimOpenedAt: Date | null; claimReason: string | null; claimResolvedAt: Date | null;
+  }>;
+  internalByCode: Map<string, { status: string }>;
+  toGateOrder: (code: string) => GateOrder;
+  feedbacks: WbFeedback[];
+  feedbacksComplete: boolean;
+  frozenByReview: Set<string>;
+  released: Set<string>;
+}) {
+  const events: RiskEventInput[] = [];
+  const closedCodes: string[] = [];
+  const fixedCodes: string[] = [];
+  for (const [code, meta] of input.dbsByCode) {
+    if (meta.isTest) continue;
+    const status = input.internalByCode.get(code)?.status;
+    const closed = Boolean(meta.cancelledAt) || status === "COMPLETED" || status === "REJECTED";
+    if (closed) closedCodes.push(code);
+    const order: RiskOrder = {
+      marketplaceId: meta.id,
+      wbCode: code,
+      wbOrderId: meta.wbOrderId,
+      buyerName: meta.buyerName,
+      nmId: meta.nmId ?? null,
+      amount: meta.denominationSnapshot ?? null,
+      createdAt: meta.createdAt,
+      closed,
+      claimOpenedAt: meta.claimOpenedAt,
+      claimReason: meta.claimReason,
+      claimResolvedAt: meta.claimResolvedAt,
+      refunded: Boolean(meta.cancelledAt && meta.claimOpenedAt),
+    };
+    events.push(...claimEvents(order, input.now));
+    if (!meta.buyerName) continue;
+    const gate = input.toGateOrder(code);
+    const bad = matchBadReview(gate, input.feedbacks);
+    if (bad && reviewBelongsInFeed(order, bad)) {
+      events.push(badReviewEvent(order, bad, input.frozenByReview.has(code) ? "frozen" : "none", input.now));
+    }
+    // Исправление видно только по полной выдаче: иначе потерянной могла
+    // оказаться как раз свежая ★1.
+    if (!bad && input.feedbacksComplete) {
+      const fixed = matchFixedReview(gate, input.feedbacks);
+      if (fixed && reviewBelongsInFeed(order, fixed.review)) {
+        events.push(reviewFixedEvent(order, fixed, input.released.has(code) ? "released" : "none", input.now));
+        fixedCodes.push(code);
+      }
+    }
+  }
+  const added = await recordRiskEvents(db, events);
+  const resolved = await autoResolveRiskEvents(db, { closedCodes, fixedCodes, now: input.now });
+  if (added || resolved) console.log(`[WbDbsSync] риски: +${added}, разобрано авто ${resolved}`);
 }
 
 /** Заморозка по заявке. Ошибка не роняет синк: алерт важнее, а последний

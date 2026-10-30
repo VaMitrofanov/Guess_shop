@@ -2176,6 +2176,9 @@ html.twa-route-active [contenteditable="true"] {
 .twa-more-icon.is-purple { background: rgba(167,139,250,.18) !important; color: #cdbcff !important; }
 .twa-more-icon.is-pink { background: rgba(203,17,171,.2) !important; color: #f39be0 !important; }
 .twa-more-icon.is-orange { background: rgba(255,189,92,.16) !important; color: #ffbd5c !important; }
+.twa-more-icon.is-red { background: rgba(255,69,58,.16) !important; color: #ff8a82 !important; }
+/* Счётчик открытых рисков в строке «Ещё» (30.10.2026). */
+.twa-more-badge { min-width: 24px; padding: 3px 8px; border-radius: 999px; background: #ff453a; color: #fff; font-size: 14px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* 🔍 в шапке любого экрана. */
 .twa-title-search {

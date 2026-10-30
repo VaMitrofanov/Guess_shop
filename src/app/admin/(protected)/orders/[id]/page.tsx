@@ -2,6 +2,9 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, LayoutList, Smartphone } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getAdminOrderDetail } from "@/lib/admin-ecosystem";
+import { prisma } from "@/lib/prisma";
+import { riskInfoForCodes } from "@/lib/order-risk";
+import OrderRiskBlock from "@/components/admin/risks/review-plaque";
 import OutboxReplayButton from "@/components/admin/outbox-replay-button";
 import OrderDetailTools from "@/components/admin/orders/order-detail-tools";
 import styles from "@/components/admin/admin-shell.module.css";
@@ -35,6 +38,8 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
   if (!/^[a-z0-9_-]{8,40}$/i.test(id)) notFound();
   const order = await getAdminOrderDetail(id);
   if (!order || order.isTest) notFound();
+  // Отзыв и покупатель WB (30.10.2026): плашка ★ и ссылка на досье.
+  const risk = (await riskInfoForCodes(prisma as never, [order.wbCode]).catch(() => new Map())).get(order.wbCode) ?? null;
 
   const code = order.publicOrderId ?? order.wbCode;
   const payment = order.paymentAttempts[0];
@@ -85,6 +90,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
             <DetailRow label="В очереди с" value={dateTime(order.pendingAt)} />
             <DetailRow label="Выполнен" value={dateTime(order.completedAt)} />
           </div>
+          {risk && <div style={{ marginTop: 14 }}><OrderRiskBlock risk={risk} /></div>}
         </section>
 
         {/* 🎮 Настройка геймпассов — то же меню, что в рабочем месте и в TWA.

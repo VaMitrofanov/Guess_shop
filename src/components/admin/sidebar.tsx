@@ -14,6 +14,7 @@ import {
   LogOut,
   MessageSquare,
   Shield,
+  ShieldAlert,
   ShoppingBasket,
   ShoppingCart,
   Smartphone,
@@ -33,6 +34,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { href: "/admin/risks", icon: ShieldAlert, label: "Риски" },
   { href: "/admin/wildberries/delivery", icon: Truck, label: "WB Доставка" },
   { href: "/admin/economics", icon: Wallet, label: "Экономика" },
   { href: "/admin/partners/anton", icon: Handshake, label: "Антон" },
@@ -51,6 +53,19 @@ function isActive(pathname: string, href: string) {
 export default function AdminSidebar({ user }: { user: { name?: string | null; via?: "telegram" | "break-glass" } }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  /* Открытые события «Рисков» (30.10.2026) — счётчик у пункта меню. */
+  const [risksOpen, setRisksOpen] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch("/api/admin/risks?count=1", { cache: "no-store" })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive && d) setRisksOpen(Number(d.open) || 0); })
+      .catch(() => {});
+    void load();
+    const timer = window.setInterval(load, 60_000);
+    window.addEventListener("admin:risks-changed", load);
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener("admin:risks-changed", load); };
+  }, []);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const current = NAV.find((item) => isActive(pathname, item.href));
@@ -100,6 +115,9 @@ export default function AdminSidebar({ user }: { user: { name?: string | null; v
               >
                 <Icon aria-hidden="true" />
                 {label}
+                {href === "/admin/risks" && risksOpen > 0 && (
+                  <span className={styles.navBadge} aria-label={`${risksOpen} открыто`}>{risksOpen > 99 ? "99+" : risksOpen}</span>
+                )}
               </Link>
             );
           })}

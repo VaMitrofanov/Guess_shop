@@ -39,6 +39,7 @@ import {
   SLICE_META, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf,
 } from "./types";
 import styles from "./orders.module.css";
+import { HOLD_KINDS, HOLD_KIND_META, type HoldKind } from "@/lib/hold-kinds-meta";
 
 const PAGE_SIZE = 50;
 /** Закрытый заказ: у него нет места в очереди — ни ⚡, ни кнопки поднять. */
@@ -93,6 +94,7 @@ export default function OrdersWorkspace({
      подсвечиваем, повтор с закрытым заказом — справка в досье (21.10). */
   const packDup = useMemo(() => packDuplicates(orders, gamepassIdsOf), [orders]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [heldKinds, setHeldKinds] = useState<Record<HoldKind, number> | null>(null);
   const [slices, setSlices] = useState<OrderSlicesPayload | null>(null);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
@@ -173,6 +175,7 @@ export default function OrdersWorkspace({
       const data = (await res.json()) as OrdersResponse;
       if (data.counts) setCounts(data.counts);
       if (data.slices) setSlices(data.slices);
+      if (data.heldKinds) setHeldKinds(data.heldKinds);
       setLoadedAt(Date.now());
     } catch { /* счётчики подтянутся при следующем действии */ }
   }, [slice]);
@@ -210,6 +213,7 @@ export default function OrdersWorkspace({
     if (narrow.age) params.set("age", narrow.age);
     if (narrow.amount) params.set("amount", String(narrow.amount));
     if (narrow.blocked) params.set("blocked", narrow.blocked);
+    if (narrow.held && slice === "HELD") params.set("held", narrow.held);
     return params;
   }, [slice, query, narrow]);
 
@@ -274,6 +278,7 @@ export default function OrdersWorkspace({
     if (narrow.age) params.set("age", narrow.age);
     if (narrow.amount) params.set("amount", String(narrow.amount));
     if (narrow.blocked) params.set("blocked", narrow.blocked);
+    if (narrow.held && slice === "HELD") params.set("held", narrow.held);
     const suffix = params.toString();
     window.history.replaceState(null, "", suffix ? `/admin/orders?${suffix}` : "/admin/orders");
   }, [slice, mode, openId, query, narrow]);
@@ -883,6 +888,25 @@ export default function OrdersWorkspace({
           onExport={exportSliceIds}
           onRefresh={() => void load(1, false)}
         />
+      )}
+
+      {/* ❄️ Подвкладки «Заморожены» по причине (30.10.2026). */}
+      {slice === "HELD" && !query.trim() && (
+        <div className={styles.narrowRow} role="group" aria-label="Причина заморозки">
+          <span>Причина:</span>
+          <button type="button" className={`${styles.chip} ${!narrow.held ? styles.chipOn : ""}`}
+            aria-pressed={!narrow.held} onClick={() => setNarrow(n => ({ ...n, held: null }))}>
+            Все
+          </button>
+          {HOLD_KINDS.map(kind => (
+            <button key={kind} type="button" title={HOLD_KIND_META[kind].hint}
+              className={`${styles.chip} ${narrow.held === kind ? styles.chipOn : ""}`}
+              aria-pressed={narrow.held === kind}
+              onClick={() => setNarrow(n => ({ ...n, held: n.held === kind ? null : kind }))}>
+              {HOLD_KIND_META[kind].icon} {HOLD_KIND_META[kind].label} <b>{heldKinds?.[kind] ?? 0}</b>
+            </button>
+          ))}
+        </div>
       )}
 
       {narrowChips.length > 0 && (

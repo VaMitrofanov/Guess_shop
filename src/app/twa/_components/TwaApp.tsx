@@ -17,6 +17,7 @@ const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
 const EconomicsScreen = dynamic(() => import("./screens/EconomicsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const RisksScreen     = dynamic(() => import("./screens/RisksScreen"),    { ssr: false, loading: () => <ScreenSkeleton /> });
 
 function ScreenSkeleton() {
   return (
@@ -70,7 +71,7 @@ export type OrdersCommand =
   | { kind: "export" }
   | { kind: "focus-search" };
 
-type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics";
+type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics" | "risks";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Сегодня",
@@ -81,6 +82,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
   settings:   "Настройки",
   system:     "Система",
   economics:  "Экономика",
+  risks:      "Риски",
 };
 
 // Drill-down screens reachable from a parent tab (not in the bottom nav).
@@ -101,6 +103,7 @@ export default function TwaApp() {
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
   const [dbsBadge,            setDbsBadge]            = useState(0);
+  const [risksBadge,          setRisksBadge]          = useState(0);
   /* Шапка экрана сжимается, когда лента заказов ушла с верха (событие шлёт
      OrdersScreen): дата и крупный заголовок не съедают экран при работе. */
   const [compactTitle, setCompactTitle] = useState(false);
@@ -310,6 +313,10 @@ export default function TwaApp() {
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setDbsBadge(d.count ?? 0); })
       .catch(() => {});
+    fetch("/api/twa/risks?count=1", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setRisksBadge(d.open ?? 0); })
+      .catch(() => {});
   }, [token]);
 
   useEffect(() => {
@@ -455,9 +462,11 @@ export default function TwaApp() {
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}
         {screen === "economics"  && <EconomicsScreen {...sp} />}
+        {screen === "risks"      && <RisksScreen     {...sp} onChanged={refreshBadge}
+          onOpenOrder={(code) => { setOrderQueryPreload(code); setOrdersTabPreload(""); setScreen("orders"); }} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} onQuick={runQuick} />
+      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} risksBadge={risksBadge} onQuick={runQuick} />
       <ToastHost />
     </div>
   );

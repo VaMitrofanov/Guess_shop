@@ -58,6 +58,8 @@ import { PLACE_HELP_EVENT } from "../../../../../bots/shared/no-place";
 import { BUYER_STEP_STATUSES } from "@/lib/gamepass-tools";
 import { JOURNEY_EVENT_TYPES, trimJourneyPayload } from "@/lib/buyer-journey";
 import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
+import { countHoldKinds } from "@/lib/hold-kinds";
+import { riskInfoForCodes, type OrderRisk } from "@/lib/order-risk";
 import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
 
@@ -510,7 +512,11 @@ export async function GET(req: NextRequest) {
         return { ...emptyCounts, total: cnt };
       })();
 
-  const [rawOrders, { total, counts, sums, oldest, slices }] = await Promise.all([ordersPromise, countsPromise]);
+  // Подвкладки «Заморожены» по причине (30.10.2026) — тем же заходом, что лента.
+  const heldKindsPromise = tab === "HELD" && !q && !skipCounts
+    ? countHoldKinds(prisma as any).catch(() => null)
+    : Promise.resolve(null);
+  const [rawOrders, { total, counts, sums, oldest, slices }, heldKinds] = await Promise.all([ordersPromise, countsPromise, heldKindsPromise]);
   const hasMore = skipCounts && rawOrders.length > limit;
   const orders = hasMore ? rawOrders.slice(0, limit) : rawOrders;
   const finalTotal = skipCounts
@@ -548,7 +554,7 @@ export async function GET(req: NextRequest) {
       .filter((o) => !["COMPLETED", "REJECTED"].includes(o.status))
       .map((o) => o.id);
 
-    const [clusterOrders, codeRecords, firstOrderRows, statusEvents, journeyRows] = await Promise.all([
+    const [clusterOrders, codeRecords, firstOrderRows, statusEvents, journeyRows, riskByCode] = await Promise.all([
       // «Заказ №N из M» у покупателя — один заход в базу, а не два.
       // Через Prisma это `findMany` с вложенным `user`, и вложенность стоит
       // ОТДЕЛЬНОГО запроса за пользователями: с базой в Сингапуре это лишние
@@ -596,7 +602,12 @@ export async function GET(req: NextRequest) {
             select: { orderId: true, type: true, payload: true, createdAt: true },
           })
         : [],
+      // Отзыв и покупатель для карточки (30.10.2026) — в той же волне.
+      riskInfoForCodes(prisma as any, orders.map((o: any) => o.wbCode as string))
+        .catch(() => new Map<string, OrderRisk>()),
     ]);
+
+    for (const order of orders) order.risk = riskByCode.get(order.wbCode) ?? null;
 
     if (journeyIds.length > 0) {
       const byOrder = new Map<string, { type: string; payload: Record<string, unknown>; createdAt: Date }[]>();
@@ -690,7 +701,7 @@ export async function GET(req: NextRequest) {
         _count: { profitKopecks: true },
       })
     : null;
-  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, slices, profitSummary, page, pages });
+  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, slices, heldKinds, profitSummary, page, pages });
 }
 
 function tabTotal(tab: string, counts: Record<string, number>): number {

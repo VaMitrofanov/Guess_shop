@@ -990,3 +990,6 @@
 /* «Куплено» в строке «Выкупа» — текстовая кнопка, не значок: общее правило
    `.rowActions button { width: 32px }` обрезало её до «Купленo» (20.10). */
 .rowActions .buyButton { width: auto; min-width: 112px; height: 34px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+
+/* Счётчик открытых рисков у пункта меню (30.10.2026). */
+.navBadge { margin-left: auto; min-width: 22px; padding: 2px 7px; border-radius: 999px; background: #ff453a; color: #fff; font-size: 12px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }

@@ -53,6 +53,9 @@ import { buyerJourney, type JourneyEventRow, type JourneyNext } from "@/lib/buye
 import type { BuyerStepKind } from "../../../../../bots/shared/buyer-step";
 import { JourneyBlock, JourneyHistorySheet, JourneyTrack } from "../BuyerJourney";
 import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
+import type { OrderRisk } from "@/lib/order-risk-types";
+import { HOLD_KINDS, HOLD_KIND_META, type HoldKind } from "@/lib/hold-kinds-meta";
+import { BuyerDossierSheet, BuyerLine, ReviewPlaque } from "../RiskBits";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -97,6 +100,8 @@ interface LiveSearch {
 interface Order {
   id: string;
   amount: number;
+  /** Отзыв и покупатель WB (30.10.2026) — приезжает с обогащением. */
+  risk?: OrderRisk | null;
   gamepassUrl: string | null;
   /** Пусто у обычного заказа — тогда работает единственный `gamepassUrl`. */
   splitGamepasses?: SplitPart[];
@@ -193,6 +198,8 @@ interface OrdersData {
   oldest?: Record<string, string | null> | null;
   /** Шапка среза: деньги, полосы источников, препятствия, возраст, «сегодня». */
   slices?: OrderSlicesPayload | null;
+  /** Счётчики подвкладок «Заморожены» по причине. */
+  heldKinds?: Record<HoldKind, number> | null;
   page: number;
   pages: number;
 }
@@ -204,6 +211,7 @@ interface EnrichValue {
   vkUnreachable?: boolean | null;
   /** 🧭 События пути покупателя — только у незакрытых. */
   journeyEvents?: JourneyEventRow[];
+  risk?: OrderRisk | null;
 }
 
 /** Живая проверка ГП (gp-live-check): фактическая цена vs ожидаемая по номиналу. */
@@ -2704,6 +2712,16 @@ function OrderCard({
             тем, что заказ оказался сверху, — а это же место занимает и просто
             самый старый. */}
         {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
+        {/* Отзыв и «проблемный» покупатель видны прямо в ленте (30.10.2026). */}
+        {order.risk?.review?.kind === "BAD_REVIEW" && (
+          <span className="twa-oc-prio" style={{ color: C.red, background: `${C.red}1f` }} title="Плохой отзыв на WB">★{order.risk.review.stars ?? "?"}</span>
+        )}
+        {order.risk?.review?.kind === "REVIEW_FIXED" && (
+          <span className="twa-oc-prio" style={{ color: C.green, background: `${C.green}1f` }} title="Отзыв исправлен">★{order.risk.review.starsBefore ?? "?"}→{order.risk.review.stars ?? "?"}</span>
+        )}
+        {order.risk?.flag && (
+          <span className="twa-oc-prio" style={{ color: C.orange, background: `${C.orange}1f` }} title={order.risk.flag.note ?? "Покупатель отмечен проблемным"}>⚠️ проблемный</span>
+        )}
         {/* Код ВБ — якорь заказа: его называют в чате и по нему ищут. Крупный,
             всегда на одном месте, тап копирует. */}
         {codeChip()}
@@ -3041,6 +3059,13 @@ function OrderCard({
             </span>
           </div>
         </div>
+      )}
+
+      {/* ★ Отзыв покупателя и досье (30.10.2026): рядом с заморозкой — «почему
+          заморожен» и «что написал человек» читаются вместе. */}
+      {order.risk?.review && <ReviewPlaque review={order.risk.review} />}
+      {order.risk?.buyerName && (
+        <BuyerLine risk={order.risk} onOpen={(name) => window.dispatchEvent(new CustomEvent("twa:open-buyer", { detail: name }))} />
       )}
 
 
@@ -3829,6 +3854,7 @@ export default function OrdersScreen({
       if (n.age) params.set("age", n.age);
       if (n.amount) params.set("amount", String(n.amount));
       if (n.blocked) params.set("blocked", n.blocked);
+      if (n.held && f === "HELD") params.set("held", n.held);
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
@@ -3847,7 +3873,7 @@ export default function OrdersScreen({
 
   const isAttentionView = filter === "ALL" && !query && allView === "attention";
   const serverTab: FilterTab = isAttentionView ? "ATTENTION" : filter;
-  const narrowKey = `${narrow.lane ?? ""}|${narrow.age ?? ""}|${narrow.amount ?? ""}|${narrow.blocked ?? ""}`;
+  const narrowKey = `${narrow.lane ?? ""}|${narrow.age ?? ""}|${narrow.amount ?? ""}|${narrow.blocked ?? ""}|${narrow.held ?? ""}`;
 
   /* Срез, в котором мы стоим. Фильтр из шторки срезом не является: ряд тогда
      стоит без выделения, а активен чип «Фильтры» — так видно, что лента
@@ -4001,6 +4027,18 @@ export default function OrdersScreen({
     if (result === "consumed") { setPage(1); fetchOrders(serverTab, query, 1, false); }
     onActionDone?.();
   }, [serverTab, query, fetchOrders, onActionDone]);
+
+  /* Досье покупателя (30.10.2026): карточка шлёт событие с именем, шторка
+     живёт здесь — одна на экран, а не по копии в каждой карточке. */
+  const [dossierName, setDossierName] = useState<string | null>(null);
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const name = (event as CustomEvent<string>).detail;
+      if (name) setDossierName(name);
+    };
+    window.addEventListener("twa:open-buyer", onOpen);
+    return () => window.removeEventListener("twa:open-buyer", onOpen);
+  }, []);
 
   /* 🧭 После «📨 Отправить» путь заказа устарел: сбрасываем его из кэша
      обогащения, и эффект ниже дотягивает свежие события. */
@@ -4559,6 +4597,32 @@ export default function OrdersScreen({
             ))}
           </div>
         )}
+
+        {/* ❄️ Подвкладки «Заморожены» по причине (30.10.2026): отзыв, возврат,
+            висяк, вручную. Тап по активной — снова все заморозки. */}
+        {!query && filter === "HELD" && (
+          <div className="twa-slice-row">
+            <div className="twa-slice-scroll twa-no-scrollbar">
+              {HOLD_KINDS.map(kind => {
+                const meta = HOLD_KIND_META[kind];
+                const isOn = narrow.held === kind;
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    title={meta.hint}
+                    className={`twa-slice-tab twa-press-sm${isOn ? " is-on" : ""}`}
+                    style={isOn ? { background: `${C.ice}2a`, color: C.ice } : undefined}
+                    onClick={() => { haptic.select(); setNarrow(n => ({ ...n, held: isOn ? null : kind })); }}
+                  >
+                    {meta.icon} {meta.label}
+                    <b>{data?.heldKinds?.[kind] ?? 0}</b>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
 
@@ -4813,6 +4877,13 @@ export default function OrdersScreen({
 
       {/* Шторка «Фильтры»: всё, что не является ежедневной работой. Ни одна
           вкладка из старого ряда чипов не исчезла — она переехала сюда. */}
+      <BuyerDossierSheet
+        token={token}
+        name={dossierName}
+        onClose={() => setDossierName(null)}
+        onOpenOrder={(code) => { setDossierName(null); setQuery(code); }}
+      />
+
       <FiltersSheet
         open={filtersOpen}
         active={sliceId === null ? filter : null}

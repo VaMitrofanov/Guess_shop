@@ -21,6 +21,7 @@ import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
 import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/lib/buyout-summary";
+import OrderRiskBlock from "@/components/admin/risks/review-plaque";
 
 const TONE_CLASS: Record<BuyoutTone, string> = {
   green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
@@ -421,6 +422,8 @@ export default function OrderDossier({
                 <div>{order.heldReason ?? "причина не указана"} · выключен из выкупа, очередей и пачки</div>
               </div>
             )}
+            {/* ★ Отзыв покупателя и досье (30.10.2026). */}
+            <OrderRiskBlock risk={order.risk} />
             {order.buyoutErrorCode === "REGIONAL_PRICE" && (
               <div className={`${styles.box} ${styles.boxRed}`}>
                 <div className={styles.boxHead}>Почему сорвался выкуп</div>

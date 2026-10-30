@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { NOT_HELD_SQL } from "@/lib/order-hold";
+import { holdKindWhere, isHoldKind, type HoldKind } from "@/lib/hold-kinds";
 import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW } from "@/lib/purchase-guard";
 import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, NEW_CUTOFF_HOURS, SILENT_REMINDERS, type FilterTab } from "@/lib/order-queue";
 
@@ -361,6 +362,8 @@ export interface OrderNarrow {
   amount?: number | null;
   /** `silent` — бот отправил все 3 напоминания; `unreached` — не ушло ни одного. */
   blocked?: "regional" | "split" | "nogp" | "silent" | "unreached" | null;
+  /** Причина заморозки — подвкладка «Заморожены» (30.10.2026). */
+  held?: HoldKind | null;
 }
 
 const NARROW_BLOCKED = ["regional", "split", "nogp", "silent", "unreached"] as const;
@@ -381,11 +384,12 @@ export function parseNarrow(params: URLSearchParams): OrderNarrow {
     age: params.get("age"),
     amount: Number.isFinite(amount) && amount > 0 ? amount : null,
     blocked: (NARROW_BLOCKED as readonly string[]).includes(blocked ?? "") ? blocked as OrderNarrow["blocked"] : null,
+    held: isHoldKind(params.get("held")) ? params.get("held") as HoldKind : null,
   };
 }
 
 export function isNarrowed(narrow: OrderNarrow): boolean {
-  return !!(narrow.lane || narrow.age || narrow.amount || narrow.blocked);
+  return !!(narrow.lane || narrow.age || narrow.amount || narrow.blocked || narrow.held);
 }
 
 export function buildNarrowWhere(tab: FilterTab, narrow: OrderNarrow): Prisma.WbOrderWhereInput {
@@ -416,6 +420,8 @@ export function buildNarrowWhere(tab: FilterTab, narrow: OrderNarrow): Prisma.Wb
   if (narrow.blocked === "silent") and.push({ remindersSent: { gte: 3 } });
   if (narrow.blocked === "unreached")
     and.push({ remindersSent: 0, createdAt: { lte: new Date(Date.now() - 24 * 3600_000) } });
+
+  if (narrow.held) and.push(holdKindWhere(narrow.held));
 
   return and.length === 0 ? {} : { AND: and };
 }

@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   Settings,
+  ShieldAlert,
   ShoppingBag,
   Sun,
   Ticket,
@@ -23,7 +24,7 @@ import BottomSheet from "./BottomSheet";
 import { haptic } from "./haptics";
 import { C } from "./theme";
 
-type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics";
+type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics" | "risks";
 
 const LEFT_TABS = [
   { id: "dashboard" as const, label: "Сегодня", Icon: Sun },
@@ -57,12 +58,15 @@ export default function BottomNav({
   onChange,
   ordersBadge = 0,
   dbsBadge = 0,
+  risksBadge = 0,
   onQuick,
 }: {
   active: Screen;
   onChange: (screen: Screen) => void;
   ordersBadge?: number;
   dbsBadge?: number;
+  /** Открытые события раздела «Риски» (30.10.2026). */
+  risksBadge?: number;
   onQuick: (action: QuickAction) => void;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -77,7 +81,7 @@ export default function BottomNav({
     setMoreOpen(false);
     onQuick(action);
   }
-  const moreActive = active === "account" || active === "wb" || active === "settings" || active === "system" || active === "economics";
+  const moreActive = active === "account" || active === "wb" || active === "settings" || active === "system" || active === "economics" || active === "risks";
 
   function navigate(screen: Screen) {
     if (screen !== active) haptic.select();
@@ -124,7 +128,15 @@ export default function BottomNav({
               <X size={18} />
             </button>
           </div>
-          {/* Разделы по смыслу, а не списком: деньги, магазин, система. */}
+          {/* Разделы по смыслу, а не списком: контроль, деньги, магазин, система. */}
+          <div className="twa-more-group">Контроль</div>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("risks")}>
+            <span className="twa-more-icon is-red"><ShieldAlert size={19} /></span>
+            <span><strong>Риски</strong><small>Плохие отзывы, исправления, возвраты</small></span>
+            {risksBadge > 0
+              ? <b className="twa-more-badge">{risksBadge > 99 ? "99+" : risksBadge}</b>
+              : <span aria-hidden="true">›</span>}
+          </button>
           <div className="twa-more-group">Деньги</div>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("economics")}>
             <span className="twa-more-icon is-green"><Wallet size={19} /></span>
@@ -201,6 +213,7 @@ export default function BottomNav({
         >
           <span className="twa-tab-icon">
             <Ellipsis size={22} />
+            {risksBadge > 0 && <b style={{ background: C.red }}>{risksBadge > 99 ? "99+" : risksBadge}</b>}
           </span>
           <span>Ещё</span>
         </button>

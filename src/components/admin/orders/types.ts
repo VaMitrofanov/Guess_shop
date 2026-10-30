@@ -2,6 +2,8 @@ import type { JourneyEventRow } from "@/lib/buyer-journey";
 import type { OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 import type { Tone } from "@/lib/order-presentation";
 import type { BuyoutOrderInput } from "@/lib/buyout-summary";
+import type { HoldKind } from "@/lib/hold-kinds-meta";
+import type { OrderRisk } from "@/lib/order-risk-types";
 
 /** Заказ в том виде, в котором его отдаёт `/api/admin/orders`. */
 export interface AdminOrder {
@@ -19,6 +21,8 @@ export interface AdminOrder {
   buyoutErrorCode: string | null;
   heldAt: string | null;
   heldReason: string | null;
+  /** Отзыв и покупатель WB (30.10.2026). */
+  risk?: OrderRisk | null;
   heldBy: string | null;
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Поверх статуса. */
   priorityAt?: string | null;
@@ -66,6 +70,8 @@ export interface OrdersResponse {
   sums: Record<string, number> | null;
   oldest: Record<string, string | null> | null;
   slices: OrderSlicesPayload | null;
+  /** Подвкладки «Заморожены» по причине (30.10.2026). */
+  heldKinds?: Record<HoldKind, number> | null;
 }
 
 export interface LiveCheck {
@@ -84,6 +90,7 @@ export type Narrow = {
   age?: string | null;
   amount?: number | null;
   blocked?: string | null;
+  held?: HoldKind | null;
 };
 
 /** Тон → цвет тёмной оболочки админки. Один словарь на все экраны заказов. */
