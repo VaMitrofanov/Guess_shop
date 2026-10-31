@@ -15,6 +15,17 @@
 | VK-бот | vk-io-процесс | `bots/vk` |
 | Bridge | HTTP-прокси к Roblox/Telegram | `bots/shared/bridge.ts` |
 
+### Guide собирается из урезанного `src/app`
+
+`Dockerfile.guide` вырезает перед сборкой `src/app/admin`, `src/app/api/admin` и ещё
+полтора десятка маршрутов. Всё, что осталось в `src/app` (например `/api/twa/*`), Next
+компилирует целиком — и импорт вырезанного пути роняет Guide на «Module not found».
+30–31.10.2026 так упали восемь выкаток Guide подряд: `/api/twa/{buyers,risks}`
+реэкспортировали `@/app/api/admin/...`. Общие обработчики для `/api/admin/*` и
+`/api/twa/*` кладём в `src/lib/*-route.ts` (как `wb-delivery-route.ts`,
+`admin-risks-route.ts`), а не в папку admin. Инвариант —
+`src/__tests__/guide-pruned-imports.test.ts`.
+
 ## Как деплоить
 
 Coolify настроен на **автодеплой по push в `main`** (GitHub webhook). Достаточно:
