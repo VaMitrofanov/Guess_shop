@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Roblox Bank
 
-## Getting Started
+Сервис выкупа Robux у российских пользователей. Клиент покупает карту на Wildberries,
+активирует 7-символьный код на сайте, попадает в Telegram- или VK-бота, создаёт геймпасс
+в Roblox, менеджер его выкупает — клиент получает деньги. Цель — приучить клиента заказывать
+повторно прямо в боте.
 
-First, run the development server:
+**Стек:** Next.js (App Router) · TypeScript · Prisma · Neon Postgres · Telegram/VK боты ·
+Telegram Web App (админка).
+
+## Документация
+
+Полная документация — в [`docs/`](docs/README.md):
+
+| Файл | О чём |
+|------|-------|
+| [architecture.md](docs/architecture.md) | Обзор системы, три канала как единая экосистема |
+| [corridor-and-site.md](docs/corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора |
+| [bots.md](docs/bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы |
+| [twa-admin.md](docs/twa-admin.md) | Telegram Web App админка |
+| [database.md](docs/database.md) | Модели Prisma и статусы заказов |
+| [deploy.md](docs/deploy.md) | Как деплоится каждый сервис |
+| [security.md](docs/security.md) | Модель угроз, известные риски |
+
+## Локальный запуск
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install            # + prisma generate (postinstall)
+npm run dev            # сайт (Next.js)
+npm run bot:tg         # TG-бот (отдельный терминал)
+npm run bot:vk         # VK-бот
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local` — переменные из `.env.example` + переменные ботов (см. [docs/deploy.md](docs/deploy.md)).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> Репозиторий публичный. Секреты, доступы к серверам и деплою намеренно **не** в репозитории —
+> операционная информация ведётся локально вне git.

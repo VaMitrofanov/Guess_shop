@@ -3,6 +3,16 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+function verifiedDatabaseUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    if (url.searchParams.get("sslmode") === "require") url.searchParams.set("sslmode", "verify-full");
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
@@ -12,6 +22,8 @@ export default defineConfig({
   datasource: {
     // We use process.env here to avoid throwing error during build
     // if the environment variable is not yet linked.
-    url: process.env.DATABASE_URL || "postgresql://johndoe:randompassword@localhost:5432/mydb",
+    url: verifiedDatabaseUrl(
+      process.env.DATABASE_URL || "postgresql://johndoe:randompassword@localhost:5432/mydb",
+    ),
   },
 });
