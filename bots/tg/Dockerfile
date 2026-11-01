@@ -20,6 +20,17 @@ ARG NODE_VERSION=22-bookworm-slim
 # Stage 1 — deps
 # ────────────────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS deps
+
+# Prisma без сети (02.11.2026). `prisma generate` и postinstall `@prisma/engines`
+# качают schema-engine с binaries.prisma.sh, хотя для генерации клиента он не
+# нужен (Prisma 7 — wasm-компилятор запросов внутри пакета). С RF-хоста эта
+# загрузка то проходит, то ВИСИТ без тайм-аута: 01.11 так встали сборки Guide
+# (npm ci) и VK-бота (prisma generate) — отсюда вечное «Guide отстал».
+# Путь к «движку» задан — значит, качать нечего. Только на этапах СБОРКИ:
+# в рабочем контейнере миграции не запускаются (их гоняют с ноутбука), а
+# фальшивый движок там превратил бы `prisma migrate` в тихий «успех».
+ENV PRISMA_SCHEMA_ENGINE_BINARY=/bin/true \
+    PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 WORKDIR /app
 
 RUN apt-get update -y \
