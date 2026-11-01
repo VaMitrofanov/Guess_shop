@@ -42,6 +42,23 @@ describe("WB gate link handed to the buyer", () => {
     expect(wbGateMessage("QUN5YFZ", null)).toContain("ваш номинал");
   });
 
+  /** 01.11.2026: покупатель забывал код из ссылки и писал в поддержку без него. */
+  it("names the order code on its own line, right under the confirmation", () => {
+    for (const message of [wbGateMessage("QUN5YFZ", 1000), ...[1, 2, 3].map((l) => wbGateReminderMessage("QUN5YFZ", 1000, l))]) {
+      const paragraphs = message.split("\n\n");
+      expect(paragraphs[1]).toMatch(/^Код вашего заказа: QUN5YFZ\n/);
+      expect(message).toMatch(/назовите код/);
+    }
+    // Эхо гейта находится по первой строке — она не сдвинулась.
+    expect(wbGateMessage("QUN5YFZ", 1000).startsWith("Спасибо, код доставки получен!")).toBe(true);
+  });
+
+  it("masks the order-code line in the stored transcript", () => {
+    const stored = redactWbChatText(wbGateMessage("QUN5YFZ", 1000));
+    expect(stored).not.toContain("QUN5YFZ");
+    expect(stored).toContain("Код вашего заказа: •••••••");
+  });
+
   /** Traefik routes on the query, so a fallback without `source=wb` never
    * reaches the guide container. */
   it("gives a fallback URL that actually resolves to the guide", () => {

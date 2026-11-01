@@ -14,11 +14,15 @@ import {
   firstAgeBasis,
   firstCopyableIds,
   firstCopyToast,
-  firstHiddenCount,
+  firstGroupTotal,
   firstMetaLine,
   firstNoteText,
   firstReadiness,
-  groupFirstInLine,
+  firstRushHeat,
+  firstRushLine,
+  firstVisibleGroups,
+  FIRST_GROUPS,
+  type FirstFilter,
   type FirstLive,
 } from "@/lib/first-in-line-view";
 
@@ -35,11 +39,15 @@ import {
    случайное касание обязано быть обратимым. Ушли с экрана во время отсчёта —
    выкуп всё равно засчитывается: админ нажал «Выкуплено», значит купил, и
    потерянная отметка означала бы второй выкуп того же заказа.
+
+   01.11.2026: группа «📣 Торопят» (писали в поддержку за 48 ч) и 🛑 полоса
+   просьб об отмене. Счётчики в шапке — фильтры: «Все» показывает по три
+   строки на группу, тап по счётчику — всю группу.
    ───────────────────────────────────────────────────────────────────────── */
 
 const TONE: Record<Tone, string> = {
   green: C.green, yellow: C.yellow, orange: C.orange, red: C.red,
-  blue: C.blue, ice: C.ice, accent: C.accent, muted: C.textTertiary, pink: C.pink,
+  blue: C.blue, ice: C.ice, accent: C.accent, muted: C.textTertiary, pink: C.pink, purple: C.purple,
 };
 
 const robux = (n: number) => n.toLocaleString("ru-RU");
@@ -66,6 +74,7 @@ export default function FirstInLineBlock({
   const [now, setNow] = useState(() => Date.now());
   const [noteEdit, setNoteEdit] = useState<{ id: string; value: string } | null>(null);
   const [noteSaving, setNoteSaving] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FirstFilter>("all");
   const timers = useRef(new Map<string, { timer: number; order: FirstInLineOrder }>());
   /* Зеркало правки в ref: поле сохраняется по blur, а Esc снимает правку тем же
      движением — без зеркала Esc всё равно сохранял бы набранное. */
@@ -216,14 +225,12 @@ export default function FirstInLineBlock({
 
   // Грязные — на ВСЕ такие заказы (строк может быть меньше), минус выкупленные.
   const gross = rows.reduce((sum, row) => (bought.has(row.id) ? sum - row.gross : sum), data.gross);
-  const hidden = firstHiddenCount(data);
-  const groups = groupFirstInLine(visible);
-  const allIds = firstCopyableIds(visible, live).ids.length;
-  const counts = [
-    { tone: "pink" as Tone, label: "🔁 не дошло", n: data.rebuy ?? 0 },
-    { tone: "yellow" as Tone, label: "⚡ подняты", n: data.pinned },
-    { tone: "blue" as Tone, label: "💳 прямых", n: data.direct },
-  ];
+  // Фильтр на опустевшую группу (всё выкупили) — обратно на «Все».
+  const groups = firstVisibleGroups(visible, filter, data);
+  const shownRows = groups.flatMap(entry => entry.rows);
+  const allIds = firstCopyableIds(filter === "all" ? visible : shownRows, live).ids.length;
+  const stops = data.stops ?? [];
+  const pick = (next: FirstFilter) => { haptic.select(); setFilter(prev => (prev === next ? "all" : next)); };
 
   return (
     <section className="twa-first">
@@ -233,26 +240,55 @@ export default function FirstInLineBlock({
         <button
           type="button"
           className="twa-first-copy-all twa-press-sm"
-          onClick={() => copyIds(visible, "первым делом")}
+          onClick={() => copyIds(filter === "all" ? visible : shownRows, "первым делом")}
           disabled={allIds === 0}
           aria-label="Скопировать ID геймпассов всей пачки"
         >
           <Copy size={13} />ID · {allIds}
         </button>
       </div>
-      <div className="twa-first-counts">
-        {counts.map(c => (
-          <span key={c.label} className={`twa-first-cnt${c.n === 0 ? " is-off" : ""}`} style={c.n ? { color: TONE[c.tone], background: `${TONE[c.tone]}24` } : undefined}>
-            {c.label} {c.n}
-          </span>
-        ))}
+      <div className="twa-first-counts" role="tablist" aria-label="Фильтр «Первым делом»">
+        <button type="button" role="tab" aria-selected={filter === "all"}
+          className={`twa-first-cnt twa-press-sm${filter === "all" ? " is-on" : ""}`} onClick={() => pick("all")}>
+          Все {data.total}
+        </button>
+        {FIRST_GROUPS.map(group => {
+          const n = firstGroupTotal(data, group.id);
+          return (
+            <button key={group.id} type="button" role="tab" aria-selected={filter === group.id}
+              aria-label={`${group.title}: ${n}`} disabled={n === 0}
+              className={`twa-first-cnt twa-press-sm${n === 0 ? " is-off" : ""}${filter === group.id ? " is-on" : ""}`}
+              style={n ? { color: TONE[group.tone], background: `${TONE[group.tone]}${filter === group.id ? "3d" : "24"}` } : undefined}
+              onClick={() => pick(group.id)}>
+              {group.icon} {n}
+            </button>
+          );
+        })}
       </div>
 
-      {groups.map(({ group, rows: groupRows }) => (
+      {stops.length > 0 && filter === "all" && (
+        <div className="twa-first-stop" role="note">
+          <div className="twa-first-stop-h">
+            🛑 Просят отмену — не выкупать
+            <b>{data.stopTotal ?? stops.length}</b>
+          </div>
+          {stops.map(stop => (
+            <button key={stop.id} type="button" className="twa-first-stop-row twa-press-sm"
+              onClick={() => { haptic.select(); onOpenOrder?.(stop.wbCode); }}>
+              <strong>{stop.wbCode}</strong>
+              <span>{stop.quote ? `«${stop.quote}»` : "просит вернуть деньги"}</span>
+              <em>❄ {robux(stop.amount)}</em>
+            </button>
+          ))}
+          <small>Заморожены автоматически. Решить: отменить заказ или разморозить в карточке.</small>
+        </div>
+      )}
+
+      {groups.map(({ group, rows: groupRows, hidden }) => (
         <div key={group.id} className={`twa-first-group is-${group.id}`}>
           <div className="twa-first-gh" style={{ color: TONE[group.tone] }}>
             <span>{group.icon} {group.title}</span>
-            <b>{groupRows.length}</b>
+            <b>{firstGroupTotal(data, group.id) || groupRows.length}</b>
             <small>{group.hint}</small>
             {groups.length > 1 && (
               <button type="button" className="twa-first-gh-copy twa-press-sm" onClick={() => copyIds(groupRows, group.title.toLowerCase())}
@@ -279,8 +315,14 @@ export default function FirstInLineBlock({
                   <b className="twa-first-sum">{robux(order.gross)}</b>
                   <span className="twa-first-age" style={{ color: ageColor(basis) }}>{fmtAge(basis)}</span>
                 </button>
-                {(ready || meta) && (
+                {(ready || meta || order.rush) && (
                   <div className="twa-first-meta">
+                    {order.rush && (
+                      <span className="twa-first-heat" style={{ color: C.purple }} title={firstRushLine(order.rush, now)}>
+                        <i aria-hidden>{"●".repeat(firstRushHeat(order.rush.count))}{"○".repeat(3 - firstRushHeat(order.rush.count))}</i>
+                        {firstRushLine(order.rush, now).replace(/^📣 /, "")}
+                      </span>
+                    )}
                     {ready && <span style={{ color: TONE[ready.tone] }}>{ready.text}</span>}
                     {meta && <span>{meta}</span>}
                   </div>
@@ -313,7 +355,7 @@ export default function FirstInLineBlock({
                     ) : (
                       <button
                         type="button"
-                        className={`twa-first-note twa-press-sm${note.empty ? " is-empty" : ""}${order.reason === "rebuy" && !order.note ? " is-rebuy" : ""}`}
+                        className={`twa-first-note twa-press-sm${note.empty ? " is-empty" : ""}${order.reason === "rebuy" && !order.note ? " is-rebuy" : ""}${note.quote ? " is-quote" : ""}`}
                         onClick={() => { haptic.select(); editNote({ id: order.id, value: order.note ?? "" }); }}
                       >
                         {noteSaving === order.id ? "сохраняю…" : note.text}
@@ -342,17 +384,21 @@ export default function FirstInLineBlock({
               </div>
             );
           })}
+          {hidden > 0 && (filter === "all" ? (
+            <button type="button" className="twa-first-group-more twa-press-sm" style={{ color: TONE[group.tone] }}
+              onClick={() => pick(group.id)}>
+              Ещё {hidden} · {group.title.toLowerCase()} →
+            </button>
+          ) : (
+            <div className="twa-first-group-more is-static">Ещё {hidden} — в общей очереди</div>
+          ))}
         </div>
       ))}
 
-      {(hidden > 0 || onOpenQueue) && (
-        onOpenQueue ? (
-          <button type="button" className="twa-first-more twa-press-sm" onClick={() => { haptic.select(); onOpenQueue(); }}>
-            {hidden > 0 ? `Ещё ${hidden} первым делом · ` : ""}Вся очередь{data.queueTotal ? ` · ${robux(data.queueTotal)}` : ""} →
-          </button>
-        ) : (
-          <div className="twa-first-more is-static">Ещё {hidden} первым делом — ниже в очереди</div>
-        )
+      {onOpenQueue && (
+        <button type="button" className="twa-first-more twa-press-sm" onClick={() => { haptic.select(); onOpenQueue(); }}>
+          Вся очередь{data.queueTotal ? ` · ${robux(data.queueTotal)}` : ""} →
+        </button>
       )}
     </section>
   );

@@ -2215,7 +2215,11 @@ function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: s
                 />
               </div>
               <div className="wbg-meta">
-                <span>{prefilled ? "Код из чата Wildberries — вводить ничего не нужно" : "7 символов с обратной стороны карточки"}</span>
+                <span>
+                  {prefilled
+                    ? <>Код из чата Wildberries — вводить ничего не нужно. <b>Сохраните его:</b> если напишете нам, назовите код — так мы сразу найдём заказ.</>
+                    : "7 символов с обратной стороны карточки"}
+                </span>
                 <span className={`wbg-count${codeReady ? " ready" : ""}`}>{code.length}/7</span>
               </div>
 

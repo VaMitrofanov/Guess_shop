@@ -12,7 +12,8 @@ const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,6})(?!\d)/g;
 /** The buyer naming it themselves ("код 7760778") removes the ambiguity that
  * makes a bare five- or seven-digit run untrustworthy in prose. */
 const LABELLED_CODE_RE = /код\D{0,20}?(?<!\d)(\d(?:[\s-]?\d){4,6})(?!\d)/gi;
-const ACTIVATION_CODE_RE = /(код(?:\s+активации)?\s*[:—-]?\s*)([A-Z0-9]{7})(?![A-Z0-9])/gi;
+/** «Код вашего заказа: …» — строка гейта и напоминаний с 01.11.2026. */
+const ACTIVATION_CODE_RE = /(код(?:\s+активации|\s+(?:вашего\s+)?заказа)?\s*[:—-]?\s*)([A-Z0-9]{7})(?![A-Z0-9])/gi;
 /** The gate link carries the same activation code as a query param, which the
  * prose pattern above cannot see. Without this the code would survive in the
  * stored transcript inside the URL. */

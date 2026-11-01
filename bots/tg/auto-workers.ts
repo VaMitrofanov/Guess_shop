@@ -34,6 +34,7 @@ import { runDrain, drainAuthedUser, drainUserGamepasses } from "../shared/drain"
 import { notifyUserCompleted } from "./handlers";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { runWbTokenWatch } from "../shared/wb-token-watch";
+import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
 import { browserFailureMessage, getBrowserGamepassPreflight, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -539,6 +540,13 @@ export function startAutoWorkers(bot: Telegraf): void {
   // (01.11.2026 токен истёк молча — бот 7 часов не видел заказы DBS).
   setTimeout(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] boot:", e)), 120_000);
   setInterval(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] tick:", e)), 60 * 60 * 1000);
+
+  // Обращения покупателей: «верните деньги» → заморозка, «нужен человек» → «Риски».
+  const buyerSweep = () => runBuyerContactSweep(db, alertAdmins)
+    .then((r) => { if (r.cancel || r.help) console.log(`[buyer-contacts] отмена ${r.cancel}, нужен человек ${r.help}`); })
+    .catch((e) => console.error("[buyer-contacts] tick:", e));
+  setTimeout(buyerSweep, 150_000);
+  setInterval(buyerSweep, 3 * 60 * 1000);
 
   console.log("[auto-buyout] worker started ✅ (kill-switch in GlobalSettings.autoBuyoutEnabled)");
   console.log("[gp-watch] worker started ✅ (kill-switch in GlobalSettings.gpWatchEnabled)");

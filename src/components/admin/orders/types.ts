@@ -108,6 +108,7 @@ export const TONE_COLOR: Record<Tone, string> = {
   accent: "var(--o-accent)",
   muted: "var(--o-muted)",
   pink: "var(--o-pink)",
+  purple: "var(--o-purple)",
 };
 
 export const SLICE_META: { key: SliceKey; label: string; tone: Tone; hint: string }[] = [

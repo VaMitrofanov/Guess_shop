@@ -33,7 +33,7 @@ export function fmtRiskDate(iso: string): string {
 export function ReviewPlaque({ review }: { review: NonNullable<OrderRisk["review"]> }) {
   const fixed = review.kind === "REVIEW_FIXED";
   const tone = fixed ? C.green : C.red;
-  const action = riskActionText(review.action);
+  const action = riskActionText(review.action, review.kind);
   return (
     <div style={{
       display: "flex", flexDirection: "column", gap: 6, padding: "12px 14px",
@@ -108,7 +108,7 @@ export function RiskItemCard({
   const meta = RISK_KIND_META[item.kind];
   const tone = TONE[meta.tone];
   const resolved = Boolean(item.resolvedAt);
-  const action = riskActionText(item.action);
+  const action = riskActionText(item.action, item.kind);
   const stars = item.kind === "REVIEW_FIXED"
     ? `${starsText(item.starsBefore)} → ${starsText(item.stars)}`
     : item.kind === "BAD_REVIEW" ? starsText(item.stars) : null;

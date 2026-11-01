@@ -1298,6 +1298,46 @@ html.twa-route-active [contenteditable="true"] {
 .twa-first-more.is-static { display: flex; align-items: center; justify-content: center; color: #777181; font-size: 14px; font-weight: 600; }
 .twa-first-copy-all:disabled { opacity: .4; }
 
+/* «Первым делом» v3 (01.11.2026): счётчики-фильтры, 📣 «Торопят» и 🛑 полоса
+   просьб об отмене. Фиолетовый — iOS systemPurple: оранжевый занят Авито,
+   голубой — заморозкой. */
+.twa-first-counts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.twa-first-counts::-webkit-scrollbar { display: none; }
+.twa-first-cnt {
+  flex: 0 0 auto; min-height: 30px; border: 1px solid transparent; font-family: inherit; font-size: 14px; cursor: pointer;
+}
+.twa-first-cnt.is-on { border-color: rgba(255,255,255,.22); color: #f7f5ff; background: rgba(255,255,255,.16); }
+.twa-first-cnt.is-off { opacity: .5; cursor: default; }
+.twa-first-group.is-rush {
+  margin: 4px -14px 0; padding: 6px 14px 0;
+  background: rgba(191,90,242,.07); border-top: 1px solid rgba(191,90,242,.24); border-bottom: 1px solid rgba(191,90,242,.24);
+}
+.twa-first-group.is-rebuy + .twa-first-group.is-rush { margin-top: 0; border-top: 0; }
+.twa-first-group.is-rush + .twa-first-group { border-top: 0; }
+.twa-first-heat { display: inline-flex; align-items: center; gap: 6px; }
+.twa-first-heat > i { font-style: normal; font-size: 10px; letter-spacing: 1px; }
+.twa-first-note.is-quote { color: #d9c2f5; font-style: italic; background: rgba(191,90,242,.08); border-color: rgba(191,90,242,.18); }
+.twa-first-group-more {
+  width: 100%; min-height: 38px; border: 0; background: transparent;
+  font-family: inherit; font-size: 15px; font-weight: 700; text-align: center;
+}
+.twa-first-group-more.is-static { display: flex; align-items: center; justify-content: center; color: #777181; font-size: 14px; font-weight: 600; }
+.twa-first-stop {
+  margin: 6px 0 2px; padding: 9px 11px; border-radius: 14px;
+  border: 1px solid rgba(255,69,58,.35); background: rgba(255,69,58,.1);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.twa-first-stop-h { display: flex; align-items: center; gap: 8px; color: #ff6961; font-size: 14px; font-weight: 800; }
+.twa-first-stop-h > b { color: #ff9d97; font-variant-numeric: tabular-nums; }
+.twa-first-stop-row {
+  display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0; border: 0; background: transparent;
+  color: #f7f5ff; font-family: inherit; font-size: 14px; text-align: left;
+}
+.twa-first-stop-row > strong { flex: 0 0 auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+.twa-first-stop-row > span { flex: 1; min-width: 0; color: #ffc9c5; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-first-stop-row > em { flex: 0 0 auto; font-style: normal; color: #64d2ff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-first-stop > small { color: #b3a9a8; font-size: 13px; }
+
 /* ── «Другие пассы на аккаунте» (карточка заказа) ───────────────────────────
    Зеркало блока из досье сайта. Вторичный по виду намеренно: это не факты
    заказа, а витрина, из которой заказ можно починить. Строка на телефоне

@@ -108,7 +108,9 @@ describe("«Первым делом» на обеих главных", () => {
 
   it("границы — те же, что у вкладки «Выкупить»", () => {
     expect(lib).toContain("BUYOUT_QUEUE_SQL");
-    expect(lib).toContain('("rebuyAt" IS NOT NULL OR "priorityAt" IS NOT NULL OR "isDirectOrder" = true)');
+    // 📣 с 01.11.2026: в границы входит и «писали за 48 ч»; торопят ли — решает классификатор.
+    expect(lib).toContain('("rebuyAt" IS NOT NULL OR "priorityAt" IS NOT NULL OR "isDirectOrder" = true OR ${recentContactExistsSql()})');
+    expect(lib).toContain("orderWhereSql: BUYOUT_QUEUE_SQL");
   });
 
   it("порядок внутри блока: 🔁 перевыкуп → ⚡ → прямые → возраст", () => {
@@ -130,7 +132,8 @@ describe("«Первым делом» на обеих главных", () => {
     for (const file of ["src/app/twa/_components/FirstInLineBlock.tsx", "src/components/admin/first-in-line/first-in-line-panel.tsx"]) {
       const src = read(file);
       expect(src).toContain("if (visible.length === 0) return null;");
-      expect(src).toContain("groupFirstInLine(visible)");
+      // Группы и фильтр «Все/одна группа» — из общего правила.
+      expect(src).toContain("firstVisibleGroups(visible, filter, data)");
       expect(src).toContain("firstCopyableIds(");
       // «Выкуплено» — с отменой, а не сразу.
       expect(src).toContain("FIRST_UNDO_MS");

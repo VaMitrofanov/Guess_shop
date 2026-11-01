@@ -15,7 +15,7 @@
 import { expectedGamepassPrice } from "@/lib/purchase-guard";
 
 /** `pink` — 🔁 перевыкуп: оранжевый уже значит «Авито», розовым не помечено ничего. */
-export type Tone = "green" | "yellow" | "orange" | "red" | "blue" | "ice" | "accent" | "muted" | "pink";
+export type Tone = "green" | "yellow" | "orange" | "red" | "blue" | "ice" | "accent" | "muted" | "pink" | "purple";
 
 /** Минимум, который presentation-функции обязаны знать о заказе. */
 export interface PresentableOrder {

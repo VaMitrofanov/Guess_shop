@@ -16,6 +16,7 @@
  * сервером: тот же файл читает роут оформления, когда пишет разбивку.
  */
 
+import OrderCodePlate from "./OrderCodePlate";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/navbar";
@@ -513,6 +514,9 @@ export default function GamepassCheck({
               {!isSite && <ThemeToggle compact />}
             </div>
           </div>
+
+          {/* Код заказа — покупатель должен его видеть и помнить (01.11.2026). */}
+          {code && !isSite && !testMode && <OrderCodePlate code={code} />}
 
           {/* ── «Создай плейс» по ссылке из бота (`?stage=place`) ──────────
               Статичные шаги: проверка ника им не нужна, поэтому раздел стоит

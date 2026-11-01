@@ -7,7 +7,11 @@
    • CLAIM_OPENED   — покупатель открыл заявку на возврат;
    • CLAIM_RESOLVED — WB решил заявку.
 
-   Пишет только свип гейта (раз в 15 минут) — один источник, без гонок между
+   • BUYER_CANCEL   — покупатель сам просит отмену/возврат (заказ заморожен);
+   • BUYER_HELP     — вопрос, на который выкупом не ответить (нужен человек).
+
+   Отзывы и заявки пишет свип гейта (раз в 15 минут), обращения — проход
+   `buyer-contact-sweep` (раз в 3 минуты) — один источник, без гонок между
    ботами. `dedupeKey` делает запись идемпотентной: свип может видеть одно и то
    же сколько угодно раз.
 
@@ -18,7 +22,10 @@
 
 import { normalizeName, type FixedReview, type WbFeedback } from "./buyout-gate";
 
-export type RiskKind = "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED";
+export type RiskKind =
+  | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
+  /** С 01.11.2026 — из обращений покупателя (buyer-contact-sweep). */
+  | "BUYER_CANCEL" | "BUYER_HELP";
 export type RiskAction = "frozen" | "released" | "none";
 
 export const RISK_AUTO_ACTOR = "авто";

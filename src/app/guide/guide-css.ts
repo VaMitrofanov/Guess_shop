@@ -710,4 +710,14 @@ export const GUIDE_CSS = `
 @media (prefers-reduced-motion: reduce){
  .wbi-bigfield.idle,.wbi-ava.spin::after,.wbi-scanline.on:not(.done) .m{animation:none !important}
 }
+
+/* Код заказа (01.11.2026): покупатель не видит код в ссылке и потом пишет в поддержку без него. */
+.wbi-codeplate{display:flex;align-items:center;gap:14px;margin:4px 0 14px;padding:12px 14px;border:1px solid var(--rb-border);border-radius:14px;background:var(--rb-surface)}
+.wbi-codeplate-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.wbi-codeplate-main small{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--rb-muted)}
+.wbi-codeplate-main strong{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:24px;letter-spacing:.14em;color:var(--rb-text);user-select:all;-webkit-user-select:all}
+.wbi-codeplate-main span{font-size:14px;line-height:1.4;color:var(--rb-muted)}
+.wbi-codeplate-copy{flex:0 0 auto;min-height:40px;padding:0 14px;border:1px solid var(--rb-accent);border-radius:10px;background:var(--rb-accent-soft);color:var(--rb-text);font:inherit;font-size:14px;font-weight:750;cursor:pointer}
+.wbi-codeplate-copy:focus-visible{outline:2px solid var(--rb-accent);outline-offset:2px}
+@media (max-width:420px){.wbi-codeplate{flex-direction:column;align-items:stretch}.wbi-codeplate-copy{width:100%}}
 `;

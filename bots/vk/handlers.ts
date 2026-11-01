@@ -161,6 +161,9 @@ import {
   xlinkWaitingText,
 } from "../shared/cross-platform-notify";
 import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
+import {
+  BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel, orderCodePinText,
+} from "../shared/buyer-contact";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -280,8 +283,15 @@ async function deliverSupportIntake(
 ): Promise<void> {
   const intake = await takeIntake(intakeDb, intakeSubject(vkUserId));
   const firstName = await vkGetName(vkUserId);
-  const hint = intake?.wbCode ? { wbCode: intake.wbCode, denom: intake.denomination } : await supportOrderHint(vkUserId);
+  let hint: { wbCode?: string; denom?: number } =
+    intake?.wbCode ? { wbCode: intake.wbCode, denom: intake.denomination } : await supportOrderHint(vkUserId);
   let said = clipProblemText(text) || (photoUrl ? "(прислал скриншот без текста)" : "(без описания)");
+  // Заказа за аккаунтом нет — ищем по тому, что человек написал (01.11.2026).
+  const matched = hint.wbCode ? null : await findOrderByBuyerHints(db, extractBuyerHints(text));
+  if (matched) {
+    hint = { wbCode: matched.wbCode, denom: matched.amount };
+    said = `${said}\n\n🔎 Заказ найден ${matchedByLabel(matched.by)}`;
+  }
 
   // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами
   // (локальный Tesseract, 27.10.2026, зеркало TG). Менеджер получает его всегда.
@@ -321,6 +331,8 @@ async function deliverSupportIntake(
     type: SUPPORT_METRIC_EVENT.DELIVERED, wbCode: hint.wbCode, via: "vk-bot",
     payload: {
       contextKey: intake?.contextKey ?? "general",
+      // Текст — для «Торопят» и стопа по просьбе вернуть деньги (buyer-contact.ts).
+      text: clipProblemText(text)?.slice(0, 300) || null,
       robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
       photo: !!photoUrl,
       ...(ocr ? { ocr: ocr.verdict, ocrPending: ocr.read.pending } : {}),
@@ -337,7 +349,9 @@ async function deliverSupportIntake(
     return;
   }
   await pauseSupport(vkUserId, "клиент описал проблему");
-  await ctx.reply(intakeAckText("VK"));
+  // Заказ не нашли ни по аккаунту, ни по тексту — просим то, что человек
+  // точно помнит. Ответит уже менеджеру (бот на паузе), но с кодом или ником.
+  await ctx.reply(hint.wbCode ? intakeAckText("VK") : `${intakeAckText("VK")}\n\n${BUYER_HINT_REQUEST_TEXT}`);
 }
 
 /**
@@ -2434,6 +2448,23 @@ async function settleForeignCodeClaimVk(
   return "proceed";
 }
 
+/**
+ * Закреп «Код вашего заказа» (01.11.2026, зеркало TG). `messages.pin` в
+ * диалоге сообщества с человеком VK разрешает не везде — не вышло, карточка
+ * просто остаётся в чате.
+ */
+async function pinOrderCodeVk(ctx: MessageContext, vkUserId: number, code: string, denomination: number): Promise<void> {
+  try {
+    const sent: any = await ctx.reply(orderCodePinText(code, denomination, "plain"));
+    const cmid = sent?.conversationMessageId ?? sent?.conversation_message_id;
+    if (_vkApi && cmid) {
+      await _vkApi.messages.pin({ peer_id: vkUserId, conversation_message_id: cmid });
+    }
+  } catch (err) {
+    console.warn("[VK] закреп кода заказа:", (err as Error)?.message ?? err);
+  }
+}
+
 async function handleRefActivation(
   ctx: MessageContext,
   vkUserId: number,
@@ -2718,6 +2749,7 @@ async function handleRefActivation(
   if (vkMultiOrder) {
     kb.row().textButton({ label: "📦 Мои заказы", payload: { command: "orders_list" }, color: "secondary" });
   }
+  await pinOrderCodeVk(ctx, vkUserId, code, totalAmount);
   await ctx.reply({
     message:
       greetLine + `\n` +

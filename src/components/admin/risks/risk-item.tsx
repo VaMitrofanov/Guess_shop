@@ -33,7 +33,7 @@ export function RiskItem({
 }) {
   const meta = RISK_KIND_META[item.kind];
   const resolved = Boolean(item.resolvedAt);
-  const action = riskActionText(item.action);
+  const action = riskActionText(item.action, item.kind);
   const href = orderHref(item);
   const stars = item.kind === "REVIEW_FIXED"
     ? `${starsText(item.starsBefore)} → ${starsText(item.stars)}`

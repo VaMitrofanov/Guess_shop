@@ -4,12 +4,20 @@ import { prisma } from "@/lib/prisma";
 import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, FIRST_IN_LINE_ORDER_SQL } from "@/lib/order-queue";
 import type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
 import { rebuyWasFromNote } from "@/lib/first-in-line-view";
+import {
+  BUYER_RUSH_WINDOW_HOURS, contactQuote, loadBuyerContacts, recentContactExistsSql, summarizeRush, type BuyerRush,
+} from "../../bots/shared/buyer-contact";
+import { problemHoldReason } from "../../bots/shared/order-hold";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    «Первым делом» — короткий список заказов, которые выкупаются вне общей
    очереди. Один источник на обе главные: и «Обзор» сайта, и Главная TWA.
 
-   Сюда попадают ровно два случая, и оба — не про возраст:
+   С 01.11.2026 групп четыре (не пересекаются, порядок = срочность):
+   🔁 не дошло → 📣 торопят (писали в поддержку за 48 ч) → ⚡ подняты → 💳 прямые.
+   Сверху — 🛑 полоса заказов, где покупатель просит отмену (они заморожены).
+
+   Исходно сюда попадали два случая, и оба — не про возраст:
 
    1. ⚡ поднятые руками. Кнопка «Вперёд очереди» ставит `priorityAt`, и без
       такого блока проверить её действие можно было бы только пролистав ленту
@@ -24,8 +32,15 @@ import { rebuyWasFromNote } from "@/lib/first-in-line-view";
    за неоплаченный заказ нельзя даже «в приоритете».
    ───────────────────────────────────────────────────────────────────────── */
 
-/** Больше шести строк — это уже лента заказов, а не «первым делом». */
-export const FIRST_IN_LINE_LIMIT = 6;
+/**
+ * Сколько строк одной группы грузить. «Все» показывает по три
+ * (`FIRST_GROUP_PREVIEW`), фильтр группы — все загруженные; дальше —
+ * «Вся очередь». Больше двенадцати — это уже лента заказов.
+ */
+export const FIRST_IN_LINE_GROUP_CAP = 12;
+
+/** Сколько просьб об отмене показать полосой. */
+const STOP_LIMIT = 5;
 
 export type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
 
@@ -44,12 +59,24 @@ function humanNote(note: string | null): string | null {
   return human.length > 0 ? human.join(" · ") : null;
 }
 
-export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Promise<FirstInLine> {
-  // 🔁 Перевыкуп входит сам, даже если ⚡ с него потом сняли: этот заказ уже
-  // раз закрыли, и в общей очереди ему теряться нельзя.
-  const scope = `"isTest" = false AND ${BUYOUT_QUEUE_SQL} AND ("rebuyAt" IS NOT NULL OR "priorityAt" IS NOT NULL OR "isDirectOrder" = true)`;
+/** Порядок групп: 🔁 → 📣 → ⚡ → 💳. */
+const GROUP_RANK: Record<FirstInLineOrder["reason"], number> = { rebuy: 0, rush: 1, pinned: 2, direct: 3 };
 
-  const [rows, totals, queue] = await Promise.all([
+/** Цитата из причины заморозки «Покупатель просит отмену…: «текст»». */
+function stopQuote(reason: string | null): string | null {
+  const m = (reason ?? "").match(/«(.*)»\s*$/);
+  return m ? m[1] : null;
+}
+
+export async function loadFirstInLine(): Promise<FirstInLine> {
+  // 🔁 Перевыкуп входит сам, даже если ⚡ с него потом сняли: этот заказ уже
+  // раз закрыли, и в общей очереди ему теряться нельзя. 📣 — любой заказ
+  // очереди, по которому писали за 48 ч; торопят ли, решает классификатор ниже.
+  const scope = `"isTest" = false AND ${BUYOUT_QUEUE_SQL}
+    AND ("rebuyAt" IS NOT NULL OR "priorityAt" IS NOT NULL OR "isDirectOrder" = true OR ${recentContactExistsSql()})`;
+
+  // Всё параллельно: каждый заход в базу из РФ в Сингапур — ~210 мс.
+  const [rows, contacts, queue, stops] = await Promise.all([
     prisma.$queryRawUnsafe<Array<{
       id: string;
       wbCode: string;
@@ -60,6 +87,7 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       since: Date;
       createdAt: Date;
       gamepassId: string | null;
+      isDirectOrder: boolean;
       priorityAt: Date | null;
       priorityBy: string | null;
       rebuyAt: Date | null;
@@ -72,6 +100,7 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
              COALESCE("pendingAt", "createdAt") AS "since",
              "createdAt",
              "gamepassId",
+             "isDirectOrder",
              "priorityAt",
              "priorityBy",
              "rebuyAt",
@@ -80,30 +109,76 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
         FROM "WbOrder"
        WHERE ${scope}
        ORDER BY ${FIRST_IN_LINE_ORDER_SQL}
-       LIMIT ${Math.max(1, Math.trunc(limit))}
+       LIMIT 200
     `),
-    prisma.$queryRawUnsafe<Array<{ total: number; pinned: number; direct: number; rebuy: number; gross: number }>>(`
-      SELECT COUNT(*)::int AS "total",
-             COUNT(*) FILTER (WHERE "rebuyAt" IS NOT NULL)::int AS "rebuy",
-             -- Группы не пересекаются, как и в блоке: 🔁 → ⚡ → прямой.
-             COUNT(*) FILTER (WHERE "rebuyAt" IS NULL AND "priorityAt" IS NOT NULL)::int AS "pinned",
-             COUNT(*) FILTER (WHERE "rebuyAt" IS NULL AND "priorityAt" IS NULL AND "isDirectOrder" = true)::int AS "direct",
-             -- Грязные считаются по каждому заказу, а не от общей суммы:
-             -- округление ceil(amount / 0.7) у каждого своё.
-             COALESCE(SUM(CEIL("amount" / 0.7)), 0)::int AS "gross"
-        FROM "WbOrder"
-       WHERE ${scope}
-    `),
+    loadBuyerContacts(prisma, {
+      since: new Date(Date.now() - BUYER_RUSH_WINDOW_HOURS * 3_600_000),
+      orderWhereSql: BUYOUT_QUEUE_SQL,
+    }).catch(() => []),
     prisma.$queryRawUnsafe<Array<{ n: number }>>(`
       SELECT COUNT(*)::int AS "n" FROM "WbOrder" WHERE "isTest" = false AND ${BUYOUT_QUEUE_SQL}
     `),
+    // 🛑 Заморожены автозащитой из-за просьбы покупателя — пока заказ жив.
+    prisma.$queryRawUnsafe<Array<{
+      id: string; wbCode: string; amount: number; robloxUsername: string | null;
+      heldAt: Date; heldReason: string | null; total: number;
+    }>>(`
+      SELECT "id", "wbCode", "amount", "robloxUsername", "heldAt", "heldReason",
+             COUNT(*) OVER ()::int AS "total"
+        FROM "WbOrder"
+       WHERE "isTest" = false AND "heldAt" IS NOT NULL
+         AND "heldReason" LIKE $1
+         AND "status" IN ('AWAITING_GAMEPASS','PENDING','IN_PROGRESS','ERROR')
+       ORDER BY "heldAt" DESC
+       LIMIT ${STOP_LIMIT}
+    `, `${problemHoldReason("BUYER_REFUND_REQUEST")}%`),
   ]);
 
+  const rush = summarizeRush(contacts);
+
+  // Группа каждой строки. Писали, но не «торопят» (спасибо, прислал ник) и
+  // других причин нет — строке здесь не место.
+  const placed = rows
+    .map((row) => {
+      const reason: FirstInLineOrder["reason"] | null = row.rebuyAt
+        ? "rebuy"
+        : rush.has(row.id) ? "rush"
+        : row.priorityAt ? "pinned"
+        : row.isDirectOrder ? "direct"
+        : null;
+      return reason ? { row, reason } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  // Внутри группы порядок SQL (он же порядок очереди), кроме «Торопят»: там
+  // первым тот, кто писал чаще, при равенстве — кто дольше ждёт.
+  const indexed = placed.map((entry, index) => ({ ...entry, index }));
+  indexed.sort((a, b) => {
+    const g = GROUP_RANK[a.reason] - GROUP_RANK[b.reason];
+    if (g !== 0) return g;
+    if (a.reason === "rush") {
+      const heat = (rush.get(b.row.id)?.count ?? 0) - (rush.get(a.row.id)?.count ?? 0);
+      if (heat !== 0) return heat;
+      return a.row.since.getTime() - b.row.since.getTime();
+    }
+    return a.index - b.index;
+  });
+
+  const counts = { rebuy: 0, rush: 0, pinned: 0, direct: 0 };
+  let gross = 0;
+  const shown: typeof indexed = [];
+  for (const entry of indexed) {
+    counts[entry.reason] += 1;
+    // Грязные считаются по каждому заказу: округление ceil(amount / 0.7) у каждого своё.
+    gross += Math.ceil(entry.row.amount / 0.7);
+    if (counts[entry.reason] <= FIRST_IN_LINE_GROUP_CAP) shown.push(entry);
+  }
+  const total = counts.rebuy + counts.rush + counts.pinned + counts.direct;
   // Части разбитых заказов — отдельным запросом и только НЕвыкупленные: в буфер
   // донору должно попасть то, что ещё покупать, а не история заказа.
-  const parts = rows.length > 0
+  const parts = shown.length > 0
     ? await prisma.wbOrderGamepass.findMany({
-        where: { orderId: { in: rows.map((row) => row.id) }, purchasedAt: null },
+        where: { orderId: { in: shown.map((entry) => entry.row.id) }, purchasedAt: null },
         orderBy: { position: "asc" },
         select: { orderId: true, gamepassId: true },
       })
@@ -117,9 +192,8 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
     else partsByOrder.set(part.orderId, [part.gamepassId]);
   }
 
-  const summary = totals[0] ?? { total: 0, pinned: 0, direct: 0, rebuy: 0, gross: 0 };
   return {
-    rows: rows.map((row) => ({
+    rows: shown.map(({ row, reason }) => ({
       id: row.id,
       wbCode: row.wbCode,
       robloxUsername: row.robloxUsername,
@@ -136,18 +210,34 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       // Машинные строки аудита начинаются с `[МЕТКА]` — на дашборде нужна
       // только та часть, которую писал человек.
       note: humanNote(row.adminNote),
-      // 🔁 важнее ⚡, ⚡ важнее полосы: поднятый руками прямой — всё-таки поднятый.
-      reason: row.rebuyAt ? "rebuy" : row.priorityAt ? "pinned" : "direct",
+      // 🔁 → 📣 → ⚡ → полоса: поднятый руками прямой — всё-таки поднятый.
+      reason,
+      rush: rushView(rush.get(row.id)),
       rebuyReason: row.rebuyAt ? row.rebuyReason : null,
       rebuyWas: row.rebuyAt ? rebuyWasFromNote(row.adminNote) : null,
       priorityBy: row.priorityAt ? row.priorityBy : null,
       priorityAt: row.priorityAt ? row.priorityAt.toISOString() : null,
     })),
-    total: Number(summary.total ?? 0),
-    pinned: Number(summary.pinned ?? 0),
-    direct: Number(summary.direct ?? 0),
-    rebuy: Number(summary.rebuy ?? 0),
+    total,
+    pinned: counts.pinned,
+    direct: counts.direct,
+    rebuy: counts.rebuy,
+    rush: counts.rush,
+    stops: stops.map((stop) => ({
+      id: stop.id,
+      wbCode: stop.wbCode,
+      amount: stop.amount,
+      robloxUsername: stop.robloxUsername,
+      heldAt: stop.heldAt.toISOString(),
+      quote: stopQuote(stop.heldReason),
+    })),
+    stopTotal: Number(stops[0]?.total ?? 0),
     queueTotal: Number(queue[0]?.n ?? 0),
-    gross: Number(summary.gross ?? 0),
+    gross,
   };
+}
+
+function rushView(r: BuyerRush | undefined): FirstInLineOrder["rush"] {
+  if (!r) return null;
+  return { count: r.count, channels: r.channels, lastAt: r.lastAt.toISOString(), quote: contactQuote(r.lastText), via: r.lastVia };
 }

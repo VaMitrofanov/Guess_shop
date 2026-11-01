@@ -47,6 +47,7 @@ const TONE_CLASS: Record<Tone, string> = {
   accent: styles.toneAccent,
   muted: styles.toneMuted,
   pink: styles.tonePink,
+  purple: styles.tonePurple,
 };
 
 const LANE_LABEL: Record<OverviewQueueOrder["lane"], string> = {

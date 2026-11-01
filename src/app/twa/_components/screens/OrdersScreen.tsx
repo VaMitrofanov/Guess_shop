@@ -40,7 +40,7 @@ const ICE = C.ice;
    палитрой. Здесь — тёмная палитра TWA. */
 const TONE: Record<Tone, string> = {
   green: C.green, yellow: C.yellow, orange: C.orange, red: C.red,
-  blue: C.blue, ice: ICE, accent: C.accent, muted: C.textTertiary, pink: C.pink,
+  blue: C.blue, ice: ICE, accent: C.accent, muted: C.textTertiary, pink: C.pink, purple: C.purple,
 };
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";

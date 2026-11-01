@@ -156,6 +156,10 @@ import {
   xlinkWaitingText,
 } from "../shared/cross-platform-notify";
 import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
+import {
+  BUYER_HINT_CONTEXT, BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel,
+  orderCodePinText,
+} from "../shared/buyer-contact";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -382,6 +386,22 @@ function supportBtn(label = "💬 Написать в поддержку", ctxKe
   return Markup.button.callback(label, CB.supTap(ctxKey));
 }
 
+/**
+ * Закреп «Код вашего заказа» (01.11.2026). Уходит ДО приветствия, чтобы
+ * кнопка инструкции оставалась последним сообщением. Не вышло закрепить —
+ * карточка всё равно в чате; ошибка не мешает активации.
+ */
+async function pinOrderCodeTg(ctx: any, code: string, denomination: number): Promise<void> {
+  try {
+    const sent = await ctx.reply(orderCodePinText(code, denomination, "html"), { parse_mode: "HTML" });
+    if (sent?.message_id && ctx.chat?.id) {
+      await ctx.telegram.pinChatMessage(ctx.chat.id, sent.message_id, { disable_notification: true });
+    }
+  } catch (err) {
+    console.warn("[TG] закреп кода заказа:", (err as Error)?.message ?? err);
+  }
+}
+
 /** Клиент БД для ожидания описания проблемы (`User.supportIntakeAt/Ctx`). */
 const intakeDb = db as unknown as SupportIntakeDb;
 
@@ -418,10 +438,16 @@ async function deliverSupportIntakeTg(
 ): Promise<void> {
   const tgId = String(ctx.from.id);
   const intake = await takeIntake(intakeDb, { tgId });
-  const hint = intake?.wbCode
+  let hint: { wbCode?: string; denomination?: number } = intake?.wbCode
     ? { wbCode: intake.wbCode, denomination: intake.denomination }
     : await supportOrderHint(ctx);
   let said = clipProblemText(text) || (photoFileId ? "(прислал скриншот без текста)" : "(без описания)");
+  // Заказа за аккаунтом нет — ищем по тому, что человек написал (01.11.2026).
+  const matched = hint.wbCode ? null : await findOrderByBuyerHints(db, extractBuyerHints(text));
+  if (matched) {
+    hint = { wbCode: matched.wbCode, denomination: matched.amount };
+    said = `${said}\n\n🔎 Заказ найден ${matchedByLabel(matched.by)}`;
+  }
   const display = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name ?? `tg:${tgId}`);
 
   // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами
@@ -462,6 +488,8 @@ async function deliverSupportIntakeTg(
     type: SUPPORT_METRIC_EVENT.DELIVERED, wbCode: hint.wbCode, via: "tg-bot",
     payload: {
       contextKey: intake?.contextKey ?? "general",
+      // Текст — для «Торопят» и стопа по просьбе вернуть деньги (buyer-contact.ts).
+      text: clipProblemText(text)?.slice(0, 300) || null,
       robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
       photo: !!photoFileId,
       ...(ocr ? { ocr: ocr.verdict, ocrPending: ocr.read.pending } : {}),
@@ -488,6 +516,12 @@ async function deliverSupportIntakeTg(
     parse_mode: "HTML",
     ...Markup.inlineKeyboard([[Markup.button.url("📩 Написать в @RobloxBank_PA", SUPPORT_URL)]]),
   });
+  // Заказ так и не нашли — один раз просим то, что человек точно помнит.
+  // Следующее сообщение уйдёт менеджеру дополнением и найдёт заказ само.
+  if (!hint.wbCode && intake?.contextKey !== BUYER_HINT_CONTEXT) {
+    await openIntake(intakeDb, { tgId }, { platform: "TG", contextKey: BUYER_HINT_CONTEXT, nudged: true });
+    await ctx.reply(BUYER_HINT_REQUEST_TEXT);
+  }
 }
 
 /** Fire-and-forget deduped "user is stuck" heads-up — sent when the bot puts
@@ -1146,6 +1180,7 @@ export function registerStart(bot: Telegraf): void {
           ...(multiOrder ? [[Markup.button.callback("📦 Мои заказы", CB.ordersList)]] : []),
         ])
       : {};
+    if (!isAdmin) await pinOrderCodeTg(ctx, code, wbCode.denomination);
     await ctx.reply(
       `${greetLine}\n` +
       `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>${nickLine}\n\n` +
@@ -4883,6 +4918,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   }
 
   const textGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}`;
+  await pinOrderCodeTg(ctx, codeInput, wbCode.denomination);
   await ctx.reply(
     `✅ Код <b>${codeInput}</b> активирован!\n` +
     `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n` +

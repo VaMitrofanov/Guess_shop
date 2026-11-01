@@ -18,6 +18,7 @@
   --o-yellow: #ffd60a;
   --o-orange: #ff9f0a;
   --o-pink: #ff5c7a;
+  --o-purple: #c77dff;
   --o-red: #ff6b60;
   --o-blue: #7d9cff;
   --o-ice: #64d2ff;
@@ -44,6 +45,7 @@
 .toneAccent { color: var(--o-accent); }
 .toneMuted { color: var(--o-muted); }
 .tonePink { color: var(--o-pink); }
+.tonePurple { color: var(--o-purple); }
 
 .num { font-variant-numeric: tabular-nums; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

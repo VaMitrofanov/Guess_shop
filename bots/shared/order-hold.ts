@@ -313,7 +313,9 @@ export type ProblemKind =
   | "WB_CANCELLED"
   | "CODE_REVOKED"
   | "PAYMENT_REFUNDED"
-  | "PAYMENT_PARTIAL_REFUND";
+  | "PAYMENT_PARTIAL_REFUND"
+  /** Покупатель сам написал «верните деньги / отмените» (01.11.2026, buyer-contact-sweep). */
+  | "BUYER_REFUND_REQUEST";
 
 /** Кто ставит автозаморозку — так она подписана в заметке и в карточке. */
 export const PROBLEM_HOLD_ACTOR = "автозащита";
@@ -326,6 +328,7 @@ const PROBLEM_REASON_HEAD: Record<ProblemKind, string> = {
   CODE_REVOKED: "Код аннулирован",
   PAYMENT_REFUNDED: "Платёж возвращён покупателю",
   PAYMENT_PARTIAL_REFUND: "Частичный возврат платежа — решить вручную",
+  BUYER_REFUND_REQUEST: "Покупатель просит отмену и возврат денег",
 };
 
 export function problemHoldReason(kind: ProblemKind, detail?: string | null): string {

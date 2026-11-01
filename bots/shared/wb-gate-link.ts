@@ -104,6 +104,22 @@ export function wbCodeRequestMessage(): string {
  *
  * Deliberately names no messenger: Wildberries penalises sellers for steering
  * buyers to outside platforms, so the page itself introduces the next step. */
+/** Код как «номер заказа» в начале сообщения (01.11.2026).
+
+Покупатель переходит по ссылке, а код, который сидит внутри неё, забывает. Потом
+пишет в поддержку всё, кроме кода, — и заказ ищут вручную по нику и сумме.
+Поэтому код назван отдельной строкой сразу под подтверждением, и сказано,
+зачем его хранить. Слитно, как он вводится: так его копируют целиком.
+
+Подпись «Код вашего заказа:» знает `redactWbChatText` — в сохранённой
+переписке код маскируется и в этой строке. */
+export function wbOrderCodeLines(code: string): string[] {
+  return [
+    `Код вашего заказа: ${code}`
+    + "\nСохраните его. Если напишете нам по этому заказу — назовите код, так мы сразу найдём ваш заказ.",
+  ];
+}
+
 /** Первая строка гейта. По ней сверка находит эхо отправленного гейта в ленте
  * чата WB (`verifyGateDelivery`) — текст и поиск обязаны совпадать. */
 export const WB_GATE_MESSAGE_LEAD = "Спасибо, код доставки получен!";
@@ -117,6 +133,7 @@ export function wbGateMessage(
   const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
   return [
     `${WB_GATE_MESSAGE_LEAD} Заказ подтверждён, ${amount} готовы к зачислению.`,
+    ...wbOrderCodeLines(code),
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
     wbGateShortUrl(code, origin),
@@ -233,6 +250,7 @@ export function wbGateReminderMessage(
   if (level >= 3) {
     return [
       opening,
+      ...wbOrderCodeLines(code),
       ...wbSiblingLines(sibling),
       "Чаще всего люди останавливаются на одном шаге — создать геймпасс в Roblox."
         + " Если дело в нём, просто напишите в этот чат «помогите» — проведём по шагам"
@@ -243,6 +261,7 @@ export function wbGateReminderMessage(
   }
   return [
     opening,
+    ...wbOrderCodeLines(code),
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
     wbGateShortUrl(code, origin),

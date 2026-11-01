@@ -10,11 +10,16 @@ import {
   firstAgeBasis,
   firstCopyableIds,
   firstCopyToast,
-  firstHiddenCount,
+  firstGroupTotal,
   firstMetaLine,
   firstNoteText,
   firstReadiness,
-  groupFirstInLine,
+  firstRushHeat,
+  firstRushLine,
+  firstVisibleGroups,
+  FIRST_GROUPS,
+  type FirstFilter,
+  type FirstGroupId,
   type FirstLive,
 } from "@/lib/first-in-line-view";
 import { cn } from "@/lib/utils";
@@ -28,15 +33,22 @@ import styles from "./first-in-line.module.css";
    «Прямые», полоса причины слева, готовность пасса под строкой, «Выкуплено» с
    отменой в течение FIRST_UNDO_MS. Ушли со страницы во время отсчёта — выкуп
    засчитывается: потерянная отметка означала бы второй выкуп того же заказа.
+
+   С 01.11.2026: группа «📣 Торопят», 🛑 полоса просьб об отмене и счётчики-
+   фильтры в шапке («Все» — по три строки на группу).
    ───────────────────────────────────────────────────────────────────────── */
 
 const TONE_CLASS: Record<Tone, string> = {
   green: styles.toneGreen, yellow: styles.toneYellow, orange: styles.toneOrange, red: styles.toneRed,
-  blue: styles.toneBlue, ice: styles.toneIce, accent: styles.toneAccent, muted: styles.toneMuted, pink: styles.tonePink,
+  blue: styles.toneBlue, ice: styles.toneIce, accent: styles.toneAccent, muted: styles.toneMuted, pink: styles.tonePink, purple: styles.tonePurple,
 };
 const STRIPE_CLASS: Record<FirstInLineOrder["reason"], string> = {
-  rebuy: styles.rowRebuy, pinned: styles.rowPinned, direct: styles.rowDirect,
+  rebuy: styles.rowRebuy, rush: styles.rowRush, pinned: styles.rowPinned, direct: styles.rowDirect,
 };
+const CNT_CLASS: Record<FirstGroupId, string> = {
+  rebuy: styles.cntRebuy, rush: styles.cntRush, pinned: styles.cntPinned, direct: styles.cntDirect,
+};
+const GROUP_CLASS: Partial<Record<FirstGroupId, string>> = { rebuy: styles.groupRebuy, rush: styles.groupRush };
 
 const num = (n: number) => n.toLocaleString("ru-RU");
 
@@ -83,6 +95,7 @@ export default function FirstInLinePanel({
   const [now, setNow] = useState(() => Date.now());
   const [noteEdit, setNoteEdit] = useState<{ id: string; value: string } | null>(null);
   const [noteSaving, setNoteSaving] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FirstFilter>("all");
   const timers = useRef(new Map<string, { timer: number; order: FirstInLineOrder }>());
 
   useEffect(() => {
@@ -182,32 +195,61 @@ export default function FirstInLinePanel({
   if (visible.length === 0) return null;
 
   const gross = rows.reduce((sum, row) => (bought.has(row.id) ? sum - row.gross : sum), data.gross);
-  const hidden = firstHiddenCount(data);
-  const groups = groupFirstInLine(visible);
-  const allIds = firstCopyableIds(visible, live).ids.length;
+  const groups = firstVisibleGroups(visible, filter, data);
+  const pack = filter === "all" ? visible : groups.flatMap(entry => entry.rows);
+  const allIds = firstCopyableIds(pack, live).ids.length;
+  const stops = data.stops ?? [];
+  const pick = (next: FirstFilter) => setFilter(prev => (prev === next ? "all" : next));
 
   return (
     <section className={styles.first} aria-label="Выкупать первым делом">
       <div className={styles.head}>
         <span className={styles.title}>Первым делом</span>
-        <span className={styles.counts}>
-          <span className={cn(styles.cnt, (data.rebuy ?? 0) > 0 ? styles.cntRebuy : styles.cntOff)}>🔁 не дошло {data.rebuy ?? 0}</span>
-          <span className={cn(styles.cnt, data.pinned > 0 ? styles.cntPinned : styles.cntOff)}>⚡ подняты {data.pinned}</span>
-          <span className={cn(styles.cnt, data.direct > 0 ? styles.cntDirect : styles.cntOff)}>💳 прямых {data.direct}</span>
+        <span className={styles.counts} role="tablist" aria-label="Фильтр «Первым делом»">
+          <button type="button" role="tab" aria-selected={filter === "all"}
+            className={cn(styles.cnt, styles.cntAll, filter === "all" && styles.cntOn)} onClick={() => pick("all")}>
+            Все {data.total}
+          </button>
+          {FIRST_GROUPS.map(group => {
+            const n = firstGroupTotal(data, group.id);
+            return (
+              <button key={group.id} type="button" role="tab" aria-selected={filter === group.id} disabled={n === 0}
+                title={`${group.title}: ${group.hint}`}
+                className={cn(styles.cnt, n > 0 ? CNT_CLASS[group.id] : styles.cntOff, filter === group.id && styles.cntOn)}
+                onClick={() => pick(group.id)}>
+                {group.icon} {group.title.toLowerCase()} {n}
+              </button>
+            );
+          })}
         </span>
         <span className={styles.spacer} />
         <span className={styles.sum}><b>{num(gross)}</b> R$ грязными</span>
         <button type="button" className={styles.copyAll} disabled={allIds === 0}
-          onClick={() => copyIds(visible, "первым делом")} title="Скопировать ID геймпассов всей пачки (кроме снятых с продажи)">
+          onClick={() => copyIds(pack, "первым делом")} title="Скопировать ID геймпассов всей пачки (кроме снятых с продажи)">
           ⧉ ID · {allIds}
         </button>
       </div>
 
-      {groups.map(({ group, rows: groupRows }) => (
-        <div key={group.id} className={cn(styles.group, group.id === "rebuy" && styles.groupRebuy)}>
+      {stops.length > 0 && filter === "all" && (
+        <div className={styles.stop} role="note">
+          <div className={styles.stopHead}>🛑 Просят отмену — не выкупать <b>{data.stopTotal ?? stops.length}</b>
+            <small>заморожены автоматически: отменить заказ или разморозить в досье</small>
+          </div>
+          {stops.map(stop => (
+            <Link key={stop.id} className={styles.stopRow} href={`/admin/orders?slice=HELD&order=${stop.id}`}>
+              <strong>{stop.wbCode}</strong>
+              <span>{stop.quote ? `«${stop.quote}»` : "просит вернуть деньги"}</span>
+              <em>❄ {num(stop.amount)} R$</em>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {groups.map(({ group, rows: groupRows, hidden }) => (
+        <div key={group.id} className={cn(styles.group, GROUP_CLASS[group.id])}>
           <div className={cn(styles.gh, TONE_CLASS[group.tone])}>
             <span>{group.icon} {group.title}</span>
-            <b>{groupRows.length}</b>
+            <b>{firstGroupTotal(data, group.id) || groupRows.length}</b>
             <small>{group.hint}</small>
             {groups.length > 1 && (
               <button type="button" className={styles.ghCopy} onClick={() => copyIds(groupRows, group.title.toLowerCase())}>⧉ ID</button>
@@ -231,6 +273,12 @@ export default function FirstInLinePanel({
                   <span className={styles.nick} title={order.robloxUsername ?? undefined}>{order.robloxUsername ?? "ник не указан"}</span>
                 </div>
                 <div className={styles.facts}>
+                  {order.rush && (
+                    <span className={cn(styles.heat, styles.tonePurple)} title={firstRushLine(order.rush, now)}>
+                      <i aria-hidden="true">{"●".repeat(firstRushHeat(order.rush.count))}{"○".repeat(3 - firstRushHeat(order.rush.count))}</i>
+                      {firstRushLine(order.rush, now).replace(/^📣 /, "")}
+                    </span>
+                  )}
                   {ready && <span className={TONE_CLASS[ready.tone]}>{ready.text}</span>}
                   {meta && <span>{meta}</span>}
                 </div>
@@ -256,9 +304,9 @@ export default function FirstInLinePanel({
                 ) : (
                   <button
                     type="button"
-                    className={cn(styles.note, note.empty && styles.noteEmpty, order.reason === "rebuy" && !order.note && styles.noteRebuy)}
+                    className={cn(styles.note, note.empty && styles.noteEmpty, order.reason === "rebuy" && !order.note && styles.noteRebuy, note.quote && styles.noteQuote)}
                     onClick={() => setNoteEdit({ id: order.id, value: order.note ?? "" })}
-                    title={note.empty ? "Добавить заметку" : note.text}
+                    title={note.empty ? "Добавить заметку" : note.quote ? `${note.text} — нажмите, чтобы добавить заметку` : note.text}
                   >
                     {noteSaving === order.id ? "сохраняю…" : note.text}
                   </button>
@@ -288,18 +336,21 @@ export default function FirstInLinePanel({
               </div>
             );
           })}
+          {hidden > 0 && (filter === "all" ? (
+            <button type="button" className={cn(styles.groupMore, TONE_CLASS[group.tone])} onClick={() => pick(group.id)}>
+              Ещё {hidden} · {group.title.toLowerCase()} →
+            </button>
+          ) : (
+            <div className={cn(styles.groupMore, styles.moreStatic)}>Ещё {hidden} — в общей очереди</div>
+          ))}
         </div>
       ))}
 
-      {hidden > 0 || queueHref ? (
-        queueHref ? (
-          <Link className={styles.more} href={queueHref}>
-            {hidden > 0 ? `Ещё ${hidden} первым делом · ` : ""}Вся очередь{data.queueTotal ? ` · ${num(data.queueTotal)}` : ""} →
-          </Link>
-        ) : (
-          <div className={cn(styles.more, styles.moreStatic)}>Ещё {hidden} первым делом — ниже в очереди</div>
-        )
-      ) : null}
+      {queueHref && (
+        <Link className={styles.more} href={queueHref}>
+          Вся очередь{data.queueTotal ? ` · ${num(data.queueTotal)}` : ""} →
+        </Link>
+      )}
     </section>
   );
 }

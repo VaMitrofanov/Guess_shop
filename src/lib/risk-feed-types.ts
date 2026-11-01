@@ -1,7 +1,10 @@
 /** Типы раздела «Риски» и досье покупателя — общие для TWA и /admin. */
 
 export type RiskState = "open" | "all";
-export type RiskKind = "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED";
+export type RiskKind =
+  | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
+  /** Из обращений покупателя (01.11.2026, `bots/shared/buyer-contact-sweep.ts`). */
+  | "BUYER_CANCEL" | "BUYER_HELP";
 
 export interface RiskFeedItem {
   id: string;
@@ -54,6 +57,8 @@ export const RISK_KIND_META: Record<RiskKind, { label: string; tone: "red" | "gr
   REVIEW_FIXED:   { label: "Отзыв исправлен", tone: "green" },
   CLAIM_OPENED:   { label: "Заявка на возврат", tone: "amber" },
   CLAIM_RESOLVED: { label: "Заявка решена", tone: "muted" },
+  BUYER_CANCEL:   { label: "Просит отмену", tone: "red" },
+  BUYER_HELP:     { label: "Нужен человек", tone: "amber" },
 };
 
 export const ORDER_STATUS_RU: Record<string, string> = {
@@ -67,8 +72,9 @@ export const ORDER_STATUS_RU: Record<string, string> = {
   NO_ORDER: "код не вводили",
 };
 
-/** Что гейт сделал с заказом — подпись в ленте. */
-export function riskActionText(action: string | null | undefined): string | null {
+/** Что автоматика сделала с заказом — подпись в ленте. */
+export function riskActionText(action: string | null | undefined, kind?: string | null): string | null {
+  if (kind === "BUYER_CANCEL") return action === "frozen" ? "заморожен: просьба об отмене" : null;
   if (action === "frozen") return "заморожен гейтом";
   if (action === "released") return "разморожен гейтом";
   return null;

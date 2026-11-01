@@ -27,9 +27,16 @@ export interface FirstGroupMeta {
 /** Порядок групп = порядок срочности: тот же, что `FIRST_IN_LINE_ORDER_SQL`. */
 export const FIRST_GROUPS: readonly FirstGroupMeta[] = [
   { id: "rebuy", icon: "🔁", title: "Не дошло", hint: "покупатель не получил", tone: "pink" },
+  { id: "rush", icon: "📣", title: "Торопят", hint: "писали в поддержку за 48 ч", tone: "purple" },
   { id: "pinned", icon: "⚡", title: "Подняты вручную", hint: "выкупать первым", tone: "yellow" },
   { id: "direct", icon: "💳", title: "Прямые", hint: "оплачены напрямую", tone: "blue" },
 ];
+
+/** Сколько строк группы видно в режиме «Все» — остальное за «Ещё N →». */
+export const FIRST_GROUP_PREVIEW = 3;
+
+/** Фильтр блока: все группы или одна. */
+export type FirstFilter = "all" | FirstGroupId;
 
 /** Только непустые группы, в фиксированном порядке. */
 export function groupFirstInLine<T extends Pick<FirstInLineOrder, "reason">>(
@@ -38,6 +45,47 @@ export function groupFirstInLine<T extends Pick<FirstInLineOrder, "reason">>(
   return FIRST_GROUPS
     .map(group => ({ group, rows: rows.filter(row => row.reason === group.id) }))
     .filter(entry => entry.rows.length > 0);
+}
+
+/** Сколько всего заказов в группе — из счётчиков сервера (строк может быть загружено меньше). */
+export function firstGroupTotal(
+  data: { rebuy?: number; rush?: number; pinned: number; direct: number },
+  id: FirstGroupId,
+): number {
+  return id === "rebuy" ? data.rebuy ?? 0 : id === "rush" ? data.rush ?? 0 : id === "pinned" ? data.pinned : data.direct;
+}
+
+/**
+ * Что показать при фильтре: в «Все» по `FIRST_GROUP_PREVIEW` строк на группу,
+ * в одной группе — все загруженные. `hidden` — сколько в группе осталось за
+ * кадром (по счётчику сервера, не по загруженным строкам).
+ */
+export function firstVisibleGroups<T extends Pick<FirstInLineOrder, "reason">>(
+  rows: T[],
+  filter: FirstFilter,
+  totals: { rebuy?: number; rush?: number; pinned: number; direct: number },
+): { group: FirstGroupMeta; rows: T[]; hidden: number }[] {
+  return groupFirstInLine(rows)
+    .filter(entry => filter === "all" || entry.group.id === filter)
+    .map(entry => {
+      const shown = filter === "all" ? entry.rows.slice(0, FIRST_GROUP_PREVIEW) : entry.rows;
+      const total = Math.max(firstGroupTotal(totals, entry.group.id), entry.rows.length);
+      return { group: entry.group, rows: shown, hidden: Math.max(0, total - shown.length) };
+    });
+}
+
+const CHANNEL_LABEL: Record<string, string> = { TG: "TG", VK: "VK", WB: "чат WB" };
+
+/** Строка «торопят»: «📣 3× · TG, чат WB · 2 ч назад». */
+export function firstRushLine(rush: NonNullable<FirstInLineOrder["rush"]>, now = Date.now()): string {
+  const mins = Math.max(0, Math.round((now - Date.parse(rush.lastAt)) / 60_000));
+  const ago = mins < 60 ? `${mins} мин назад` : mins < 48 * 60 ? `${Math.round(mins / 60)} ч назад` : `${Math.round(mins / 1440)} дн назад`;
+  return [`📣 ${rush.count}×`, rush.channels.map(c => CHANNEL_LABEL[c] ?? c).join(", "), ago].join(" · ");
+}
+
+/** Точки «накала»: 1 обращение — ●○○, 3 и больше — ●●●. */
+export function firstRushHeat(count: number): 1 | 2 | 3 {
+  return count >= 3 ? 3 : count === 2 ? 2 : 1;
 }
 
 /**
@@ -140,10 +188,20 @@ export function firstCopyToast(label: string, result: ReturnType<typeof firstCop
     + (result.noPass > 0 ? ` · без пасса: ${result.noPass}` : "");
 }
 
-/** Пустая заметка у перевыкупа показывает причину — иначе её не видно в блоке. */
-export function firstNoteText(row: Pick<FirstInLineOrder, "note" | "rebuyReason">): { text: string; empty: boolean } {
+/**
+ * Что показать на месте заметки. Своя заметка — главнее всего; без неё
+ * перевыкуп показывает причину, а торопящий — цитату последнего сообщения:
+ * по ней видно, что человек хочет, и сразу видно, если классификатор ошибся.
+ */
+export function firstNoteText(
+  row: Pick<FirstInLineOrder, "note" | "rebuyReason"> & { rush?: FirstInLineOrder["rush"] },
+): { text: string; empty: boolean; quote?: boolean } {
   if (row.note) return { text: row.note, empty: false };
   if (row.rebuyReason) return { text: `не дошло: ${row.rebuyReason}`, empty: false };
+  if (row.rush) {
+    const text = row.rush.quote ? `«${row.rush.quote}»` : row.rush.via === "status" ? "нажимал «Статус»" : "писал в поддержку";
+    return { text, empty: false, quote: true };
+  }
   return { text: "+ заметка", empty: true };
 }
 

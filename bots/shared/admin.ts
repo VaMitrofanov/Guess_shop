@@ -89,6 +89,7 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   pending_long:   "Заказ долго в обработке",
   direct_wait:    "Долгое ожидание прямого заказа",
   general:        "Общий вопрос",
+  order_hint:     "Дополнение к обращению: код, ник или геймпасс, чтобы найти заказ",
   robux_overdue:  "Робуксов нет — самопроверка Pending",
   robux_low_pending: "Робуксов нет: в Pending меньше номинала (самопроверка, скрин Transactions приложен)",
   robux_low_pending_retry: "Робуксов нет: второй скрин после «это не Transactions» (самопроверка)",

@@ -37,6 +37,8 @@ export const C = {
   ice:    "#64d2ff",
   /* 🔁 Перевыкуп («выкуплен, но не дошёл»). iOS systemPink: оранжевый занят Авито. */
   pink:   "#ff375f",
+  /** 📣 «Торопят» — iOS systemPurple: оранжевый занят Авито, голубой — заморозкой. */
+  purple: "#bf5af2",
 } as const;
 
 export const RADIUS = { sm: 11, md: 14, lg: 17, xl: 22, pill: 999 } as const;

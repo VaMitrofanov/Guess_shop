@@ -16,6 +16,7 @@
   --f-accent: #a78bfa;
   --f-muted: #8e8e97;
   --f-pink: #ff5c7a;
+  --f-purple: #c77dff;
   --f-line: rgba(255, 255, 255, .085);
   --f-line-2: rgba(255, 255, 255, .15);
 
@@ -39,6 +40,7 @@
 .toneAccent { color: var(--f-accent); }
 .toneMuted { color: var(--f-muted); }
 .tonePink { color: var(--f-pink); }
+.tonePurple { color: var(--f-purple); }
 
 /* ── Шапка ── */
 .head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 4px; }
@@ -165,3 +167,63 @@
   .amount { display: none; }
   .facts { padding-left: 0; }
 }
+
+/* ── v3 (01.11.2026): фильтры, 📣 «Торопят», 🛑 просьбы об отмене ──
+   Фиолетовый — «торопят»: оранжевый занят Авито, голубой — заморозкой. */
+.counts .cnt { border: 1px solid transparent; }
+.cntAll { color: #c6c6ce; background: rgba(255, 255, 255, .06); }
+.cntRush { color: var(--f-purple); background: rgba(191, 90, 242, .15); }
+.cntOn { border-color: rgba(255, 255, 255, .28) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06); }
+.cnt:disabled { cursor: default; }
+.groupRush {
+  margin: 4px -14px 0; padding: 6px 14px 6px;
+  background: rgba(191, 90, 242, .06);
+  border-top: 1px solid rgba(191, 90, 242, .22); border-bottom: 1px solid rgba(191, 90, 242, .22);
+}
+.group.groupRebuy + .group.groupRush { margin-top: 0; border-top: 0; }
+.group.groupRush + .group { border-top: 0; }
+.rowRush::before { background: var(--f-purple); }
+.heat { display: inline-flex; align-items: center; gap: 6px; }
+.heat > i { font-style: normal; font-size: 9px; letter-spacing: 1px; }
+.noteQuote { color: #dcc6f7; font-style: italic; background: rgba(191, 90, 242, .07); }
+.groupMore {
+  display: block; width: 100%; margin-top: 2px; padding: 5px 0 2px; border: 0; background: none;
+  text-align: center !important; font-weight: 700;
+}
+.groupMore:hover { filter: brightness(1.2); }
+
+.stop {
+  margin: 6px 0 4px; padding: 8px 12px; border-radius: 11px;
+  border: 1px solid rgba(255, 107, 96, .38); background: rgba(255, 107, 96, .09);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.stopHead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; color: var(--f-red); font-weight: 800; }
+.stopHead > b { color: #ffa59e; font-variant-numeric: tabular-nums; }
+.stopHead > small { color: #a39a99; font-weight: 600; font-size: 12.5px; }
+.stopRow {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  min-height: 28px; text-decoration: none; color: #f2f2f5; border-radius: 7px; padding: 0 4px;
+}
+.stopRow:hover { background: rgba(255, 255, 255, .05); }
+.stopRow > strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; font-weight: 600; }
+.stopRow > span { color: #ffc9c5; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stopRow > em { font-style: normal; color: var(--f-ice); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Оболочка «Обзора» красит кнопки правилом `.screen button { color: inherit;
+   font: inherit }` — вес (0,1,1) перебивает одиночный класс. Поэтому у кнопок
+   блока цвет и начертание заданы с весом побольше. */
+.first button.cntAll { color: #c6c6ce; }
+.first button.cntAll.cntOn { color: #fff; }
+.first button.cntRebuy { color: var(--f-pink); }
+.first button.cntRush { color: var(--f-purple); }
+.first button.cntPinned { color: var(--f-yellow); }
+.first button.cntDirect { color: #bcd0ff; }
+.first button.cntOff { color: #6e6e77; }
+.first button.toneGreen { color: var(--f-green); }
+.first button.toneYellow { color: var(--f-yellow); }
+.first button.toneBlue { color: var(--f-blue); }
+.first button.tonePink { color: var(--f-pink); }
+.first button.tonePurple { color: var(--f-purple); }
+.first button.noteEmpty { color: #6e6e77; }
+.first button.noteRebuy { color: #ffb3c2; }
+.first button.noteQuote { color: #dcc6f7; font-style: italic; }

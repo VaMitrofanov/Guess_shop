@@ -121,7 +121,8 @@ export async function openIntake(db: SupportIntakeDb, who: IntakeSubject, ctx: I
   const where = whereOf(who);
   const key = cacheKey(who);
   if (!where || !key) return;
-  const entry: IntakeContext = { ...ctx, nudged: false, openedAt: Date.now() };
+  // `nudged: true` на входе — «молчит» не слать: человек уже написал, ждём дополнение.
+  const entry: IntakeContext = { ...ctx, nudged: ctx.nudged ?? false, openedAt: Date.now() };
   cache.set(key, entry);
   try {
     await db.user.updateMany({
