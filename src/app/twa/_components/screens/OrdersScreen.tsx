@@ -17,7 +17,9 @@ import { AskBuyerForm, AttachGamepassForm, GamepassToolRows, KeyCreateForm } fro
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
+import FirstInLineBlock from "../FirstInLineBlock";
 import {
+  canRebuy,
   orderBadge as sharedOrderBadge,
   orderFlag as sharedOrderFlag,
   nextStepFor as sharedNextStep,
@@ -38,7 +40,7 @@ const ICE = C.ice;
    палитрой. Здесь — тёмная палитра TWA. */
 const TONE: Record<Tone, string> = {
   green: C.green, yellow: C.yellow, orange: C.orange, red: C.red,
-  blue: C.blue, ice: ICE, accent: C.accent, muted: C.textTertiary,
+  blue: C.blue, ice: ICE, accent: C.accent, muted: C.textTertiary, pink: C.pink,
 };
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
@@ -118,6 +120,10 @@ interface Order {
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Тоже поверх статуса. */
   priorityAt?: string | null;
   priorityBy?: string | null;
+  /** 🔁 Перевыкуп: был выкуплен, но не дошёл — вернули в очередь первым. */
+  rebuyAt?: string | null;
+  rebuyReason?: string | null;
+  rebuyBy?: string | null;
   isDirectOrder: boolean;
   isFavorite: boolean;
   paymentDetails: string | null;
@@ -1104,6 +1110,95 @@ function HoldModal({ order, onHold, onClose }: {
 }
 
 
+/* 🔁 «Не дошло — выкупить снова». Заказ из «Готово» уходит в очередь первым и
+   с меткой перевыкупа. Причина обязательна: её читает тот, кто выкупает. */
+const REBUY_PRESETS = ["Прислал скрин — робуксов нет", "Не пришло в Pending", "Выкуп не прошёл", "Купили не тот пасс"];
+
+function RebuyModal({ order, onRebuy, onClose }: {
+  order: Order;
+  onRebuy: (reason: string) => Promise<ActionResult>;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    const text = reason.trim();
+    if (!text) { toast("Причина обязательна", "error"); return; }
+    setLoading(true);
+    const res = await onRebuy(text);
+    setLoading(false);
+    if (res.ok) onClose();
+    else toast(res.error ?? "Ошибка", "error");
+  }
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 14px 14px",
+      borderTop: `1px solid ${C.hairline}`,
+      background: "rgba(0,0,0,0.15)",
+      display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.pink }}>🔁 Не дошло — выкупить снова</div>
+      <div style={{ fontSize: 14, color: C.textSecondary, fontFamily: MONO }}>
+        {order.wbCode} · {order.robloxUsername ?? order.probableNick ?? "ник не указан"} · {order.amount.toLocaleString("ru-RU")} R$
+        {order.purchaserUsername ? ` · был: ${order.purchaserUsername}` : " · был закрыт вручную"}
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {REBUY_PRESETS.map(preset => (
+          <button key={preset} className="twa-press-sm" onClick={() => setReason(preset)}
+            style={{
+              padding: "8px 13px", borderRadius: 999, cursor: "pointer",
+              border: reason === preset ? `1px solid ${C.pink}66` : "1px solid transparent",
+              background: reason === preset ? `${C.pink}29` : "rgba(255,255,255,0.08)",
+              color: reason === preset ? C.pink : C.textSecondary,
+              fontSize: 14, fontWeight: 600,
+            }}>
+            {preset}
+          </button>
+        ))}
+      </div>
+
+      <textarea
+        placeholder="Что прислал покупатель (обязательно)…"
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        rows={2}
+        style={{
+          background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, borderRadius: 10,
+          color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
+          padding: "10px 12px", resize: "none", outline: "none",
+          width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+        }}
+      />
+
+      <div style={{
+        display: "flex", gap: 9, padding: "11px 13px", borderRadius: 11,
+        background: `${C.pink}1a`, border: `1px solid ${C.pink}42`,
+        fontSize: 14, lineHeight: 1.45, color: C.textSecondary,
+      }}>
+        <span>💡</span>
+        <span>
+          Заказ вернётся в <b style={{ color: C.pink }}>«К выкупу» первым</b> с меткой «🔁 Перевыкуп».
+          Клиенту сейчас ничего не уйдёт. Тот же пасс брать <b style={{ color: C.pink }}>с другого аккаунта</b>.
+        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose}
+          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+          Отмена
+        </button>
+        <button className="twa-press" onClick={submit} disabled={loading || !reason.trim()}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.pink, color: "#2a0610", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading || !reason.trim() ? 0.5 : 1 }}>
+          {loading ? "…" : "Вернуть к выкупу"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function RefundModal({ order, token, onDone, onClose }: { order: Order; token: string; onDone: () => void; onClose: () => void }) {
   const payment = order.paymentAttempts?.[0];
   const remaining = payment ? payment.amountKopecks - payment.refundedAmountKopecks : 0;
@@ -2076,7 +2171,7 @@ function RejectModal({ order, onReject, onClose }: {
 type MenuAction =
   | "edit" | "key" | "link" | "nick" | "ask" | "split" | "rebind" | "move"
   | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
-  | "purchase" | "refund" | "trace";
+  | "purchase" | "refund" | "trace" | "rebuy";
 
 function OrderMenuSheet({
   open, order, passId, splitIds, grossAmount, canEdit, canRefund, canMove, canPurchase, canPrioritize, busy,
@@ -2155,6 +2250,8 @@ function OrderMenuSheet({
           заказ никуда не переезжает, он просто выкупается первым. */}
       {canPrioritize && row("priority", "⚡", order.priorityAt ? "Убрать из первых" : "Вперёд очереди",
         order.priorityAt ? "сейчас первый" : "выкупать первым")}
+      {/* 🔁 Выкуплен, но покупатель робуксов не получил — обратно в очередь первым. */}
+      {canRebuy(order as never) && row("rebuy", "🔁", "Не дошло — выкупить снова", "первым в очередь")}
       {["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status)
         && row("reject", "✕", "Отменить заказ", undefined, "red")}
 
@@ -2337,6 +2434,7 @@ function OrderCard({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
+  const [rebuyOpen, setRebuyOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   /** Пасс, выбранный в списке пассов ника до открытия разбиения. */
@@ -2712,6 +2810,9 @@ function OrderCard({
             тем, что заказ оказался сверху, — а это же место занимает и просто
             самый старый. */}
         {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
+        {order.rebuyAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (
+          <span className="twa-oc-prio" style={{ color: C.pink, background: `${C.pink}1f` }} title={order.rebuyReason ?? "Выкуплен, но не дошёл"}>🔁 перевыкуп</span>
+        )}
         {/* Отзыв и «проблемный» покупатель видны прямо в ленте (30.10.2026). */}
         {order.risk?.review?.kind === "BAD_REVIEW" && (
           <span className="twa-oc-prio" style={{ color: C.red, background: `${C.red}1f` }} title="Плохой отзыв на WB">★{order.risk.review.stars ?? "?"}</span>
@@ -2969,6 +3070,7 @@ function OrderCard({
           case "rebind":   inSheet(() => setRebindOpen(true), "rebind"); break;
           case "move":     inSheet(() => setMoveOpen(true), "move"); break;
           case "hold":     inSheet(() => setHoldOpen(true), "hold"); break;
+          case "rebuy":    inSheet(() => setRebuyOpen(true), "rebuy"); break;
           case "refund":   inSheet(() => setRefundOpen(true), "refund"); break;
           case "reject":   inSheet(() => setRejectOpen(true), "reject"); break;
           case "trace":    setExpanded(true); break;
@@ -3026,6 +3128,9 @@ function OrderCard({
           )}
           {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
           {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
+        {order.rebuyAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (
+          <span className="twa-oc-prio" style={{ color: C.pink, background: `${C.pink}1f` }} title={order.rebuyReason ?? "Выкуплен, но не дошёл"}>🔁 перевыкуп</span>
+        )}
           <em className="twa-os-buyer">{shortName}</em>
           {codeChip()}
         </span>
@@ -3324,6 +3429,15 @@ function OrderCard({
           order={order}
           onHold={(reason) => onRunAction("hold", reason)}
           onClose={() => setHoldOpen(false)}
+        />
+        </div>
+      )}
+      {rebuyOpen && (
+        <div data-form="rebuy">
+        <RebuyModal
+          order={order}
+          onRebuy={(reason) => onRunAction("rebuy", reason)}
+          onClose={() => setRebuyOpen(false)}
         />
         </div>
       )}
@@ -4172,7 +4286,7 @@ export default function OrdersScreen({
     if (action === "complete") { newStatus = "COMPLETED"; toTab = "DONE"; }
     else if (action === "reject") { newStatus = "REJECTED"; toTab = "REJECTED"; }
     else if (action === "set-error") { newStatus = "ERROR"; toTab = "ERROR"; }
-    else if (action === "restore-to-buyout") {
+    else if (action === "restore-to-buyout" || action === "rebuy") {
       newStatus = "PENDING";
       toTab = order.orderSource === "AVITO" ? "AVITO" : isUnpaidDirect(order) ? "DIRECT" : "BUYOUT";
     }
@@ -4195,8 +4309,11 @@ export default function OrdersScreen({
           ...o,
           status: newStatus!,
           rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason,
-          buyoutErrorCode: ["complete", "reject", "restore-to-buyout"].includes(action) ? null : o.buyoutErrorCode,
-          pendingAt: action === "restore-to-buyout" ? new Date().toISOString() : o.pendingAt,
+          buyoutErrorCode: ["complete", "reject", "restore-to-buyout", "rebuy"].includes(action) ? null : o.buyoutErrorCode,
+          pendingAt: action === "restore-to-buyout" || action === "rebuy" ? new Date().toISOString() : o.pendingAt,
+          ...(action === "rebuy"
+            ? { priorityAt: new Date().toISOString(), rebuyAt: new Date().toISOString(), rebuyReason: reason ?? null, completedAt: null }
+            : {}),
         }
       : o));
     if (data?.counts && toTab) {
@@ -4222,6 +4339,10 @@ export default function OrdersScreen({
             rejectionReason: order.rejectionReason,
             buyoutErrorCode: order.buyoutErrorCode,
             pendingAt: order.pendingAt,
+            priorityAt: order.priorityAt ?? null,
+            rebuyAt: order.rebuyAt ?? null,
+            rebuyReason: order.rebuyReason ?? null,
+            completedAt: order.completedAt,
           }
         : o));
       if (data?.counts && toTab) {
@@ -4264,7 +4385,9 @@ export default function OrdersScreen({
           ? "→ Ошибка"
           : action === "restore-to-buyout"
             ? "Возвращён к выкупу"
-            : "Отклонён";
+            : action === "rebuy"
+              ? "🔁 Снова в очереди — первым"
+              : "Отклонён";
       toast(msg, action === "reject" ? "default" : "success");
       return { ok: true };
     } catch {
@@ -4346,6 +4469,11 @@ export default function OrdersScreen({
      переезжает, меняется только его место в сортировке. Поэтому счётчики вкладок
      не трогаем — двигаем саму карточку, чтобы поднятие было видно сразу, а не
      после следующей загрузки списка (сервер вернёт ровно этот же порядок). */
+  /* Сигнал блоку «Первым делом»: меняется, когда в ленте сменился статус или
+     ⚡ у заказа, — тогда блок перечитывает себя. Строка, а не объект: иначе
+     каждый рендер считался бы изменением. */
+  const firstSignal = `${data?.total ?? 0}|${allOrders.map(o => `${o.id}:${o.status}:${o.priorityAt ? 1 : 0}`).join(",")}`;
+
   const togglePriority = useCallback(async (order: Order) => {
     const on = !order.priorityAt;
     haptic.impact("medium");
@@ -4647,6 +4775,20 @@ export default function OrdersScreen({
               refreshing={loading}
               updatedAt={tillAt}
               onFindOldest={() => { haptic.select(); setNarrow({ age: activeSlice.age.buckets[activeSlice.age.buckets.length - 1]?.id ?? null }); }}
+            />
+          </div>
+        )}
+
+        {/* ⚡ «Первым делом» — тот же блок, что на Главной: заказ, поднятый или
+            возвращённый на перевыкуп, обязан быть виден и здесь, а не только
+            местом в ленте. Перечитывается, когда в ленте меняется статус или ⚡. */}
+        {filter === "BUYOUT" && !query && (
+          <div style={{ padding: "10px 16px 0" }}>
+            <FirstInLineBlock
+              token={token}
+              refreshSignal={firstSignal}
+              onOpenOrder={code => { haptic.select(); setQuery(code); }}
+              onChanged={() => { setPage(1); void fetchOrders(serverTab, query, 1, false); onActionDone?.(); }}
             />
           </div>
         )}

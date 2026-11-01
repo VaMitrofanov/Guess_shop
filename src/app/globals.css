@@ -1203,6 +1203,7 @@ html.twa-route-active [contenteditable="true"] {
 }
 .twa-first-why.is-pinned { color: #ffd60a; background: rgba(255,214,10,.15); }
 .twa-first-why.is-direct { color: #9db8ff; background: rgba(10,132,255,.16); }
+.twa-first-why.is-rebuy { color: #ff375f; background: rgba(255,55,95,.16); }
 .twa-first-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .twa-first-main > strong {
   font-size: 14px; font-weight: 700; letter-spacing: .06em;
@@ -1254,6 +1255,48 @@ html.twa-route-active [contenteditable="true"] {
   border: 1px solid rgba(48,209,88,.4); border-radius: 9px;
   background: rgba(48,209,88,.14); color: #30d158;
 }
+
+/* «Первым делом» v2 (01.11.2026): группы по причине в формате списка.
+   Причина видна полосой слева и заголовком группы; метка в строке больше не
+   нужна — ник получает её место. Перевыкуп розовый: оранжевый занят Авито. */
+.twa-first-counts { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 4px; }
+.twa-first-cnt {
+  padding: 3px 9px; border-radius: 999px; font-size: 13px; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: #777181; background: rgba(255,255,255,.06);
+}
+.twa-first-group { display: flex; flex-direction: column; padding-top: 6px; }
+.twa-first-group + .twa-first-group { border-top: 1px solid rgba(255,255,255,.07); margin-top: 2px; }
+.twa-first-group.is-rebuy {
+  margin: 4px -14px 0; padding: 6px 14px 0;
+  background: rgba(255,55,95,.07); border-top: 1px solid rgba(255,55,95,.22); border-bottom: 1px solid rgba(255,55,95,.22);
+}
+.twa-first-gh { display: flex; align-items: center; gap: 7px; min-height: 30px; white-space: nowrap; }
+.twa-first-gh > span { font-size: 14px; font-weight: 800; }
+.twa-first-gh > b { font-size: 14px; color: #777181; font-variant-numeric: tabular-nums; }
+.twa-first-gh > small { flex: 1; min-width: 0; color: #777181; font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.twa-first-gh-copy {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 9px;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 999px; background: rgba(255,255,255,.05);
+  color: #ded9ea; font-family: inherit; font-size: 13px; font-weight: 700;
+}
+.twa-first-row { position: relative; padding-left: 12px; }
+.twa-first-row::before {
+  content: ""; position: absolute; left: 0; top: 10px; bottom: 12px; width: 4px; border-radius: 4px;
+  background: var(--stripe, #ffd60a);
+}
+.twa-first-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; font-weight: 600; color: #8f899c; margin-top: -2px; }
+.twa-first-note.is-rebuy { color: #ffb3c2; background: rgba(255,55,95,.10); border-color: rgba(255,55,95,.2); }
+.twa-first-undo-text { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: #30d158; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-first-undo {
+  flex: 0 0 auto; min-height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.1); color: #f7f5ff; font-family: inherit; font-size: 14px; font-weight: 700;
+}
+.twa-first-more {
+  width: 100%; min-height: 40px; margin-top: 2px; border: 0; background: transparent;
+  color: #a78bfa; font-family: inherit; font-size: 15px; font-weight: 700; text-align: center;
+}
+.twa-first-more.is-static { display: flex; align-items: center; justify-content: center; color: #777181; font-size: 14px; font-weight: 600; }
+.twa-first-copy-all:disabled { opacity: .4; }
 
 /* ── «Другие пассы на аккаунте» (карточка заказа) ───────────────────────────
    Зеркало блока из досье сайта. Вторичный по виду намеренно: это не факты

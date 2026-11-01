@@ -33,6 +33,7 @@ import { NOT_HELD, activeHoldCodes, assertOrderBuyable } from "../shared/order-h
 import { runDrain, drainAuthedUser, drainUserGamepasses } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
+import { runWbTokenWatch } from "../shared/wb-token-watch";
 import { browserFailureMessage, getBrowserGamepassPreflight, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -533,6 +534,11 @@ export function startAutoWorkers(bot: Telegraf): void {
   // Auto-drain: 15-минутный цикл (слив — редкое событие, чаще незачем).
   setTimeout(() => runAutoDrainTick().catch((e) => console.error("[auto-drain] boot:", e)), 90_000);
   setInterval(() => runAutoDrainTick().catch((e) => console.error("[auto-drain] tick:", e)), 15 * 60 * 1000);
+
+  // Срок токена WB: раз в час, первый прогон через 2 минуты после старта
+  // (01.11.2026 токен истёк молча — бот 7 часов не видел заказы DBS).
+  setTimeout(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] boot:", e)), 120_000);
+  setInterval(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] tick:", e)), 60 * 60 * 1000);
 
   console.log("[auto-buyout] worker started ✅ (kill-switch in GlobalSettings.autoBuyoutEnabled)");
   console.log("[gp-watch] worker started ✅ (kill-switch in GlobalSettings.gpWatchEnabled)");

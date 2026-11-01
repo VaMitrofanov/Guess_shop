@@ -492,6 +492,13 @@ model WbOrder {
   /// поднятый последним. Сортировать ТОЛЬКО как `desc, nulls: "last"`.
   priorityAt             DateTime?
   priorityBy             String?
+  /// 🔁 Перевыкуп: заказ был в «Готово», но покупатель робуксы не получил
+  /// (выкупа не было, ошибка аккаунта, пасс не тот). Кнопка «Не дошло — выкупить
+  /// снова» возвращает его в очередь первым и ставит эту метку. Метка остаётся
+  /// историей и после повторного выкупа; бейдж рисуется, пока заказ в очереди.
+  rebuyAt                DateTime?
+  rebuyReason            String?
+  rebuyBy                String?
   pendingAt              DateTime?
   takenAt                DateTime?
   remindersSent          Int               @default(0)

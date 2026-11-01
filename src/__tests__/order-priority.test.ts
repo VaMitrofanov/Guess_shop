@@ -108,54 +108,49 @@ describe("«Первым делом» на обеих главных", () => {
 
   it("границы — те же, что у вкладки «Выкупить»", () => {
     expect(lib).toContain("BUYOUT_QUEUE_SQL");
-    expect(lib).toContain('("priorityAt" IS NOT NULL OR "isDirectOrder" = true)');
+    expect(lib).toContain('("rebuyAt" IS NOT NULL OR "priorityAt" IS NOT NULL OR "isDirectOrder" = true)');
   });
 
-  it("порядок внутри блока: ⚡ → прямые → возраст", () => {
+  it("порядок внутри блока: 🔁 перевыкуп → ⚡ → прямые → возраст", () => {
     expect(lib).toContain("FIRST_IN_LINE_ORDER_SQL");
+    // NULLS LAST обязателен и у перевыкупа: без него наверх уехали бы все обычные.
     expect(FIRST_IN_LINE_ORDER_SQL).toBe(
-      '"priorityAt" DESC NULLS LAST, "isDirectOrder" DESC, COALESCE("pendingAt", "createdAt") ASC',
+      '"rebuyAt" DESC NULLS LAST, "priorityAt" DESC NULLS LAST, "isDirectOrder" DESC, COALESCE("pendingAt", "createdAt") ASC',
     );
   });
 
-  it("оба экрана рисуют блок и прячут его пустым", () => {
-    const overview = read("src/components/admin/overview/overview-screen.tsx");
-    const twa = read("src/app/twa/_components/screens/Dashboard.tsx");
-    expect(overview).toContain("firstInLine.length > 0");
-    expect(twa).toContain("firstInLine.length > 0");
-    // Причина попадания видна в строке, иначе блок читается как «просто список».
-    expect(overview).toContain('order.reason === "pinned"');
-    expect(twa).toContain('order.reason === "pinned"');
-  });
-
-  it("выгрузка ID: вся пачка и каждый заказ отдельно", () => {
-    const overview = read("src/components/admin/overview/overview-screen.tsx");
-    expect(overview).toContain("copyFirstIds(firstInLine,");
-    expect(overview).toContain("copyFirstIds([order],");
+  it("блок стоит везде: Главная и «Выкупы» в TWA, «Обзор» и «Выкупить» на сайте", () => {
+    // Одна копия на платформу: TWA — FirstInLineBlock, сайт — FirstInLinePanel.
+    // Копия внутри экрана уже раз разошлась бы со второй.
+    expect(read("src/app/twa/_components/screens/Dashboard.tsx")).toContain("<FirstInLineBlock");
+    expect(read("src/app/twa/_components/screens/OrdersScreen.tsx")).toMatch(/filter === "BUYOUT" && !query && \(\s*<div[^>]*>\s*<FirstInLineBlock/);
+    expect(read("src/components/admin/overview/overview-screen.tsx")).toContain("<FirstInLinePanel");
+    expect(read("src/components/admin/orders/orders-workspace.tsx")).toMatch(/slice === "BUYOUT"[^\n]*\n[\s\S]{0,120}<FirstInLinePanel/);
+    // Пустой блок не рисуется, группы и копирование — из общего правила.
+    for (const file of ["src/app/twa/_components/FirstInLineBlock.tsx", "src/components/admin/first-in-line/first-in-line-panel.tsx"]) {
+      const src = read(file);
+      expect(src).toContain("if (visible.length === 0) return null;");
+      expect(src).toContain("groupFirstInLine(visible)");
+      expect(src).toContain("firstCopyableIds(");
+      // «Выкуплено» — с отменой, а не сразу.
+      expect(src).toContain("FIRST_UNDO_MS");
+      // Заметка из блока НЕ затирает машинный аудит.
+      expect(src).toContain('action: "set-note", orderId: order.id, note: next, keepTags: true');
+    }
   });
 
   it("у разбитого заказа копируются ВСЕ невыкупленные части", () => {
-    // Одна строка списка = одна покупка только у неразбитого заказа; у
-    // разбитого их столько, сколько частей осталось, и повтор пасса не
-    // схлопывается — это две покупки с разных доноров.
+    // Повтор пасса не схлопывается — это две покупки с разных аккаунтов.
     expect(lib).toContain("purchasedAt: null");
     expect(lib).toContain("bucket.push(part.gamepassId)");
-    const overview = read("src/components/admin/overview/overview-screen.tsx");
-    expect(overview).toContain("orders.flatMap(order => order.gamepassIds)");
   });
 
   it("заметка из блока НЕ затирает машинный аудит заметки", () => {
-    // Заметка заказа — два разных содержимого в одном поле: аудит выкупа
-    // (`[РАЗБИВКА …]`, `[ЦЕНА-СТОП …]`) и текст админа. Узкое поле на дашборде
-    // правит только второе, иначе строка «доплата» стёрла бы историю.
     const route = read("src/app/api/twa/orders/route.ts");
     const handler = route.slice(route.indexOf('if (action === "set-note")'));
     const block = handler.slice(0, 1600);
     expect(block).toContain("body.keepTags === true");
     expect(block).toContain('line.startsWith("[")');
-    const overview = read("src/components/admin/overview/overview-screen.tsx");
-    expect(overview).toContain('action: "set-note", orderId: order.id, note: next, keepTags: true');
-    // И показывается ровно то, что уйдёт в сохранение.
     expect(read("src/lib/first-in-line.ts")).toContain("function humanNote(");
   });
 

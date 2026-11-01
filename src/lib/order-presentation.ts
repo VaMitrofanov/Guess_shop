@@ -14,7 +14,8 @@
 
 import { expectedGamepassPrice } from "@/lib/purchase-guard";
 
-export type Tone = "green" | "yellow" | "orange" | "red" | "blue" | "ice" | "accent" | "muted";
+/** `pink` — 🔁 перевыкуп: оранжевый уже значит «Авито», розовым не помечено ничего. */
+export type Tone = "green" | "yellow" | "orange" | "red" | "blue" | "ice" | "accent" | "muted" | "pink";
 
 /** Минимум, который presentation-функции обязаны знать о заказе. */
 export interface PresentableOrder {
@@ -25,6 +26,9 @@ export interface PresentableOrder {
   splitGamepasses?: { purchasedAt: string | null }[] | null;
   heldAt: string | null;
   heldReason?: string | null;
+  /** 🔁 Был выкуплен, но не дошёл — вернули в очередь (см. `buildRebuyData`). */
+  rebuyAt?: string | null;
+  rebuyReason?: string | null;
   isDirectOrder: boolean;
   isFavorite?: boolean;
   orderSource: string;
@@ -98,6 +102,11 @@ export function ageBasis(order: Pick<PresentableOrder, "status" | "pendingAt" | 
 
 /* ── Бейдж состояния ─────────────────────────────────────────────────────── */
 
+/** Метка перевыкупа видна, пока заказ снова не закрыт: дальше она — история. */
+function isRebuyQueued(order: Pick<PresentableOrder, "status">): boolean {
+  return ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status);
+}
+
 /** Порог, после которого заказ без ссылки перестаёт быть «новым» (см. order-queue). */
 const NEW_CUTOFF_HOURS = 40;
 
@@ -108,6 +117,9 @@ export function orderBadge(order: PresentableOrder): { label: string; tone: Tone
   // ❄️ Заморозка бьёт все остальные бейджи: это единственное, что определяет,
   // можно ли с заказом вообще что-то делать.
   if (order.heldAt) return { label: "❄️ Заморожен", tone: "ice" };
+  // 🔁 Перевыкуп сильнее «Избранного» и источника: этот заказ уже раз закрыли,
+  // и покупатель ждёт его дольше всех в очереди.
+  if (order.rebuyAt && isRebuyQueued(order)) return { label: "🔁 Перевыкуп", tone: "pink" };
   if (order.isFavorite) return { label: "Избранное", tone: "yellow" };
   if (order.status === "COMPLETED") return { label: "Готово", tone: "green" };
   if (order.status === "REJECTED") return { label: "Отменено", tone: "red" };
@@ -200,6 +212,10 @@ export function orderFlag(
   if (order.buyoutErrorCode === "REGIONAL_PRICE")
     return { text: "🌍 рег. цена на доноре — замена по нику не найдена", tone: "red" };
   if (live?.isForSale === false) return { text: "⛔ геймпасс снят с продажи", tone: "red" };
+  /* 🔁 Причина перевыкупа — то, ради чего заказ снова в очереди: без неё
+     выкупающий купит тем же аккаунтом тот же пасс и получит `AlreadyOwned`. */
+  if (order.rebuyAt && isRebuyQueued(order))
+    return { text: `🔁 не дошло: ${order.rebuyReason ?? "покупатель не получил робуксы"}`, tone: "pink" };
   /* Тот же пасс стоит ещё в одном заказе ТЕКУЩЕЙ очереди — то есть в одной
      пачке выкупа. Это единственный повтор, о котором кричим: оба заказа уйдут
      в работу рядом, и одним аккаунтом второй уже не купить (`AlreadyOwned`).
@@ -433,4 +449,13 @@ export function readinessFor(order: PresentableOrder & { probableNick?: string |
   if (pass === "bad") return make([paid, nick, "bad", "todo"], "Цена не та", "orange");
   if (split.length > 0 && bought > 0) return make([paid, nick, pass, "now"], `Выкуп · ${bought} из ${split.length}`, "green", true);
   return make([paid, nick, pass, "now"], "Готов к выкупу", "green", true);
+}
+
+/**
+ * 🔁 Кнопку «Не дошло — выкупить снова» показываем ровно там, где сервер её
+ * примет (`buildRebuyData`): выкупленный, не замороженный, с геймпассом.
+ */
+export function canRebuy(order: PresentableOrder): boolean {
+  if (order.status !== "COMPLETED" || order.heldAt) return false;
+  return !!order.gamepassUrl || (order.splitGamepasses?.length ?? 0) > 0;
 }

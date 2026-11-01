@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
 import type { AdminOverview, OverviewFeedRow, OverviewQueueOrder } from "@/types/admin-overview";
-import type { FirstInLineOrder } from "@/types/first-in-line";
+import FirstInLinePanel from "@/components/admin/first-in-line/first-in-line-panel";
 import styles from "./overview.module.css";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +46,7 @@ const TONE_CLASS: Record<Tone, string> = {
   ice: styles.toneIce,
   accent: styles.toneAccent,
   muted: styles.toneMuted,
+  pink: styles.tonePink,
 };
 
 const LANE_LABEL: Record<OverviewQueueOrder["lane"], string> = {
@@ -231,28 +232,6 @@ export default function OverviewScreen({
     showToast(`⧉ ID в буфере: ${ids.length}`);
   }, [showToast]);
 
-  /* Заметка прямо в блоке: «почему этот заказ тут». Раньше ради строчки текста
-     надо было уходить в досье, а середина строки при этом пустовала.
-     `keepTags` на сервере бережёт машинный аудит заметки — узкое поле правит
-     только человеческую часть. */
-  const [noteEdit, setNoteEdit] = useState<{ id: string; value: string } | null>(null);
-  const [noteSaving, setNoteSaving] = useState<string | null>(null);
-
-  const saveNote = useCallback(async (order: FirstInLineOrder, value: string) => {
-    const next = value.trim();
-    setNoteEdit(null);
-    if (next === (order.note ?? "")) return;
-    setNoteSaving(order.id);
-    const result = await post({ action: "set-note", orderId: order.id, note: next, keepTags: true });
-    setNoteSaving(null);
-    if (!result.ok) { showToast(`${order.wbCode}: ${result.error}`, true); return; }
-    // Правим строку на месте: перезагрузка обзора сбросила бы фокус и прокрутку.
-    setData(prev => (prev.firstInLine
-      ? { ...prev, firstInLine: { ...prev.firstInLine, rows: prev.firstInLine.rows.map(row => (
-          row.id === order.id ? { ...row, note: next || null } : row)) } }
-      : prev));
-    showToast(next ? `✎ ${order.wbCode}: заметка сохранена` : `✎ ${order.wbCode}: заметка снята`);
-  }, [showToast]);
 
   /* Напоминание про код доставки прямо с обзора (решение О7 от 03.09.2026).
      Кнопка отправляет покупателю сообщение в чат WB, поэтому она спрашивает
@@ -281,29 +260,7 @@ export default function OverviewScreen({
     }
   }, [refresh, showToast]);
 
-  /* ID пассов из «Первым делом» — то, что вставляют в донора.
-     У разбитого заказа их несколько (все невыкупленные части), поэтому это
-     `flatMap`, а не `map`: одна строка списка может дать две покупки. */
-  const copyFirstIds = useCallback((orders: FirstInLineOrder[], label: string) => {
-    const ids = orders.flatMap(order => order.gamepassIds);
-    if (ids.length === 0) { showToast(`${label}: пассов ещё нет`, true); return; }
-    copyText(ids.join("\n"));
-    // Заказов и ID может быть разное количество — говорим оба числа, иначе
-    // «скопировано 3» на двух заказах выглядит ошибкой.
-    const skipped = orders.filter(order => order.gamepassIds.length === 0).length;
-    showToast(
-      `⧉ ${label}: ${ids.length} ID` +
-      (ids.length !== orders.length ? ` из ${orders.length} заказов` : "") +
-      (skipped > 0 ? ` · без пасса: ${skipped}` : ""),
-    );
-  }, [showToast]);
 
-  const firstInLine = (data.firstInLine?.rows ?? []).filter(order => !bought.has(order.id));
-  // Грязные считаются на ВСЕ такие заказы, а показанных строк может быть
-  // меньше — поэтому вычитаем только что выкупленные, а не суммируем видимые:
-  // иначе шапка продолжала просить деньги за строку, которая уже ушла.
-  const firstInLineGross = (data.firstInLine?.rows ?? [])
-    .reduce((sum, order) => (bought.has(order.id) ? sum - order.gross : sum), data.firstInLine?.gross ?? 0);
   const oldest = queue.slice(0, OLDEST_SHOWN);
   const buyout = data.slices.slices.BUYOUT;
   const errors = data.slices.slices.ERROR;
@@ -380,114 +337,14 @@ export default function OverviewScreen({
       </section>
 
       {/* ── 1.5. ⚡ Первым делом ────────────────────────────────────────────
-          Два случая, которые выкупаются не по возрасту: поднятые руками и
-          прямые (за них клиент заплатил лично и ждёт лично). В общей очереди
-          они стоят наверху, но там же стоит и просто самый старый — без
-          отдельной полосы «подняли» и «прямой» неотличимы от «давно висит».
-          Пусто — блока нет вовсе: чинить в нём нечего. */}
-      {firstInLine.length > 0 && (
-        <section className={styles.first} aria-label="Выкупать первым делом">
-          <div className={styles.firstHead}>
-            ⚡ Первым делом
-            <span className={styles.note}>
-              {data.firstInLine!.pinned > 0 && <>подняты вручную: <b>{data.firstInLine!.pinned}</b></>}
-              {data.firstInLine!.pinned > 0 && data.firstInLine!.direct > 0 && " · "}
-              {data.firstInLine!.direct > 0 && <>прямых: <b>{data.firstInLine!.direct}</b></>}
-            </span>
-            <span className={styles.spacer} />
-            <span className={styles.note}><b>{num(firstInLineGross)}</b> R$ грязными</span>
-            {/* Выгрузка всей пачки: типовой шаг — скопировал ID, вставил в
-                донора, вернулся отмечать. Ради него незачем уходить в «Заказы». */}
-            <button
-              type="button"
-              className={styles.firstCopyAll}
-              onClick={() => copyFirstIds(firstInLine, "первым делом")}
-              title="Скопировать ID геймпассов всей пачки"
-            >
-              ⧉ ID · {firstInLine.reduce((sum, order) => sum + order.gamepassIds.length, 0)}
-            </button>
-          </div>
-          <div className={styles.firstRows}>
-            {firstInLine.map(order => (
-              <div
-                className={cn(styles.firstRow, busy.has(order.id) && styles.firstRowBusy)}
-                key={order.id}
-              >
-                <span className={cn(
-                  styles.firstWhy,
-                  order.reason === "pinned" ? styles.firstWhyPinned : styles.firstWhyDirect,
-                )}>
-                  {order.reason === "pinned" ? "⚡ поднят" : "Прямой"}
-                </span>
-                <Link className={styles.code} href={`/admin/orders?slice=BUYOUT&order=${order.id}`}>
-                  {order.wbCode}
-                </Link>
-                <span className={styles.nick} title={order.robloxUsername ?? undefined}>
-                  {order.robloxUsername ?? "Ник не указан"}
-                </span>
-                {/* Заметка занимает середину строки — раньше там была пустота.
-                    Поле однострочное: сюда пишут «доплата», «спор на WB»,
-                    «обещал к вечеру», а не историю заказа. */}
-                {noteEdit?.id === order.id ? (
-                  <input
-                    autoFocus
-                    className={styles.firstNoteInput}
-                    value={noteEdit.value}
-                    maxLength={200}
-                    placeholder="Почему этот заказ первым…"
-                    onChange={event => setNoteEdit({ id: order.id, value: event.target.value })}
-                    onBlur={() => void saveNote(order, noteEdit.value)}
-                    onKeyDown={event => {
-                      if (event.key === "Enter") { event.preventDefault(); void saveNote(order, noteEdit.value); }
-                      // Esc отменяет правку целиком: строка возвращается к тому,
-                      // что было, а не сохраняет наполовину набранное.
-                      if (event.key === "Escape") { event.preventDefault(); setNoteEdit(null); }
-                    }}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    className={cn(styles.firstNote, !order.note && styles.firstNoteEmpty)}
-                    onClick={() => setNoteEdit({ id: order.id, value: order.note ?? "" })}
-                    title={order.note ?? "Добавить заметку"}
-                  >
-                    {noteSaving === order.id ? "сохраняю…" : order.note ?? "+ заметка"}
-                  </button>
-                )}
-                <span className={styles.amount} title={`${num(order.gross)} грязными → ${num(order.amount)} R$ клиенту`}>
-                  {num(order.gross)} R$
-                </span>
-                <span className={cn(styles.age, TONE_CLASS[ageTone(order.since)])}>{fmtAge(order.since)}</span>
-                <button
-                  type="button"
-                  className={styles.firstCopy}
-                  onClick={() => copyFirstIds([order], order.wbCode)}
-                  disabled={order.gamepassIds.length === 0}
-                  title={order.gamepassIds.length > 1
-                    ? `Скопировать ${order.gamepassIds.length} ID частей · ${order.wbCode}`
-                    : `Скопировать ID геймпасса · ${order.wbCode}`}
-                  aria-label={`Скопировать ID геймпасса заказа ${order.wbCode}`}
-                >
-                  {/* Число рисуем только у разбитого: у обычного «⧉ 1» — шум. */}
-                  ⧉ ID{order.gamepassIds.length > 1 ? ` · ${order.gamepassIds.length}` : ""}
-                </button>
-                {/* «Выкуплено» отделено щелью и рамкой намеренно: оно
-                    необратимо и шлёт клиенту сообщение, а соседняя кнопка —
-                    безобидное копирование, которое жмут в десять раз чаще. */}
-                <button
-                  type="button"
-                  className={cn(styles.tick, styles.firstTick)}
-                  title={`Выкуплено · ${order.wbCode} · клиенту уйдёт сообщение`}
-                  aria-label={`Отметить выкупленным заказ ${order.wbCode}`}
-                  onClick={() => void completeOne(order)}
-                >
-                  <Check size={15} aria-hidden="true" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+          Перевыкупы, поднятые руками и прямые — группами. Тот же компонент
+          стоит над лентой «Выкупить»; пусто — блока нет вовсе. */}
+      <FirstInLinePanel
+        initial={data.firstInLine ?? null}
+        queueHref="/admin/orders?slice=BUYOUT"
+        onChanged={() => void refresh(true)}
+        onToast={showToast}
+      />
 
       {/* ── 2. Дорожки работы ──────────────────────────────────────────────── */}
       <div className={styles.sectionHead}><h2>Дорожки</h2></div>

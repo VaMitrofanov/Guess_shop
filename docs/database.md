@@ -255,6 +255,11 @@ NULL (крон разблокировки их не трогает, нет пу�
 `src/lib/order-queue.ts` (`PRIORITY_ORDER_BY` / `PRIORITY_ORDER_SQL`), потому что очередь
 читают четыре разных места: две ленты, голова «Обзора», выгрузка ID и автовыкуп бота.
 
+Перевыкуп (01.11.2026, миграция `20261101_order_rebuy`): `rebuyAt` / `rebuyReason` / `rebuyBy`
+— метка «был выкуплен, но не дошёл, вернули в очередь». Ставится действием `rebuy` вместе с
+`priorityAt`, переживает повторное закрытие как история. Без индекса: читается только вместе
+со строкой заказа. Подробно — [twa-admin.md](twa-admin.md).
+
 Индексы покрывают все вкладки TWA (status+createdAt, favorites, purchaserUsername, orderSource,
 robloxUsername, userId+createdAt, heldAt, priorityAt).
 

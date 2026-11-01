@@ -19,12 +19,13 @@
       и в пачку он не попадает даже через «выделить все».
    ───────────────────────────────────────────────────────────────────────── */
 
+import FirstInLinePanel from "@/components/admin/first-in-line/first-in-line-panel";
 import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ageBasis, ageTone, canComplete, fmtAge, grossOf, isHeld, laneOf,
-  LANE_META, orderBadge, orderFlag, packDuplicates, primaryActionFor,
+  LANE_META, canRebuy, orderBadge, orderFlag, packDuplicates, primaryActionFor,
 } from "@/lib/order-presentation";
 import type { LaneId } from "@/lib/order-presentation";
 import type { OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
@@ -301,6 +302,10 @@ export default function OrdersWorkspace({
     return () => { cancelled = true; };
   }, [editId, openId, splitId, orders, pinned]);
 
+  /* Сигнал блоку «Первым делом»: строка меняется, когда в ленте сменился
+     статус или ⚡ у заказа, — тогда блок перечитывает себя. */
+  const firstSignal = orders.map(o => `${o.id}:${o.status}:${o.priorityAt ? 1 : 0}`).join(",");
+
   /* ── Живая проверка пассов ────────────────────────────────────────────── */
 
   useEffect(() => {
@@ -424,6 +429,27 @@ export default function OrdersWorkspace({
       inverse: { action: "set-error" },
     });
   }, [run, slice]);
+
+  /* 🔁 «Не дошло — выкупить снова». Заказ из «Готово» возвращается в очередь
+     первым и с меткой перевыкупа; причину увидит тот, кто будет выкупать. */
+  const rebuy = useCallback(async (order: AdminOrder) => {
+    if (!canRebuy(order)) return;
+    const reason = await askFor({
+      title: `Выкупить ${order.wbCode} снова`,
+      message: "Заказ вернётся из «Готово» в «К выкупу» первым и с меткой «🔁 Перевыкуп». Клиенту сейчас ничего не уйдёт — «выкуплено» он получит, когда заказ закроют повторно. Прошлый аккаунт закупки останется в заметке: тот же пасс брать с другого.",
+      placeholder: "Например: прислал скрин — робуксов нет",
+      confirmLabel: "Вернуть к выкупу",
+      input: true,
+    });
+    if (reason === null) return;
+    if (!reason.trim()) { showToast({ text: "Причина обязательна", error: true }); return; }
+    const now = new Date().toISOString();
+    await run(order, { action: "rebuy", reason }, {
+      leaves: slice === "DONE",
+      label: `🔁 ${order.wbCode} снова в очереди выкупа — первым`,
+      patch: { status: "PENDING", priorityAt: now, pendingAt: now, rebuyAt: now, rebuyReason: reason.trim(), completedAt: null },
+    });
+  }, [run, slice, askFor, showToast]);
 
   const toggleHold = useCallback(async (order: AdminOrder) => {
     if (order.heldAt) {
@@ -921,6 +947,23 @@ export default function OrdersWorkspace({
         </div>
       )}
 
+      {/* ⚡ «Первым делом» — тот же блок, что на «Обзоре»: поднятый или
+          возвращённый на перевыкуп заказ обязан быть виден и здесь, а не только
+          местом в ленте. При поиске и сужении его нет: там ищут конкретное. */}
+      {slice === "BUYOUT" && !query.trim() && narrowChips.length === 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <FirstInLinePanel
+            refreshSignal={firstSignal}
+            onOpenOrder={order => {
+              if (orders.some(o => o.id === order.id)) { setOpenId(order.id); setMode("split"); }
+              else setQuery(order.wbCode);
+            }}
+            onChanged={() => { void load(1, false); void refreshCounts(); }}
+            onToast={(text, error) => showToast({ text, error })}
+          />
+        </div>
+      )}
+
       <div className={styles.panes} data-split={split ? "1" : "0"}>
         <div className={styles.listPane}>
           {!asCards && (
@@ -1032,6 +1075,7 @@ export default function OrdersWorkspace({
             onFavorite={() => void toggleFavorite(openOrder)}
             onPriority={() => void togglePriority(openOrder)}
             onCancel={() => void cancelOrder(openOrder)}
+            onRebuy={() => void rebuy(openOrder)}
             onSplit={(preselect) => { setSplitSeed(preselect ?? null); setSplitId(openOrder.id); }}
             onEdit={() => setEditId(openOrder.id)}
             onToast={(text, error) => showToast({ text, error })}

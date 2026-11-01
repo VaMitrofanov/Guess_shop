@@ -16,6 +16,9 @@ export interface FirstInLineOrder {
   status: string;
   /** С какого момента заказ стоит в очереди. */
   since: string;
+  /** Когда заказ создан: от него считается возраст перевыкупа — покупатель
+   *  ждёт с первого раза, а не с возврата в очередь. */
+  createdAt: string;
   gamepassId: string | null;
   /**
    * Что копировать донору: ID пассов, которые по этому заказу ещё покупать.
@@ -34,16 +37,28 @@ export interface FirstInLineOrder {
    * Правится прямо в блоке, машинные строки при этом сохраняются (`keepTags`).
    */
   note: string | null;
-  /** Почему он здесь: подняли руками или это прямой заказ. */
-  reason: "pinned" | "direct";
+  /** Почему он здесь: перевыкуп, подняли руками или это прямой заказ. */
+  reason: "rebuy" | "pinned" | "direct";
+  /** 🔁 Что прислал покупатель — только у `reason: "rebuy"`. */
+  rebuyReason?: string | null;
+  /** 🔁 Чем заказ закрывали в прошлый раз: «закрыт 2026-10-24 Demid, вручную». */
+  rebuyWas?: string | null;
+  /** ⚡ Кто поднял и когда — только у поднятых. */
+  priorityBy?: string | null;
+  priorityAt?: string | null;
 }
 
 export interface FirstInLine {
   rows: FirstInLineOrder[];
   /** Сколько всего таких заказов — строк может быть показано меньше. */
   total: number;
+  /** Группы не пересекаются: перевыкуп с ⚡ — в `rebuy`, поднятый прямой — в `pinned`. */
   pinned: number;
   direct: number;
+  /** 🔁 Сколько из них — перевыкупы. */
+  rebuy?: number;
+  /** Сколько всего заказов в очереди выкупа — для «Вся очередь · N →». */
+  queueTotal?: number;
   /** Грязные робуксы на все такие заказы: столько нужно прямо сейчас. */
   gross: number;
 }

@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ageBasis, ageTone, fmtAge, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
+  ageBasis, ageTone, canRebuy, fmtAge, grossOf, laneOf, LANE_META, orderBadge, orderFlag,
   primaryActionFor, nextStepFor, sourceLabel,
 } from "@/lib/order-presentation";
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
@@ -49,7 +49,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function OrderDossier({
-  order, live, packDupIn = null, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onEdit, onToast, onChanged,
+  order, live, packDupIn = null, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onRebuy, onSplit, onEdit, onToast, onChanged,
   initialTool = null, instructSignal,
 }: {
   order: AdminOrder;
@@ -63,6 +63,8 @@ export default function OrderDossier({
   onFavorite: () => void;
   onPriority: () => void;
   onCancel: () => void;
+  /** 🔁 Выкупленный, но не дошедший заказ — обратно в очередь первым. */
+  onRebuy?: () => void;
   /** `preselect` — пасс, с которым открыть разбиение уже выбранным. */
   onSplit: (preselect?: string) => void;
   onEdit: () => void;
@@ -357,7 +359,14 @@ export default function OrderDossier({
           {["PENDING", "IN_PROGRESS"].includes(order.status) && (
             <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onError}>⚠ Пометить ошибкой <kbd>E</kbd></button>
           )}
-          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>✕ Отменить заказ</button>
+          {/* 🔁 У выкупленного заказа главного действия нет — эта кнопка стоит
+              в основном ряду, а не в «Ещё»: за ней приходят именно сюда. */}
+          {onRebuy && canRebuy(order) && (
+            <button type="button" className={styles.btn} onClick={onRebuy}>🔁 Не дошло — выкупить снова</button>
+          )}
+          {!["COMPLETED", "REJECTED"].includes(order.status) && (
+            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>✕ Отменить заказ</button>
+          )}
           <a className={`${styles.btn} ${styles.actionMore}`} href={`/admin/orders/${order.id}`}>Полная карточка ↗</a>
           {/* На телефоне ряд из девяти кнопок занимал два-три экрана: сверху
               остаются главное действие, ID и правка, остальное — здесь. */}

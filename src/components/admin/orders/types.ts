@@ -27,6 +27,10 @@ export interface AdminOrder {
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Поверх статуса. */
   priorityAt?: string | null;
   priorityBy?: string | null;
+  /** 🔁 Перевыкуп: был выкуплен, но не дошёл — вернули в очередь первым. */
+  rebuyAt?: string | null;
+  rebuyReason?: string | null;
+  rebuyBy?: string | null;
   isDirectOrder: boolean;
   isFavorite: boolean;
   paidAt: string | null;
@@ -103,6 +107,7 @@ export const TONE_COLOR: Record<Tone, string> = {
   ice: "var(--o-ice)",
   accent: "var(--o-accent)",
   muted: "var(--o-muted)",
+  pink: "var(--o-pink)",
 };
 
 export const SLICE_META: { key: SliceKey; label: string; tone: Tone; hint: string }[] = [

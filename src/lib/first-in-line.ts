@@ -3,6 +3,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, FIRST_IN_LINE_ORDER_SQL } from "@/lib/order-queue";
 import type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
+import { rebuyWasFromNote } from "@/lib/first-in-line-view";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    «Первым делом» — короткий список заказов, которые выкупаются вне общей
@@ -44,9 +45,11 @@ function humanNote(note: string | null): string | null {
 }
 
 export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Promise<FirstInLine> {
-  const scope = `"isTest" = false AND ${BUYOUT_QUEUE_SQL} AND ("priorityAt" IS NOT NULL OR "isDirectOrder" = true)`;
+  // 🔁 Перевыкуп входит сам, даже если ⚡ с него потом сняли: этот заказ уже
+  // раз закрыли, и в общей очереди ему теряться нельзя.
+  const scope = `"isTest" = false AND ${BUYOUT_QUEUE_SQL} AND ("rebuyAt" IS NOT NULL OR "priorityAt" IS NOT NULL OR "isDirectOrder" = true)`;
 
-  const [rows, totals] = await Promise.all([
+  const [rows, totals, queue] = await Promise.all([
     prisma.$queryRawUnsafe<Array<{
       id: string;
       wbCode: string;
@@ -55,31 +58,44 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       lane: FirstInLineOrder["lane"];
       status: string;
       since: Date;
+      createdAt: Date;
       gamepassId: string | null;
       priorityAt: Date | null;
+      priorityBy: string | null;
+      rebuyAt: Date | null;
+      rebuyReason: string | null;
       adminNote: string | null;
     }>>(`
       SELECT "id", "wbCode", "robloxUsername", "amount",
              ${BUYOUT_LANE_SQL} AS "lane",
              "status",
              COALESCE("pendingAt", "createdAt") AS "since",
+             "createdAt",
              "gamepassId",
              "priorityAt",
+             "priorityBy",
+             "rebuyAt",
+             "rebuyReason",
              "adminNote"
         FROM "WbOrder"
        WHERE ${scope}
        ORDER BY ${FIRST_IN_LINE_ORDER_SQL}
        LIMIT ${Math.max(1, Math.trunc(limit))}
     `),
-    prisma.$queryRawUnsafe<Array<{ total: number; pinned: number; direct: number; gross: number }>>(`
+    prisma.$queryRawUnsafe<Array<{ total: number; pinned: number; direct: number; rebuy: number; gross: number }>>(`
       SELECT COUNT(*)::int AS "total",
-             COUNT(*) FILTER (WHERE "priorityAt" IS NOT NULL)::int AS "pinned",
-             COUNT(*) FILTER (WHERE "isDirectOrder" = true)::int AS "direct",
+             COUNT(*) FILTER (WHERE "rebuyAt" IS NOT NULL)::int AS "rebuy",
+             -- Группы не пересекаются, как и в блоке: 🔁 → ⚡ → прямой.
+             COUNT(*) FILTER (WHERE "rebuyAt" IS NULL AND "priorityAt" IS NOT NULL)::int AS "pinned",
+             COUNT(*) FILTER (WHERE "rebuyAt" IS NULL AND "priorityAt" IS NULL AND "isDirectOrder" = true)::int AS "direct",
              -- Грязные считаются по каждому заказу, а не от общей суммы:
              -- округление ceil(amount / 0.7) у каждого своё.
              COALESCE(SUM(CEIL("amount" / 0.7)), 0)::int AS "gross"
         FROM "WbOrder"
        WHERE ${scope}
+    `),
+    prisma.$queryRawUnsafe<Array<{ n: number }>>(`
+      SELECT COUNT(*)::int AS "n" FROM "WbOrder" WHERE "isTest" = false AND ${BUYOUT_QUEUE_SQL}
     `),
   ]);
 
@@ -101,7 +117,7 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
     else partsByOrder.set(part.orderId, [part.gamepassId]);
   }
 
-  const summary = totals[0] ?? { total: 0, pinned: 0, direct: 0, gross: 0 };
+  const summary = totals[0] ?? { total: 0, pinned: 0, direct: 0, rebuy: 0, gross: 0 };
   return {
     rows: rows.map((row) => ({
       id: row.id,
@@ -112,6 +128,7 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       lane: row.lane,
       status: row.status,
       since: row.since.toISOString(),
+      createdAt: row.createdAt.toISOString(),
       gamepassId: row.gamepassId,
       // Легаси-поле заказа указывает на ТЕКУЩУЮ часть, поэтому оно же и
       // единственный ID у неразбитого заказа.
@@ -119,12 +136,18 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       // Машинные строки аудита начинаются с `[МЕТКА]` — на дашборде нужна
       // только та часть, которую писал человек.
       note: humanNote(row.adminNote),
-      // Поднятый руками прямой заказ — всё-таки поднятый: ⚡ важнее полосы.
-      reason: row.priorityAt ? "pinned" : "direct",
+      // 🔁 важнее ⚡, ⚡ важнее полосы: поднятый руками прямой — всё-таки поднятый.
+      reason: row.rebuyAt ? "rebuy" : row.priorityAt ? "pinned" : "direct",
+      rebuyReason: row.rebuyAt ? row.rebuyReason : null,
+      rebuyWas: row.rebuyAt ? rebuyWasFromNote(row.adminNote) : null,
+      priorityBy: row.priorityAt ? row.priorityBy : null,
+      priorityAt: row.priorityAt ? row.priorityAt.toISOString() : null,
     })),
     total: Number(summary.total ?? 0),
     pinned: Number(summary.pinned ?? 0),
     direct: Number(summary.direct ?? 0),
+    rebuy: Number(summary.rebuy ?? 0),
+    queueTotal: Number(queue[0]?.n ?? 0),
     gross: Number(summary.gross ?? 0),
   };
 }

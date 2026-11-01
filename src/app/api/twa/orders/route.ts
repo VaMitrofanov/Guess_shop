@@ -11,7 +11,7 @@ import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/bro
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, PRICE_TOL, checkGamepassPrice, expectedGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
-import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
+import { appendOrderAudit, buildRebuyData, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 import { recordOrderStatusChange } from "@/lib/order-status-event";
 import { BUYOUT_EVENT_TYPES, buyoutFactsFromEvents, type BuyoutEventRow } from "@/lib/buyout-summary";
 import { recordCompletedNotice } from "@/lib/notice-delivery";
@@ -1610,6 +1610,59 @@ export async function POST(req: NextRequest) {
     });
     cachedCounts = null;
     return NextResponse.json({ ok: true, status: "PENDING" });
+  }
+
+  /* 🔁 «Не дошло — выкупить снова»: COMPLETED → PENDING, первым в очереди и с
+     меткой перевыкупа. Клиенту ничего не уходит: «выкуплено» он получит заново,
+     когда заказ закроют повторно. Части разбивки снова становятся
+     невыкупленными — какая из них не дошла, решает тот, кто выкупает. */
+  if (action === "rebuy") {
+    // Кто закрывал в прошлый раз — из журнала: ручное «Выкуплено» не пишет
+    // `purchaserUsername`, и без этого в аудите было бы просто «вручную».
+    const lastClose = await prisma.orderEvent.findFirst({
+      where: { orderId, type: "ORDER_STATUS_CHANGED", payload: { path: ["to"], equals: "COMPLETED" } },
+      orderBy: { createdAt: "desc" },
+      select: { payload: true },
+    }).catch(() => null);
+    const closedActor = (lastClose?.payload as { actor?: unknown } | null)?.actor;
+    const rebuy = buildRebuyData(
+      {
+        ...order,
+        splitCount: splitParts.length,
+        closedBy: typeof closedActor === "string" ? closedActor.replace(/^admin:/, "") : null,
+      },
+      body.reason,
+      actor.displayName,
+    );
+    if (!rebuy.ok) return NextResponse.json({ error: rebuy.error }, { status: rebuy.status });
+    const [moved] = await prisma.$transaction([
+      prisma.wbOrder.updateMany({
+        where: { id: orderId, status: "COMPLETED", heldAt: null },
+        data: rebuy.data,
+      }),
+      ...(splitParts.length > 0
+        ? [prisma.wbOrderGamepass.updateMany({
+            where: { orderId },
+            data: { purchasedAt: null },
+          })]
+        : []),
+    ]);
+    if (moved.count !== 1) {
+      return NextResponse.json({ error: "Заказ уже перемещён другим администратором" }, { status: 409 });
+    }
+    await recordOrderStatusChange({
+      orderId, from: "COMPLETED", to: "PENDING", actor: `admin:${actor.displayName}`,
+      reason: rebuy.data.rebuyReason,
+      extra: { wbCode: order.wbCode, why: "rebuy" },
+    });
+    cachedCounts = null;
+    return NextResponse.json({
+      ok: true,
+      status: "PENDING",
+      priorityAt: rebuy.data.priorityAt,
+      rebuyAt: rebuy.data.rebuyAt,
+      rebuyReason: rebuy.data.rebuyReason,
+    });
   }
 
   if (action === "move-to") {

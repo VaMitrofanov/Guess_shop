@@ -234,9 +234,16 @@ export const PRIORITY_ORDER_SQL = `"priorityAt" DESC NULLS LAST`;
 export const DIRECT_ORDER_BY = { isDirectOrder: "desc" } as const;
 export const DIRECT_ORDER_SQL = `"isDirectOrder" DESC`;
 
-/** Порядок блока «Первым делом» на обеих главных: ⚡ → прямые → возраст. */
+/**
+ * 🔁 Перевыкуп — выше любого ⚡: этот заказ уже раз закрыли, а покупатель
+ * робуксов так и не получил. Без отдельной ступени его обгонял бы любой
+ * заказ, поднятый позже (у ⚡ первым идёт поднятый последним).
+ */
+export const REBUY_ORDER_SQL = `"rebuyAt" DESC NULLS LAST`;
+
+/** Порядок блока «Первым делом» на обеих главных: 🔁 → ⚡ → прямые → возраст. */
 export const FIRST_IN_LINE_ORDER_SQL =
-  `${PRIORITY_ORDER_SQL}, ${DIRECT_ORDER_SQL}, COALESCE("pendingAt", "createdAt") ASC`;
+  `${REBUY_ORDER_SQL}, ${PRIORITY_ORDER_SQL}, ${DIRECT_ORDER_SQL}, COALESCE("pendingAt", "createdAt") ASC`;
 
 /** Срезы, где место в списке означает очередь работы, а не историю. */
 const PRIORITY_TABS: readonly FilterTab[] = [
