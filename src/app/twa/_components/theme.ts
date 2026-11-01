@@ -39,6 +39,8 @@ export const C = {
   pink:   "#ff375f",
   /** 📣 «Торопят» — iOS systemPurple: оранжевый занят Авито, голубой — заморозкой. */
   purple: "#bf5af2",
+  /** 🧺 Корзина WB — бирюзовый: свободный цвет, не путается со статусами. */
+  teal:   "#40c8b0",
 } as const;
 
 export const RADIUS = { sm: 11, md: 14, lg: 17, xl: 22, pill: 999 } as const;

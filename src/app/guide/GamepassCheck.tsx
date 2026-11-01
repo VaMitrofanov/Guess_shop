@@ -17,6 +17,7 @@
  */
 
 import OrderCodePlate from "./OrderCodePlate";
+import BasketNext from "./BasketNext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/navbar";
@@ -900,6 +901,11 @@ export default function GamepassCheck({
                 </div>
               )}
             </>
+          )}
+
+          {/* ── Корзина WB: следующий заказ одной кнопкой (01.11.2026) ─────── */}
+          {orderPlaced && mode === "WB" && code && !testMode && (
+            <BasketNext code={code} nick={account?.username ?? (nick || null)} />
           )}
 
           {/* ── Хендофф: бот или оформление на сайте ────────────────────── */}

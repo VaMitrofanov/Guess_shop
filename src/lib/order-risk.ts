@@ -30,12 +30,27 @@ export async function riskInfoForCodes(db: Db, codes: string[]): Promise<Map<str
       code: string; buyerName: string | null; wbOrderId: string | null;
       kind: string | null; stars: number | null; starsBefore: number | null;
       text: string | null; occurredAt: Date | null; action: string | null;
+      total: number | null; idx: number | null;
+      sibs: Array<{ code: string | null; nick: string | null; status: string | null; cancelled: boolean }> | null;
     }>>`
       SELECT c.code, m."buyerName", m."wbOrderId",
-             r.kind, r.stars, r."starsBefore", r.text, r."occurredAt", r.action
+             r.kind, r.stars, r."starsBefore", r.text, r."occurredAt", r.action,
+             b.total, b.idx, b.sibs
       FROM unnest(${unique}::text[]) AS c(code)
       LEFT JOIN "WbCode" w ON w.code = c.code
       LEFT JOIN "WbMarketplaceOrder" m ON m."wbCodeId" = w.id
+      -- 🧺 Корзина WB: соседние заказы той же покупки (общий orderUid), по порядку WB.
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE length(s."wbOrderId") < length(m."wbOrderId")
+                 OR (length(s."wbOrderId") = length(m."wbOrderId") AND s."wbOrderId" <= m."wbOrderId"))::int AS idx,
+               json_agg(json_build_object('code', sw.code, 'nick', so."robloxUsername", 'status', so.status,
+                 'cancelled', s."cancelledAt" IS NOT NULL) ORDER BY length(s."wbOrderId"), s."wbOrderId") AS sibs
+        FROM "WbMarketplaceOrder" s
+        LEFT JOIN "WbCode" sw ON sw.id = s."wbCodeId"
+        LEFT JOIN "WbOrder" so ON so."wbCode" = sw.code
+        WHERE m."orderUid" IS NOT NULL AND s."orderUid" = m."orderUid"
+      ) b ON true
       LEFT JOIN LATERAL (
         SELECT e.kind, e.stars, e."starsBefore", e.text, e."occurredAt", e.action
         FROM "RiskEvent" e
@@ -49,7 +64,10 @@ export async function riskInfoForCodes(db: Db, codes: string[]): Promise<Map<str
   for (const row of rows) {
     const key = buyerKey(row.buyerName);
     const flag = key ? flagByKey.get(key) : undefined;
-    if (!row.buyerName && !row.kind) continue;
+    const basket = row.total && row.total > 1 && row.idx
+      ? { index: row.idx, total: row.total, siblings: row.sibs ?? [] }
+      : null;
+    if (!row.buyerName && !row.kind && !basket) continue;
     out.set(row.code, {
       buyerName: row.buyerName,
       buyerKey: key,
@@ -65,6 +83,7 @@ export async function riskInfoForCodes(db: Db, codes: string[]): Promise<Map<str
             action: row.action,
           }
         : null,
+      basket,
     });
   }
   return out;

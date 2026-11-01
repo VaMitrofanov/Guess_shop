@@ -1,4 +1,5 @@
 "use client";
+import { basketLabel } from "@/lib/wb-basket";
 import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type React from "react";
@@ -2813,6 +2814,7 @@ function OrderCard({
         {order.rebuyAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (
           <span className="twa-oc-prio" style={{ color: C.pink, background: `${C.pink}1f` }} title={order.rebuyReason ?? "Выкуплен, но не дошёл"}>🔁 перевыкуп</span>
         )}
+        <BasketChips risk={order.risk} />
         {/* Отзыв и «проблемный» покупатель видны прямо в ленте (30.10.2026). */}
         {order.risk?.review?.kind === "BAD_REVIEW" && (
           <span className="twa-oc-prio" style={{ color: C.red, background: `${C.red}1f` }} title="Плохой отзыв на WB">★{order.risk.review.stars ?? "?"}</span>
@@ -3131,6 +3133,7 @@ function OrderCard({
         {order.rebuyAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (
           <span className="twa-oc-prio" style={{ color: C.pink, background: `${C.pink}1f` }} title={order.rebuyReason ?? "Выкуплен, но не дошёл"}>🔁 перевыкуп</span>
         )}
+        <BasketChips risk={order.risk} />
           <em className="twa-os-buyer">{shortName}</em>
           {codeChip()}
         </span>
@@ -5752,5 +5755,22 @@ function Skeleton() {
       ))}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.45}}`}</style>
     </div>
+  );
+}
+
+/**
+ * 🧺 Корзина WB (01.11.2026): «1/2» — заказ из покупки нескольких карточек;
+ * жёлтое «2 аккаунта» — у соседей разные ники, при выкупе не перепутать.
+ */
+function BasketChips({ risk }: { risk?: { basket?: { index: number; total: number; siblings: Array<{ code: string | null; nick: string | null; cancelled: boolean }> } | null } | null }) {
+  const b = risk?.basket;
+  const label = b ? basketLabel(b, b.siblings.filter(s => !s.cancelled).map(s => s.nick)) : null;
+  if (!b || !label) return null;
+  const others = b.siblings.filter((s, i) => i + 1 !== b.index).map(s => `${s.code ?? "без кода"}${s.nick ? ` · ${s.nick}` : ""}${s.cancelled ? " · отменён" : ""}`);
+  return (
+    <>
+      <span className="twa-oc-prio" style={{ color: C.teal, background: `${C.teal}1f` }} title={`Покупка из ${b.total} заказов. Соседние: ${others.join("; ")}`}>{label.text}</span>
+      {label.twoAccounts && <span className="twa-oc-prio" style={{ color: C.yellow, background: `${C.yellow}1f` }} title="У заказов корзины разные ники Roblox">2 аккаунта</span>}
+    </>
   );
 }

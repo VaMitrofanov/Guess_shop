@@ -375,3 +375,44 @@ describe("four-hour auto-close window", () => {
     expect(stuck).toContain("if (receivedAt && !wbAutoReceiveWithinWindow(order, receivedAt)) continue;");
   });
 });
+
+/* 01.11.2026: корзина из нескольких карточек — код доставки обычно общий, а
+   присылают его в один чат. Код идёт соседям тем же путём закрытия. */
+describe("код доставки — соседям по корзине", () => {
+  const share = worker.slice(
+    worker.indexOf("async function shareCodeWithSiblings"),
+    worker.indexOf("async function giveUpSiblingCode"),
+  );
+  const capture = worker.slice(worker.indexOf("async function captureDeliveryCode"), worker.indexOf("async function backfillDeliveryCodes"));
+
+  it("пробует код на соседях после своего закрытия, но не в режиме отмены и не по отклонённому коду", () => {
+    const at = capture.indexOf("shareCodeWithSiblings(");
+    expect(at).toBeGreaterThan(capture.indexOf("await tryAutoReceive("));
+    expect(capture).toContain('if (skip !== "cancel_requested" && skip !== "wb_rejected")');
+  });
+
+  it("берёт только живых соседей той же корзины без своего кода", () => {
+    expect(share).toContain("orderUid: self.orderUid");
+    expect(share).toContain("id: { not: orderId }");
+    expect(share).toContain("cancelledAt: null");
+    expect(share).toContain("cancelRequestedAt: null");
+    expect(share).toContain("if (wbDeliverySecretIsLive(sibling.deliverySecret)) continue;");
+    // Брошенный код второй раз не пробуем.
+    expect(share).toContain("if (await isSiblingSecret(db, sibling.id, hmac)) continue;");
+  });
+
+  it("закрывает соседа тем же путём: закрытие с повторами, потом ссылка", () => {
+    expect(share).toContain("const { closed } = await tryAutoReceive(db, sibling.id, sibling.wbOrderId);");
+    expect(share).toContain("if (closed) await tryAutoGate(db, sibling.id, sibling.wbOrderId);");
+  });
+
+  it("отказ WB по коду соседа не шлёт покупателю «код не подошёл» — просит свой код", () => {
+    const branch = autoReceive.slice(autoReceive.indexOf("isSiblingSecret(db, orderId"), autoReceive.indexOf("// Расписание кончилось"));
+    expect(branch).toContain("SIBLING_CODE_MAX_FAILS");
+    expect(branch).toContain("giveUpSiblingCode(");
+    expect(branch).toContain('return { closed: false, skip: "wb_rejected" };');
+    const giveUp = worker.slice(worker.indexOf("async function giveUpSiblingCode"), worker.indexOf("/** Closing the delivery used to get exactly one attempt"));
+    expect(giveUp).toContain('encryptedValue: "PURGED"');
+    expect(giveUp).toContain("wbSiblingOwnCodeMessage(");
+  });
+});

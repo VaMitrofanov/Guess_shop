@@ -1,4 +1,5 @@
 "use client";
+import BasketChip from "./basket-chip";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    «Заказы» на сайте — рабочее место, а не витрина (этапы В1–В5).
@@ -1487,6 +1488,7 @@ function OrderRow({
             заказа, и искать его глазами по правому краю неудобно. */}
         {order.priorityAt && !isClosed(order) && <i className={styles.prio} title="Выкупать первым">⚡</i>}
         {order.wbCode}
+        {order.risk?.basket && <small style={{ marginLeft: 6 }}><BasketChip risk={order.risk} /></small>}
       </button>
       <button type="button" className={`${styles.nick} ${!order.robloxUsername && order.probableNick ? styles.nickProbable : ""}`} onClick={onOpen}>
         {order.robloxUsername ?? order.probableNick ?? "ник не указан"}
@@ -1582,6 +1584,7 @@ function QueueCard({
         {order.priorityAt && !isClosed(order) && <span className={styles.prioTag}>⚡ первый</span>}
         <span className={styles.age} style={{ color: TONE_COLOR[ageTone(basis)] }}>{fmtAge(basis)}</span>
         {badge && <span style={{ color: TONE_COLOR[badge.tone] }}>{badge.label}</span>}
+        <BasketChip risk={order.risk} />
         <span className={styles.code} style={{ marginLeft: "auto" }}>{order.wbCode}</span>
       </button>
       <button type="button" className={styles.cardMain} onClick={onOpen} style={{ width: "100%" }}>

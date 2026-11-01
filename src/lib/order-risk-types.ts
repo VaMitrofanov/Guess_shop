@@ -14,6 +14,15 @@ export interface OrderRisk {
     at: string;
     action: string | null;
   } | null;
+  /**
+   * 🧺 Корзина WB (01.11.2026): заказ — один из нескольких в одной покупке.
+   * `siblings` — все заказы корзины по порядку WB, включая этот.
+   */
+  basket?: {
+    index: number;
+    total: number;
+    siblings: Array<{ code: string | null; nick: string | null; status: string | null; cancelled: boolean }>;
+  } | null;
 }
 
 export function starsText(n: number | null | undefined): string {

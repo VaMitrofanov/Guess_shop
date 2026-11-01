@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
 import {
   wbCodeRequestMessage,
+  wbSiblingOwnCodeMessage,
   wbCodeRecheckMessage,
   wbCodeRetryMessage,
   wbGateMessage,
@@ -607,6 +608,18 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
       receivedAt: order.deliverySecret.receivedAt,
     };
     const exhausted = wbReceiveRetriesExhausted(retryState);
+    // Код пришёл из соседнего чата корзины (01.11.2026): покупатель его сюда не
+    // присылал, поэтому «код не подошёл» здесь — неправда. После нескольких
+    // внятных отказов считаем, что у этого заказа свой код, и просим его.
+    if (!unknown && await isSiblingSecret(db, orderId, order.deliverySecret.codeHmac)) {
+      if (attempt >= SIBLING_CODE_MAX_FAILS) {
+        await giveUpSiblingCode(db, orderId, wbOrderId).catch((e) => {
+          console.error(`[WbDbsSync] sibling code give-up failed for ${wbOrderId}:`, safeErrorCode(e));
+        });
+      }
+      await refreshDbsCard(db, orderId).catch(() => {});
+      return { closed: false, skip: "wb_rejected" };
+    }
     // Расписание кончилось, а отказ был внятным — только теперь код считается
     // неверным. Раньше это случалось на восьмой минуте, и код стирался, хотя WB
     // принимал его часом позже (заказ 5550714937, 22.08).
@@ -746,6 +759,118 @@ async function askBuyerForAnotherCode(db: Db, orderId: string, wbOrderId: string
   // Уведомление уходит в любом случае: это единственный громкий сигнал о том,
   // что покупатель остался без выдачи, а карточка звука не даёт.
   notifyDbsCodeRejected(await dbsRef(db, orderId, wbOrderId), asking);
+}
+
+/* ─── Корзина: один код доставки на несколько заказов (01.11.2026) ──────────
+   Покупатель берёт две карточки одной покупкой — WB заводит два заказа и два
+   чата. Код доставки у них чаще всего один (3 из 4 корзин, где известны оба),
+   но присылают его обычно в один чат, и второй заказ висел без кода. Поэтому
+   код из одного чата сразу пробуем и на соседях: тот же секрет, тот же путь
+   закрытия с повторами и та же выдача ссылки. WB не принял — у этого заказа
+   свой код, и только тогда его просим. Решение владельца: закрывать сразу,
+   быстрое подтверждение дешевле по комиссии WB, чем редкий возврат. */
+
+/** Сколько внятных отказов WB терпим по коду соседа, прежде чем просить свой. */
+const SIBLING_CODE_MAX_FAILS = 4;
+const SIBLING_CODE_EVENT = "DELIVERY_CODE_FROM_SIBLING";
+
+async function isSiblingSecret(db: Db, orderId: string, codeHmac: string | null | undefined): Promise<boolean> {
+  if (!codeHmac) return false;
+  const hit = await db.wbMarketplaceEvent.findUnique({
+    where: { idempotencyKey: `sibling-code:${orderId}:${codeHmac}` },
+    select: { id: true },
+  }).catch(() => null);
+  return Boolean(hit);
+}
+
+/** Есть ли у заказа код, пришедший из соседнего чата (для текста гейта). */
+async function hasSiblingCode(db: Db, orderId: string): Promise<boolean> {
+  const n = await db.wbMarketplaceEvent.count({
+    where: { marketplaceOrderId: orderId, type: SIBLING_CODE_EVENT },
+  }).catch(() => 0);
+  return n > 0;
+}
+
+/** Код покупателя → соседние заказы той же корзины, у которых своего кода нет. */
+async function shareCodeWithSiblings(db: Db, orderId: string, code: string, receivedAt: Date, sourceKey: string) {
+  const self = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    select: { orderUid: true, isTest: true },
+  });
+  if (!self?.orderUid) return;
+  const siblings = await db.wbMarketplaceOrder.findMany({
+    where: {
+      orderUid: self.orderUid,
+      id: { not: orderId },
+      isTest: self.isTest,
+      completedAt: null,
+      cancelledAt: null,
+      cancelRequestedAt: null,
+    },
+    select: {
+      id: true, wbOrderId: true, completedAt: true, cancelledAt: true, wbCreatedAt: true, firstSeenAt: true,
+      deliverySecret: true,
+    },
+  });
+  for (const sibling of siblings) {
+    // Свой код (или уже переданный) не трогаем — им сейчас закрывается доставка.
+    if (wbDeliverySecretIsLive(sibling.deliverySecret)) continue;
+    // Этот код по этому заказу уже пробовали и бросили — второй раз не начинаем.
+    const hmac = wbSecretHmac(code, "delivery-code");
+    if (await isSiblingSecret(db, sibling.id, hmac)) continue;
+    const expiresAt = new Date(receivedAt.getTime() + 24 * 60 * 60 * 1_000);
+    if (expiresAt.getTime() <= Date.now()) continue;
+    const secret = { encryptedValue: encryptWbSecret(code, "delivery-code"), codeHmac: hmac, receivedAt, expiresAt };
+    await db.wbDeliverySecret.upsert({
+      where: { marketplaceOrderId: sibling.id },
+      create: { marketplaceOrderId: sibling.id, ...secret },
+      update: { ...secret, consumedAt: null, failedAttempts: 0 },
+    });
+    await db.wbMarketplaceOrder.update({
+      where: { id: sibling.id },
+      data: { chatState: "CODE_RECEIVED", lastErrorCode: null },
+    });
+    await audit(db, sibling.id, SIBLING_CODE_EVENT, `sibling-code:${sibling.id}:${hmac}`, {
+      fromOrderId: orderId,
+      source: sourceKey,
+    });
+    const { closed } = await tryAutoReceive(db, sibling.id, sibling.wbOrderId);
+    if (closed) await tryAutoGate(db, sibling.id, sibling.wbOrderId);
+    await refreshDbsCard(db, sibling.id).catch(() => {});
+  }
+}
+
+/** Код соседа WB для этого заказа не принял — у заказа свой код. Снимаем
+ * секрет и просим код в чате ЭТОГО заказа (если чата ещё нет — попросит
+ * обычный автоответ, когда покупатель его откроет). */
+async function giveUpSiblingCode(db: Db, orderId: string, wbOrderId: string) {
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: { chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 } },
+  });
+  if (!order || order.completedAt || order.cancelledAt) return;
+  await db.wbDeliverySecret.update({
+    where: { marketplaceOrderId: orderId },
+    data: { encryptedValue: "PURGED", consumedAt: new Date() },
+  }).catch(() => {});
+  const chat = order.chats?.[0];
+  const canAsk = !order.isTest && process.env.WB_CHAT_SEND_ENABLED === "true" && Boolean(chat?.replySignEncrypted);
+  await db.wbMarketplaceOrder.update({
+    where: { id: orderId },
+    data: { chatState: canAsk ? "CODE_REQUESTED" : "WAITING_BUYER_CHAT", lastErrorCode: null },
+  });
+  await audit(db, orderId, "SIBLING_CODE_REJECTED", `sibling-code-rejected:${orderId}`, { asked: canAsk });
+  if (canAsk && chat?.replySignEncrypted) {
+    try {
+      await sendBuyerChatMessage(
+        decryptWbSecret(chat.replySignEncrypted, "reply-sign"),
+        wbSiblingOwnCodeMessage(await loadOrderSibling(db, order)),
+      );
+      await audit(db, orderId, "DELIVERY_CODE_REQUESTED", `sibling-own-code:${orderId}`, { source: "sibling-rejected" });
+    } catch (error) {
+      console.error(`[WbDbsSync] own-code request failed for ${wbOrderId}:`, safeErrorCode(error));
+    }
+  }
 }
 
 /** Closing the delivery used to get exactly one attempt, taken at the instant
@@ -910,7 +1035,9 @@ async function verifyGateDelivery(db: Db) {
       try {
         await sendBuyerChatMessage(
           decryptWbSecret(chat.replySignEncrypted, "reply-sign"),
-          wbGateMessage(code, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order)),
+          wbGateMessage(code, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order), {
+            codeFromSibling: await hasSiblingCode(db, order.id),
+          }),
         );
         await db.wbMarketplaceOrder.update({
           where: { id: order.id },
@@ -1109,7 +1236,9 @@ async function tryAutoGate(
     if (!order.isTest) {
       await sendBuyerChatMessage(
         replySign,
-        wbGateMessage(activationCode, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order)),
+        wbGateMessage(activationCode, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order), {
+          codeFromSibling: await hasSiblingCode(db, orderId),
+        }),
       );
     }
     await db.wbMarketplaceOrder.update({
@@ -1196,6 +1325,13 @@ async function captureDeliveryCode(
   // An unclosed order comes back here through `dispatchGatesForClosedOrders`.
   const { closed, skip } = await tryAutoReceive(db, order.id, order.wbOrderId);
   if (closed) await tryAutoGate(db, order.id, order.wbOrderId);
+  // Тот же код — соседям по корзине. Не в режиме отмены: там код нужен для
+  // отказа, а не для закрытия. И не по отклонённому коду: он не подойдёт и там.
+  if (skip !== "cancel_requested" && skip !== "wb_rejected") {
+    await shareCodeWithSiblings(db, order.id, code, receivedAt, idempotencyKey).catch((e) => {
+      console.error(`[WbDbsSync] sibling share failed for ${order.wbOrderId}:`, safeErrorCode(e));
+    });
+  }
   // The notification is sent *after* the attempt so it can say what actually
   // happened. It used to fire first and claim "можно выпускать гейт" — advice
   // for a step the worker had already taken, next to a closing that had

@@ -129,10 +129,14 @@ export function wbGateMessage(
   denomination: number | null,
   origin?: string,
   sibling?: WbOrderSibling | null,
+  opts: { codeFromSibling?: boolean } = {},
 ): string {
   const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
   return [
     `${WB_GATE_MESSAGE_LEAD} Заказ подтверждён, ${amount} готовы к зачислению.`,
+    ...(opts.codeFromSibling && sibling && sibling.total > 1
+      ? ["Код доставки мы получили в соседнем чате вашей покупки — сюда его присылать не нужно."]
+      : []),
     ...wbOrderCodeLines(code),
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
@@ -178,12 +182,24 @@ export function wbSiblingPosition(
  * намекало, что ник указывается для каждого заказа свой. */
 function wbSiblingLines(sibling?: WbOrderSibling | null): string[] {
   if (!sibling || sibling.total < 2) return [];
+  // 01.11.2026: можно на один аккаунт, можно на разные — так и сказано, без
+  // «независимы» (слово путало). После оформления этого заказа страница сама
+  // предложит следующий одной кнопкой.
   return [
-    `Это заказ ${sibling.index} из ${sibling.total} в вашей покупке. Заказы независимы:`
-    + " у каждого свой код и свой ник Roblox, и робуксы придут на тот аккаунт, который вы укажете"
-    + " именно по этому коду. Ссылка ниже — только для этого заказа; остальные оформляются"
-    + " по ссылкам из своих чатов.",
+    `Это заказ ${sibling.index} из ${sibling.total} в вашей покупке.`
+    + " Робуксы можно получить на один аккаунт Roblox или на разные — у каждого заказа своя ссылка."
+    + " Оформите этот заказ по ссылке ниже, а следующий страница предложит сама, одной кнопкой.",
   ];
+}
+
+/** Код соседа для этого заказа WB не принял — у заказа свой код доставки. */
+export function wbSiblingOwnCodeMessage(sibling?: WbOrderSibling | null): string {
+  const which = sibling && sibling.total > 1 ? `заказа ${sibling.index} из ${sibling.total}` : "этого заказа";
+  return [
+    `Здравствуйте! Для ${which} в вашей покупке у Wildberries свой код доставки — код из соседнего чата к нему не подошёл.`,
+    "Пришлите, пожалуйста, сюда код доставки именно этого заказа: 5-7 цифр в разделе «Доставки» приложения"
+    + " Wildberries, рядом с QR-кодом этого заказа. Текстом, как он показан: 111 111 или 111111.",
+  ].join("\n\n");
 }
 
 /** WB пока не принимает код, но мы всё ещё пробуем.

@@ -1,4 +1,5 @@
 "use client";
+import BasketChip from "./basket-chip";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Досье заказа — про факты. Действия живут сверху и в строке, а вкладки внизу
@@ -433,6 +434,7 @@ export default function OrderDossier({
             )}
             {/* ★ Отзыв покупателя и досье (30.10.2026). */}
             <OrderRiskBlock risk={order.risk} />
+            <BasketChip risk={order.risk} full />
             {order.buyoutErrorCode === "REGIONAL_PRICE" && (
               <div className={`${styles.box} ${styles.boxRed}`}>
                 <div className={styles.boxHead}>Почему сорвался выкуп</div>

@@ -720,4 +720,21 @@ export const GUIDE_CSS = `
 .wbi-codeplate-copy{flex:0 0 auto;min-height:40px;padding:0 14px;border:1px solid var(--rb-accent);border-radius:10px;background:var(--rb-accent-soft);color:var(--rb-text);font:inherit;font-size:14px;font-weight:750;cursor:pointer}
 .wbi-codeplate-copy:focus-visible{outline:2px solid var(--rb-accent);outline-offset:2px}
 @media (max-width:420px){.wbi-codeplate{flex-direction:column;align-items:stretch}.wbi-codeplate-copy{width:100%}}
+
+/* Корзина WB (01.11.2026): следующий заказ покупки одной кнопкой. */
+.wbi-basket{margin:14px 0;padding:16px;border:2px solid var(--rb-accent);border-radius:18px;background:var(--rb-surface)}
+.wbi-basket-steps{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.wbi-basket-step{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--rb-border);background:var(--rb-surface-2);font-size:15px;font-weight:650;color:var(--rb-text)}
+.wbi-basket-step i{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:900;font-size:14px;background:var(--rb-accent-soft);color:var(--rb-accent)}
+.wbi-basket-step.is-done i{background:rgba(48,209,88,.18);color:#30d158}
+.wbi-basket-step span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.wbi-basket-step small{font-size:13.5px;font-weight:500;color:var(--rb-muted)}
+.wbi-basket h3{margin:4px 2px 6px;font-size:21px;line-height:1.2;color:var(--rb-text)}
+.wbi-basket p{margin:0 2px 14px;font-size:15px;line-height:1.45;color:var(--rb-muted)}
+.wbi-basket-btn{display:block;text-align:center;text-decoration:none;padding:15px 12px;margin-bottom:10px;border-radius:14px;border:1px solid var(--rb-border);background:var(--rb-surface-2);color:var(--rb-text);font-size:17px;font-weight:800}
+.wbi-basket-btn small{display:block;margin-top:3px;font-size:14px;font-weight:600;opacity:.8}
+.wbi-basket-btn small.is-nick{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.wbi-basket-btn.is-primary{border:0;background:var(--rb-accent);color:#fff;box-shadow:0 8px 22px color-mix(in srgb,var(--rb-accent) 35%,transparent)}
+.wbi-basket-btn:focus-visible{outline:2px solid var(--rb-accent);outline-offset:2px}
+.wbi-basket-wait{margin-bottom:0!important}
 `;

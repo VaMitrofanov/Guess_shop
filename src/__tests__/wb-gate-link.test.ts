@@ -8,6 +8,7 @@ import {
   wbGateShortUrl,
   wbGateUrl,
   wbGuideFallbackUrl,
+  wbSiblingOwnCodeMessage,
   wbSiblingPosition,
 } from "../../bots/shared/wb-gate-link";
 import { redactWbChatText } from "../../bots/shared/wb-delivery-crypto";
@@ -113,16 +114,28 @@ describe("WB gate link handed to the buyer", () => {
    * написала «во втором чате висит ник первого ребёнка». Сообщения в обоих
    * чатах были байт-в-байт одинаковыми, и ничто не говорило, что заказа два и
    * ник у каждого свой. */
-  it("tells a buyer of several cards that the orders are independent", () => {
+  it("tells a buyer of several cards: one account or several, each order has its own link", () => {
     const message = wbGateMessage("QUN5YFZ", 500, undefined, { index: 2, total: 2 });
     expect(message).toContain("заказ 2 из 2");
-    expect(message).toMatch(/независим/i);
-    expect(message).toMatch(/свой ник Roblox/);
+    expect(message).toMatch(/на один аккаунт Roblox или на разные/);
+    expect(message).toMatch(/своя ссылка/);
     // Подсказка не отменяет остального: ссылка и ручной фолбэк на месте.
     expect(message).toContain("https://robloxbank.ru/wb/QUN5YFZ");
     expect(message).toContain("введите код: QUN5YFZ");
     // И по-прежнему не уводит с площадки.
     expect(message).not.toMatch(/telegram|телеграм|вконтакте|\bvk\b/i);
+  });
+
+  /** 01.11.2026: код доставки из соседнего чата закрыл и этот заказ. */
+  it("says the delivery code came from the sibling chat only for a basket", () => {
+    const sib = wbGateMessage("QUN5YFZ", 500, undefined, { index: 2, total: 2 }, { codeFromSibling: true });
+    expect(sib.startsWith("Спасибо, код доставки получен!")).toBe(true);
+    expect(sib).toMatch(/получили в соседнем чате/);
+    expect(wbGateMessage("QUN5YFZ", 500, undefined, null, { codeFromSibling: true })).not.toMatch(/соседнем чате/);
+    const own = wbSiblingOwnCodeMessage({ index: 2, total: 2 });
+    expect(own).toMatch(/заказа 2 из 2/);
+    expect(own).toMatch(/111 111 или 111111/);
+    expect(own).not.toMatch(/telegram|телеграм|вконтакте|\bvk\b/i);
   });
 
   it("says nothing about siblings when the buyer has a single order", () => {
