@@ -353,7 +353,7 @@ export async function notifyRebind(
     : `✅ Код <b>${wbCode}</b> активирован · номинал <b>${amount} R$</b> → геймпасс <b>${dirty} R$</b>`;
 
   if (hasGamepass) {
-    const tgMsg = `${head}\n\nГеймпасс уже у нас — выкупим в ближайшее время и напишем, как будет готово 💛`;
+    const tgMsg = `${head}\n\nГеймпасс уже у нас — выкупим, как только дойдёт очередь (сейчас у Roblox задержки — до нескольких суток), и напишем 💛`;
     const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
     if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
     if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
@@ -467,7 +467,7 @@ export async function notifyGamepassAttached(user: UserRef, wbCode: string): Pro
   // (номера заказов убраны из клиентских сообщений 2026-06-24, de7d7fd).
   const tgMsg =
     `🎉 Отлично, геймпасс принят!\n\n` +
-    `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
+    `⏳ Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Как только будет готово — напишем.\n` +
     `💡 <i>После выкупа робуксы сначала попадут в Pending у Roblox — когда перевести их на баланс, решает уже Roblox.</i>\n\n` +
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
@@ -498,7 +498,7 @@ export async function notifyGamepassCreatedForBuyer(
     `🔑 <b>Сделали за тебя — геймпасс готов</b>\n\n` +
     `${passLine} на аккаунте <b>${opts.nick}</b> — по ключу, который ты нам прислал.\n\n` +
     `👍 От тебя больше ничего не нужно: заказ уже в очереди на выкуп.\n` +
-    `⏳ Выкупим в течение нескольких часов — как только будет готово, напишем.\n` +
+    `⏳ Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — как только будет готово, напишем.\n` +
     `💡 <i>После выкупа робуксы сначала попадут в Pending у Roblox — когда перевести их на баланс, решает уже Roblox.</i>\n\n` +
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
