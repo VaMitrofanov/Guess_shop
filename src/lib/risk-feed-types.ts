@@ -52,6 +52,16 @@ export interface BuyerDossier {
   events: RiskFeedItem[];
 }
 
+/**
+ * Что показывает раздел «Риски» и досье (02.11.2026): только то, что сделал сам
+ * покупатель на WB, — плохой отзыв и заявка на возврат. Обращения из чатов
+ * («хочу отменить», «нужен человек») сюда не попадают: стоп по «верните деньги»
+ * виден в «Первым делом», а сами записи BUYER_* остаются в базе как метка
+ * «это сообщение уже обработано» для `buyer-contact-sweep`.
+ */
+export const RISK_FEED_KINDS: readonly RiskKind[] = ["BAD_REVIEW", "REVIEW_FIXED", "CLAIM_OPENED", "CLAIM_RESOLVED"];
+export const RISK_FEED_KINDS_SQL = RISK_FEED_KINDS.map((k) => `'${k}'`).join(", ");
+
 export const RISK_KIND_META: Record<RiskKind, { label: string; tone: "red" | "green" | "amber" | "muted" }> = {
   BAD_REVIEW:     { label: "Плохой отзыв", tone: "red" },
   REVIEW_FIXED:   { label: "Отзыв исправлен", tone: "green" },

@@ -8,7 +8,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { buyerKey } from "@/lib/order-risk";
-import type { BuyerDossier, RiskFeed, RiskFeedItem, RiskState } from "@/lib/risk-feed-types";
+import { RISK_FEED_KINDS, RISK_FEED_KINDS_SQL, type BuyerDossier, type RiskFeed, type RiskFeedItem, type RiskState } from "@/lib/risk-feed-types";
 
 export type { BuyerDossier, RiskFeed, RiskFeedItem, RiskState } from "@/lib/risk-feed-types";
 
@@ -56,7 +56,7 @@ const RISK_SELECT = `
 
 export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFeed> {
   const take = Math.min(200, Math.max(10, limit));
-  const where = state === "open" ? `WHERE e."resolvedAt" IS NULL` : "";
+  const where = `WHERE e.kind IN (${RISK_FEED_KINDS_SQL})${state === "open" ? ` AND e."resolvedAt" IS NULL` : ""}`;
   const [rows, summaryRows] = await Promise.all([
     db.$queryRawUnsafe(
       `SELECT ${RISK_SELECT}
@@ -72,7 +72,8 @@ export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFe
         COUNT(*) FILTER (WHERE kind = 'BAD_REVIEW' AND "occurredAt" > NOW() - INTERVAL '7 days')::int AS "badReviews7d",
         COUNT(*) FILTER (WHERE kind = 'REVIEW_FIXED' AND "occurredAt" > NOW() - INTERVAL '7 days')::int AS "fixed7d",
         COUNT(*) FILTER (WHERE kind = 'CLAIM_OPENED' AND "resolvedAt" IS NULL)::int AS "claimsOpen"
-      FROM "RiskEvent"` as Promise<Array<RiskFeed["summary"]>>,
+      FROM "RiskEvent"
+      WHERE kind = ANY(${RISK_FEED_KINDS as string[]})` as Promise<Array<RiskFeed["summary"]>>,
   ]);
   return {
     items: rows.map(toItem),
@@ -82,7 +83,7 @@ export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFe
 
 /** Число открытых событий — для значка в навигации. */
 export async function countOpenRisks(): Promise<number> {
-  return db.riskEvent.count({ where: { resolvedAt: null } });
+  return db.riskEvent.count({ where: { resolvedAt: null, kind: { in: [...RISK_FEED_KINDS] } } });
 }
 
 export async function setRiskResolved(id: string, resolved: boolean, actor: string) {
@@ -121,7 +122,7 @@ export async function loadBuyerDossier(rawKey: string): Promise<BuyerDossier | n
       `SELECT ${RISK_SELECT}
        FROM "RiskEvent" e
        LEFT JOIN "WbOrder" o ON o."wbCode" = e."wbCode"
-       WHERE e."buyerKey" = $1
+       WHERE e."buyerKey" = $1 AND e.kind IN (${RISK_FEED_KINDS_SQL})
        ORDER BY e."occurredAt" DESC
        LIMIT 60`,
       key,
