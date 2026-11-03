@@ -1,0 +1,87 @@
+/* Раздел «Риски», досье покупателя и плашка отзыва (30.10.2026).
+   Тёмная админка на --admin-*: семантика — красный (плохой отзыв), зелёный
+   (исправлен), янтарный (возврат, «проблемный»), лёд (заморозка). */
+.root { --risk-red: #ff6b6b; --risk-green: #4fd18b; --risk-amber: #f4b545; --risk-ice: #64d2ff; display: grid; gap: 18px; }
+
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tile { background: var(--admin-panel); border: 1px solid var(--admin-line); border-radius: 16px; padding: 14px 16px; display: grid; gap: 4px; }
+.tile b { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.tile span { color: var(--admin-muted); font-size: 13px; }
+.tileRed b { color: var(--risk-red); }
+.tileGreen b { color: var(--risk-green); }
+.tileAmber b { color: var(--risk-amber); }
+
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--admin-panel); border: 1px solid var(--admin-line); }
+.seg button { border: 0; background: none; color: var(--admin-muted); font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--admin-text); color: #0b0b0e; font-weight: 650; }
+.refresh { margin-left: auto; border: 1px solid var(--admin-line); background: var(--admin-panel); color: var(--admin-text); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+
+.list { display: grid; gap: 10px; }
+.item { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto; gap: 14px; padding: 14px 16px; background: var(--admin-panel); border: 1px solid var(--admin-line); border-radius: 16px; align-items: start; }
+.itemResolved { opacity: .6; }
+.stripe { align-self: stretch; border-radius: 4px; }
+.red { background: var(--risk-red); }
+.green { background: var(--risk-green); }
+.amber { background: var(--risk-amber); }
+.muted { background: #4a4a52; }
+.body { display: grid; gap: 6px; min-width: 0; }
+.head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.head strong { font-size: 15px; }
+.code { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--admin-text); }
+.when { color: var(--admin-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.sub { color: var(--admin-muted); font-size: 14px; }
+.sub a, .link { color: var(--admin-blue); text-decoration: none; }
+.sub a:hover, .link:hover { text-decoration: underline; }
+.stars { color: #ffd60a; letter-spacing: 1px; font-size: 15px; }
+.quote { font-style: italic; color: #d9dae0; border-left: 2px solid var(--admin-line); padding-left: 10px; white-space: pre-wrap; max-width: 75ch; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill { font-size: 12.5px; font-weight: 650; padding: 3px 8px; border-radius: 7px; background: rgba(255,255,255,.07); color: var(--admin-muted); }
+.pillIce { background: rgba(100,210,255,.14); color: var(--risk-ice); }
+.pillGreen { background: rgba(79,209,139,.14); color: var(--risk-green); }
+.pillAmber { background: rgba(244,181,69,.14); color: var(--risk-amber); }
+.actions { display: grid; gap: 6px; }
+.btn { border: 1px solid var(--admin-line); background: rgba(255,255,255,.05); color: var(--admin-text); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 13.5px; cursor: pointer; white-space: nowrap; text-align: center; text-decoration: none; }
+.btn:hover { background: rgba(255,255,255,.1); }
+.btnPrimary { background: var(--admin-text); color: #0b0b0e; border-color: transparent; font-weight: 650; }
+.btnPrimary:hover { background: #fff; }
+.btnAmber { background: var(--risk-amber); color: #1b1000; border-color: transparent; font-weight: 650; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn:focus-visible, .seg button:focus-visible, .refresh:focus-visible { outline: 2px solid var(--admin-blue); outline-offset: 2px; }
+.empty { padding: 40px 12px; text-align: center; color: var(--admin-muted); }
+.error { color: var(--risk-red); }
+
+/* Досье */
+.dossierHead { display: grid; gap: 8px; }
+.namesake { padding: 11px 14px; border-radius: 12px; font-size: 14px; border: 1px solid var(--admin-line); color: var(--admin-muted); background: var(--admin-panel); max-width: 80ch; }
+.namesakeWarn { color: var(--risk-amber); border-color: rgba(244,181,69,.35); background: rgba(244,181,69,.08); }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
+.section { display: grid; gap: 10px; }
+.section h2 { margin: 0; font-size: 13px; letter-spacing: .07em; text-transform: uppercase; color: var(--admin-muted); font-weight: 700; }
+.orderRow { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 13px; background: var(--admin-panel); border: 1px solid var(--admin-line); color: var(--admin-text); text-decoration: none; }
+a.orderRow:hover { border-color: rgba(255,255,255,.2); }
+.orderRow b { font-variant-numeric: tabular-nums; }
+.flagBox { display: grid; gap: 8px; padding: 14px; border-radius: 14px; background: var(--admin-panel); border: 1px solid var(--admin-line); max-width: 560px; }
+.flagBox textarea { width: 100%; resize: vertical; min-height: 58px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--admin-line); color: var(--admin-text); font: inherit; font-size: 14px; }
+.flagRow { display: flex; gap: 8px; flex-wrap: wrap; }
+.hint { color: var(--admin-muted); font-size: 13px; }
+.searchForm { display: flex; gap: 8px; max-width: 520px; }
+.searchForm input { flex: 1; padding: 9px 12px; border-radius: 10px; background: var(--admin-panel); border: 1px solid var(--admin-line); color: var(--admin-text); font: inherit; font-size: 14px; }
+
+/* Плашка отзыва в карточке заказа */
+.plaque { display: grid; gap: 6px; padding: 12px 14px; border-radius: 14px; border: 1px solid; }
+.plaqueBad { background: rgba(255,107,107,.08); border-color: rgba(255,107,107,.32); }
+.plaqueFixed { background: rgba(79,209,139,.08); border-color: rgba(79,209,139,.32); }
+.plaqueTitle { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 750; letter-spacing: .03em; }
+.plaqueBad .plaqueTitle { color: #ff6b6b; }
+.plaqueFixed .plaqueTitle { color: #4fd18b; }
+.buyerChip { display: inline-flex; gap: 8px; align-items: center; width: fit-content; padding: 6px 11px; border-radius: 10px; border: 1px solid var(--admin-line); background: rgba(255,255,255,.04); color: var(--admin-text); font-size: 14px; text-decoration: none; }
+.buyerChip:hover { border-color: rgba(255,255,255,.22); }
+.buyerChipFlag { border-color: rgba(244,181,69,.4); background: rgba(244,181,69,.08); }
+
+@media (max-width: 900px) {
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .columns { grid-template-columns: 1fr; }
+  .item { grid-template-columns: 4px minmax(0, 1fr); }
+  .actions { grid-column: 2; display: flex; flex-wrap: wrap; }
+}

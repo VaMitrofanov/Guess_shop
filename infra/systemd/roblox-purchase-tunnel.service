@@ -1,0 +1,20 @@
+[Unit]
+Description=RobloxBank RF to SG browser purchase tunnel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/robloxbank/purchase-tunnel.env
+ExecStart=/usr/bin/ssh -NT -i /root/.ssh/roblox-buyout-tunnel -o BatchMode=yes -o ExitOnForwardFailure=yes -o UpdateHostKeys=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L ${RF_BIND_HOST}:${RF_BIND_PORT}:${SG_SERVICE_HOST}:${SG_SERVICE_PORT} root@${SG_SSH_HOST}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
