@@ -10,7 +10,7 @@ import {
   summarizeRush,
   type BuyerContact,
 } from "../../bots/shared/buyer-contact";
-import { buyerCancelNotice, runBuyerContactSweep } from "../../bots/shared/buyer-contact-sweep";
+import { runBuyerContactSweep } from "../../bots/shared/buyer-contact-sweep";
 import { problemHoldReason } from "../../bots/shared/order-hold";
 
 describe("classifyBuyerMessage — живые сообщения 30.10–01.11.2026", () => {
@@ -123,40 +123,27 @@ describe("runBuyerContactSweep", () => {
     };
   }
 
-  it("просьба вернуть деньги: событие риска, заморозка и один пуш на заказ", async () => {
+  it("просьба вернуть деньги: только отметка, без заморозки и пуша", async () => {
     const db = fakeDb([contactRow({}), contactRow({ sourceId: "ev2", text: "отказ, отмените заказ" })]);
-    const send = jest.fn().mockResolvedValue(undefined);
-    const res = await runBuyerContactSweep(db, send, new Date("2026-11-01T12:00:00Z"));
-    expect(res.cancel).toBe(1);
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(db.riskEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: "BUYER_CANCEL", dedupeKey: "buyer-cancel:ev1", action: "frozen" }) });
-    expect(String(send.mock.calls[0][0])).toContain("E5G3VPR");
+    const res = await runBuyerContactSweep(db, new Date("2026-11-01T12:00:00Z"));
+    expect(res.cancel).toBe(2);
+    expect(db.riskEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: "BUYER_CANCEL", dedupeKey: "buyer-cancel:ev1", action: "none" }) });
+    expect(db.orderHold.upsert).not.toHaveBeenCalled();
+    expect(db.wbOrder.update).not.toHaveBeenCalled();
+    expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
   });
 
-  it("уже записанное сообщение повторно не морозит (админ мог разморозить)", async () => {
+  it("уже записанное сообщение повторно не считается", async () => {
     const db = fakeDb([contactRow({})], { duplicate: true });
-    const send = jest.fn();
-    const res = await runBuyerContactSweep(db, send);
+    const res = await runBuyerContactSweep(db);
     expect(res.cancel).toBe(0);
-    expect(send).not.toHaveBeenCalled();
   });
 
   it("«нужен человек» — в «Риски» без пуша", async () => {
     const db = fakeDb([contactRow({ text: "где второй код?" })]);
-    const send = jest.fn();
-    const res = await runBuyerContactSweep(db, send);
+    const res = await runBuyerContactSweep(db);
     expect(res.help).toBe(1);
-    expect(send).not.toHaveBeenCalled();
     expect(db.riskEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: "BUYER_HELP" }) });
-  });
-
-  it("пуш по правилам единого языка: зона, код, цитата", () => {
-    const html = buyerCancelNotice({
-      sourceId: "x", orderId: "o", at: new Date(), channel: "WB", text: "верните <деньги>", kind: "cancel",
-      wbCode: "E5G3VPR", amount: 500, buyerName: null, wbOrderId: null,
-    });
-    expect(html).toMatch(/^🔴 <b>ВЫКУП · /);
-    expect(html).toContain("&lt;деньги&gt;");
   });
 
   it("причина заморозки начинается с метки, по которой блок рисует 🛑", () => {

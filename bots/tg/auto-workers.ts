@@ -541,8 +541,8 @@ export function startAutoWorkers(bot: Telegraf): void {
   setTimeout(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] boot:", e)), 120_000);
   setInterval(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] tick:", e)), 60 * 60 * 1000);
 
-  // Обращения покупателей: «верните деньги» → заморозка, «нужен человек» → «Риски».
-  const buyerSweep = () => runBuyerContactSweep(db, alertAdmins)
+  // Обращения покупателей: отметки BUYER_CANCEL/BUYER_HELP (с 03.11 без заморозки и пуша).
+  const buyerSweep = () => runBuyerContactSweep(db)
     .then((r) => { if (r.cancel || r.help) console.log(`[buyer-contacts] отмена ${r.cancel}, нужен человек ${r.help}`); })
     .catch((e) => console.error("[buyer-contacts] tick:", e));
   setTimeout(buyerSweep, 150_000);
