@@ -32,7 +32,8 @@ import type { GamepassToolId } from "@/lib/gamepass-tools";
 import styles from "./orders.module.css";
 
 /** Статусы, в которых сервер принимает `edit-order`. */
-const EDITABLE = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"];
+/** С 10.11.2026 и COMPLETED: правится запись (пасс/ник), статус не меняется. */
+const EDITABLE = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"];
 
 const SOURCES = [
   { id: "WB", label: "Wildberries — карта с кодом" },
@@ -95,6 +96,9 @@ export default function OrderEditor({
   onTool?: (id: Extract<GamepassToolId, "nick" | "split">) => void;
 }) {
   const editable = EDITABLE.includes(order.status) && !order.heldAt;
+  const completed = order.status === "COMPLETED";
+  /** Номинал закрыт: у прямого — оплатой, у выкупленного — посчитанной прибылью. */
+  const amountLocked = order.isDirectOrder || completed;
 
   const [nick, setNick] = useState(order.robloxUsername ?? "");
   const [gamepass, setGamepass] = useState(gamepassIdOf(order) ?? "");
@@ -120,7 +124,7 @@ export default function OrderEditor({
     const list: string[] = [];
     if (nick.trim() !== (order.robloxUsername ?? "")) list.push("ник");
     if (gpDirty) list.push(gpId ? "геймпасс" : "геймпасс снят");
-    if (!order.isDirectOrder && Number(amount) !== order.amount) list.push("номинал");
+    if (!amountLocked && Number(amount) !== order.amount) list.push("номинал");
     if (source !== order.orderSource) list.push("источник");
     if (note.trim() !== humanNote(order.adminNote)) list.push("заметка");
     return list;
@@ -171,7 +175,7 @@ export default function OrderEditor({
           orderId: order.id,
           robloxUsername: nick.trim(),
           gamepassUrl: gamepass.trim(),
-          ...(order.isDirectOrder ? {} : { amount: Number(amount) || order.amount }),
+          ...(amountLocked ? {} : { amount: Number(amount) || order.amount }),
           orderSource: source,
           note: note.trim(),
           ...(force ? { force: true } : {}),
@@ -339,7 +343,14 @@ export default function OrderEditor({
             )}
           </label>
 
-          {!order.isDirectOrder && (
+          {completed && (
+            <p style={{ margin: 0, color: "var(--admin-muted)" }}>
+              Заказ выкуплен — правится только запись, статус останется «Выкуплен». Выкупить на новый
+              пасс: «🔁 Перевыкуп» в досье.
+            </p>
+          )}
+
+          {!amountLocked && (
             <label style={{ display: "grid", gap: 5 }}>
               <span className={styles.kvKey}>Номинал, R$ чистыми клиенту</span>
               <input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} inputMode="numeric" />

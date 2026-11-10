@@ -228,6 +228,8 @@ export default function OrderSheet({
   /** Цель листа: `null` — новый заказ, иначе правим этот. */
   const [target, setTarget] = useState<MatchedOrder | null>(initialTarget ?? null);
   const editing = target !== null;
+  /** Номинал не правится: у прямого он привязан к оплате, у выкупленного по нему посчитана прибыль. */
+  const amountLocked = !!target && (target.isDirectOrder || target.status === "COMPLETED");
 
   const [wbCode, setWbCode] = useState("");
   /* В правке поля стартуют ЗНАЧЕНИЯМИ ЗАКАЗА, а не пустыми.
@@ -382,14 +384,14 @@ export default function OrderSheet({
   /* ── Что можно нажать ──────────────────────────────────────────────────── */
   const frozen = editing && !!target?.heldAt;
   const dirtyEdit = editing && !!target && (
-    (!target.isDirectOrder && (Number(amount) || 0) !== target.amount) ||
+    (!amountLocked && (Number(amount) || 0) !== target.amount) ||
     gpInput.trim() !== (target.gamepassUrl ?? "") ||
     nick.trim() !== (target.robloxUsername ?? "") ||
     note.trim() !== humanNoteOf(target.adminNote) ||
     source !== (target.orderSource ?? "WB")
   );
   const editChanges = editing && target ? [
-    !target.isDirectOrder && (Number(amount) || 0) !== target.amount ? "номинал" : null,
+    !amountLocked && (Number(amount) || 0) !== target.amount ? "номинал" : null,
     nick.trim() !== (target.robloxUsername ?? "") ? "ник" : null,
     gpInput.trim() !== (target.gamepassUrl ?? "") ? "геймпасс" : null,
     note.trim() !== humanNoteOf(target.adminNote) ? "заметка" : null,
@@ -499,7 +501,7 @@ export default function OrderSheet({
         note: note.trim(),
         orderSource: source,
       };
-      if (!target.isDirectOrder) payload.amount = Number(amount) || 0;
+      if (!amountLocked) payload.amount = Number(amount) || 0;
       if (force) payload.force = true;
       const r = await fetch("/api/twa/orders", { method: "POST", headers, body: JSON.stringify(payload) });
       const d = await r.json();
@@ -883,7 +885,7 @@ export default function OrderSheet({
           )}
 
           {/* Номинал. У прямого привязан к оплате — сервер откажет, поэтому замок. */}
-          {(editing ? !target?.isDirectOrder : !isDirect && !codeState?.ok && !wbState?.denomination) ? (
+          {(editing ? !amountLocked : !isDirect && !codeState?.ok && !wbState?.denomination) ? (
             <input
               value={amount}
               onChange={e => setAmount(e.target.value.replace(/\D/g, ""))}
@@ -892,12 +894,17 @@ export default function OrderSheet({
               disabled={frozen}
               style={{ ...inputStyle, opacity: frozen ? 0.5 : 1 }}
             />
-          ) : editing && target?.isDirectOrder ? (
+          ) : editing && target && amountLocked ? (
             <div style={lockedStyle}>
               <span>{target.amount.toLocaleString("ru-RU")} R$</span>
-              <span style={{ marginLeft: "auto", fontSize: 10.5 }}>🔒 привязан к оплате</span>
+              <span style={{ marginLeft: "auto", fontSize: 10.5 }}>🔒 {target.isDirectOrder ? "привязан к оплате" : "заказ выкуплен"}</span>
             </div>
           ) : null}
+          {editing && target?.status === "COMPLETED" && (
+            <div style={{ fontSize: 14, color: C.textTertiary, lineHeight: 1.35 }}>
+              Заказ останется выкупленным — правится только запись. Выкупить на новый пасс: «···» → «🔁 Перевыкуп».
+            </div>
+          )}
 
           {/* Ник + поиск его for-sale пассов. В правке он теперь тоже есть —
               раньше поиск жил только в создании, и при снятом пассе новую ссылку

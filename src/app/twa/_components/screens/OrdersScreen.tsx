@@ -2600,7 +2600,8 @@ function OrderCard({
       : null;
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
-  const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
+  // С 10.11 и выкупленный: поправить пасс/ник записи (статус не меняется).
+  const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"].includes(order.status);
   /* Что можно сделать с геймпассом этого заказа — общий модуль
      `@/lib/gamepass-tools`. Предусловия списаны с сервера и одинаковы в TWA, в
      досье сайта и в правке; до 19.10.2026 каждая поверхность считала их сама и
@@ -3498,7 +3499,7 @@ function OrderCard({
       )}
 
       {/* Edit order button — правка номинала/ника/ГП за клиента */}
-      {isEditable && !editOpen && (
+      {isEditable && order.status !== "COMPLETED" && !editOpen && (
         <div style={{ padding: "0 14px 6px" }}>
           <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setEditOpen(true); }}
             style={{
@@ -5336,7 +5337,7 @@ function orderToTarget(order: Order): MatchedOrder {
     unpaidDirect: isUnpaidDirect(order),
     heldAt: order.heldAt,
     heldReason: order.heldReason,
-    editable: ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status),
+    editable: ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"].includes(order.status),
     client: order.user.username ? `@${order.user.username}`
       : order.user.name ?? (order.user.tgId ? `TG ${order.user.tgId}` : order.user.vkId ? `VK ${order.user.vkId}` : null),
     createdAt: order.createdAt,

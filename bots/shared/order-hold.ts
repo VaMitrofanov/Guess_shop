@@ -368,6 +368,27 @@ export async function holdForProblem(
   return { ...res, internalStatus: order?.status ?? null };
 }
 
+/** Кто снимает заморозки сам — такое снятие не считается решением человека. */
+const AUTO_RELEASE_ACTORS = [PROBLEM_HOLD_ACTOR, "гейт выкупа", "wb-sync"];
+
+/**
+ * Админ сам разморозил заказ ПОСЛЕ того, как открылась заявка на возврат
+ * (10.11.2026). Значит, он решил выкупить вопреки заявке (покупатель часто
+ * открывает её от нетерпения: «не приходят рб»), и автоматика не должна
+ * морозить заказ снова. Раньше автовыкуп раз в минуту возвращал заморозку,
+ * и ни разморозить, ни отметить «Выкуплено» было нельзя (AQHS3DX, 09.11).
+ * Отмена на WB и возврат денег этим не обходятся — там платить уже нечем.
+ */
+export function adminOverrodeClaim(
+  hold: { releasedAt?: Date | string | null; releasedBy?: string | null } | null | undefined,
+  claimOpenedAt: Date | string,
+): boolean {
+  if (!hold?.releasedAt) return false;
+  const by = String(hold.releasedBy ?? "");
+  if (AUTO_RELEASE_ACTORS.some((a) => by.startsWith(a))) return false;
+  return new Date(hold.releasedAt).getTime() >= new Date(claimOpenedAt).getTime();
+}
+
 /** Статусы, в которых выкуп невозможен ни при каких условиях. */
 const NEVER_BUYABLE = new Set(["REJECTED"]);
 
@@ -386,17 +407,20 @@ export async function findHardProblem(
   db: any,
   order: { id: string; wbCode: string },
 ): Promise<{ kind: ProblemKind; detail?: string | null } | null> {
-  const [code, dbs, payments] = await Promise.all([
+  const [code, dbs, payments, hold] = await Promise.all([
     db.wbCode?.findUnique({ where: { code: order.wbCode }, select: { status: true } }).catch(() => null),
     db.wbMarketplaceOrder?.findFirst({
       where: { wbCode: { code: order.wbCode } },
       select: { cancelledAt: true, claimOpenedAt: true, claimResolvedAt: true, claimReason: true },
     }).catch(() => null),
     db.paymentAttempt?.findMany({ where: { orderId: order.id }, select: { status: true } }).catch(() => []),
+    db.orderHold?.findUnique({ where: { wbCode: order.wbCode }, select: { releasedAt: true, releasedBy: true } }).catch(() => null),
   ]);
   if (code?.status === "REVOKED") return { kind: "CODE_REVOKED" };
   if (dbs?.cancelledAt) return { kind: "WB_CANCELLED" };
-  if (dbs?.claimOpenedAt && !dbs.claimResolvedAt) return { kind: "WB_CLAIM", detail: dbs.claimReason };
+  if (dbs?.claimOpenedAt && !dbs.claimResolvedAt && !adminOverrodeClaim(hold, dbs.claimOpenedAt)) {
+    return { kind: "WB_CLAIM", detail: dbs.claimReason };
+  }
   const statuses: string[] = (payments ?? []).map((p: { status: string }) => String(p.status));
   if (statuses.includes("REFUNDED") && !statuses.some((s) => LIVE_PAYMENT.has(s))) {
     return { kind: "PAYMENT_REFUNDED" };

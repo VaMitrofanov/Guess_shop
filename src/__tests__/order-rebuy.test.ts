@@ -108,3 +108,15 @@ describe("метка перевыкупа", () => {
     expect(canRebuy({ ...done, gamepassUrl: null })).toBe(false);
   });
 });
+
+describe("правка выкупленного заказа (10.11.2026)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const route: string = require("fs").readFileSync(require("path").join(process.cwd(), "src/app/api/twa/orders/route.ts"), "utf8");
+  const edit = route.slice(route.indexOf('if (action === "edit-order")'), route.indexOf('if (action === "set-source")'));
+
+  it("принимает COMPLETED, но статус и номинал не трогает", () => {
+    expect(edit).toContain('"COMPLETED"].includes(order.status)');
+    expect(edit).toContain("if (completedEdit) { /* статус не трогаем */ }");
+    expect(edit).toContain("completedEdit && amt !== order.amount");
+  });
+});

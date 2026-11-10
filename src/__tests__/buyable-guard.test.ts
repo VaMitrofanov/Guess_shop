@@ -192,6 +192,24 @@ describe("assertOrderBuyable", () => {
     expect(state.order!.heldAt).toBeInstanceOf(Date);
   });
 
+  it("админ разморозил после открытия заявки — заявка больше не морозит", async () => {
+    const opened = new Date("2026-11-09T00:00:00Z");
+    const dbs = { cancelledAt: null, claimOpenedAt: opened, claimResolvedAt: null, claimReason: "не приходят рб" };
+    const released = { releasedAt: new Date("2026-11-09T06:00:00Z") };
+    const human = fakeDb({ order: baseOrder(), dbs, hold: { ...released, releasedBy: "Demid" } });
+    expect((await assertOrderBuyable(human.db, "o1")).held).toBe(false);
+    expect(human.calls.holds).toHaveLength(0);
+    // Снятие автоматикой — не решение человека.
+    const auto = fakeDb({ order: baseOrder(), dbs, hold: { ...released, releasedBy: "гейт выкупа" } });
+    expect((await assertOrderBuyable(auto.db, "o1")).held).toBe(true);
+    // Разморозка ДО заявки ничего не разрешает.
+    const early = fakeDb({ order: baseOrder(), dbs, hold: { releasedAt: new Date("2026-11-08T00:00:00Z"), releasedBy: "Demid" } });
+    expect((await assertOrderBuyable(early.db, "o1")).held).toBe(true);
+    // Отмена на WB разморозкой не обходится.
+    const cancelled = fakeDb({ order: baseOrder(), dbs: { ...dbs, cancelledAt: new Date() }, hold: { ...released, releasedBy: "Demid" } });
+    expect((await assertOrderBuyable(cancelled.db, "o1")).held).toBe(true);
+  });
+
   it("решённая заявка (отказ в возврате) сама по себе не блокирует — решает человек", async () => {
     const { db } = fakeDb({
       order: baseOrder(),

@@ -904,7 +904,7 @@ export async function POST(req: NextRequest) {
       heldReason: row.heldReason ?? null,
       // `edit-order` живёт только в этих статусах — не даём форме предложить
       // правку там, где сервер откажет.
-      editable: ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(row.status),
+      editable: ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"].includes(row.status),
       client: row.user?.username ? `@${row.user.username}`
         : row.user?.name ?? (row.user?.tgId ? `TG ${row.user.tgId}` : row.user?.vkId ? `VK ${row.user.vkId}` : null),
       createdAt: row.createdAt?.toISOString() ?? null,
@@ -2253,8 +2253,13 @@ export async function POST(req: NextRequest) {
     // заказ снова выглядит рабочим. Разморозка обязана быть отдельным шагом.
     if (order.heldAt)
       return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
-    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status))
+    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"].includes(order.status))
       return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
+    /* Выкупленный заказ правится с 10.11.2026 (RVAMP3J: покупатель прислал
+       другой пасс уже после «Выкуплено»). Это правка записи, а не выкуп:
+       статус остаётся COMPLETED, номинал не трогаем (по нему посчитана
+       прибыль). Выкупить на новый пасс — отдельной кнопкой «🔁 Перевыкуп». */
+    const completedEdit = order.status === "COMPLETED";
 
     const data: any = {};
     const changes: string[] = [];
@@ -2267,6 +2272,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "amount должен быть > 0" }, { status: 400 });
       if (order.isDirectOrder && amt !== order.amount)
         return NextResponse.json({ error: "У прямого заказа номинал привязан к оплате — правь ник/геймпасс" }, { status: 400 });
+      if (completedEdit && amt !== order.amount)
+        return NextResponse.json({ error: "У выкупленного заказа номинал не правится — по нему посчитана прибыль" }, { status: 400 });
       if (amt !== order.amount) { data.amount = amt; changes.push(`номинал ${order.amount}→${amt}`); }
     }
 
@@ -2306,7 +2313,10 @@ export async function POST(req: NextRequest) {
         changes.push(gpId ? `ГП ${oldId ?? "—"}→${gpId}` : `ГП ${oldId} снят`);
         // Переходы статуса — паритет с edit-avito: появился пасс → в очередь,
         // сняли пасс → ждать ссылку. Замена пасса в ERROR статус не трогает.
-        if (!gpId) { data.status = "AWAITING_GAMEPASS"; data.pendingAt = null; }
+        // Выкупленный заказ остаётся выкупленным: в очередь его возвращает
+        // только «Перевыкуп» (с причиной и меткой «не дошло»).
+        if (completedEdit) { /* статус не трогаем */ }
+        else if (!gpId) { data.status = "AWAITING_GAMEPASS"; data.pendingAt = null; }
         else if (!order.gamepassUrl) { data.status = "PENDING"; data.pendingAt = new Date(); }
       }
     }
