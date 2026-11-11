@@ -213,6 +213,16 @@ describe("метки диалогов ВК — синхронизация", () =
     expect(early.calls).toContain("bind:100:Нужен человек");
   });
 
+  it("ВК не отдал историю — «Нужен человек» не ставится и не снимается (без мигания)", async () => {
+    const f = fakeVk();
+    const api = { call: async (m: string, p: Record<string, string | number>) => {
+      if (m === "messages.getHistory") throw new Error("timeout");
+      return f.api.call(m, p);
+    } };
+    await new VkDialogLabelSync(api, 1, 0).run(loader([snap([], { humanSince: hoursAgo(2) })]), NOW);
+    expect(f.calls).not.toContain("bind:100:Нужен человек");
+  });
+
   it("листает все страницы диалогов", async () => {
     const dialogs: Record<string, number[]> = {};
     for (let i = 1; i <= 450; i++) dialogs[String(i)] = [];

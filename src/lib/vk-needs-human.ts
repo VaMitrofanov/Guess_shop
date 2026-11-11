@@ -35,12 +35,20 @@ type Row = {
 /** vkId → { since: для какого обращения проверяли, replied, checkedAt }. */
 const replyCache = new Map<string, { since: number; replied: boolean; checkedAt: number }>();
 
-async function managerReplied(vkId: string, since: Date): Promise<boolean> {
+/**
+ * Ответил ли менеджер после `since`. `null` — неизвестно: ВК не ответил или
+ * вернул ошибку, а прошлой проверки нет. Такую строку не показываем — следующий
+ * опрос через 30 с спросит снова, а метка в «Сообщениях» сообщества стоит
+ * независимо. До 11.11 сбой считался «не ответили» и кэшировался на 2 минуты:
+ * на холодном старте в список попадали те, кому уже ответили.
+ */
+async function managerReplied(vkId: string, since: Date): Promise<boolean | null> {
   const sinceMs = since.getTime();
   const hit = replyCache.get(vkId);
-  if (hit && hit.since === sinceMs && (hit.replied || Date.now() - hit.checkedAt < RECHECK_MS)) return hit.replied;
+  const known = hit && hit.since === sinceMs ? hit.replied : null;
+  if (hit && known !== null && (known || Date.now() - hit.checkedAt < RECHECK_MS)) return known;
   const token = process.env.VK_TOKEN;
-  if (!token) return false;
+  if (!token) return null;
   try {
     const body = new URLSearchParams({
       group_id: String(process.env.VK_GROUP_ID ?? VK_COMMUNITY_ID), peer_id: vkId, count: "50",
@@ -48,14 +56,17 @@ async function managerReplied(vkId: string, since: Date): Promise<boolean> {
     });
     const res = await fetch("https://api.vk.com/method/messages.getHistory", {
       method: "POST", body, signal: AbortSignal.timeout(3_000),
-    }).then((r) => r.json()) as { response?: { items?: Array<{ out?: number; date?: number; admin_author_id?: number }> } };
+    }).then((r) => r.json()) as {
+      response?: { items?: Array<{ out?: number; date?: number; admin_author_id?: number }> };
+      error?: { error_msg?: string };
+    };
+    if (!res.response) throw new Error(res.error?.error_msg ?? "нет ответа");
     const replied = (res.response?.items ?? []).some((m) =>
       m.out === 1 && Number(m.admin_author_id) > 0 && (m.date ?? 0) * 1000 > sinceMs);
     replyCache.set(vkId, { since: sinceMs, replied, checkedAt: Date.now() });
     return replied;
   } catch {
-    // ВК молчит — показываем: пропустить живого человека хуже лишней строки.
-    return hit?.since === sinceMs ? hit.replied : false;
+    return known;
   }
 }
 
@@ -96,7 +107,7 @@ export async function loadVkNeedsHuman(): Promise<VkNeedsHuman> {
   const checked = await Promise.all([...latest.values()].map(async (row) => ({
     row, replied: await managerReplied(row.vkId, new Date(row.at)),
   })));
-  const waiting = checked.filter((c) => !c.replied).map((c) => c.row)
+  const waiting = checked.filter((c) => c.replied === false).map((c) => c.row)
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
   return {

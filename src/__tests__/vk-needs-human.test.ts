@@ -46,6 +46,16 @@ describe("loadVkNeedsHuman", () => {
     expect((await loadVkNeedsHuman()).total).toBe(1);
   });
 
+  it("ВК вернул ошибку или не ответил — строку не показываем и «не ответили» не кэшируем", async () => {
+    queryRaw.mockResolvedValue([row("31", "Отменить заказ")]);
+    global.fetch = jest.fn(async () => ({ json: async () => ({ error: { error_msg: "Too many requests" } }) }) as Response) as unknown as typeof fetch;
+    expect((await loadVkNeedsHuman()).total).toBe(0);
+    global.fetch = jest.fn(async () => { throw new Error("timeout"); }) as unknown as typeof fetch;
+    expect((await loadVkNeedsHuman()).total).toBe(0);
+    vkHistory({ "31": [] }); // ВК ожил: ответа менеджера нет — строка появляется
+    expect((await loadVkNeedsHuman()).total).toBe(1);
+  });
+
   it("найденный ответ кэшируется — ВК второй раз не спрашиваем", async () => {
     queryRaw.mockResolvedValue([row("21", "Отменить заказ")]);
     const calls = vkHistory({ "21": [{ out: 1, date: ago(1).getTime() / 1000, admin_author_id: 9 }] });

@@ -300,7 +300,8 @@ export class VkDialogLabelSync {
    * диалога: у менеджерских есть `admin_author_id`, у бота — нет. Найденный
    * ответ запоминаем, чтобы не спрашивать ВК каждый проход.
    */
-  async managerRepliedAfter(vkId: string, since: Date): Promise<boolean> {
+  /** `null` — ВК не ответил: неизвестно, метку тогда не трогаем (без мигания). */
+  async managerRepliedAfter(vkId: string, since: Date): Promise<boolean | null> {
     const sinceMs = since.getTime();
     if ((this.answered.get(vkId) ?? -1) >= sinceMs) return true;
     try {
@@ -314,7 +315,7 @@ export class VkDialogLabelSync {
       return replied;
     } catch (err) {
       console.warn(`[vk-labels] история ${vkId}: ${(err as Error)?.message ?? err}`);
-      return false;
+      return null;
     }
   }
 
@@ -362,11 +363,19 @@ export class VkDialogLabelSync {
       const snapshots = new Map((await load(conversations.map((c) => c.vkId))).map((s) => [s.vkId, s]));
       for (const conv of conversations) {
         let snap = snapshots.get(conv.vkId) ?? { vkId: conv.vkId, orders: [], pendingIntentAt: null, humanSince: null };
+        let humanUnknown = false;
         if (snap.humanSince && now.getTime() - snap.humanSince.getTime() <= HUMAN_WINDOW_MS) {
-          snap = { ...snap, managerReplied: await this.managerRepliedAfter(conv.vkId, snap.humanSince) };
+          const replied = await this.managerRepliedAfter(conv.vkId, snap.humanSince);
+          humanUnknown = replied === null;
+          snap = { ...snap, managerReplied: replied === true };
         }
         const want = desiredVkLabels(snap, now);
         const has = new Set(conv.tags);
+        // ВК не ответил про историю — «Нужен человек» оставляем как стоит.
+        const humanId = ids.get("human");
+        if (humanUnknown && humanId) {
+          if (has.has(humanId)) want.add("human"); else want.delete("human");
+        }
         for (const key of VK_LABEL_KEYS) {
           const tagId = ids.get(key);
           if (!tagId) continue;
