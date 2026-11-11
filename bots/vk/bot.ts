@@ -107,9 +107,8 @@ if (process.env.VK_DIALOG_LABELS !== "off") {
   );
   const tick = async () => {
     try {
-      const snapshots = await loadVkLabelSnapshots(db as any);
-      const { bound, unbound } = await labels.sync(snapshots);
-      if (bound || unbound) console.log(`[vk-labels] диалогов ${snapshots.length}: +${bound} / −${unbound}`);
+      const { dialogs, bound, unbound } = await labels.run((vkIds) => loadVkLabelSnapshots(db as any, vkIds));
+      if (bound || unbound) console.log(`[vk-labels] диалогов ${dialogs}: +${bound} / −${unbound}`);
     } catch (err) {
       console.error("[vk-labels] tick:", err);
     }

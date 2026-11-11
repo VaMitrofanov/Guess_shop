@@ -13,8 +13,10 @@
      отклоняется, «Идут робуксы» — нет. Поэтому смысл несёт цвет;
    • цвет — только из фиксированного списка (`VK_TAG_COLORS`);
    • `tagBind` идемпотентен (повторный bind отвечает 1);
-   • прочитать метки диалога нельзя — поэтому поставленное мы помним сами
-     (`applied`), а после рестарта один раз сверяем все диалоги заново;
+   • метки диалога ЧИТАЮТСЯ: `messages.getConversations` отдаёт у беседы
+     `tags: [id…]` (777 диалогов = 4 запроса по 200). Сверяемся с тем, что
+     реально стоит, — без памяти и без полной пересверки после рестарта;
+   • цвет метки уникален в сообществе («color has been used already»);
    • в `messages.getHistory` сообщение живого менеджера несёт
      `admin_author_id`, сообщение бота — нет. По нему и снимаем «Нужен человек».
 
@@ -25,7 +27,9 @@
 import { classifyBuyerMessage } from "./buyer-contact";
 import { isRobuxSupportContext } from "./support-metric";
 
-export type VkLabelKey = "human" | "held" | "queue" | "pass" | "stale" | "pay" | "bought" | "ready";
+export type VkLabelKey =
+  | "human" | "held" | "queue" | "pass" | "stale" | "pay" | "bought" | "ready"
+  | "regular" | "once" | "abandoned" | "fresh";
 
 /** Разрешённые цвета `groups.tagAdd` (из ответа API). */
 export const VK_TAG_COLORS = [
@@ -43,7 +47,15 @@ export const VK_LABELS: Record<VkLabelKey, { name: string; color: (typeof VK_TAG
   pay: { name: "Ждёт оплату", color: "5c9ce6", hint: "прямой заказ оформлен, оплаты нет (до суток)" },
   bought: { name: "Выкуплен, идут рб", color: "6bc76b", hint: "выкупили меньше 5 дней назад — робуксы в ожидании Roblox" },
   ready: { name: "Готово", color: "4bb34b", hint: "выкупили 5–14 дней назад — робуксы уже должны быть на счету" },
+  // История — когда ничего открытого нет: у каждого диалога хоть одна метка.
+  regular: { name: "Постоянный клиент", color: "a162de", hint: "2+ выкупа, сейчас ничего не ждёт" },
+  once: { name: "Был клиентом", color: "5181b8", hint: "1 выкуп, сейчас ничего не ждёт" },
+  abandoned: { name: "Бросил заказ", color: "9e8d6b", hint: "заказ или заявка были, выкупа не было" },
+  fresh: { name: "Новый клиент", color: "7ececf", hint: "написал, но ни кода, ни заказа ещё нет" },
 };
+
+/** Метки «где человек сейчас»; без них ставится метка истории. */
+const STAGE_KEYS: readonly VkLabelKey[] = ["queue", "pass", "stale", "pay", "bought", "ready"];
 
 export const VK_LABEL_KEYS = Object.keys(VK_LABELS) as VkLabelKey[];
 
@@ -89,6 +101,10 @@ export interface VkLabelSnapshot {
   humanSince: Date | null;
   /** Менеджер ответил после `humanSince` — заполняет синхронизация. */
   managerReplied?: boolean;
+  /** Выкупов за всё время. */
+  completedCount?: number;
+  /** Был ли хоть один заказ, заявка или активированный код. */
+  everOrdered?: boolean;
 }
 
 /* ── «Нужен человек» ───────────────────────────────────────────────────── */
@@ -185,6 +201,10 @@ export function desiredVkLabels(snap: VkLabelSnapshot, now: Date): Set<VkLabelKe
     if (doneAge < ROBUX_PENDING_MS) out.add("bought");
     else if (doneAge <= READY_KEEP_MS) out.add("ready");
   }
+  if (!STAGE_KEYS.some((k) => out.has(k))) {
+    const done = snap.completedCount ?? 0;
+    out.add(done >= 2 ? "regular" : done === 1 ? "once" : snap.everOrdered ? "abandoned" : "fresh");
+  }
   return out;
 }
 
@@ -206,9 +226,13 @@ function vkErrorCode(err: unknown): number | null {
   return Number.isFinite(code) ? code : null;
 }
 
+/** Диалог сообщества и id меток, которые на нём стоят сейчас. */
+export interface VkConversationTags {
+  vkId: string;
+  tags: number[];
+}
+
 export class VkDialogLabelSync {
-  /** vkId → метки, которые мы поставили. Пусто после рестарта. */
-  private applied = new Map<string, Set<VkLabelKey>>();
   private ids: Map<VkLabelKey, number> | null = null;
   /** vkId → для какого обращения уже нашли ответ менеджера (мс). */
   private answered = new Map<string, number>();
@@ -224,13 +248,12 @@ export class VkDialogLabelSync {
   async ensureLabels(): Promise<Map<VkLabelKey, number>> {
     if (this.ids) return this.ids;
     const list = async () =>
-      ((await this.api.call("groups.getTagList", { group_id: this.groupId })) as { id: number; name: string }[]) ?? [];
+      ((await this.api.call("groups.getTagList", { group_id: this.groupId })) as { id: number; name: string; color?: string }[]) ?? [];
     let tags = await list();
     let created = false;
     // Цвет у меток сообщества уникален: «color has been used already» (прод,
-    // 11.11 — `ffc107` уже был у ручной «Не пришли рб»). Занятый — берём
-    // ближайший свободный из списка.
-    const used = new Set(tags.map((t) => String((t as { color?: string }).color ?? "").replace(/^#/, "").toLowerCase()));
+    // 11.11 — `ffc107` уже был у ручной «Не пришли рб»). Занятый — заменяем.
+    const used = new Set(tags.map((t) => String(t.color ?? "").replace(/^#/, "").toLowerCase()));
     for (const key of VK_LABEL_KEYS) {
       const { name, color: wanted } = VK_LABELS[key];
       if (tags.some((t) => t.name === name)) continue;
@@ -252,6 +275,24 @@ export class VkDialogLabelSync {
     }
     this.ids = ids;
     return ids;
+  }
+
+  /** Все личные диалоги сообщества с их текущими метками (по 200 за запрос). */
+  async listConversations(): Promise<VkConversationTags[]> {
+    const out: VkConversationTags[] = [];
+    for (let offset = 0; offset < 20_000; offset += 200) {
+      const res = (await this.api.call("messages.getConversations", {
+        group_id: this.groupId, count: 200, offset,
+      })) as { count?: number; items?: Array<{ conversation?: { peer?: { id?: number; type?: string }; tags?: number[] } }> };
+      for (const item of res?.items ?? []) {
+        const peer = item.conversation?.peer;
+        if (peer?.type !== "user" || !peer.id || peer.id <= 0) continue;
+        out.push({ vkId: String(peer.id), tags: (item.conversation?.tags ?? []).map(Number) });
+      }
+      await sleep(this.gapMs);
+      if (offset + 200 >= Number(res?.count ?? 0)) break;
+    }
+    return out;
   }
 
   /**
@@ -303,50 +344,40 @@ export class VkDialogLabelSync {
   }
 
   /**
-   * Один проход: привести метки всех диалогов из `snapshots` к нужным.
-   * Диалог, которого нет в выборке, но на котором мы что-то ставили, —
-   * очищается. Без известного прошлого (после рестарта) снимаются все наши
-   * метки, кроме нужных: прочитать текущие API не даёт.
+   * Один проход: все диалоги сообщества → нужные метки → разница с тем, что
+   * стоит сейчас. Чужие (ручные) метки не трогаются. Диалог без данных в базе
+   * — «Новый клиент».
    */
-  async sync(snapshots: readonly VkLabelSnapshot[], now = new Date()): Promise<{ bound: number; unbound: number }> {
-    if (this.running) return { bound: 0, unbound: 0 };
+  async run(
+    load: (vkIds: string[]) => Promise<VkLabelSnapshot[]>,
+    now = new Date(),
+  ): Promise<{ dialogs: number; bound: number; unbound: number }> {
+    if (this.running) return { dialogs: 0, bound: 0, unbound: 0 };
     this.running = true;
     let bound = 0;
     let unbound = 0;
     try {
-      await this.ensureLabels();
-      const inSnapshot = new Set(snapshots.map((s) => s.vkId));
-      const targets: Array<[string, Set<VkLabelKey>]> = [];
-      for (const s of snapshots) {
-        let snap = s;
-        if (s.humanSince && now.getTime() - s.humanSince.getTime() <= HUMAN_WINDOW_MS) {
-          snap = { ...s, managerReplied: await this.managerRepliedAfter(s.vkId, s.humanSince) };
+      const ids = await this.ensureLabels();
+      const conversations = await this.listConversations();
+      const snapshots = new Map((await load(conversations.map((c) => c.vkId))).map((s) => [s.vkId, s]));
+      for (const conv of conversations) {
+        let snap = snapshots.get(conv.vkId) ?? { vkId: conv.vkId, orders: [], pendingIntentAt: null, humanSince: null };
+        if (snap.humanSince && now.getTime() - snap.humanSince.getTime() <= HUMAN_WINDOW_MS) {
+          snap = { ...snap, managerReplied: await this.managerRepliedAfter(conv.vkId, snap.humanSince) };
         }
-        targets.push([s.vkId, desiredVkLabels(snap, now)]);
-      }
-      for (const vkId of this.applied.keys()) {
-        if (!inSnapshot.has(vkId)) targets.push([vkId, new Set()]);
-      }
-      const seen = new Set<string>();
-      for (const [vkId, want] of targets) {
-        if (seen.has(vkId)) continue;
-        seen.add(vkId);
-        const had = this.applied.get(vkId);
-        const next = new Set(had ?? []);
+        const want = desiredVkLabels(snap, now);
+        const has = new Set(conv.tags);
         for (const key of VK_LABEL_KEYS) {
-          const should = want.has(key);
-          const known = had ? had.has(key) : null; // null — не знаем
-          if (should && known !== true) {
-            if (await this.bind(vkId, key, "bind")) { next.add(key); bound++; }
-          } else if (!should && known !== false) {
-            if (await this.bind(vkId, key, "unbind")) { next.delete(key); if (known) unbound++; }
+          const tagId = ids.get(key);
+          if (!tagId) continue;
+          if (want.has(key) && !has.has(tagId)) {
+            if (await this.bind(conv.vkId, key, "bind")) bound++;
+          } else if (!want.has(key) && has.has(tagId)) {
+            if (await this.bind(conv.vkId, key, "unbind")) unbound++;
           }
         }
-        // Ушёл из выборки и очищен — помнить незачем (повторный приход снова сверит).
-        if (!inSnapshot.has(vkId) && next.size === 0) this.applied.delete(vkId);
-        else this.applied.set(vkId, next);
       }
-      return { bound, unbound };
+      return { dialogs: conversations.length, bound, unbound };
     } finally {
       this.running = false;
     }
@@ -355,7 +386,11 @@ export class VkDialogLabelSync {
 
 /* ── Выборка из базы ───────────────────────────────────────────────────── */
 
-/** Диалоги, которые стоит размечать: движение за 45 дней. */
+/**
+ * Данные по диалогам `$1` (vkId[]): открытые заказы — любой давности (иначе
+ * заказ в очереди старше 45 дней оставался без метки), прочие — за 45 дней;
+ * выкупы за всё время — для меток истории.
+ */
 export const VK_LABEL_SNAPSHOT_SQL = `
 select u."vkId" as "vkId",
        coalesce(json_agg(json_build_object(
@@ -364,14 +399,17 @@ select u."vkId" as "vkId",
          'completedAt', w."completedAt", 'held', w."heldAt" is not null
        )) filter (where w.id is not null), '[]') as orders,
        (select max(i."createdAt") from "DirectIntent" i
-         where i."userId" = u.id and i.status = 'PENDING') as "pendingIntentAt"
+         where i."userId" = u.id and i.status = 'PENDING') as "pendingIntentAt",
+       (select count(*) from "WbOrder" c
+         where c."userId" = u.id and c."isTest" = false and c.status = 'COMPLETED')::int as "completedCount",
+       (exists (select 1 from "WbOrder" c where c."userId" = u.id and c."isTest" = false)
+        or exists (select 1 from "DirectIntent" i where i."userId" = u.id)
+        or exists (select 1 from "WbCode" k where k."userId" = u.id)) as "everOrdered"
 from "User" u
 left join "WbOrder" w on w."userId" = u.id and w."isTest" = false
-      and w."updatedAt" > now() - interval '45 days'
-where u."vkId" is not null
-  and (w.id is not null
-       or exists (select 1 from "DirectIntent" i
-                  where i."userId" = u.id and i."createdAt" > now() - interval '45 days'))
+      and (w.status in ('AWAITING_GAMEPASS','PENDING','IN_PROGRESS','ERROR')
+           or w."updatedAt" > now() - interval '45 days')
+where u."vkId" = any($1::text[])
 group by u.id`;
 
 /** Обращения через «Поддержку» VK-бота за окно «Нужен человек». */
@@ -395,23 +433,27 @@ where e.type = 'SUPPORT_REQUEST_DELIVERED'
 type OrderRow = Omit<VkLabelOrder, "createdAt" | "updatedAt" | "completedAt"> & {
   createdAt: string; updatedAt: string; completedAt: string | null;
 };
-type SnapshotRow = { vkId: string; orders: OrderRow[]; pendingIntentAt: Date | null };
+type SnapshotRow = {
+  vkId: string; orders: OrderRow[]; pendingIntentAt: Date | null; completedCount: number; everOrdered: boolean;
+};
 type SupportRow = Omit<VkSupportRequest, "ocrPending"> & { vkId: string | null; ocrPending: unknown };
 
-type RawDb = { $queryRawUnsafe: (sql: string) => Promise<unknown> };
+type RawDb = { $queryRawUnsafe: (sql: string, ...values: unknown[]) => Promise<unknown> };
 
-export async function loadVkLabelSnapshots(db: RawDb): Promise<VkLabelSnapshot[]> {
-  const rows = (await db.$queryRawUnsafe(VK_LABEL_SNAPSHOT_SQL)) as SnapshotRow[];
+export async function loadVkLabelSnapshots(db: RawDb, vkIds: readonly string[]): Promise<VkLabelSnapshot[]> {
+  const wanted = new Set(vkIds);
+  const rows = (await db.$queryRawUnsafe(VK_LABEL_SNAPSHOT_SQL, [...wanted])) as SnapshotRow[];
   const support = (await db.$queryRawUnsafe(VK_SUPPORT_REQUESTS_SQL)) as SupportRow[];
 
   const byId = new Map<string, VkLabelSnapshot>();
   for (const r of rows) {
     const vkId = String(r.vkId);
-    if (!/^\d+$/.test(vkId)) continue;
     byId.set(vkId, {
       vkId,
       pendingIntentAt: r.pendingIntentAt ? new Date(r.pendingIntentAt) : null,
       humanSince: null,
+      completedCount: Number(r.completedCount ?? 0),
+      everOrdered: Boolean(r.everOrdered),
       // json_build_object отдаёт timestamp без зоны — это UTC (так пишет Prisma).
       orders: (r.orders ?? []).map((o) => ({
         status: o.status,
@@ -425,7 +467,7 @@ export async function loadVkLabelSnapshots(db: RawDb): Promise<VkLabelSnapshot[]
   }
   for (const s of support) {
     const vkId = String(s.vkId ?? "");
-    if (!/^\d+$/.test(vkId)) continue;
+    if (!wanted.has(vkId)) continue;
     const req: VkSupportRequest = {
       at: new Date(s.at),
       text: s.text,
