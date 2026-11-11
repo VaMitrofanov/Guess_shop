@@ -27,6 +27,9 @@ export interface AdminOrder {
   /** 🛡 Разморожен админом вручную (11.11.2026) — автоматика не морозит. */
   manualReleaseAt?: string | null;
   manualReleaseBy?: string | null;
+  /** 🏷 Пометки (11.11.2026) — `OrderFlag[]` из bots/shared/order-flags. */
+  flags?: unknown;
+  flaggedAt?: string | null;
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Поверх статуса. */
   priorityAt?: string | null;
   priorityBy?: string | null;
@@ -131,6 +134,7 @@ export const EXTRA_TABS: { key: string; label: string }[] = [
   { key: "FAVORITES", label: "Избранное" },
   { key: "ATTENTION", label: "Требуют внимания" },
   { key: "STALE_LINK", label: "🫥 Молчат" },
+  { key: "FLAGGED", label: "🏷 С пометками" },
   { key: "HELD", label: "Заморожены" },
   { key: "REJECTED", label: "Отменены" },
 ];

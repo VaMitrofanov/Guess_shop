@@ -859,3 +859,45 @@
 .idHeroIcon kbd { padding: 0 4px; border-radius: 4px; background: rgba(13, 31, 20, .18); color: #0d1f14; font-size: 10px; font-weight: 700; }
 .idHeroDone .idHeroIcon { background: #f7f5ff; }
 .refNote { margin-bottom: 8px; color: var(--o-muted); font-size: 12.5px; }
+
+/* ── «Сейчас» и лента заказа (11.11.2026) ────────────────────────────────────
+   Минимум оформления: цвет несёт только состояние (`--now`), выделены только
+   слова покупателя (`.quote`). Остальное — текст и серые подписи. */
+.now { margin-top: 16px; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--now) 8%, transparent); }
+.nowHead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nowHead i { width: 8px; height: 8px; border-radius: 50%; background: var(--now); flex: 0 0 auto; }
+.nowHead strong { font-size: 15px; font-weight: 650; }
+.nowHead span { color: var(--o-muted); font-size: 13.5px; }
+.nowAction {
+  margin-left: auto; height: 30px; padding: 0 12px; border: 0; border-radius: 8px; cursor: pointer;
+  background: color-mix(in srgb, var(--now) 20%, transparent); color: var(--now); font: inherit; font-size: 13px; font-weight: 650;
+}
+.nowAction:hover { background: color-mix(in srgb, var(--now) 28%, transparent); }
+.now .quote { margin: 10px 0 0 18px; }
+.nowNote { margin: 10px 0 0 18px; }
+.nowNote[data-solo] { margin-left: 0; margin-top: 0; }
+.nowNote p { margin: 0; color: #dadae0; font-size: 14px; line-height: 1.5; }
+.nowNote span { display: block; margin-top: 4px; color: #75757e; font-size: 12.5px; }
+.quote {
+  display: block; padding-left: 11px; border-left: 2px solid var(--o-orange);
+  color: #dadae0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.feed { display: flex; flex-direction: column; gap: 12px; margin: 20px 0 6px; }
+.feedLabel { color: var(--o-muted); font-size: 13px; font-weight: 600; }
+.feedInput {
+  height: 40px; padding: 0 13px; border: 1px solid var(--o-line); border-radius: 10px;
+  background: transparent; color: inherit; font: inherit; font-size: 14px; outline: none;
+}
+.feedInput:focus { border-color: rgba(167, 139, 250, .55); }
+.feedList { display: flex; flex-direction: column; gap: 12px; margin: 4px 0 0; padding: 0; list-style: none; }
+.feedList li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; font-size: 14px; line-height: 1.45; }
+.feedList li[data-dim] .feedText { color: var(--o-muted); }
+.feedText { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.feedMeta { color: #75757e; font-size: 12.5px; white-space: nowrap; }
+.feedRaw { align-self: flex-start; padding: 0; border: 0; background: none; color: #75757e; font: inherit; font-size: 12.5px; cursor: pointer; }
+.feedRaw:hover { color: var(--o-muted); }
+.stateWord { font-weight: 650; margin-right: 8px; }
+.headline {
+  display: block; margin-top: 3px; color: var(--o-muted); font-size: 13px; font-weight: 450;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

@@ -112,6 +112,7 @@ export type ClaimHoldOutcome =
   | "held_code"
   | "held_in_progress"
   | "already_delivered"
+  | "flagged"
   | "failed";
 
 const CLAIM_HOLD_LINE: Record<ClaimHoldOutcome, string> = {
@@ -119,6 +120,7 @@ const CLAIM_HOLD_LINE: Record<ClaimHoldOutcome, string> = {
   held_code: "❄️ Код заморожен — заказ, если появится, выкупаться не будет",
   held_in_progress: "❄️ Заказ заморожен, но <b>выкуп уже шёл</b> — проверить, не потрачены ли робуксы",
   already_delivered: "⚠️ Заказ <b>уже выкуплен</b> — робуксы потрачены, спор решать вручную",
+  flagged: "↩ Пометка «Возврат открыт» — заказ остаётся в очереди; договоритесь и нажмите «✓ Договорились»",
   failed: "⚠️ Заморозка не встала — выкуп всё равно заблокирован гардом, но проверить карточку",
 };
 

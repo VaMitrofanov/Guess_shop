@@ -488,6 +488,11 @@ model WbOrder {
   /// `OrderHold.manualReleaseAt` — для пометки в карточке без джойна.
   manualReleaseAt        DateTime?
   manualReleaseBy        String?
+  /// 🏷 Пометки (11.11.2026): «возврат открыт», «висит» и т.п. — видно, но
+  /// выкуп не блокирует. JSON-список `OrderFlag` (bots/shared/order-flags.ts).
+  flags                  Json?
+  /// Самая ранняя НЕпогашенная пометка; null — всё решено. Срез «С пометками».
+  flaggedAt              DateTime?
   /// Ручной приоритет: «этот выкупать первым».
   ///
   /// Признак поверх статуса, как и заморозка. Очередь по умолчанию отсортирована
@@ -566,6 +571,7 @@ model WbOrder {
   @@index([priorityAt(sort: Desc)])
   // Заморозка: рабочие вкладки фильтруют по `heldAt IS NULL` на каждом запросе.
   @@index([heldAt])
+  @@index([flaggedAt])
 }
 
 /// Заморозка по КОДУ — «не выкупать, но и не удалять».

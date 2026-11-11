@@ -1,5 +1,8 @@
 "use client";
 import BasketChip from "./basket-chip";
+import { Headline, StateWord } from "./order-signals";
+import { flagsConfirmText } from "@/lib/order-signals";
+import { orderStateWord } from "@/lib/order-feed";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    «Заказы» на сайте — рабочее место, а не витрина (этапы В1–В5).
@@ -414,14 +417,36 @@ export default function OrdersWorkspace({
     return true;
   }, [post, showToast, dropFromList, markBusy, refreshCounts]);
 
+  /* 🏷 «✓ Договорились» (11.11.2026): пометка гаснет, но остаётся в истории.
+     Ответ сервера приносит свежие `flags`, их и кладём в строку. */
+  const ackFlag = useCallback(async (order: AdminOrder, kind?: string) => {
+    markBusy(order.id, true);
+    const result = await post({ action: "ack-flag", orderId: order.id, ...(kind ? { kind } : {}) });
+    markBusy(order.id, false);
+    if (!result.ok) { showToast({ text: result.error ?? "Не получилось", error: true }); return false; }
+    setOrders(prev => prev.map(o => (o.id === order.id ? { ...o, flags: result.data?.flags, flaggedAt: result.data?.flaggedAt } as AdminOrder : o)));
+    if (slice === "FLAGGED" && !result.data?.flaggedAt) dropFromList(order.id);
+    showToast({ text: `✓ ${order.wbCode}: договорились` });
+    void refreshCounts();
+    return true;
+  }, [post, markBusy, showToast, slice, dropFromList, refreshCounts]);
+
   const complete = useCallback(async (order: AdminOrder) => {
     if (!canComplete(order)) return;
+    /* Пометка не блокирует выкуп, но и не пропускает его молча: одно
+       подтверждение, после которого пометки гаснут как «договорились». */
+    const warn = flagsConfirmText(order);
+    if (warn) {
+      const ok = await askFor({ title: `Выкупить ${order.wbCode}?`, message: warn, confirmLabel: "Выкупить", input: false });
+      if (ok === null) return;
+      if (!(await ackFlag(order))) return;
+    }
     await run(order, { action: "complete" }, {
       leaves: true,
       // Обратного действия нет намеренно: клиенту уже ушло «зачислено».
       label: `✓ ${order.wbCode} выкуплен · клиенту ушло сообщение`,
     });
-  }, [run]);
+  }, [run, askFor, ackFlag]);
 
   const restore = useCallback(async (order: AdminOrder) => {
     await run(order, { action: "restore-to-buyout" }, {
@@ -584,9 +609,12 @@ export default function OrdersWorkspace({
   const bulkComplete = useCallback(async () => {
     if (completableSelected.length === 0) return;
     const gross = completableSelected.reduce((sum, o) => sum + grossOf(o.amount), 0);
+    // 🏷 Заказы с нерешёнными пометками называем поимённо — их выкуп = «договорились».
+    const flagged = completableSelected.filter(o => flagsConfirmText(o));
     const confirmed = await askFor({
       title: `Отметить выкупленными: ${completableSelected.length}`,
-      message: `На ${num(gross)} R$ грязными. Каждому клиенту уйдёт сообщение о зачислении — отменить это нельзя.`,
+      message: `На ${num(gross)} R$ грязными. Каждому клиенту уйдёт сообщение о зачислении — отменить это нельзя.`
+        + (flagged.length ? `\n\n🏷 С пометками: ${flagged.map(o => o.wbCode).join(", ")} — пометки погасятся как «договорились».` : ""),
       confirmLabel: `Отметить ${completableSelected.length}`,
       input: false,
     });
@@ -594,6 +622,7 @@ export default function OrdersWorkspace({
     let done = 0;
     for (const order of completableSelected) {
       markBusy(order.id, true);
+      if (flagsConfirmText(order)) await post({ action: "ack-flag", orderId: order.id });
       const result = await post({ action: "complete", orderId: order.id });
       markBusy(order.id, false);
       if (result.ok) { done += 1; dropFromList(order.id); }
@@ -1072,6 +1101,7 @@ export default function OrdersWorkspace({
             onClose={() => setOpenId(null)}
             onPrimary={() => void runPrimary(openOrder)}
             onHold={() => void toggleHold(openOrder)}
+            onAckFlag={(kind) => void ackFlag(openOrder, kind)}
             onError={() => void setError(openOrder)}
             onFavorite={() => void toggleFavorite(openOrder)}
             onPriority={() => void togglePriority(openOrder)}
@@ -1131,7 +1161,7 @@ export default function OrdersWorkspace({
         <div className={styles.paletteBackdrop} onMouseDown={event => event.target === event.currentTarget && closeAsk(null)}>
           <div className={styles.ask} role="dialog" aria-modal="true">
             <h3>{ask.title}</h3>
-            {ask.message && <p>{ask.message}</p>}
+            {ask.message && <p style={{ whiteSpace: "pre-line" }}>{ask.message}</p>}
             {ask.input && (
               <input
                 autoFocus
@@ -1492,13 +1522,18 @@ function OrderRow({
       </button>
       <button type="button" className={`${styles.nick} ${!order.robloxUsername && order.probableNick ? styles.nickProbable : ""}`} onClick={onOpen}>
         {order.robloxUsername ?? order.probableNick ?? "ник не указан"}
+        {/* Под ником — главное по заказу: заметка или слова покупателя. */}
+        <Headline order={order} />
       </button>
       <span className={styles.client}>{clientLabel(order)}</span>
       <span className={styles.money}>{num(grossOf(order.amount))}<small>R$</small></span>
       <span className={styles.moneyDim}>{num(order.amount)}</span>
       <span className={styles.age} style={{ color: TONE_COLOR[ageTone(basis)] }}>{fmtAge(basis)}</span>
+      {/* 🏷 Сигналы (пометки, заморозка) — первыми в колонке «что с заказом»:
+          это и есть его состояние, а не приписка к коду. */}
       <span className={styles.flag} style={{ color: flag ? TONE_COLOR[flag.tone] : "var(--o-muted)" }} title={flag?.text}>
-        {flag?.text ?? "—"}
+        <StateWord order={order} />
+        {order.heldAt || (!flag && orderStateWord(order)) ? null : (flag?.text ?? "—")}
       </span>
       <span className={styles.gpid}>{parts.length > 0 ? `${parts.length} ID пассов` : ids ?? "—"}</span>
       <span className={styles.rowActions}>
@@ -1585,11 +1620,13 @@ function QueueCard({
         <span className={styles.age} style={{ color: TONE_COLOR[ageTone(basis)] }}>{fmtAge(basis)}</span>
         {badge && <span style={{ color: TONE_COLOR[badge.tone] }}>{badge.label}</span>}
         <BasketChip risk={order.risk} />
+        <StateWord order={order} />
         <span className={styles.code} style={{ marginLeft: "auto" }}>{order.wbCode}</span>
       </button>
       <button type="button" className={styles.cardMain} onClick={onOpen} style={{ width: "100%" }}>
         <strong className={!order.robloxUsername && order.probableNick ? styles.nickProbable : ""}>
           {order.robloxUsername ?? order.probableNick ?? "ник не указан"}
+          <Headline order={order} />
         </strong>
         <b>{num(grossOf(order.amount))}<small>R$</small></b>
       </button>

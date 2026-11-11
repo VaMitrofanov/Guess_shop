@@ -23,6 +23,7 @@ import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, 
 import styles from "./orders.module.css";
 import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/lib/buyout-summary";
 import OrderRiskBlock from "@/components/admin/risks/review-plaque";
+import { NowBlock, OrderFeed } from "./order-signals";
 
 const TONE_CLASS: Record<BuyoutTone, string> = {
   green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
@@ -50,7 +51,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function OrderDossier({
-  order, live, packDupIn = null, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onRebuy, onSplit, onEdit, onToast, onChanged,
+  order, live, packDupIn = null, onClose, onPrimary, onHold, onAckFlag, onError, onFavorite, onPriority, onCancel, onRebuy, onSplit, onEdit, onToast, onChanged,
   initialTool = null, instructSignal,
 }: {
   order: AdminOrder;
@@ -60,6 +61,8 @@ export default function OrderDossier({
   onClose: () => void;
   onPrimary: () => void;
   onHold: () => void;
+  /** 🏷 «✓ Договорились» по пометке. */
+  onAckFlag?: (kind: string) => void;
   onError: () => void;
   onFavorite: () => void;
   onPriority: () => void;
@@ -81,6 +84,7 @@ export default function OrderDossier({
   const [noteLines, setNoteLines] = useState<string[]>([]);
   const [audit, setAudit] = useState<any | null>(null);
   const [note, setNote] = useState(order.adminNote ?? "");
+  const [rawNote, setRawNote] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   /* Пассы ника — не часть карточки, а ответ на вопрос «чем ещё закрыть».
      Поэтому грузятся по кнопке: поиск ходит в Roblox через мост и занимает
@@ -297,6 +301,9 @@ export default function OrderDossier({
         </div>
         {/* 🧭 Полоса пути (5 шагов) на месте полосы готовности — 28.10.2026. */}
         {order.status !== "REJECTED" && <JourneySteps journey={journey} />}
+        {/* Сигналы — часть шапки (11.11.2026): заморозка, пометки и решения по
+            ним одним блоком, у каждого своё действие справа. */}
+        <NowBlock order={order} onUnhold={onHold} onAck={(flag) => onAckFlag?.(flag)} />
         {/* ID пасса — главное в досье: на компьютере выкупают вставкой ID.
             Крупная плашка, клик (или C) копирует. В TWA на этом месте ник. */}
         {ids.length > 0 && (
@@ -376,6 +383,27 @@ export default function OrderDossier({
           </button>
         </div>
 
+        {/* Лента заказа (11.11.2026): заметки людей, заморозки, заявки и
+            правки одной хроникой. Сырой текст — по «Править текстом». */}
+        <OrderFeed
+          order={order}
+          onAdd={async (text) => {
+            try { await post({ action: "add-note", text }); onChanged(); return true; }
+            catch (error) { onToast((error as Error).message, true); return false; }
+          }}
+          onEditRaw={() => setRawNote(v => !v)}
+        />
+        {rawNote && (
+          <div className={styles.box}>
+            <textarea className={styles.note} value={note} onChange={event => setNote(event.target.value)} placeholder="Что нужно помнить про этот заказ" />
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 9 }}>
+              <button type="button" className={styles.btn} onClick={() => void saveNote()} disabled={savingNote || note === (order.adminNote ?? "")}>
+                {savingNote ? "Сохраняем…" : "Сохранить"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 🧭 Путь покупателя: чего ждём, касания, «Следующий шаг» и вся история. */}
         {order.status !== "REJECTED" && (
           <BuyerJourneyPanel
@@ -424,18 +452,6 @@ export default function OrderDossier({
               <div className={`${styles.box} ${styles.boxPrio}`}>
                 <div className={styles.boxHead}>⚡ Выкупать первым<em>{order.priorityBy ?? ""}</em></div>
                 <div>Поднят наверх очереди {fmtAge(order.priorityAt)} назад — на всех экранах и в выгрузке ID.</div>
-              </div>
-            )}
-            {order.heldAt && (
-              <div className={`${styles.box} ${styles.boxIce}`}>
-                <div className={styles.boxHead}>❄️ Заморожен<em>{order.heldBy ?? ""}</em></div>
-                <div>{order.heldReason ?? "причина не указана"} · выключен из выкупа, очередей и пачки</div>
-              </div>
-            )}
-            {!order.heldAt && order.manualReleaseAt && (
-              <div className={styles.box}>
-                <div className={styles.boxHead}>🛡 Разморожен вручную<em>{order.manualReleaseBy ?? ""}</em></div>
-                <div>{fmtAge(order.manualReleaseAt)} назад · автоматика не морозит, кроме нового плохого отзыва и возврата денег</div>
               </div>
             )}
             {/* ★ Отзыв покупателя и досье (30.10.2026). */}
@@ -577,15 +593,7 @@ export default function OrderDossier({
             </div>
 
 
-            <div className={styles.box}>
-              <div className={styles.boxHead}>Заметка</div>
-              <textarea className={styles.note} value={note} onChange={event => setNote(event.target.value)} placeholder="Что нужно помнить про этот заказ" />
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 9 }}>
-                <button type="button" className={styles.btn} onClick={() => void saveNote()} disabled={savingNote || note === (order.adminNote ?? "")}>
-                  {savingNote ? "Сохраняем…" : "Сохранить"}
-                </button>
-              </div>
-            </div>
+
           </>
         )}
 

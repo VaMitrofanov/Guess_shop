@@ -31,6 +31,7 @@ import {
   SplitError,
   type StoredPart,
 } from "@/lib/order-gamepass-split";
+import { FLAG_META, ackFlags } from "../../../../../bots/shared/order-flags";
 import {
   TAB_SQL,
   buildTabWhere, isGamepassExportTab, loadGamepassExport, orderByForTab,
@@ -39,6 +40,7 @@ import {
 import {
   assertOrderBuyable, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
 } from "@/lib/order-hold";
+import { humanNoteLine, prependNote } from "../../../../../bots/shared/order-hold";
 import { isRevokedCode } from "@/lib/wb-code-revocation";
 import {
   buildNarrowWhere, isNarrowed, loadOrderSlices, parseNarrow, type OrderSlicesPayload,
@@ -345,7 +347,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"].includes(tab);
+  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -478,7 +480,7 @@ export async function GET(req: NextRequest) {
           }).catch(() => 0);
           // Все предикаты — из `TAB_SQL` (order-queue.ts): одно правило на ленту,
           // «Выкуп», значок и шапку среза.
-          const countable = ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"] as const;
+          const countable = ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const;
           const summable = ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const;
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
@@ -494,7 +496,7 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"] as const)
+          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const)
             counts[k] = Number(r[k] ?? 0);
           counts["INTENTS"] = await intentsPromise;
           for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const)
@@ -1464,6 +1466,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, wbCode, awaitingOrder: result.awaitingOrder ?? false });
   }
 
+  /* ── 🏷 «✓ Договорились» — погасить пометку (11.11.2026) ───────────────────
+     Пометка не блокирует выкуп, а просит решения. Погашенная остаётся в
+     истории заказа с автором и временем; `kind` не указан — гасим все. */
+  if (action === "ack-flag") {
+    if (!orderId) return NextResponse.json({ error: "Нужен orderId" }, { status: 400 });
+    const kind = typeof body.kind === "string" && body.kind in FLAG_META ? body.kind : null;
+    const res = await ackFlags(prisma, { orderId, actor: actor.displayName, kind });
+    if (!res.ok) return NextResponse.json({ error: res.error }, { status: 404 });
+    cachedCounts = null;
+    const fresh = await (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { flags: true, flaggedAt: true } });
+    return NextResponse.json({ ok: true, acked: res.acked, flags: fresh?.flags ?? null, flaggedAt: fresh?.flaggedAt ?? null });
+  }
+
   /** Состояние заморозки по коду — для поиска по коду, у которого нет заказа. */
   if (action === "hold-status") {
     const wbCode = normalizeHoldCode(body.wbCode);
@@ -1503,6 +1518,19 @@ export async function POST(req: NextRequest) {
   // ни одним путём — робуксы донора тратятся только после подтверждения оплаты.
   const unpaidDirect = order.isDirectOrder && !order.paidAt;
   const UNPAID_DIR_ERROR = `💳 Прямой заказ ${order.wbCode} не оплачен — сначала подтверди оплату (pay_ok в TG-карточке)`;
+
+  /* ── Лента заказа: «Добавить заметку» (11.11.2026) ──────────────────────
+     Не перезаписывает заметку, как `set-note`, а дописывает строку сверху с
+     автором и временем — из неё и собирается лента, и «Сейчас» в карточке. */
+  if (action === "add-note") {
+    const text = typeof body.text === "string" ? body.text.replace(/\s+/g, " ").trim().slice(0, 500) : "";
+    if (!text) return NextResponse.json({ error: "Пустая заметка" }, { status: 400 });
+    const row = await (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true } });
+    if (!row) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    const note = prependNote(row.adminNote, humanNoteLine(text, actor.displayName));
+    await (prisma as any).wbOrder.update({ where: { id: orderId }, data: { adminNote: note } });
+    return NextResponse.json({ ok: true, note });
+  }
 
   if (action === "set-note") {
     const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";

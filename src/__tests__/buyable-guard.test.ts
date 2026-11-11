@@ -179,17 +179,13 @@ describe("assertOrderBuyable", () => {
     expect(await assertOrderBuyable(db, "o1")).toEqual({ held: false });
   });
 
-  it("открытая заявка на возврат блокирует и сама ставит заморозку", async () => {
-    const { db, calls, state } = fakeDb({
+  it("открытая заявка на возврат НЕ блокирует — это пометка (11.11.2026)", async () => {
+    const { db, calls } = fakeDb({
       order: baseOrder(),
       dbs: { cancelledAt: null, claimOpenedAt: new Date(), claimResolvedAt: null, claimReason: "прошу вернуть деньги" },
     });
-    const res = await assertOrderBuyable(db, "o1");
-    expect(res.held).toBe(true);
-    expect(calls.holds).toHaveLength(1);
-    expect(calls.holds[0].reason).toContain("Возврат на WB");
-    expect(calls.holds[0].reason).toContain("прошу вернуть деньги");
-    expect(state.order!.heldAt).toBeInstanceOf(Date);
+    expect((await assertOrderBuyable(db, "o1")).held).toBe(false);
+    expect(calls.holds).toHaveLength(0);
   });
 
   it("админ разморозил вручную — заявка больше не морозит, деньги ушли ПОСЛЕ — морозят (11.11)", async () => {
@@ -203,9 +199,6 @@ describe("assertOrderBuyable", () => {
     // Даже заявка, открытая уже после разморозки, решение админа не отменяет.
     const later = fakeDb({ order: baseOrder(), dbs: { ...dbs, claimOpenedAt: new Date("2026-11-10T00:00:00Z") }, hold: manual });
     expect((await assertOrderBuyable(later.db, "o1")).held).toBe(false);
-    // Снятие автоматикой — не решение человека: отметки нет, заявка морозит.
-    const auto = fakeDb({ order: baseOrder(), dbs, hold: { releasedAt, releasedBy: "гейт выкупа" } });
-    expect((await assertOrderBuyable(auto.db, "o1")).held).toBe(true);
     // Отмена на WB, которую админ уже видел, — его решение.
     const seenCancel = fakeDb({ order: baseOrder(), dbs: { ...dbs, cancelledAt: new Date("2026-11-09T03:00:00Z") }, hold: manual });
     expect((await assertOrderBuyable(seenCancel.db, "o1")).held).toBe(false);
@@ -255,10 +248,21 @@ describe("assertOrderBuyable", () => {
 describe("holdForProblem", () => {
   it("морозит по коду, даже если заказа ещё нет", async () => {
     const { db, calls } = fakeDb({ order: null });
-    const res = await holdForProblem(db, { wbCode: "jr7htsw", kind: "WB_CLAIM", detail: "не получилось" });
+    const res = await holdForProblem(db, { wbCode: "jr7htsw", kind: "WB_CANCELLED" });
     expect(res.ok).toBe(true);
     expect(res.awaitingOrder).toBe(true);
     expect(calls.holds[0].wbCode).toBe("JR7HTSW");
+  });
+
+  it("заявка, частичный возврат, просьба об отмене — пометка вместо заморозки", async () => {
+    for (const kind of ["WB_CLAIM", "PAYMENT_PARTIAL_REFUND", "BUYER_REFUND_REQUEST"] as const) {
+      const { db, calls, state } = fakeDb({ order: baseOrder() });
+      const res = await holdForProblem(db, { wbCode: "JR7HTSW", kind, detail: "не приходят рб" });
+      expect(res.flagged).toBe(true);
+      expect(calls.holds).toHaveLength(0);
+      expect(state.order!.heldAt).toBeNull();
+      expect(state.order!.flaggedAt).toBeInstanceOf(Date);
+    }
   });
 
   it("выкупленный заказ не морозит — тратить уже нечего", async () => {

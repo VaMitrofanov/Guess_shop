@@ -88,6 +88,7 @@ import {
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
+import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
 import { GATE_ACTOR, isGateReviewHold, matchBadReview, matchFixedReview, runBuyoutGate, type GateOrder, type WbFeedback } from "./buyout-gate";
 import {
   autoResolveRiskEvents,
@@ -2061,9 +2062,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   const allCodes = [...new Set([...pendingCodes, ...dbsByCode.keys(), ...reviewHoldCodes])];
   if (allCodes.length === 0) return;
 
-  // Морозим только коды без истории заморозок — снятую руками заморозку не
-  // воскрешаем. Исключение — замок, который снял сам гейт по исправленному
-  // отзыву: если покупатель вернёт ★1, заказ должен замёрзнуть снова.
+  // История заморозок: что заморожено сейчас, что снял гейт, что снял человек.
   const [holdRows, internal] = await Promise.all([
     db.orderHold.findMany({
       where: { wbCode: { in: allCodes } },
@@ -2071,7 +2070,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     }),
     db.wbOrder.findMany({
       where: { wbCode: { in: allCodes } },
-      select: { wbCode: true, status: true, createdAt: true, heldAt: true },
+      select: { wbCode: true, status: true, createdAt: true, heldAt: true, flags: true },
     }),
   ]);
   const gateReleased = new Set(holdRows.filter((h) => h.releasedAt && h.releasedBy === GATE_ACTOR).map((h) => h.wbCode));
@@ -2081,9 +2080,11 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   const manualReleased = new Map(holdRows
     .filter((h) => h.releasedAt && h.manualReleaseAt)
     .map((h) => [h.wbCode, h.manualReleaseAt as Date] as const));
-  const blocked = new Set(holdRows
-    .filter((h) => !gateReleased.has(h.wbCode) && !manualReleased.has(h.wbCode))
-    .map((h) => h.wbCode));
+  /* Пропускаем только то, что заморожено прямо сейчас (11.11.2026). Снятые
+     заморозки гейт смотрит снова: плохой отзыв морозит всегда, а старый,
+     который админ уже видел, отсекает `manualReleaseAt` в `decideGate`. */
+  const blocked = new Set(holdRows.filter((h) => !h.releasedAt).map((h) => h.wbCode));
+  const everHeld = new Set(holdRows.map((h) => h.wbCode));
   const internalByCode = new Map(internal.map((o) => [o.wbCode, o]));
 
   const toGateOrder = (code: string): GateOrder => {
@@ -2099,7 +2100,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
       buyerName: meta?.buyerName ?? null,
       // Висяк — только у PENDING с пассом и только если гейт его ещё не
       // отпускал: исправивший отзыв по нашей просьбе на связи, подтверждать нечего.
-      staleCheck: pendingCodes.has(code) && !gateReleased.has(code) && !manualReleased.has(code),
+      staleCheck: pendingCodes.has(code) && !everHeld.has(code),
       manualReleaseAt: manualReleased.get(code) ?? null,
     };
   };
@@ -2127,6 +2128,15 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     loadReviewHolds: async () => holdOrders,
     loadFeedbacks: async () => loaded,
     freeze: async (wbCode, reason, decision) => {
+      /* 🏷 Висяк с 11.11.2026 — пометка «⏳ Висит», а не заморозка: заказ
+         остаётся в «К выкупу», админ уточняет у покупателя и выкупает. */
+      if (decision?.rule === "stale") {
+        const own = internalByCode.get(wbCode);
+        if (own && !flagsOf(own).some((f) => f.kind === "STALE")) {
+          await setFlag(db, { wbCode, kind: "STALE" });
+        }
+        return false;
+      }
       const res = await holdByCode(db, {
         wbCode, reason, actor: GATE_ACTOR,
         auto: decision?.rule === "bad_review"
@@ -2263,9 +2273,10 @@ async function claimHold(
   kind: "WB_CLAIM",
   reason: string | null,
   refunded: boolean,
+  openedAt: Date | null = null,
 ): Promise<ProblemHoldResult | null> {
   if (!code) return null;
-  return holdForProblem(db, { wbCode: code, kind: refunded ? "WB_CLAIM_REFUNDED" : kind, detail: reason })
+  return holdForProblem(db, { wbCode: code, kind: refunded ? "WB_CLAIM_REFUNDED" : kind, detail: reason, eventAt: openedAt })
     .catch((error) => {
       console.error(`[WbDbsSync] заморозка по заявке ${code} не встала:`, safeErrorCode(error));
       return null;
@@ -2275,6 +2286,7 @@ async function claimHold(
 function claimHoldOutcome(hold: ProblemHoldResult | null): ClaimHoldOutcome {
   if (!hold || !hold.ok) return "failed";
   if (hold.alreadyCompleted) return "already_delivered";
+  if (hold.flagged) return "flagged";
   if (hold.internalStatus === "IN_PROGRESS") return "held_in_progress";
   if (hold.awaitingOrder) return "held_code";
   return "held";
@@ -2336,7 +2348,7 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
       /* Заявка = деньги могут уйти покупателю. До 24.10.2026 тут был только
          алерт, а заказ оставался в очереди выкупа (JR7HTSW). Морозим по КОДУ:
          заморозка сядет и на заказ, которого ещё нет. */
-      const hold = await claimHold(db, order.wbCode?.code ?? null, "WB_CLAIM", claim.reason ?? null, resolved && claim.statusEx === CLAIM_REFUND_GRANTED);
+      const hold = await claimHold(db, order.wbCode?.code ?? null, "WB_CLAIM", claim.reason ?? null, resolved && claim.statusEx === CLAIM_REFUND_GRANTED, openedAt);
       await notifyWbBuyerClaim({
         wbOrderId: order.wbOrderId,
         code: order.wbCode?.code ?? null,
@@ -2597,6 +2609,10 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     if (await streamDue(db, CLAIMS_STREAM, 15 * 60_000, force)) {
       await syncBuyerClaims(db, out).catch((error) => {
         console.error(`[WbDbsSync] claims skipped: ${safeErrorCode(error)}`);
+      });
+      // 🏷 Заявка могла прийти раньше заказа — пометка догоняет его здесь.
+      await syncClaimFlags(db).catch((error) => {
+        console.error(`[WbDbsSync] claim flags skipped: ${safeErrorCode(error)}`);
       });
       await touchCursor(db, CLAIMS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }

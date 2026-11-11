@@ -125,7 +125,9 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
       // Пояс+подтяжки (П5): неоплаченный DIR в PENDING оказаться не должен
       // (guard'ы в TWA), но даже если окажется — автовыкуп его не тронет.
       // ❄️ heldAt — то же самое для заморозки: «не выкупать, но и не удалять».
-      where: { status: "PENDING", isTest: false, ...NOT_HELD, NOT: { isDirectOrder: true, paidAt: null } },
+      // 🏷 flaggedAt — непогашенная пометка («возврат открыт», «висит»): её
+      // решает человек, автовыкуп такой заказ не берёт (11.11.2026).
+      where: { status: "PENDING", isTest: false, ...NOT_HELD, flaggedAt: null, NOT: { isDirectOrder: true, paidAt: null } },
       // Ручной приоритет («⚡ Вперёд очереди» в админке) бьёт возраст и здесь:
       // иначе поднятый заказ стоял бы первым на всех экранах, а автовыкуп
       // молча брал бы старейший. `nulls: "last"` обязателен — в Postgres у

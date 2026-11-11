@@ -23,6 +23,8 @@
  * поэтому ядро лежит здесь, а `src/lib/order-hold.ts` его переэкспортирует.
  */
 
+import { setFlag, type OrderFlagKind } from "./order-flags";
+
 /** Маркеры строк заметки. По ним TWA красит строку заморозки отдельно. */
 export const HOLD_NOTE_MARK = "[ЗАМОРОЗКА";
 export const UNHOLD_NOTE_MARK = "[РАЗМОРОЗКА";
@@ -128,6 +130,11 @@ export async function stampHoldOnOrder(
         : { adminNote: prependNote(order.adminNote, holdNoteLine(hold.reason, hold.createdBy)) }),
     },
   });
+}
+
+/** Заметка человека из поля «Добавить заметку» (11.11.2026). */
+export function humanNoteLine(text: string, actor: string): string {
+  return `[ЗАМЕТКА ${stamp()} · ${actor}] ${text.replace(/\s+/g, " ").trim()}`;
 }
 
 export function unholdNoteLine(actor: string): string {
@@ -443,7 +450,16 @@ export function problemHoldReason(kind: ProblemKind, detail?: string | null): st
   return normalizeHoldReason(tail ? `${head}: «${tail}»` : head) ?? head;
 }
 
+/** Проблемы, которые с 11.11.2026 ставят пометку вместо заморозки. */
+const PROBLEM_FLAG: Partial<Record<ProblemKind, OrderFlagKind>> = {
+  WB_CLAIM: "CLAIM",
+  PAYMENT_PARTIAL_REFUND: "PARTIAL_REFUND",
+  BUYER_REFUND_REQUEST: "CANCEL_ASK",
+};
+
 export interface ProblemHoldResult extends HoldResult {
+  /** Вместо заморозки повешена пометка — заказ остаётся в очереди. */
+  flagged?: boolean;
   /** Заказ уже выкуплен — морозить нечего, робуксы потрачены. */
   alreadyCompleted?: boolean;
   /** Статус нашего заказа на момент события (`null` — заказа ещё нет). */
@@ -473,6 +489,13 @@ export async function holdForProblem(
   if (order?.status === "COMPLETED") {
     return { ok: true, alreadyCompleted: true, internalStatus: "COMPLETED" };
   }
+  /* 🏷 С 11.11.2026 заявка без решения, частичный возврат и просьба об отмене
+     — пометка, а не заморозка: заказ остаётся в очереди, админ решает в чате. */
+  const flagKind = PROBLEM_FLAG[input.kind];
+  if (flagKind) {
+    const res = await setFlag(db, { wbCode, kind: flagKind, detail: input.detail, at: input.eventAt ? new Date(input.eventAt) : null });
+    return { ok: res.ok, flagged: true, awaitingOrder: res.awaitingOrder, internalStatus: order?.status ?? null };
+  }
   const res = await holdByCode(db, {
     wbCode,
     reason: problemHoldReason(input.kind, input.detail),
@@ -490,10 +513,10 @@ const LIVE_PAYMENT = new Set(["AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED"]);
 
 /**
  * Найти «жёсткую» проблему заказа — ту, при которой выкуп запрещён, даже если
- * заморозку кто-то снял: открытая заявка на возврат, отмена на WB,
+ * заморозку кто-то снял: отмена на WB,
  * аннулированный код, полностью возвращённый платёж.
  *
- * Мягкие проблемы (возврат отклонён, частичный возврат) сюда не входят: их
+ * Мягкие проблемы (открытая заявка, частичный возврат) — пометки, сюда не входят: их
  * решает человек, и после ручной разморозки заказ должен выкупаться.
  */
 export async function findHardProblem(
@@ -504,7 +527,7 @@ export async function findHardProblem(
     db.wbCode?.findUnique({ where: { code: order.wbCode }, select: { status: true } }).catch(() => null),
     db.wbMarketplaceOrder?.findFirst({
       where: { wbCode: { code: order.wbCode } },
-      select: { cancelledAt: true, claimOpenedAt: true, claimResolvedAt: true, claimReason: true },
+      select: { cancelledAt: true },
     }).catch(() => null),
     db.paymentAttempt?.findMany({ where: { orderId: order.id }, select: { status: true, updatedAt: true } }).catch(() => []),
     db.orderHold?.findUnique({ where: { wbCode: order.wbCode }, select: { manualReleaseAt: true } }).catch(() => null),
@@ -518,9 +541,7 @@ export async function findHardProblem(
   const found: Array<{ kind: ProblemKind; detail?: string | null; at?: Date | null }> = [];
   if (code?.status === "REVOKED") found.push({ kind: "CODE_REVOKED" });
   if (dbs?.cancelledAt) found.push({ kind: "WB_CANCELLED", at: dbs.cancelledAt });
-  if (dbs?.claimOpenedAt && !dbs.claimResolvedAt) {
-    found.push({ kind: "WB_CLAIM", detail: dbs.claimReason, at: dbs.claimOpenedAt });
-  }
+  // Открытая заявка WB с 11.11.2026 — пометка, а не блок (`order-flags.ts`).
   const rows: Array<{ status: string; updatedAt?: Date | null }> = payments ?? [];
   const statuses = rows.map((p) => String(p.status));
   if (statuses.includes("REFUNDED") && !statuses.some((s) => LIVE_PAYMENT.has(s))) {

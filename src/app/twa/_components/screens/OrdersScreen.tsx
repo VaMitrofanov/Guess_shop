@@ -1,5 +1,7 @@
 "use client";
 import { basketLabel } from "@/lib/wb-basket";
+import { flagsConfirmText } from "@/lib/order-signals";
+import { orderFeed, orderHeadline, orderNow, orderStateWord } from "@/lib/order-feed";
 import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type React from "react";
@@ -122,6 +124,9 @@ interface Order {
    *  кроме нового плохого отзыва и возврата денег. */
   manualReleaseAt?: string | null;
   manualReleaseBy?: string | null;
+  /** 🏷 Пометки (11.11.2026): «возврат открыт», «висит» — видно, выкуп не блокирует. */
+  flags?: unknown;
+  flaggedAt?: string | null;
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Тоже поверх статуса. */
   priorityAt?: string | null;
   priorityBy?: string | null;
@@ -249,6 +254,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
   ATTENTION:     { label: "Требуют внимания", color: C.orange },
   HELD:          { label: "Заморожены",      color: ICE },
+  FLAGGED:       { label: "🏷 С пометками",   color: C.orange },
 };
 
 /* ── Срезы ───────────────────────────────────────────────────────────────────
@@ -275,7 +281,7 @@ const SLICE_IDS = new Set<string>(SLICES.map(s => s.id));
    «Все», и своей строкой она стояла бы в шторке дважды. Её строка — отдельная,
    ниже. */
 const SHEET_FILTERS: FilterTab[] = [
-  "ALL", "WORK", "NEW", "DIRECT", "AVITO", "FAVORITES", "REJECTED", "HELD", "STALE_LINK",
+  "ALL", "WORK", "NEW", "DIRECT", "AVITO", "FAVORITES", "REJECTED", "FLAGGED", "HELD", "STALE_LINK",
 ];
 
 const LANE_META: Record<LaneId, { label: string; color: string }> = {
@@ -803,6 +809,7 @@ function ActionPanel({
 
   async function doPurchase() {
     if (busyRef.current) return;
+    if (!(await confirmFlags(order, token))) return;
     busyRef.current = true;
     setLoading(true);
     try {
@@ -2549,6 +2556,7 @@ function OrderCard({
      читается как «заказ закрыт» и следующую часть никто не выкупит. */
   async function runPurchase() {
     if (primaryBusy) return;
+    if (!(await confirmFlags(order, token))) return;
     setPrimaryBusy(true);
     haptic.impact("light");
     try {
@@ -2820,6 +2828,7 @@ function OrderCard({
           <span className="twa-oc-prio" style={{ color: C.pink, background: `${C.pink}1f` }} title={order.rebuyReason ?? "Выкуплен, но не дошёл"}>🔁 перевыкуп</span>
         )}
         <BasketChips risk={order.risk} />
+        <StateWordTwa order={order} />
         {/* Отзыв и «проблемный» покупатель видны прямо в ленте (30.10.2026). */}
         {order.risk?.review?.kind === "BAD_REVIEW" && (
           <span className="twa-oc-prio" style={{ color: C.red, background: `${C.red}1f` }} title="Плохой отзыв на WB">★{order.risk.review.stars ?? "?"}</span>
@@ -2840,6 +2849,7 @@ function OrderCard({
         <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "Ник не указан"}</strong>
         <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
       </span>
+      <HeadlineTwa order={order} />
       <span className="twa-oc-meta">
         {/* Одиночной карточке бейдж состояния занял место источника — а полоса
             («WB DBS» против прямого заказа) для разговора с клиентом важна. */}
@@ -3139,6 +3149,7 @@ function OrderCard({
           <span className="twa-oc-prio" style={{ color: C.pink, background: `${C.pink}1f` }} title={order.rebuyReason ?? "Выкуплен, но не дошёл"}>🔁 перевыкуп</span>
         )}
         <BasketChips risk={order.risk} />
+        <StateWordTwa order={order} />
           <em className="twa-os-buyer">{shortName}</em>
           {codeChip()}
         </span>
@@ -3151,50 +3162,14 @@ function OrderCard({
       </div>
 
       <div className="twa-os-body">
-      {/* ❄️ Плашка заморозки — ПЕРЕД всеми полями.
-          Раньше причину «почему нельзя трогать» приходилось вычитывать из
-          заметки наравне со служебным логом; здесь она первое, что видно. */}
-      {order.heldAt && (
-        <div style={{
-          display: "flex", gap: 11, margin: 0, padding: "13px 14px",
-          borderRadius: 14, background: `${ICE}1a`, border: `1px solid ${ICE}57`,
-        }}>
-          <span style={{ fontSize: 19, lineHeight: 1.2 }}>❄️</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-            <strong style={{ fontSize: 14, fontWeight: 700, color: ICE, letterSpacing: ".01em" }}>
-              ЗАМОРОЖЕН — НЕ ВЫКУПАТЬ
-            </strong>
-            <span style={{ fontSize: 15, color: C.textPrimary, lineHeight: 1.4 }}>
-              {order.heldReason || "причина не указана"}
-            </span>
-            <span style={{ fontSize: 14, color: C.textTertiary, fontFamily: MONO }}>
-              {order.heldBy ?? "—"} · {fmtAge(order.heldAt)} назад
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* 🛡 Пометка «разморожен вручную» (11.11.2026): видно, что автоматика
-          этот заказ больше не тронет — и почему он не замёрз по заявке WB. */}
-      {!order.heldAt && order.manualReleaseAt && (
-        <div style={{
-          display: "flex", gap: 11, margin: 0, padding: "11px 14px",
-          borderRadius: 14, background: `${C.green}14`, border: `1px solid ${C.green}40`,
-        }}>
-          <span style={{ fontSize: 17, lineHeight: 1.25 }}>🛡</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
-            <strong style={{ fontSize: 14, fontWeight: 700, color: C.green, letterSpacing: ".01em" }}>
-              РАЗМОРОЖЕН ВРУЧНУЮ
-            </strong>
-            <span style={{ fontSize: 14, color: C.textSecondary, lineHeight: 1.4 }}>
-              Автоматика не морозит, кроме нового плохого отзыва и возврата денег
-            </span>
-            <span style={{ fontSize: 14, color: C.textTertiary, fontFamily: MONO }}>
-              {order.manualReleaseBy ?? "—"} · {fmtAge(order.manualReleaseAt)} назад
-            </span>
-          </div>
-        </div>
-      )}
+      {/* Сигналы заказа (11.11.2026) — ПЕРЕД всеми полями: заморозка, пометки
+          и решения по ним одним блоком, а не россыпью плашек. Действие —
+          справа в строке сигнала, там же, где глаз читает причину. */}
+      <NowCard
+        order={order}
+        onUnhold={() => { haptic.impact("light"); void onRunAction("unhold"); }}
+        onAck={(flag) => { haptic.impact("light"); void onRunAction("ack-flag", flag); }}
+      />
 
       {/* ★ Отзыв покупателя и досье (30.10.2026): рядом с заморозкой — «почему
           заморожен» и «что написал человек» читаются вместе. */}
@@ -3291,8 +3266,9 @@ function OrderCard({
           />
         )}
 
-        {/* 3. Заметки. */}
-        <NotesEditor order={order} onSave={onSaveNote} />
+        {/* 3. Лента заказа (11.11.2026): заметки, заморозки, заявки и правки
+            одной хроникой. Сырой текст заметки — по «Править текстом». */}
+        <OrderFeedTwa order={order} onAdd={(text) => onRunAction("add-note", text)} onSaveRaw={onSaveNote} />
 
         {/* Вход в полную шторку: потянуть вверх или сразу в раздел. */}
         {!sheetExpanded && (
@@ -4311,6 +4287,48 @@ export default function OrdersScreen({
         return { ok: false, error: "Ошибка сети" };
       }
     }
+
+    /* 🏷 «✓ Договорились» (11.11.2026): пометка гаснет, но остаётся в истории
+       заказа. Статус не меняется — машинка вкладок ниже не нужна. */
+    /* Лента заказа: «Добавить заметку» дописывает строку с автором и временем. */
+    if (action === "add-note") {
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action, orderId: order.id, text: reason ?? "" }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { haptic.notify("error"); return { ok: false, error: d.error ?? "Ошибка" }; }
+        setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, adminNote: d.note ?? o.adminNote } : o));
+        haptic.notify("success");
+        return { ok: true };
+      } catch {
+        haptic.notify("error");
+        return { ok: false, error: "Ошибка сети" };
+      }
+    }
+    if (action === "ack-flag") {
+      haptic.impact("light");
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action, orderId: order.id, ...(reason ? { kind: reason } : {}) }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { haptic.notify("error"); return { ok: false, error: d.error ?? "Ошибка" }; }
+        setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, flags: d.flags, flaggedAt: d.flaggedAt } : o));
+        haptic.notify("success");
+        toast("✓ Договорились", "success");
+        onActionDone?.();
+        return { ok: true };
+      } catch {
+        haptic.notify("error");
+        return { ok: false, error: "Ошибка сети" };
+      }
+    }
+    if (action === "complete" && !(await confirmFlags(order, token))) return { ok: false, error: "Отменено" };
 
     const fromTab = orderToTab(order);
     let toTab: FilterTab | null = null;
@@ -5764,6 +5782,7 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     FAVORITES: "Нет избранных",
     ATTENTION: "Ничего не требует внимания",
     HELD: "Замороженных заказов нет",
+    FLAGGED: "Пометок нет — всё решено",
   };
   return (
     <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
@@ -5802,5 +5821,137 @@ function BasketChips({ risk }: { risk?: { basket?: { index: number; total: numbe
       <span className="twa-oc-prio" style={{ color: C.teal, background: `${C.teal}1f` }} title={`Покупка из ${b.total} заказов. Соседние: ${others.join("; ")}`}>{label.text}</span>
       {label.twoAccounts && <span className="twa-oc-prio" style={{ color: C.yellow, background: `${C.yellow}1f` }} title="У заказов корзины разные ники Roblox">2 аккаунта</span>}
     </>
+  );
+}
+
+
+/* ── 🏷 Пометки перед выкупом (11.11.2026) ────────────────────────────────────
+   Пометка не блокирует выкуп, но и не пропускает его молча: одно
+   подтверждение, после которого пометки гаснут как «договорились». */
+async function confirmFlags(order: Order, token: string): Promise<boolean> {
+  const text = flagsConfirmText(order);
+  if (!text) return true;
+  if (!window.confirm(text)) return false;
+  await fetch("/api/twa/orders", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "ack-flag", orderId: order.id }),
+  }).catch(() => undefined);
+  return true;
+}
+
+const SIGNAL_COLOR: Record<string, string> = {
+  ice: ICE, orange: C.orange, yellow: C.yellow, red: C.red, green: C.green, muted: C.textTertiary,
+  blue: C.blue, accent: C.accent, pink: C.pink, purple: C.accent,
+};
+
+/** Слово состояния в верхней строке карточки: «возврат открыт», «заморожен». */
+function StateWordTwa({ order }: { order: Order }) {
+  const w = orderStateWord(order);
+  if (!w || order.heldAt) return null;
+  const c = SIGNAL_COLOR[w.tone] ?? C.orange;
+  return <span style={{ color: c, fontSize: 14, fontWeight: 650, whiteSpace: "nowrap" }}>{w.text}</span>;
+}
+
+/** Под ником: заметка человека, иначе слова покупателя. Одна строка. */
+function HeadlineTwa({ order }: { order: Order }) {
+  const text = orderHeadline(order);
+  if (!text) return null;
+  return (
+    <span style={{ display: "block", color: C.textSecondary, fontSize: 14, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      {text}
+    </span>
+  );
+}
+
+/** «Сейчас»: можно ли выкупать, почему, что сделать — и заметка. */
+function NowCard({ order, onUnhold, onAck }: { order: Order; onUnhold: () => void; onAck: (flag: string) => void }) {
+  const now = orderNow(order);
+  if (!now) return null;
+  const c = SIGNAL_COLOR[now.tone] ?? C.textTertiary;
+  return (
+    <div style={{ padding: 16, borderRadius: 18, background: `${c}17` }}>
+      {now.title && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 4, background: c, flexShrink: 0 }} />
+          <strong style={{ fontSize: 16, fontWeight: 650, flex: 1 }}>{now.title}</strong>
+          {now.action && (
+            <button className="twa-press-sm"
+              onClick={e => { e.stopPropagation(); if (now.action!.kind === "unhold") onUnhold(); else if (now.action!.kind === "ack") onAck(now.action!.flag); }}
+              style={{ height: 34, padding: "0 13px", border: "none", borderRadius: 10, background: `${c}33`, color: c, fontSize: 14, fontWeight: 650, cursor: "pointer" }}>
+              {now.actionLabel}
+            </button>
+          )}
+        </div>
+      )}
+      {now.sub && <div style={{ margin: "6px 0 0 18px", color: C.textSecondary, fontSize: 14, lineHeight: 1.4 }}>{now.sub}</div>}
+      {now.quote && <Quote text={now.quote} style={{ margin: "10px 0 0 18px" }} />}
+      {now.note && (
+        <div style={{ margin: now.title ? "10px 0 0 18px" : 0 }}>
+          <div style={{ fontSize: 15, lineHeight: 1.45, color: C.textPrimary }}>{now.note.text}</div>
+          {now.note.meta && <div style={{ marginTop: 4, fontSize: 14, color: C.textTertiary }}>{now.note.meta}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Quote({ text, style }: { text: string; style?: React.CSSProperties }) {
+  return (
+    <div style={{ paddingLeft: 11, borderLeft: `2px solid ${C.orange}`, color: C.textPrimary, fontSize: 15, lineHeight: 1.45, overflowWrap: "anywhere", ...style }}>
+      «{text}»
+    </div>
+  );
+}
+
+/** Лента заказа: поле заметки и хроника. Сырой текст — за «Править текстом». */
+function OrderFeedTwa({ order, onAdd, onSaveRaw }: {
+  order: Order;
+  onAdd: (text: string) => Promise<ActionResult>;
+  onSaveRaw: (note: string) => Promise<ActionResult>;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [raw, setRaw] = useState(false);
+  const entries = orderFeed(order);
+  async function submit() {
+    const value = text.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    const res = await onAdd(value);
+    setBusy(false);
+    if (res.ok) setText("");
+    else toast(res.error ?? "Не сохранилось", "error");
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }} onClick={e => e.stopPropagation()}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Лента заказа</span>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={text} disabled={busy} onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }}
+          placeholder="Добавить заметку…" aria-label="Добавить заметку"
+          style={{ flex: 1, minWidth: 0, height: 44, padding: "0 14px", border: "none", borderRadius: 13, background: "rgba(255,255,255,0.07)", color: C.textPrimary, fontSize: 15, outline: "none", fontFamily: "inherit" }} />
+        {text.trim() && (
+          <button className="twa-press-sm" onClick={() => void submit()} disabled={busy}
+            style={{ height: 44, padding: "0 14px", border: "none", borderRadius: 13, background: C.accent, color: "#160f2b", fontSize: 15, fontWeight: 650, cursor: "pointer" }}>
+            {busy ? "…" : "Готово"}
+          </button>
+        )}
+      </div>
+      {entries.map(e => (
+        <div key={e.key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 15, lineHeight: 1.4 }}>
+            <span style={{ color: e.weight === "dim" ? C.textSecondary : C.textPrimary, minWidth: 0, overflowWrap: "anywhere" }}>{e.text}</span>
+            {e.meta && <span style={{ flexShrink: 0, color: C.textTertiary, fontSize: 14 }}>{e.meta}</span>}
+          </div>
+          {e.quote && <Quote text={e.quote} />}
+        </div>
+      ))}
+      <button onClick={() => setRaw(v => !v)}
+        style={{ alignSelf: "flex-start", padding: 0, border: "none", background: "none", color: C.textTertiary, fontSize: 14, cursor: "pointer" }}>
+        {raw ? "Скрыть текст" : "Править текстом"}
+      </button>
+      {raw && <NotesEditor order={order} onSave={onSaveRaw} />}
+    </div>
   );
 }

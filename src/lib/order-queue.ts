@@ -18,7 +18,7 @@ import { parseGamepassId } from "@/lib/roblox-buyout";
 export type FilterTab =
   | "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW"
   | "ERROR" | "AWAITING_LINK" | "STALE_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION"
-  | "HELD";
+  | "HELD" | "FLAGGED";
 
 /* Заморозка — не двенадцатый статус, а фильтр по одному полю: логика вкладок
    не размножается. Замороженный заказ уходит из ВСЕХ рабочих вкладок в свою,
@@ -127,6 +127,7 @@ export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
     OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
   )`,
   HELD: `"heldAt" IS NOT NULL`,
+  FLAGGED: `"flaggedAt" IS NOT NULL AND ${NOT_HELD_SQL} AND status NOT IN ('COMPLETED','REJECTED')`,
 };
 
 /**
@@ -190,6 +191,10 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
     // Единственная вкладка, где замороженные ЕСТЬ и где они одни.
     case "HELD":
       return { heldAt: { not: null } };
+    // 🏷 Пометки (11.11.2026): заказ остаётся и в своей рабочей вкладке, здесь —
+    // все «возврат открыт / висит» разом, старейшая пометка сверху.
+    case "FLAGGED":
+      return { flaggedAt: { not: null }, ...NOT_HELD, status: { notIn: ["COMPLETED", "REJECTED"] } };
     case "ATTENTION": {
       const buyoutOverdue = new Date(Date.now() - ATTENTION_BUYOUT_HOURS * 3600_000);
       return {
@@ -263,6 +268,7 @@ export function orderByForTab(
     : tab === "ERROR" || tab === "AWAITING_LINK" || tab === "STALE_LINK" || tab === "ATTENTION" ? [{ createdAt: "asc" }]
     // Свежая заморозка сверху: её причину чаще всего и уточняют.
     : tab === "HELD" ? [{ heldAt: "desc" }]
+    : tab === "FLAGGED" ? [{ flaggedAt: "asc" }]
     : [{ createdAt: "desc" }];
 
   // В «Готово», «Отменённых» и «Избранном» приоритет ничего не значит: там
