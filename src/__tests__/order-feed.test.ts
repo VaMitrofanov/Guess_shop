@@ -65,3 +65,28 @@ describe("строка очереди", () => {
     expect(humanNoteLine("  договорились  в чате ", "Demid")).toMatch(/^\[ЗАМЕТКА \d{2}\.\d{2}, \d{2}:\d{2} · Demid\] договорились в чате$/);
   });
 });
+
+describe("collapseFeed — повторы ленты одной строкой", () => {
+  const { collapseFeed } = jest.requireActual("@/lib/order-feed") as typeof import("@/lib/order-feed");
+  const e = (key: string, text: string, meta: string, ts: number) => ({ key, text, meta, weight: "dim" as const, ts });
+
+  it("заморозки/разморозки подряд — одна строка с причиной и кто менял", () => {
+    const out = collapseFeed([
+      e("1", "Разморожен", "Roblox · вчера", 9),
+      e("2", "Заморожен: Возврат на WB: «купила 2 карточку»", "автозащита · 5 ноя", 8),
+      e("3", "Разморожен", "GuessWho · 5 ноя", 7),
+      e("4", "Заморожен: Возврат на WB: «купила 2 карточку»", "автозащита · 5 ноя", 6),
+      e("5", "Правка: ГП 1→2", "GuessWho · 5 ноя", 5),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0].text).toBe("❄️ Заморожен ↔ разморожен ×4");
+    expect(out[0].quote).toBe("Возврат на WB: «купила 2 карточку»");
+    expect(out[0].meta).toBe("Roblox, автозащита, GuessWho · вчера");
+    expect(out[1].text).toBe("Правка: ГП 1→2");
+  });
+
+  it("одиночные события не трогает, одинаковые подряд — ×N", () => {
+    const out = collapseFeed([e("a", "Висит без выкупа", "1 ноя", 3), e("b", "Висит без выкупа", "31 окт", 2), e("c", "Разморожен", "x · 30 окт", 1)]);
+    expect(out.map((x) => x.text)).toEqual(["Висит без выкупа ×2", "Разморожен"]);
+  });
+});

@@ -12,7 +12,7 @@
  */
 
 import { useState } from "react";
-import { orderFeed, orderHeadline, orderNow, orderStateWord, type FeedOrder } from "@/lib/order-feed";
+import { collapseFeed, orderFeed, orderHeadline, orderNow, orderStateWord, type FeedOrder } from "@/lib/order-feed";
 import { TONE_COLOR } from "./types";
 import styles from "./orders.module.css";
 
@@ -79,7 +79,7 @@ export function OrderFeed({
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const entries = orderFeed(order);
+  const entries = collapseFeed(orderFeed(order));
 
   async function submit() {
     const value = text.trim();

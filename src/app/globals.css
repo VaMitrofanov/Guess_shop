@@ -2155,8 +2155,43 @@ html.twa-route-active [contenteditable="true"] {
 .twa-os-chip { min-height: 34px; padding: 0 13px; border: 0; border-radius: 999px; background: rgba(255,255,255,.08); color: #d8d3e4; font-size: 14px; font-weight: 600; }
 @keyframes twa-os-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 
-.twa-os-sec { scroll-margin-top: 112px; padding: 6px 0 8px; animation: twa-os-in .42s cubic-bezier(.32,1.25,.5,1) both; }
-.twa-os-sec > h3 { margin: 6px 20px 8px; color: #8e8a99; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+/* ── Блоки карточки заказа (редизайн 11.11.2026, мокап «Карточка заказа — редизайн»).
+   Каждый блок отвечает на один вопрос и выглядит одинаково: одна карточка, шапка
+   с эмодзи и статусом справа, строки «метка · значение · действие». Цвет — только
+   смысл (статус, опасное действие), блоки целиком не красятся. */
+.twa-blk { overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; background: rgba(255,255,255,.04); }
+.twa-blk-h { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px 0 14px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.twa-blk-h > span { font-size: 16px; line-height: 1; }
+.twa-blk-h > h4 { margin: 0; color: #f7f5ff; font-size: 14px; font-weight: 650; }
+.twa-blk-pill { margin-left: auto; padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.07); color: #d8d3e4; font-size: 13px; font-style: normal; font-weight: 600; white-space: nowrap; }
+.twa-blk-pill.is-ok { background: rgba(48,209,88,.14); color: #6ee58d; }
+.twa-blk-pill.is-warn { background: rgba(255,179,64,.14); color: #ffc46b; }
+.twa-blk-pill.is-stop { background: rgba(255,105,97,.14); color: #ff8a82; }
+.twa-blk-pill.is-wait { background: rgba(255,255,255,.07); color: #aaa4b8; }
+.twa-blk-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 6px 0 14px; border: 0; border-top: 1px solid rgba(255,255,255,.06); background: transparent; color: #f7f5ff; font-family: inherit; text-align: left; text-decoration: none; }
+.twa-blk-h + .twa-blk-row { border-top: 0; }
+.twa-blk-l { flex: 0 0 auto; width: 84px; color: #aaa4b8; font-size: 14px; }
+.twa-blk-v { flex: 1; min-width: 0; overflow: hidden; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-blk-v small { color: #aaa4b8; font-size: 14px; font-weight: 500; }
+.twa-blk-v.is-mono { font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; }
+.twa-blk-v.is-dim { color: #8e8a99; font-weight: 500; }
+.twa-blk-v.is-warn { color: #ffc46b; }
+.twa-blk-v.is-stop { color: #ff8a82; }
+.twa-blk-row > i { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; color: #aaa4b8; font-size: 16px; font-style: normal; }
+.twa-blk-row.is-guess .twa-blk-v { color: #ffe066; }
+.twa-blk-inset { padding: 8px 10px 10px; border-top: 1px solid rgba(255,255,255,.06); }
+.twa-blk-pad { padding: 12px 14px 14px; }
+.twa-blk-next { padding: 10px 14px; border-top: 1px solid rgba(255,255,255,.06); font-size: 14px; font-weight: 600; line-height: 1.35; }
+.twa-blk-next.is-quiet { color: #aaa4b8; font-weight: 500; }
+/* Разделы полной шторки — такие же блоки: карточка, шапка с эмодзи. */
+.twa-os-sec { scroll-margin-top: 112px; margin: 0 16px 12px; padding: 0 0 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; background: rgba(255,255,255,.04); animation: twa-os-in .42s cubic-bezier(.32,1.25,.5,1) both; }
+.twa-os-sec > h3 { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0 0 8px; padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,.07); color: #f7f5ff; font-size: 14px; font-weight: 650; letter-spacing: 0; text-transform: none; }
+.twa-os-sec > h3 > span { font-size: 16px; line-height: 1; }
+.twa-os-sec .twa-os-group { margin: 0 10px 10px; background: rgba(255,255,255,.045); }
+/* Раздел без содержимого (например, «Пасс» у выкупленного заказа) не рисует пустую карточку. */
+.twa-os-sec:has(> h3:only-child) { display: none; }
+.twa-os-chev { flex: 0 0 auto; color: #6f6882; font-size: 20px; }
+.twa-os-row.is-danger, .twa-os-row.is-danger b { color: #ff8a82; }
 @keyframes twa-os-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 .twa-os-ref { margin: 2px 18px 8px; color: #777181; font-size: 13px; line-height: 1.4; }
 .twa-os-group { margin: 0 14px 10px; border-radius: 16px; overflow: hidden; background: rgba(255,255,255,.055); }

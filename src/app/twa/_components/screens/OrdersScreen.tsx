@@ -1,7 +1,7 @@
 "use client";
 import { basketLabel } from "@/lib/wb-basket";
 import { flagsConfirmText } from "@/lib/order-signals";
-import { orderFeed, orderHeadline, orderNow, orderStateWord } from "@/lib/order-feed";
+import { collapseFeed, orderFeed, orderHeadline, orderNow, orderStateWord } from "@/lib/order-feed";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type React from "react";
 import { RefreshCw } from "lucide-react";
@@ -3133,73 +3133,72 @@ function OrderCard({
           <BuyoutBlock order={order} resendBusy={resendBusy} onResend={() => resendCompletedNotice()} />
         )}
 
-        {/* 1. Ник Roblox — крупно, тап копирует. По нику проверяют аккаунт и
-            ищут пасс; на сайте на этом месте стоит ID пасса (там выкупают с
-            компьютера и вставляют ID, а с телефона чаще ищут по нику). */}
-        {nick ? (
-          <button
-            type="button"
-            className={`twa-os-hero twa-press-sm${copied === "nick" ? " is-done" : ""}${nickIsGuess ? " is-guess" : ""}`}
-            onClick={() => copyAnd(nick, "nick", `Ник ${nick} скопирован`)}
-          >
-            <span>
-              <small>{copied === "nick" ? "Скопирован" : nickIsGuess ? "Вероятный ник · тап — скопировать" : "Ник Roblox · тап — скопировать"}</small>
-              <strong>{nick}</strong>
-            </span>
-            <i aria-hidden="true">{copied === "nick" ? "✓" : "⧉"}</i>
-          </button>
-        ) : (
-          <div className="twa-os-hero is-empty">
-            <span><small>Ник Roblox</small><strong>не указан</strong></span>
-          </div>
-        )}
-
-        {/* 2. ID пасса и ссылка на него. Разбитый заказ — список частей. */}
-        {split.length > 0 ? (
-          <SplitPartsBlock parts={split} orderAmount={order.amount} orderId={order.id} token={token} onChanged={onMoved} />
-        ) : passId ? (
-          <div className="twa-os-pass">
-            <div className="twa-os-pass-row">
-              <span>
-                <small>ID пасса</small>
-                <strong>{passId}</strong>
-              </span>
-              <button type="button" className={`twa-os-iconbtn twa-press-sm${copied === "pass" ? " is-done" : ""}`}
-                aria-label="Скопировать ID пасса" onClick={() => void copyPassAndVerify(passId, "ID пасса")}>
-                {copied === "pass" ? "✓" : "⧉"}
-              </button>
-            </div>
-            <a className="twa-os-pass-link" href={`https://www.roblox.com/game-pass/${passId}`} target="_blank" rel="noreferrer">
-              roblox.com/game-pass/{passId} <span aria-hidden="true">↗</span>
-            </a>
-            {live && (
-              <span className="twa-os-pass-state" style={{ color: live.isForSale === false ? C.red : live.priceMismatch ? C.orange : C.green }}>
-                {live.isForSale === false
-                  ? "⛔ снят с продажи"
-                  : live.priceMismatch && live.livePrice != null
-                    ? `⚠ ${live.livePrice.toLocaleString("ru-RU")} R$ — не та цена`
-                    : `✓ ${live.livePrice != null ? `${live.livePrice.toLocaleString("ru-RU")} R$ · ` : ""}в продаже, цена сходится`}
-              </span>
-            )}
-          </div>
-        ) : order.gamepassUrl ? (
-          <DataRow icon="🔗" copyText={order.gamepassUrl}>
-            <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
-          </DataRow>
-        ) : null}
-
-        {/* «Дальше» — только когда есть что сказать сверх полоски готовности:
-            зелёное «выкупить пасс за N» она уже показала. */}
+        {/* 🛒 Выкуп (редизайн 11.11.2026, мокап «Карточка заказа — редизайн»): всё,
+            что нужно для покупки, — одним блоком строк вместо зелёной плашки
+            ника и отдельной карточки пасса. Статус пасса — в шапке блока. */}
         {(() => {
-          if (order.heldAt) return null;
-          const next = sharedNextStep(order as never, live, order.remindersSent ?? 0, { packDupIn });
-          if (!next || next.tone === "green") return null;
-          const color = TONE[next.tone];
-          const quiet = next.tone === "muted";
+          const passState = split.length > 0
+            ? { icon: "🧩", text: `${split.filter(part => part.purchasedAt).length}/${split.length} частей`, tone: "" }
+            : !passId
+              ? { icon: "⏳", text: "ждём пасс", tone: "is-wait" }
+              : live?.isForSale === false
+                ? { icon: "⛔", text: "снят с продажи", tone: "is-stop" }
+                : live?.priceMismatch
+                  ? { icon: "⚠️", text: "не та цена", tone: "is-warn" }
+                  : live
+                    ? { icon: "✅", text: "всё сходится", tone: "is-ok" }
+                    : { icon: "🎫", text: "пасс привязан", tone: "" };
+          const next = order.heldAt ? null : sharedNextStep(order as never, live, order.remindersSent ?? 0, { packDupIn });
           return (
-            <div className={`twa-oc-next${quiet ? " is-quiet" : ""}`} style={quiet ? undefined : { color, background: `${color}14`, borderColor: `${color}33` }}>
-              <small>Дальше</small>
-              <span>{next.text}</span>
+            <div className="twa-blk">
+              <div className="twa-blk-h">
+                <span aria-hidden="true">🛒</span><h4>Выкуп</h4>
+                <em className={`twa-blk-pill ${passState.tone}`}>{passState.icon} {passState.text}</em>
+              </div>
+              {nick ? (
+                <button type="button" className={`twa-blk-row twa-press-sm${nickIsGuess ? " is-guess" : ""}`}
+                  onClick={() => copyAnd(nick, "nick", `Ник ${nick} скопирован`)}>
+                  <span className="twa-blk-l">🎮 {nickIsGuess ? "Ник?" : "Ник"}</span>
+                  <span className="twa-blk-v">{nick}</span>
+                  <i aria-hidden="true">{copied === "nick" ? "✓" : "⧉"}</i>
+                </button>
+              ) : (
+                <div className="twa-blk-row"><span className="twa-blk-l">🎮 Ник</span><span className="twa-blk-v is-dim">не указан</span></div>
+              )}
+              {split.length > 0 ? (
+                <div className="twa-blk-inset">
+                  <SplitPartsBlock parts={split} orderAmount={order.amount} orderId={order.id} token={token} onChanged={onMoved} />
+                </div>
+              ) : passId ? (
+                <>
+                  <button type="button" className="twa-blk-row twa-press-sm" aria-label="Скопировать ID пасса"
+                    onClick={() => void copyPassAndVerify(passId, "ID пасса")}>
+                    <span className="twa-blk-l">🎫 Пасс</span>
+                    <span className="twa-blk-v is-mono">{passId}</span>
+                    <i aria-hidden="true">{copied === "pass" ? "✓" : "⧉"}</i>
+                  </button>
+                  <a className="twa-blk-row" href={`https://www.roblox.com/game-pass/${passId}`} target="_blank" rel="noreferrer">
+                    <span className="twa-blk-l">💰 Цена</span>
+                    <span className={`twa-blk-v ${passState.tone}`}>
+                      {live?.livePrice != null ? `${live.livePrice.toLocaleString("ru-RU")} R$` : `${Math.ceil(order.amount / 0.7).toLocaleString("ru-RU")} R$`}
+                      <small>{live?.isForSale === false ? " · снят с продажи" : live?.priceMismatch ? " · не та цена" : live ? " · в продаже" : ""}</small>
+                    </span>
+                    <i aria-hidden="true">↗</i>
+                  </a>
+                </>
+              ) : order.gamepassUrl ? (
+                <a className="twa-blk-row" href={order.gamepassUrl} target="_blank" rel="noreferrer">
+                  <span className="twa-blk-l">🔗 Ссылка</span>
+                  <span className="twa-blk-v">{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
+                  <i aria-hidden="true">↗</i>
+                </a>
+              ) : null}
+              {/* «Дальше» — только когда есть что сказать сверх статуса блока. */}
+              {next && next.tone !== "green" && (
+                <div className={`twa-blk-next${next.tone === "muted" ? " is-quiet" : ""}`} style={next.tone === "muted" ? undefined : { color: TONE[next.tone] }}>
+                  👉 {next.text}
+                </div>
+              )}
             </div>
           );
         })()}
@@ -3217,7 +3216,12 @@ function OrderCard({
 
         {/* 3. Лента заказа (11.11.2026): заметки, заморозки, заявки и правки
             одной хроникой. Сырой текст заметки — по «Править текстом». */}
-        <OrderFeedTwa order={order} onAdd={(text) => onRunAction("add-note", text)} onSaveRaw={onSaveNote} />
+        <div className="twa-blk">
+          <div className="twa-blk-h"><span aria-hidden="true">🕓</span><h4>Лента</h4></div>
+          <div className="twa-blk-pad">
+            <OrderFeedTwa order={order} onAdd={(text) => onRunAction("add-note", text)} onSaveRaw={onSaveNote} />
+          </div>
+        </div>
 
         {/* Вход в полную шторку: потянуть вверх или сразу в раздел. */}
         {!sheetExpanded && (
@@ -3234,7 +3238,7 @@ function OrderCard({
 
       {/* ── Разделы полной шторки ─────────────────────────────────────────── */}
       <section data-form="gamepass" className="twa-os-sec">
-        <h3>Пасс</h3>
+        <h3><span aria-hidden="true">🧩</span> Пасс</h3>
       {/* ── 🎮 Геймпасс заказа: одно меню на четыре инструмента ──────────────
           Было четыре отдельных блока со своими кнопками и своими словами —
           «Вставить ссылку», «Ещё пассы ника», «Разбить», а ключ вообще только
@@ -3350,7 +3354,7 @@ function OrderCard({
       {/* Заказ: признаки поверх статуса (заморозка, избранное, очередь) и всё,
           что делается с самим заказом. */}
       <section data-form="order" className="twa-os-sec">
-        <h3>Заказ</h3>
+        <h3><span aria-hidden="true">⚙️</span> Заказ</h3>
         <div className="twa-os-group">
           {order.heldAt ? (
             <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); void onRunAction("unhold"); }}>
@@ -3378,6 +3382,36 @@ function OrderCard({
             </button>
           )}
         </div>
+        {/* Действия с заказом — строками одной группы (редизайн 11.11.2026), а не
+            четырьмя контурными кнопками разного цвета. Опасное — отдельно, ниже. */}
+        {(() => {
+          const canEditNow = isEditable && order.status !== "COMPLETED" && !editOpen;
+          const canRebind = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && !rebindOpen;
+          const canMoveNow = showMoveBtn && !moveOpen;
+          if (!canEditNow && !canRebind && !canMoveNow) return null;
+          const actRow = (icon: string, title: string, sub: string, onTap: () => void) => (
+            <button type="button" className="twa-os-row twa-press-sm" onClick={e => { e.stopPropagation(); haptic.select(); onTap(); }}>
+              <span className="twa-os-ic">{icon}</span>
+              <span className="twa-os-tx"><b>{title}</b><small>{sub}</small></span>
+              <span className="twa-os-chev" aria-hidden="true">›</span>
+            </button>
+          );
+          return (
+            <div className="twa-os-group">
+              {canEditNow && actRow("✏️", "Редактировать", "номинал, ник, пасс", () => setEditOpen(true))}
+              {canMoveNow && actRow("↪️", "Переместить в раздел", "с записью в ленту", () => setMoveOpen(true))}
+              {canRebind && actRow("🔄", "Перепривязать", "к другому покупателю", () => setRebindOpen(true))}
+            </div>
+          );
+        })()}
+        {canRefund && !refundOpen && (
+          <div className="twa-os-group">
+            <button type="button" className="twa-os-row is-danger twa-press-sm" onClick={e => { e.stopPropagation(); setRefundOpen(true); }}>
+              <span className="twa-os-ic">↩️</span>
+              <span className="twa-os-tx"><b>Оформить возврат</b><small>деньги клиенту через T-Bank</small></span>
+            </button>
+          </div>
+        )}
       {holdOpen && (
         <div data-form="hold">
         <HoldModal
@@ -3397,10 +3431,6 @@ function OrderCard({
         </div>
       )}
 
-        <div style={{ padding: "0 16px" }}>
-        {/* Кто/когда/Pending/уведомление/отзыв и повтор уведомления — в блоке
-            «✅ Выкуплен» наверху шторки (BuyoutBlock, 27.10.2026). */}
-        </div>
       {/* Rejection reason for ALL tab */}
       {(currentTab === "ALL" || currentTab === "REJECTED") && order.status === "REJECTED" && order.rejectionReason && (
         <div style={{
@@ -3415,17 +3445,6 @@ function OrderCard({
 
       {/* Ошибка тоже должна быть рабочей папкой: вернуть — быстрым действием,
           переместить в любой другой раздел — через эту форму с аудитом. */}
-      {showMoveBtn && !moveOpen && (
-        <div style={{ padding: "0 14px 10px" }}>
-          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setMoveOpen(true); }}
-            style={{
-              width: "100%", padding: "12px", borderRadius: 10, border: `1px solid ${C.accent}44`,
-              background: "transparent", color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer",
-            }}>
-            ↪ Переместить в другой раздел
-          </button>
-        </div>
-      )}
 
       {rejectOpen && (
         <div data-form="reject">
@@ -3450,17 +3469,6 @@ function OrderCard({
       )}
 
       {/* Edit order button — правка номинала/ника/ГП за клиента */}
-      {isEditable && order.status !== "COMPLETED" && !editOpen && (
-        <div style={{ padding: "0 14px 6px" }}>
-          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setEditOpen(true); }}
-            style={{
-              width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.orange}44`,
-              background: "transparent", color: C.orange, fontSize: 14, fontWeight: 600, cursor: "pointer",
-            }}>
-            ✏️ Редактировать
-          </button>
-        </div>
-      )}
 
       {/* Тот же лист заказа, что и при создании, только с целью «правлю этот».
           Две формы с одинаковыми полями разошлись бы снова: в правке не было
@@ -3488,28 +3496,9 @@ function OrderCard({
         </div>
       )}
 
-      {canRefund && !refundOpen && (
-        <div style={{ padding: "0 14px 6px" }}>
-          <button className="twa-press-sm" onClick={event => { event.stopPropagation(); setRefundOpen(true); }}
-            style={{ width: "100%", padding: 10, borderRadius: 10, border: `1px solid ${C.red}55`, background: "transparent", color: C.red, fontWeight: 600 }}>
-            ↩️ Оформить возврат
-          </button>
-        </div>
-      )}
       {refundOpen && <div data-form="refund"><RefundModal order={order} token={token} onDone={() => { setRefundOpen(false); onMoved(); }} onClose={() => setRefundOpen(false)} /></div>}
 
       {/* Rebind button */}
-      {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && !rebindOpen && (
-        <div style={{ padding: "0 14px 6px" }}>
-          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setRebindOpen(true); }}
-            style={{
-              width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.textTertiary}44`,
-              background: "transparent", color: C.textSecondary, fontSize: 14, fontWeight: 600, cursor: "pointer",
-            }}>
-            🔄 Перепривязать
-          </button>
-        </div>
-      )}
 
       {rebindOpen && (
         <div data-form="rebind">
@@ -3535,7 +3524,7 @@ function OrderCard({
 
       {/* История: полноценная карточка покупателя и все его заказы. */}
       <section data-form="history" className="twa-os-sec">
-        <h3>Покупатель и история</h3>
+        <h3><span aria-hidden="true">👤</span> Клиент</h3>
       {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
       {order.vkUnreachable === true && order.user.vkId && (
         <div style={{
@@ -5853,7 +5842,7 @@ function OrderFeedTwa({ order, onAdd, onSaveRaw }: {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [raw, setRaw] = useState(false);
-  const entries = orderFeed(order);
+  const entries = collapseFeed(orderFeed(order));
   async function submit() {
     const value = text.trim();
     if (!value || busy) return;
@@ -5865,7 +5854,6 @@ function OrderFeedTwa({ order, onAdd, onSaveRaw }: {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }} onClick={e => e.stopPropagation()}>
-      <span style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Лента заказа</span>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={text} disabled={busy} onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }}
@@ -5881,8 +5869,8 @@ function OrderFeedTwa({ order, onAdd, onSaveRaw }: {
       {entries.map(e => (
         <div key={e.key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 15, lineHeight: 1.4 }}>
-            <span style={{ color: e.weight === "dim" ? C.textSecondary : C.textPrimary, minWidth: 0, overflowWrap: "anywhere" }}>{e.text}</span>
-            {e.meta && <span style={{ flexShrink: 0, color: C.textTertiary, fontSize: 14 }}>{e.meta}</span>}
+            <span style={{ flex: "1 1 55%", color: e.weight === "dim" ? C.textSecondary : C.textPrimary, minWidth: 0, overflowWrap: "anywhere" }}>{e.text}</span>
+            {e.meta && <span style={{ flex: "0 1 auto", maxWidth: "45%", color: C.textTertiary, fontSize: 14, textAlign: "right", overflowWrap: "anywhere" }}>{e.meta}</span>}
           </div>
           {e.quote && <Quote text={e.quote} />}
         </div>

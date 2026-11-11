@@ -151,6 +151,49 @@ export function orderFeed(order: FeedOrder, now = Date.now()): FeedEntry[] {
   return out.sort((a, b) => b.ts - a.ts);
 }
 
+/**
+ * Склеить повторы ленты (11.11.2026). Автозащита и люди переключали заморозку
+ * туда-обратно, и лента заказа `79PT6B3` повторяла «Заморожен: Возврат на WB:
+ * «…»» с полной цитатой четыре раза подряд. Подряд идущие заморозки/разморозки
+ * становятся одной строкой «❄️ Заморожен ↔ разморожен ×N» (причина — цитатой,
+ * кто менял — в подписи); подряд идущие одинаковые события — «текст ×N».
+ */
+export function collapseFeed(entries: readonly FeedEntry[]): FeedEntry[] {
+  // Не `\\b`: в JS он не видит границу после кириллицы.
+  const isHoldToggle = (e: FeedEntry) => /^(Заморожен|Разморожен)(?![\p{L}])/u.test(e.text);
+  const who = (e: FeedEntry) => (e.meta ?? "").split(" · ").length > 1 ? (e.meta ?? "").split(" · ")[0] : null;
+  const when = (e: FeedEntry) => (e.meta ?? "").split(" · ").slice(-1)[0] || null;
+  const out: FeedEntry[] = [];
+  for (let i = 0; i < entries.length; ) {
+    const head = entries[i];
+    let j = i + 1;
+    if (isHoldToggle(head)) {
+      while (j < entries.length && isHoldToggle(entries[j])) j++;
+    } else {
+      while (j < entries.length && entries[j].text === head.text) j++;
+    }
+    const run = entries.slice(i, j);
+    if (run.length < 2) { out.push(head); i = j; continue; }
+    if (isHoldToggle(head)) {
+      const reasonRow = run.find((e) => e.text.startsWith("Заморожен:"));
+      const reason = reasonRow ? reasonRow.text.replace(/^Заморожен:\s*/, "") : null;
+      const whos = [...new Set(run.map(who).filter((w): w is string => !!w))];
+      out.push({
+        key: `${head.key}-x${run.length}`,
+        text: `❄️ Заморожен ↔ разморожен ×${run.length}`,
+        quote: reason,
+        meta: [whos.join(", "), when(head)].filter(Boolean).join(" · ") || head.meta,
+        weight: "strong",
+        ts: head.ts,
+      });
+    } else {
+      out.push({ ...head, key: `${head.key}-x${run.length}`, text: `${head.text} ×${run.length}` });
+    }
+    i = j;
+  }
+  return out;
+}
+
 /* ── «Сейчас» ───────────────────────────────────────────────────────────── */
 
 export function orderNow(order: FeedOrder, now = Date.now()): OrderNow | null {
