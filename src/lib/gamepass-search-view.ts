@@ -1,14 +1,14 @@
 import { singlePassFits } from "./gamepass-plan";
 
-export type SearchableGamepass = {
+type SearchableGamepass = {
   price: number;
   isForSale?: boolean;
 };
 
-export const GAMEPASS_PRICE_TOLERANCE = 2;
+const GAMEPASS_PRICE_TOLERANCE = 2;
 
-export const SITE_MIN_ROBUX = 100;
-export const SITE_MAX_ROBUX = 100_000;
+const SITE_MIN_ROBUX = 100;
+const SITE_MAX_ROBUX = 100_000;
 
 /**
  * Converts an existing Roblox pass price back into the exact net amount the

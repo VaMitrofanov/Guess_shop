@@ -46,7 +46,7 @@ export interface ResolvedGamepass {
  * - row      — проблема геймпасса/строки (цена сменилась, не продаётся): исправляет партнёр;
  * - unknown  — не классифицировано, трактовать консервативно (не вешать на партнёра).
  */
-export type PurchaseFailureKind = "internal" | "row" | "unknown";
+type PurchaseFailureKind = "internal" | "row" | "unknown";
 
 export interface PurchaseResult {
   success: boolean;
@@ -282,13 +282,6 @@ export function needsOwnershipCheck(reason: string | null | undefined): boolean 
   return !(reason && CLEAN_REFUSAL_RE.test(reason));
 }
 
-/**
- * userId аккаунта, которому принадлежит cookie. null — определить не удалось.
- */
-export async function getAuthenticatedUserId(cookie: string): Promise<number | null> {
-  const result = await getBrowserSession(cookie);
-  return result.ok ? result.session?.accountId ?? null : null;
-}
 
 /**
  * Владеет ли аккаунт cookie геймпассом. true/false — достоверный ответ,
@@ -302,23 +295,4 @@ export async function verifyGamepassOwnership(
   return result.ok ? result.gamepass?.owned ?? null : null;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Контрольная проверка владения после провала покупки: пауза ~2.5 с (Roblox
- * проводит транзакцию с задержкой) → проверка; при провале без каноничного
- * reason (таймаут/«Нет ответа») или недоступной проверке — повтор через ~5 с.
- */
-export async function verifyOwnershipAfterFailure(
-  cookie: string,
-  gamepassId: string | number,
-  hasCanonicalReason: boolean,
-): Promise<boolean | null> {
-  await sleep(2_500);
-  let owned = await verifyGamepassOwnership(cookie, gamepassId);
-  if (owned !== true && (owned === null || !hasCanonicalReason)) {
-    await sleep(5_000);
-    owned = await verifyGamepassOwnership(cookie, gamepassId);
-  }
-  return owned;
-}

@@ -34,7 +34,7 @@ import { vkCanReceive } from "./notify";
 
 type Db = Pick<PrismaClient, "user" | "wbOrder" | "wbCode" | "userIdentity" | "$transaction">;
 
-export type ClaimProvider = Extract<UserIdentityProvider, "TG" | "VK">;
+type ClaimProvider = Extract<UserIdentityProvider, "TG" | "VK">;
 
 export type CodeOwner = {
   id: string;
@@ -44,7 +44,7 @@ export type CodeOwner = {
   username: string | null;
 };
 
-export type CodeClaimVerdict =
+type CodeClaimVerdict =
   /** Код ещё ничей — обычный путь активации. */
   | { kind: "free" }
   /** Код уже за этим человеком: повторный вход, а не чужая активация. */
@@ -71,7 +71,7 @@ export function ownerLabel(owner: CodeOwner): string {
 /** Куда владельцу можно написать. Telegram-профиль в базе появляется только от
  *  того, что человек сам написал боту, поэтому TG считается достижимым по
  *  построению; проверять нужно ровно VK. */
-export async function isOwnerReachable(owner: CodeOwner): Promise<boolean> {
+async function isOwnerReachable(owner: CodeOwner): Promise<boolean> {
   if (owner.tgId) return true;
   if (!owner.vkId) return false;
   // `null` (VK не ответил) — не повод объявлять человека недостижимым и
@@ -155,7 +155,7 @@ export async function linkClaimantToCodeOwner(
    нагрузки в payload хватает ровно на «какой код» и «кого пускаем».
    ───────────────────────────────────────────────────────────────────────── */
 
-export const XLINK_PREFIX = "xlink";
+const XLINK_PREFIX = "xlink";
 
 export function buildXlinkPayload(code: string, claimantUserId: string): string {
   return `${XLINK_PREFIX}:${code}:${claimantUserId}`;
@@ -168,7 +168,7 @@ export function parseXlinkPayload(raw: string): { code: string; claimantUserId: 
   return { code: parts[1], claimantUserId: parts[2] };
 }
 
-export type XlinkConfirmResult =
+type XlinkConfirmResult =
   | { ok: true; claimant: CodeOwner; merged: boolean }
   | { ok: false; reason: "not_owner" | "claimant_gone" | "failed" };
 

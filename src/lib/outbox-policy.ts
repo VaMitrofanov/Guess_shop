@@ -1,5 +1,5 @@
 export const OUTBOX_MAX_ATTEMPTS = 8;
-export const OUTBOX_LEASE_MS = 5 * 60_000;
+const OUTBOX_LEASE_MS = 5 * 60_000;
 
 /** Deterministic capped exponential backoff: 30s, 1m, 2m ... max 1h. */
 export function outboxBackoffMs(attempts: number): number {

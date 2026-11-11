@@ -30,7 +30,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 /** Кого ждём: у TG-бота это `tgId`, у VK — `vkId`. */
-export interface IntakeSubject {
+interface IntakeSubject {
   tgId?: string | null;
   vkId?: string | null;
 }
@@ -42,9 +42,9 @@ export interface SupportIntakeDb {
   };
 }
 
-export type IntakePlatform = "TG" | "VK";
+type IntakePlatform = "TG" | "VK";
 
-export interface IntakeContext {
+interface IntakeContext {
   platform: IntakePlatform;
   /** Этап, с которого человек позвал поддержку (`SUPPORT_CONTEXT_LABELS`). */
   contextKey: string;
@@ -186,7 +186,7 @@ export async function cancelIntake(db: SupportIntakeDb, who: IntakeSubject): Pro
 }
 
 /** Отметить, что про молчание админам уже сказали (не чаще раза за ожидание). */
-export async function markIntakeNudged(db: SupportIntakeDb, who: IntakeSubject, ctx: IntakeContext): Promise<void> {
+async function markIntakeNudged(db: SupportIntakeDb, who: IntakeSubject, ctx: IntakeContext): Promise<void> {
   const where = whereOf(who);
   const key = cacheKey(who);
   if (!where || !key) return;
@@ -307,7 +307,7 @@ export interface IntakeSweepDb extends SupportIntakeDb {
   };
 }
 
-export interface SilentIntake {
+interface SilentIntake {
   who: IntakeSubject;
   ctx: IntakeContext;
 }

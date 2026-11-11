@@ -50,15 +50,9 @@ export const SHADOW = {
   pop:  "0 18px 50px rgba(3,0,12,0.42)",
 } as const;
 
-/* Apple's "snappy" motion curves */
-export const EASING = {
-  spring: "cubic-bezier(0.22, 1, 0.36, 1)",
-  out:    "cubic-bezier(0.16, 1, 0.3, 1)",
-} as const;
 
 export const tabular = { fontVariantNumeric: "tabular-nums" as const };
 
-export const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 export const MONO       = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
 /* tint(hex, 0.11) → "#bf5af21c" — translucent wash behind a colored pill.

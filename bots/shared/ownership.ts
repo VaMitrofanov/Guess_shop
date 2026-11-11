@@ -23,7 +23,7 @@ export function vkActor(externalId: string | number): Actor {
 }
 
 /** Резолвит внутреннего `User` по внешнему идентификатору платформы. */
-export async function resolveActorUserId(actor: Actor): Promise<string | null> {
+async function resolveActorUserId(actor: Actor): Promise<string | null> {
   const where = actor.platform === "TG"
     ? { tgId: actor.externalId }
     : { vkId: actor.externalId };
@@ -31,7 +31,7 @@ export async function resolveActorUserId(actor: Actor): Promise<string | null> {
   return user?.id ?? null;
 }
 
-export type OwnershipResult<T> =
+type OwnershipResult<T> =
   | { ok: true; entity: T }
   | { ok: false; reason: "not_found" | "forbidden" };
 

@@ -10,7 +10,7 @@ export type TelegramLoginPayload = {
   hash: string;
 };
 
-export type VerifiedTelegramLogin = {
+type VerifiedTelegramLogin = {
   subject: string;
   name: string;
   username?: string;

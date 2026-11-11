@@ -32,7 +32,7 @@ export { MIN_SPLIT_PART_ROBUX } from "../../bots/shared/gamepass-plan";
 /** Больше частей — это уже не «удобнее выкупать», а рассыпанный заказ. */
 export const MAX_SPLIT_PARTS = 10;
 
-export type SplitPartInput = {
+type SplitPartInput = {
   gamepassId: string;
   amount: number;
 };

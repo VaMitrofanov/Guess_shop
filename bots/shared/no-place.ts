@@ -21,7 +21,7 @@ const SITE = "https://robloxbank.ru";
 export const STUDIO_DOWNLOAD_URL = "https://create.roblox.com/download";
 
 /** Вердикты ключа, после которых показываем инструкцию по плейсу. */
-export const PLACE_HELP_VERDICTS = ["no_universe", "games_hidden"] as const;
+const PLACE_HELP_VERDICTS = ["no_universe", "games_hidden"] as const;
 
 export function showsPlaceHelp(verdictCode?: string | null): boolean {
   return Boolean(verdictCode) && (PLACE_HELP_VERDICTS as readonly string[]).includes(verdictCode as string);
@@ -40,7 +40,7 @@ export function placeHelpInfo(verdictCode?: string | null): string {
     : "Скорее всего у тебя новый аккаунт, и на нём ещё нет плейса — это нормально. Сейчас покажем, как создать его раз и навсегда.";
 }
 
-export interface PlaceStep {
+interface PlaceStep {
   /** Кадр — абсолютный адрес: его берут и боты, и сайт. */
   image: string;
   /** Подпись к кадру — без HTML (VK, alt сайта). */

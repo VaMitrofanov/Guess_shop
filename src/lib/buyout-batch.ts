@@ -24,7 +24,7 @@ export interface BatchItem {
  * баланс, протух cookie/CSRF, занят серверный браузер. Всё остальное —
  * проблема конкретного заказа, очередь едет дальше.
  */
-export const BULK_STOP_RE =
+const BULK_STOP_RE =
   /баланс|insufficient|not enough|истёк|expired|csrf|cookie|браузер занят|BROWSER_BUSY|QueueFull/i;
 
 export const shouldStopBatch = (reason: unknown): boolean =>
@@ -38,5 +38,3 @@ export const bulkPause = (): number => 2000 + Math.floor(Math.random() * 6000);
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Цена геймпасса, которую ожидает прайс-гард: комиссия Roblox 30%. */
-export const expectedGross = (amount: number): number => Math.ceil(amount / 0.7);

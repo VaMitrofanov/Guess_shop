@@ -20,7 +20,7 @@ import {
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
-export interface ForSalePass {
+interface ForSalePass {
   gamepassId: number;
   name: string;
   price: number;

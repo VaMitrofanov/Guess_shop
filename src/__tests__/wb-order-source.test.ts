@@ -59,14 +59,14 @@ describe("DBS visibility in admin cards", () => {
 
   /** Every admin surface must show it, or the orders blend together again. */
   it("is rendered on every order card and new-client notification", () => {
-    for (const file of ["bots/shared/admin.ts", "bots/tg/handlers.ts", "bots/tg/admin/hub-orders.ts"]) {
+    for (const file of ["bots/shared/admin.ts", "bots/tg/handlers.ts"]) {
       expect(read(file)).toContain("wbOrderSourceLabel(order.platform");
     }
     for (const file of ["bots/tg/handlers.ts", "bots/vk/handlers.ts"]) {
       expect(read(file)).toContain("wbDbsBadgeLine(");
     }
     // No card may print the bare platform as the source any more.
-    for (const file of ["bots/shared/admin.ts", "bots/tg/handlers.ts", "bots/tg/admin/hub-orders.ts"]) {
+    for (const file of ["bots/shared/admin.ts", "bots/tg/handlers.ts"]) {
       expect(read(file)).not.toMatch(/Источник: <b>\$\{(order\.platform|pe)\}/);
     }
   });

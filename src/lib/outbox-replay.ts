@@ -2,14 +2,14 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-export type OutboxReplayInput = {
+type OutboxReplayInput = {
   outboxId: string;
   idempotencyKey: string;
   requestedBy: string;
   reason?: string;
 };
 
-export type OutboxReplayResult = {
+type OutboxReplayResult = {
   kind: "replayed" | "existing";
   outbox: {
     id: string;

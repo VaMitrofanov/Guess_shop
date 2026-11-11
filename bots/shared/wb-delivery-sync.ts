@@ -160,7 +160,7 @@ const GATE_REMINDER_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 type Db = PrismaClient;
 
-export type WbDeliverySyncResult = {
+type WbDeliverySyncResult = {
   acquired: boolean;
   newOrders: number;
   completedOrders: number;
@@ -496,7 +496,7 @@ export type AutoReceiveSkip =
  * это и решает, можно ли отдавать покупателю гейт: раньше функция возвращала
  * `null` и на успехе, и на отказе WB, поэтому «Заказ подтверждён» уходило на
  * заказ, который WB только что отклонил (20.08, заказ 5540950769). */
-export type AutoReceiveResult = { closed: boolean; skip: AutoReceiveSkip };
+type AutoReceiveResult = { closed: boolean; skip: AutoReceiveSkip };
 
 /** Hands the buyer's own code straight back to WB so the delivery closes itself.
  *

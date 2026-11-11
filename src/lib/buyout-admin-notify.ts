@@ -1,9 +1,9 @@
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
 
-export type RetailBuyoutSource = "twa-order" | "twa-account";
+type RetailBuyoutSource = "twa-order" | "twa-account";
 
-export interface RetailBuyoutAdminInput {
+interface RetailBuyoutAdminInput {
   source: RetailBuyoutSource;
   gamepassId: string;
   chargedPrice: number;
@@ -24,8 +24,6 @@ function adminIds(): string[] {
 
 export function buildRetailBuyoutAdminCard(input: RetailBuyoutAdminInput): string {
   const source = input.source === "twa-order" ? "TWA · заказ" : "TWA · поиск и выкуп";
-  const orderLine = input.wbCode ? `\nЗаказ: <code>${escapeHtml(input.wbCode)}</code>` : "";
-  const amountLine = Number.isFinite(input.amount) ? `\nНоминал: <b>${Number(input.amount).toLocaleString("ru-RU")} R$</b>` : "";
   const sellerLine = input.sellerName ? `\nПродавец: <b>${escapeHtml(input.sellerName)}</b>` : "";
   const donorLine = input.donorName ? `\nДонор: <b>${escapeHtml(input.donorName)}</b>` : "";
   const balanceLine = Number.isFinite(input.balance)

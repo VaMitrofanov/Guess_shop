@@ -14,7 +14,7 @@ import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
  * Ключ в карточку не попадает ни при каком исходе (`docs/security.md`).
  */
 
-export interface KeyCreatedPassCheck {
+interface KeyCreatedPassCheck {
   gamepassId: string;
   /** Цена, которую мы просили выставить. */
   price: number;
@@ -22,7 +22,7 @@ export interface KeyCreatedPassCheck {
   live: { price: number | null; isForSale: boolean } | null;
 }
 
-export interface KeyCreatedAdminInput {
+interface KeyCreatedAdminInput {
   wbCode: string;
   amount: number | null;
   nick: string;

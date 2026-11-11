@@ -23,7 +23,6 @@ export const TEST_CODES: { code: string; denomination: number }[] = [
   { code: "TST5000", denomination: 5000 }, // → pass 7143
 ];
 
-export const TEST_CODE_SET = new Set(TEST_CODES.map((c) => c.code));
 
 /** Pass price a tester must set on the gamepass for a given denomination. */
 export function testPassPrice(denomination: number): number {

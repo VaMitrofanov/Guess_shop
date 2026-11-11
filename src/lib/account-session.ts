@@ -7,7 +7,7 @@
  * byte-identical for "never signed in" and "session expired", so the endpoint
  * cannot be used to probe whether an account exists.
  */
-export interface AccountMePayload {
+interface AccountMePayload {
   authenticated: boolean;
   robloxUsername: string | null;
   selectedRobloxAccountId: string | null;

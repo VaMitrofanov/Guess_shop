@@ -4,7 +4,7 @@
  *
  * parse_mode is always "HTML" to match existing message formatting.
  */
-export interface TelegramSendExtra {
+interface TelegramSendExtra {
   reply_markup?: unknown;
   /** Ответ на живую карточку заказа — Telegram рисует цитату и собирает ветку. */
   reply_to_message_id?: number;

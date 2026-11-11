@@ -22,7 +22,7 @@ export const RETENTION = {
   orderEventMonths: 18,
 } as const;
 
-export type RetentionReport = {
+type RetentionReport = {
   priceQuotesDeleted: number;
   emailTokensDeleted: number;
   orderEventsOverdue: number;

@@ -7,11 +7,11 @@ import { deterministicBotPublicOrderId, deterministicBotStatusToken } from "@/li
 import { getGamepassById } from "@/lib/roblox";
 import { acceptGamepasses, intentPartsRows } from "../../bots/shared/gamepass-acceptance";
 
-export const BOT_ORDER_TERMS_VERSION = "2026-08-09";
-export const DIRECT_INTENT_TTL_MS = 24 * 60 * 60_000;
+const BOT_ORDER_TERMS_VERSION = "2026-08-09";
+const DIRECT_INTENT_TTL_MS = 24 * 60 * 60_000;
 
 export type BotPaymentMethod = "SITE" | "BOT_ACQUIRING" | "MANUAL_TRANSFER";
-export type BotPlatform = "TG" | "VK";
+type BotPlatform = "TG" | "VK";
 
 export class BotPaymentError extends Error {
   constructor(
@@ -31,7 +31,7 @@ function actorMatches(intent: { platform: BotPlatform; user: { tgId: string | nu
   return intent.platform === platform && (platform === "TG" ? intent.user.tgId === subject : intent.user.vkId === subject);
 }
 
-export async function findExistingBotOrder(intentId: string, platform: BotPlatform, subject: string) {
+async function findExistingBotOrder(intentId: string, platform: BotPlatform, subject: string) {
   const order = await prisma.wbOrder.findUnique({
     where: { webIdempotencyKey: `direct-intent:${intentId}` },
     include: {

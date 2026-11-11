@@ -28,7 +28,7 @@ export const SUPPORT_METRIC_EVENT = {
 /** Окно, в котором повтор того же события по заказу не плодит строк. */
 const BUCKET_MS = 10 * 60 * 1000;
 
-export type SupportMetricClient = {
+type SupportMetricClient = {
   wbOrder: { findFirst: (args: unknown) => Promise<{ id: string } | null> };
   orderEvent: { create: (args: unknown) => Promise<unknown> };
 };

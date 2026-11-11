@@ -803,7 +803,7 @@ function ActionPanel({
     if (busyRef.current) return;
     busyRef.current = true;
     setLoading(true);
-    const res = await onRunAction(action);
+    await onRunAction(action);
     setLoading(false);
     busyRef.current = false;
   }
@@ -1496,11 +1496,6 @@ function fmtTxDate(iso: string): string {
     .replace(",", "");
 }
 
-function extractGpId(url: string | null): string | null {
-  if (!url) return null;
-  const m = url.match(/game-pass(?:es)?\/(\d+)/i);
-  return m ? m[1] : null;
-}
 
 function DoneAccordion({ group, token, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved, exiting }: {
   group: DoneGroup;
@@ -5457,12 +5452,6 @@ function FiltersSheet({ open, active, attention, counts, onPick, onAttention, on
    загруженной странице: лента идёт по 20 заказов, и сумма по странице врала бы
    ровно на длинной очереди — там, где на неё и смотрят.
    ────────────────────────────────────────────────────────────────────────── */
-function fmtRobux(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString("ru-RU");
-}
 
 function plural(n: number, one: string, few: string, many: string): string {
   const mod100 = Math.abs(n) % 100;

@@ -22,7 +22,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  GUIDE_PLATFORM_KEY,
   platformFromBrowser,
   rememberPlatform,
   storedPlatform,
@@ -536,5 +535,3 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
   );
 }
 
-/** Ключ выбора устройства делим с пошаговой инструкцией — на случай рефакторинга. */
-export const KEY_CREATE_PLATFORM_KEY = GUIDE_PLATFORM_KEY;

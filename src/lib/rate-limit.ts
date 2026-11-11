@@ -28,7 +28,7 @@ function evictStale(now: number) {
   }
 }
 
-export interface RateLimitResult {
+interface RateLimitResult {
   ok: boolean;
   /** Seconds until at least one token is available again (0 when ok). */
   retryAfter: number;
@@ -84,7 +84,7 @@ export function rateLimit(
  * - `cloudflare`: `cf-connecting-ip` принимается, только если ближайший hop
  *   действительно принадлежит диапазонам Cloudflare.
  */
-export type TrustedProxyMode = "direct" | "cloudflare";
+type TrustedProxyMode = "direct" | "cloudflare";
 
 export function trustedProxyMode(): TrustedProxyMode {
   return process.env.TRUSTED_PROXY_MODE === "cloudflare" ? "cloudflare" : "direct";

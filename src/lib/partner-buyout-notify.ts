@@ -29,7 +29,7 @@ export interface PartnerBuyoutNotifyItem {
   rate?: number;
 }
 
-export interface PartnerBuyoutCardInput {
+interface PartnerBuyoutCardInput {
   partnerName: string;
   /** Successfully bought tasks (already filtered to DONE by the caller). */
   items: PartnerBuyoutNotifyItem[];

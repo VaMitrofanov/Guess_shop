@@ -29,7 +29,7 @@ export const WB_ORDER_NUMBER_MIN_DIGITS = 5;
 /** Сколько заказов доставки разворачиваем в коды: защита от «1»-подобных запросов. */
 const MAX_CODES = 20;
 
-export function looksLikeWbOrderNumber(digits: string): boolean {
+function looksLikeWbOrderNumber(digits: string): boolean {
   return digits.length >= WB_ORDER_NUMBER_MIN_DIGITS;
 }
 
@@ -45,7 +45,7 @@ export function looksLikeWbOrderNumber(digits: string): boolean {
    прислал его в чат WB (~18 %), у остальных поиск по коду честно пуст.
    ───────────────────────────────────────────────────────────────────────── */
 
-export function looksLikeDeliveryCode(digits: string): boolean {
+function looksLikeDeliveryCode(digits: string): boolean {
   return /^\d{5,7}$/.test(digits);
 }
 

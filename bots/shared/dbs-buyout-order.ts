@@ -15,7 +15,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
 
-export interface DbsBuyoutOrderInput {
+interface DbsBuyoutOrderInput {
   activationCode: string;
   wbCodeId: string;
   /** Владелец кода, если покупатель его уже активировал; иначе служебный аккаунт. */
@@ -28,7 +28,7 @@ export interface DbsBuyoutOrderInput {
   adminNote: string;
 }
 
-export interface DbsBuyoutOrderRow {
+interface DbsBuyoutOrderRow {
   id: string;
   amount: number;
   status: string;

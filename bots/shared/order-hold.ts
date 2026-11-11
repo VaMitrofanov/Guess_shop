@@ -52,7 +52,7 @@ export const NOT_HELD = { heldAt: null } as const;
 /** Тот же предикат для сырых SQL-счётчиков вкладок (зеркало `NOT_HELD`). */
 export const NOT_HELD_SQL = `"heldAt" IS NULL`;
 
-export interface HeldFields {
+interface HeldFields {
   heldAt?: Date | string | null;
   heldReason?: string | null;
   heldBy?: string | null;
@@ -92,7 +92,7 @@ export function prependNote(existing: string | null | undefined, line: string): 
   return (existing ? `${line}\n${existing}` : line).slice(0, 2000);
 }
 
-export function holdNoteLine(reason: string, actor: string): string {
+function holdNoteLine(reason: string, actor: string): string {
   return `${HOLD_NOTE_MARK} ${stamp()} · ${actor}] ${reason}`;
 }
 
@@ -137,7 +137,7 @@ export function humanNoteLine(text: string, actor: string): string {
   return `[ЗАМЕТКА ${stamp()} · ${actor}] ${text.replace(/\s+/g, " ").trim()}`;
 }
 
-export function unholdNoteLine(actor: string): string {
+function unholdNoteLine(actor: string): string {
   return `${UNHOLD_NOTE_MARK} ${stamp()} · ${actor}] заморозка снята`;
 }
 
@@ -146,7 +146,7 @@ export function unholdNoteLine(actor: string): string {
    до `prisma generate` новых полей нет ни в одном из них (см. bots/shared/db.ts).
    ───────────────────────────────────────────────────────────────────────── */
 
-export interface HoldResult {
+interface HoldResult {
   ok: boolean;
   error?: string;
   /** Заморозка села на существующий заказ (а не только на код). */
@@ -169,7 +169,7 @@ export interface HoldResult {
    ───────────────────────────────────────────────────────────────────────── */
 
 /** Почему автоматика хочет заморозить. Ручная заморозка `auto` не передаёт. */
-export type AutoHoldKind = ProblemKind | "BAD_REVIEW" | "STALE";
+type AutoHoldKind = ProblemKind | "BAD_REVIEW" | "STALE";
 
 /** Что пробивает ручную разморозку — и то лишь если случилось ПОСЛЕ неё. */
 const BREAKS_MANUAL_RELEASE = new Set<AutoHoldKind>([
@@ -198,7 +198,7 @@ export function autoHoldAllowed(
 }
 
 /** Подпись к пометке в карточке и в заметке. */
-export const MANUAL_RELEASE_NOTE =
+const MANUAL_RELEASE_NOTE =
   "автоматика не морозит, кроме нового плохого отзыва и возврата денег";
 
 /**
@@ -599,7 +599,7 @@ export async function assertOrderBuyable(
 
 /* ── Признак «замороженный клиент» для алертов поддержки ─────────────────── */
 
-export interface HeldCustomer {
+interface HeldCustomer {
   /** Причина самой свежей заморозки — её и показываем в шапке алерта. */
   reason: string;
   /** Все коды этого клиента под заморозкой. */

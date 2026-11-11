@@ -83,7 +83,7 @@ if (!(g.__neonKeepalive as boolean)) {
 
 export default db;
 
-export type VerifiedBotProfile = {
+type VerifiedBotProfile = {
   name?: string | null;
   username?: string | null;
   image?: string | null;
@@ -202,7 +202,7 @@ export async function syncVerifiedBotUser(
 // Customer recognition
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface CustomerStatus {
+interface CustomerStatus {
   isReturning: boolean;
   orderCount:  number; // total WbOrders ever placed
 }

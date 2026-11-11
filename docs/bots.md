@@ -1237,12 +1237,15 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
     подпадает весь накопленный хвост разом, а сотня сообщений в минуту — это уже не
     рассылка, а инцидент.
 
-### Admin-хаб (`bots/tg/admin/`)
-`hub-orders`, `hub-stats`, `hub-wildberries` (WB API), `hub-system` (health сервисов),
-`hub-rates`, `hub-autobuy`. Health-URL ботов берётся из env (`*_BOT_HEALTH_URL`).
-⚠️ Эти `hub-*` **осиротели** — вся админ-UI живёт в TWA (кнопка Launch Dashboard); из
-`hub-*` живы только фоновые мониторы (`registerAdminHubs`). Управление новыми фичами —
-командами бота (см. ниже), не хабами.
+### Фоновые мониторы (`bots/tg/admin/`)
+Экранов админ-хаба в TG-боте больше нет — **удалены 11.11.2026** (`hub-orders`, `hub-stats`,
+`hub-rates`, `hub-autobuy` и экраны `hub-wildberries`/`hub-system`, ≈ 3 000 строк): вся
+админ-UI живёт в TWA (кнопка Launch Dashboard). Остались только мониторы, которые запускает
+`registerAdminHubs`: `startWbMonitor` (FBS-дайджест, отзывы, остатки — `hub-wildberries.ts`),
+`startServerMonitor` и `initLogCapture` (`hub-system.ts`). Health-URL ботов — из env
+(`*_BOT_HEALTH_URL`). ⚠️ Алерт «мало кодов» (`runwayDays < 7`) не срабатывал никогда: среднее
+продаж бралось из кэша, который заполняли только удалённые экраны, — runway всегда 999.
+Управление фичами — командами бота (см. ниже).
 
 ### Фоновые воркеры (`bots/tg/auto-workers.ts`, старт из `crons.ts` → `startAutoWorkers`)
 

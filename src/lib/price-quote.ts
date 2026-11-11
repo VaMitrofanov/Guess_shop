@@ -8,15 +8,15 @@ import {
   RETAIL_PRICING_POLICY_VERSION,
 } from "@/lib/retail-pricing";
 
-export const PRICE_QUOTE_TTL_MS = 15 * 60 * 1000;
+const PRICE_QUOTE_TTL_MS = 15 * 60 * 1000;
 
-export type QuoteCustomerBenefits = {
+type QuoteCustomerBenefits = {
   balance?: number | null;
   bonusExpiresAt?: Date | null;
   rubleDiscount?: number | null;
 };
 
-export type CalculatedPriceQuote = {
+type CalculatedPriceQuote = {
   policyVersion: typeof RETAIL_PRICING_POLICY_VERSION;
   requestedRobux: number;
   bonusRobux: number;

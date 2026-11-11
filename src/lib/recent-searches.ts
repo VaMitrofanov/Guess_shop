@@ -9,7 +9,7 @@
 
 export const RECENT_SEARCH_LIMIT = 6;
 
-export type RecentSearchScope = "twa" | "admin";
+type RecentSearchScope = "twa" | "admin";
 
 const storageKey = (scope: RecentSearchScope) => `rb:recent-search:${scope}`;
 

@@ -25,7 +25,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 /** Ответ транспорта: `null` — сеть не ответила вовсе. */
-export interface JsonResponse {
+interface JsonResponse {
   ok: boolean;
   status: number;
   body: any;
@@ -42,19 +42,19 @@ export type JsonGet = (url: string) => Promise<JsonResponse | null>;
  */
 export type GamesVisibility = "ok" | "hidden" | "none" | "error";
 
-export interface OwnedUniverse {
+interface OwnedUniverse {
   universeId: string;
   /** Плейс, через который нашли опыт; для публичной игры — корневой. */
   placeId: number;
   source: "public" | "inventory";
 }
 
-export interface OwnedGames {
+interface OwnedGames {
   universes: OwnedUniverse[];
   visibility: GamesVisibility;
 }
 
-export interface UniversePass {
+interface UniversePass {
   id: number;
   productId: number;
   name: string;

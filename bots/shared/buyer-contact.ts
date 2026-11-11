@@ -19,10 +19,10 @@
    Модуль чистый (кроме `findOrderByBuyerHints`) и общий для ботов и сайта.
    ───────────────────────────────────────────────────────────────────────── */
 
-export type BuyerContactKind = "rush" | "cancel" | "human" | "quiet";
+type BuyerContactKind = "rush" | "cancel" | "human" | "quiet";
 
 /** Откуда пришло обращение — подпись канала в строке блока. */
-export type BuyerContactChannel = "TG" | "VK" | "WB";
+type BuyerContactChannel = "TG" | "VK" | "WB";
 
 /** Сколько обращение «греет» заказ: молчит дольше — заказ уходит из группы. */
 export const BUYER_RUSH_WINDOW_HOURS = 48;
@@ -162,10 +162,6 @@ export function summarizeRush(contacts: BuyerContact[], now = new Date()): Map<s
   return out;
 }
 
-/** Сколько точек «накала» рисовать: 1 обращение — одна, 3 и больше — три. */
-export function rushHeat(count: number): 1 | 2 | 3 {
-  return count >= 3 ? 3 : count === 2 ? 2 : 1;
-}
 
 /** Цитата в строку блока: одна строка, без переносов, не длиннее `max`. */
 export function contactQuote(text: string | null | undefined, max = 120): string | null {
@@ -180,7 +176,7 @@ export function contactQuote(text: string | null | undefined, max = 120): string
    ник Roblox (ссылка на профиль или «ник: …»).
    ───────────────────────────────────────────────────────────────────────── */
 
-export interface BuyerHints {
+interface BuyerHints {
   codes: string[];
   gamepassIds: string[];
   nicks: string[];
@@ -214,7 +210,7 @@ export function extractBuyerHints(text: string | null | undefined): BuyerHints {
   return { codes: [...codes], gamepassIds: [...gamepassIds], nicks: [...nicks] };
 }
 
-export function hasBuyerHints(h: BuyerHints): boolean {
+function hasBuyerHints(h: BuyerHints): boolean {
   return h.codes.length + h.gamepassIds.length + h.nicks.length > 0;
 }
 
@@ -300,7 +296,7 @@ export const BUYER_HINT_REQUEST_TEXT =
      связанные с заказом через сборочное задание и код.
    ───────────────────────────────────────────────────────────────────────── */
 
-export interface BuyerContactRow extends BuyerContact {
+interface BuyerContactRow extends BuyerContact {
   /** id исходной строки — ключ идемпотентности для событий риска. */
   sourceId: string;
   wbCode: string;

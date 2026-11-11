@@ -19,7 +19,7 @@
 /** Источники, где деньги уже получены не нами. */
 export const CORRIDOR_SOURCES = ["WB", "WB_DBS"] as const;
 
-export interface UnfinishedCorridorOrder {
+interface UnfinishedCorridorOrder {
   wbCode: string;
   amount: number;
   /** Ник, если уже назывался: ссылка на инструкцию тогда откроется сразу с ним. */
@@ -94,7 +94,7 @@ export function corridorHoldText(order: UnfinishedCorridorOrder): string {
  */
 export const CORRIDOR_OVERRIDE_TTL_MS = 30 * 60 * 1000;
 
-export interface CorridorOverride {
+interface CorridorOverride {
   /** Человек нажал «Всё равно купить напрямую» — рельсу ему больше не показываем. */
   allow(id: string | number): void;
   /** Согласие ещё действует? Протухшее удаляется на месте. */

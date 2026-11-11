@@ -15,7 +15,7 @@ export type AdminGrant =
   | { via: "telegram"; telegramId: string }
   | { via: "break-glass" };
 
-export type AdminCandidate = {
+type AdminCandidate = {
   email: string | null;
   role: string;
   /** Только **проверенные** сервером Telegram-личности (`UserIdentity`). */
@@ -23,7 +23,7 @@ export type AdminCandidate = {
 };
 
 /** То же плюс поле, которым `src/auth.ts` отзывает сессию. */
-export type AdminCandidateRecord = AdminCandidate & { sessionVersion: number };
+type AdminCandidateRecord = AdminCandidate & { sessionVersion: number };
 
 /**
  * Порядок намеренный: сначала Telegram (основной путь), потом запасной вход.

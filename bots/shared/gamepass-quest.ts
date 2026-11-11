@@ -48,7 +48,7 @@ export const QUEST = {
   passid: "send_gp_link",
 } as const;
 
-export type QuestActionId = typeof QUEST[keyof typeof QUEST];
+type QuestActionId = typeof QUEST[keyof typeof QUEST];
 
 export interface QuestButton {
   /** `url` рисуется ссылкой, остальное — кнопкой действия. */
@@ -295,7 +295,7 @@ export function questForkScreen(opts: {
 /* ── 3. Ветка ключа ────────────────────────────────────────────────────── */
 
 /** Кадры выпуска ключа под устройство — те же, что в инструкции на сайте. */
-export const KEY_FRAMES: Record<"mobile" | "pc", string[]> = {
+const KEY_FRAMES: Record<"mobile" | "pc", string[]> = {
   mobile: [
     "https://robloxbank.ru/guide/wb-key-m-menu.jpg",
     "https://robloxbank.ru/guide/wb-key-m-search.jpg",
@@ -441,18 +441,3 @@ export function questNoAccountScreen(opts: { nick: string; wbCode: string }): Qu
   };
 }
 
-/** Поиск не дошёл до Roblox — это НЕ «ника нет». */
-export function questSearchDownScreen(opts: { wbCode: string; nick?: string }): QuestScreen {
-  return {
-    text: [
-      "⚠️ <b>Поиск по нику временно недоступен</b>",
-      "",
-      "Не получилось связаться с Roblox. Попробуй ещё раз через минуту — или пришли Pass ID геймпасса, этого тоже достаточно.",
-    ].join("\n"),
-    rows: [
-      [{ id: QUEST.recheck, label: "🔄 Попробовать ещё раз", tone: "positive" }],
-      [{ id: QUEST.passid, label: "🔢 Прислать Pass ID", tone: "primary" }],
-      [{ id: "url", label: "📖 Инструкция", url: guideUrlFor(opts.wbCode, opts.nick) }],
-    ],
-  };
-}

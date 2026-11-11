@@ -19,7 +19,7 @@ const ORDER_STATUS_EVENT = "ORDER_STATUS_CHANGED";
 
 /* ── Журнал → факты ──────────────────────────────────────────────────────── */
 
-export const SURVEY_EVENT = {
+const SURVEY_EVENT = {
   GOT: "ROBUX_SURVEY_GOT",
   PENDING: "ROBUX_SURVEY_PENDING",
   NONE: "ROBUX_SURVEY_NONE",
@@ -29,7 +29,7 @@ const SUPPORT_DELIVERED = "SUPPORT_REQUEST_DELIVERED";
 /** Какие события нужны блоку — один запрос на всю страницу ленты. */
 export const BUYOUT_EVENT_TYPES = [ORDER_STATUS_EVENT, SURVEY_EVENT.GOT, SURVEY_EVENT.PENDING, SURVEY_EVENT.NONE, SUPPORT_DELIVERED];
 
-export type SurveyAnswer = "GOT" | "PENDING" | "NONE";
+type SurveyAnswer = "GOT" | "PENDING" | "NONE";
 
 export interface BuyoutEventRow {
   orderId: string;
@@ -38,7 +38,7 @@ export interface BuyoutEventRow {
   createdAt: Date | string;
 }
 
-export interface BuyoutFacts {
+interface BuyoutFacts {
   /** Кто закрыл (`admin:Demid` → `Demid`). */
   by: string | null;
   /** Сколько R$ списано при выкупе (из перехода в COMPLETED). */
@@ -93,7 +93,7 @@ export function buyoutFactsFromEvents(rows: BuyoutEventRow[]): Map<string, Buyou
 
 export type BuyoutTone = "green" | "red" | "orange" | "neutral" | "muted";
 
-export interface BuyoutRow {
+interface BuyoutRow {
   key: "who" | "charged" | "queue" | "notice" | "robux" | "confirm" | "survey" | "support" | "review" | "sale";
   label: string;
   value: string;
@@ -102,7 +102,7 @@ export interface BuyoutRow {
   sub?: string[];
 }
 
-export interface BuyoutSummary {
+interface BuyoutSummary {
   /** «24 октября, 20:30 МСК» */
   when: string;
   /** «2 дня назад» */
@@ -150,7 +150,7 @@ function plural(n: number, forms: [string, string, string]): string {
 }
 
 /** «24 октября, 20:30 МСК» */
-export function fmtBuyoutWhen(d: Date): string {
+function fmtBuyoutWhen(d: Date): string {
   const day = d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: TZ });
   const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
   return `${day}, ${time} МСК`;
@@ -177,14 +177,14 @@ export function fmtSpan(ms: number): string {
 }
 
 /** «только что», «3 ч назад», «2 дня назад» */
-export function fmtAgo(ms: number): string {
+function fmtAgo(ms: number): string {
   if (ms < HOUR) return ms < 2 * MIN ? "только что" : `${Math.round(ms / MIN)} мин назад`;
   if (ms < DAY) return `${Math.floor(ms / HOUR)} ч назад`;
   const d = Math.floor(ms / DAY);
   return `${d} ${plural(d, ["день", "дня", "дней"])} назад`;
 }
 
-export interface NoticeState {
+interface NoticeState {
   state: "ok" | "partial" | "wb" | "failed" | "unknown";
   /** «TG», «VK» — кто доставил. */
   via: string | null;

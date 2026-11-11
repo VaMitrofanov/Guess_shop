@@ -14,7 +14,7 @@ import { assertOwnsOrder, type Actor } from "./ownership";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 
-export type GpWatchConfirmResult =
+type GpWatchConfirmResult =
   | { status: "ok"; passName: string; robux: number; nick: string; wbCode: string }
   | { status: "already" }        // order already moved on (manager/user handled it)
   | { status: "gone" }           // the gamepass is no longer for sale at the right price

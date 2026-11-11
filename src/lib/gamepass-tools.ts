@@ -26,7 +26,7 @@
 
 export type GamepassToolId = "key" | "link" | "nick" | "ask" | "split";
 
-export interface GamepassTool {
+interface GamepassTool {
   id: GamepassToolId;
   /** Значок — он же опознавательный знак инструмента во всех админках. */
   icon: string;
@@ -105,7 +105,7 @@ export const GAMEPASS_ATTACHABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "E
  */
 export const BUYER_STEP_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "PENDING"];
 /** Статусы, в которых сервер принимает разбивку (`set-gamepass-split`). */
-export const GAMEPASS_SPLITTABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
+const GAMEPASS_SPLITTABLE_STATUSES = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
 
 /** Неоплаченный прямой заказ до выкупа не доходит ни одним путём. */
 export function isUnpaidDirectOrder(order: GamepassToolOrder): boolean {

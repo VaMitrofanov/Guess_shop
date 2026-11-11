@@ -1,4 +1,4 @@
-export type SettledPartnerRowPolicy = {
+type SettledPartnerRowPolicy = {
   preserveTask: boolean;
   allowReplacementTask: boolean;
   restoreDoneStatus: boolean;
@@ -35,7 +35,7 @@ export type PartnerSheetRowRef = {
   rowNumber: number | null;
 };
 
-export type PartnerRenamedRowPlan =
+type PartnerRenamedRowPlan =
   | { kind: "remap"; taskId: string; fromSheetTitle: string; toSheetTitle: string; rowNumber: number; nextRowId: string }
   | { kind: "conflict"; taskId: string; toSheetTitle: string; rowNumber: number; status: string };
 

@@ -2,13 +2,13 @@ import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 
 export const PAYMENT_OUTBOX_SERVICE_KEY = "tg-payment-outbox";
-export const PAYMENT_OUTBOX_BACKLOG_KEY = "payment-outbox-backlog";
+const PAYMENT_OUTBOX_BACKLOG_KEY = "payment-outbox-backlog";
 export const HEARTBEAT_STALE_MS = 5 * 60_000;
 export const OUTBOX_BACKLOG_STALE_MS = 10 * 60_000;
 const REPEAT_ALERT_MS = 60 * 60_000;
 const CHECK_MS = 60_000;
 
-export type HeartbeatHealth = "missing" | "fresh" | "stale";
+type HeartbeatHealth = "missing" | "fresh" | "stale";
 
 export function heartbeatHealth(lastSeenAt: Date | null, now = new Date()): HeartbeatHealth {
   if (!lastSeenAt) return "missing";
@@ -26,7 +26,7 @@ async function fanout(text: string) {
   return results.some(Boolean);
 }
 
-export async function inspectPaymentWorkerHeartbeat(now = new Date()) {
+async function inspectPaymentWorkerHeartbeat(now = new Date()) {
   const cutoff = new Date(now.getTime() - HEARTBEAT_STALE_MS);
   const repeatCutoff = new Date(now.getTime() - REPEAT_ALERT_MS);
   let row = await prisma.serviceHeartbeat.findUnique({
@@ -103,7 +103,7 @@ export async function inspectPaymentWorkerHeartbeat(now = new Date()) {
   return health;
 }
 
-export async function inspectPaymentOutboxBacklog(now = new Date()) {
+async function inspectPaymentOutboxBacklog(now = new Date()) {
   const overdueBefore = new Date(now.getTime() - OUTBOX_BACKLOG_STALE_MS);
   const repeatCutoff = new Date(now.getTime() - REPEAT_ALERT_MS);
   const overdue = await prisma.outboxMessage.count({

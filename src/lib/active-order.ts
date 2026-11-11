@@ -44,7 +44,7 @@ export const ACTIVE_STATUSES = [
  */
 export const STALE_PAYMENT_MS = 2 * 60 * 60 * 1000;
 
-export interface ActiveOrderView {
+interface ActiveOrderView {
   id: string;
   wbCode: string;
   /** Что показать покупателю как имя заказа: код ВБ или публичный номер сайта. */
@@ -113,7 +113,7 @@ function rank(order: OrderRow): number {
   return 2;
 }
 
-export function toActiveOrderView(order: OrderRow): ActiveOrderView {
+function toActiveOrderView(order: OrderRow): ActiveOrderView {
   const meta = customerOrderStatus("canonical", order.status);
   const corridor = CORRIDOR_SOURCES.includes(order.orderSource as (typeof CORRIDOR_SOURCES)[number]);
   return {

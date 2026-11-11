@@ -10,7 +10,6 @@
 import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 import { downloadPhoto } from "./telegram-photo";
 import { db } from "./db";
-import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
 import { resolveWbOrderRef, wbOrderSourceLabel } from "./wb-order-source";
 import { orderCardRoots, orderThreadRoots, replyToRoot } from "./order-thread";
@@ -48,16 +47,6 @@ export async function orderCode(orderId: string): Promise<string | null> {
 
 // ── Direct order pricing ───────────────────────────────────────────────────────
 
-/** Special promo prices for non-bonus users (Friday push). */
-export const PROMO_PRICES: Record<number, number> = {
-  100:  100,
-  200:  200,
-  500:  450,
-  1000: 800,
-};
-
-/** @deprecated Kept for admin card backwards compat — use directPrice() instead. */
-export const DIRECT_RATE = 0.7;
 
 export const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -532,7 +521,7 @@ export const ADMIN_IDS: string[] = (
   )]
 );
 
-export interface RetailBuyoutAdminAlert {
+interface RetailBuyoutAdminAlert {
   wbCode: string;
   gamepassId: string;
   chargedPrice: number;
@@ -565,7 +554,7 @@ export async function notifyAdminsRetailBuyout(input: RetailBuyoutAdminAlert): P
 // ── Unified user-handle formatting ─────────────────────────────────────────────
 
 /** Minimal shape needed by {@link formatUserHandle}. */
-export interface UserHandleSource {
+interface UserHandleSource {
   tgId?:     string | null;
   vkId?:     string | null;
   username?: string | null;
@@ -580,7 +569,7 @@ export interface UserHandleSource {
  *
  * Returns plain text — caller wraps in HTML link as needed.
  */
-export function formatUserHandle(u: UserHandleSource): string {
+function formatUserHandle(u: UserHandleSource): string {
   // Display names are user-controlled and every current call site embeds the
   // result into an HTML message — escape here so a name like "<Вадим>" can't
   // break the Telegram card. @usernames are [A-Za-z0-9_] and need no escaping.
@@ -795,7 +784,7 @@ export const CB = {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface OrderCardPayload {
+interface OrderCardPayload {
   id:                  string;
   amount:              number;
   gamepassUrl:         string;
@@ -826,25 +815,15 @@ export interface OrderCardPayload {
   splitParts?:         { gamepassId: string; amount: number }[];
 }
 
-export interface ReviewCardPayload {
+interface ReviewCardPayload {
   orderId:     string;
   userId:      string;   // DB User.id
   photoSource: string;   // Telegram file_id OR public HTTPS URL (VK photo)
   userDisplay: string;
 }
 
-export interface DirectOrderCardPayload {
-  orderId:            string;
-  userId:             string;   // DB User.id
-  amount:             number;   // total Robux (incl. bonus)
-  bonusApplied:       number;
-  userDisplay:        string;
-  tgId?:              string;   // optional — not set for VK users
-  createdAt:          Date;
-  previousOrdersCount?: number;
-}
 
-export interface DirectIntentCardPayload {
+interface DirectIntentCardPayload {
   intentId:             string;
   userId:               string;
   amount:               number;
@@ -863,7 +842,7 @@ export interface DirectIntentCardPayload {
   previousOrdersCount?: number;
 }
 
-export interface PaymentScreenshotCardPayload {
+interface PaymentScreenshotCardPayload {
   orderId:     string;
   userId:      string;
   photoFileId: string;
@@ -1027,64 +1006,6 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   if (wbRef.source === "WB_DBS") await refreshDbsCardByCode(db, order.wbCode);
 }
 
-/**
- * Notify all admins about a new direct order (no WB card).
- * Admin can send payment details or cancel the order.
- */
-export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload): Promise<void> {
-  const code = await orderCode(payload.orderId);
-  const dateStr = new Date(payload.createdAt).toLocaleString("ru-RU", {
-    timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-    year: "numeric", hour: "2-digit", minute: "2-digit",
-  }) + " МСК";
-  const bonusLine = payload.bonusApplied > 0
-    ? `🎁 Бонус учтён: <b>+${payload.bonusApplied} R$</b>\n`
-    : "";
-
-  const prev = payload.previousOrdersCount ?? 0;
-  const loyaltyLine =
-    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
-    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ (${prev} заказ${prev === 1 ? "" : prev < 5 ? "а" : "ов"})</b>\n` :
-    `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
-
-  const paidRobux = payload.amount - payload.bonusApplied;
-  const rublePrice = directPrice(paidRobux);
-
-  const text = formatAdminNotice({
-    marker: "action",
-    zone: "ПРЯМОЙ",
-    title: "новый заказ — ждёт реквизиты",
-    lines: [
-      orderRef({ code, denomination: payload.amount }, [`геймпасс ${Math.ceil(payload.amount / 0.7)} R$`]),
-      loyaltyLine.trim() || null,
-      `👤 Юзер: ${payload.userDisplay}`,
-      bonusLine.trim() || null,
-      `💰 К оплате: <b>${rublePrice} ₽</b>`,
-      `📅 ${dateStr}`,
-    ],
-    next: "отправить QR или реквизиты кнопкой ниже",
-  });
-
-  const twaQuery = { q: code ?? payload.orderId.slice(-6) };
-  const reply_markup = (adminId: string) => ({
-    inline_keyboard: [
-      [
-        { text: "📷 Отправить QR (СБП)", callback_data: CB.sendQr(payload.orderId) },
-      ],
-      [
-        { text: "💳 Реквизиты текстом", callback_data: CB.sendPaymentDetails(payload.orderId) },
-        { text: "❌ Отменить заказ",     callback_data: CB.cancelDirectOrder(payload.orderId) },
-      ],
-      [
-        { text: "📊 Открыть в дашборде", web_app: { url: twaLaunchUrl(adminId, twaQuery) } },
-      ],
-    ],
-  });
-
-  await Promise.allSettled(
-    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup: reply_markup(id) }))
-  );
-}
 
 /**
  * Notify all admins about a new direct intent (pre-order).

@@ -27,20 +27,20 @@ import type { PrismaClient } from "@prisma/client";
 export const DIRECT_DISCOUNT_RUBLES = 60;
 
 /** Первый прямой заказ должен быть строго меньше этого номинала (правило «б»). */
-export const DIRECT_DISCOUNT_MAX_FIRST_ORDER_ROBUX = 500;
+const DIRECT_DISCOUNT_MAX_FIRST_ORDER_ROBUX = 500;
 
-export type DirectDiscountRefusal =
+type DirectDiscountRefusal =
   | "not_direct"
   | "already_granted"
   | "not_first_direct_order"
   | "bonus_used"
   | "first_order_too_large";
 
-export type DirectDiscountDecision =
+type DirectDiscountDecision =
   | { granted: true; rubles: number }
   | { granted: false; reason: DirectDiscountRefusal };
 
-export type DirectDiscountFacts = {
+type DirectDiscountFacts = {
   /** Завершённый прямо сейчас заказ — прямой? */
   isDirectOrder: boolean;
   /** Номинал этого заказа в R$. */

@@ -28,7 +28,7 @@ const FIRST_RUN_LOOKBACK_MS = 72 * 3_600_000;
 const OVERLAP_MS = 15 * 60_000;
 
 /** Заказы, которые ещё можно не выкупить. */
-export const BUYER_SWEEP_ORDER_SQL = `"status" IN ('AWAITING_GAMEPASS','PENDING','IN_PROGRESS','ERROR')`;
+const BUYER_SWEEP_ORDER_SQL = `"status" IN ('AWAITING_GAMEPASS','PENDING','IN_PROGRESS','ERROR')`;
 
 async function createOnce(db: Db, data: Record<string, unknown>): Promise<boolean> {
   try {

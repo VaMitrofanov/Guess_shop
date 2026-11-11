@@ -1,5 +1,4 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 
 /**
  * Единственная точка изменения бонусного баланса (ultra-review U3/U4,
@@ -28,7 +27,7 @@ export type BonusDeltaInput = {
   metadata?: Prisma.InputJsonValue;
 };
 
-export type BonusDeltaResult =
+type BonusDeltaResult =
   | { applied: true; balanceAfter: number }
   | { applied: false; reason: "duplicate" | "insufficient" };
 
@@ -84,10 +83,6 @@ export async function applyBonusDeltaTx(
   return { applied: true, balanceAfter };
 }
 
-/** Обёртка для вызова вне уже открытой транзакции. */
-export async function applyBonusDelta(input: BonusDeltaInput): Promise<BonusDeltaResult> {
-  return prisma.$transaction((tx) => applyBonusDeltaTx(tx, input));
-}
 
 export const BONUS_REASONS = {
   WEB_ORDER_REDEMPTION: "WEB_ORDER_REDEMPTION",

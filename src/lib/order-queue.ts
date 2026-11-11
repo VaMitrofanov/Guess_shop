@@ -30,8 +30,6 @@ export type FilterTab =
 export const NEW_CUTOFF_HOURS = 40;
 /** Выкуп висит дольше — заказ уходит в «Требуют внимания». */
 export const ATTENTION_BUYOUT_HOURS = 12;
-/** Столько дней ждём ссылку, прежде чем поднять тревогу. */
-export const ATTENTION_LINK_DAYS = 5;
 /**
  * После стольких дней «ждёт ссылку» превращается в висяк.
  *
@@ -223,7 +221,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
    по умолчанию NULLS FIRST, то есть без него наверх уехали бы РОВНО ВСЕ
    неприоритетные заказы. Зеркало для сырого SQL — `PRIORITY_ORDER_SQL`.
    ────────────────────────────────────────────────────────────────────────── */
-export const PRIORITY_ORDER_BY = { priorityAt: { sort: "desc", nulls: "last" } } as const;
+const PRIORITY_ORDER_BY = { priorityAt: { sort: "desc", nulls: "last" } } as const;
 
 /** То же правило для `$queryRaw`: подставляется первым в `ORDER BY`. */
 export const PRIORITY_ORDER_SQL = `"priorityAt" DESC NULLS LAST`;
@@ -244,7 +242,7 @@ export const DIRECT_ORDER_SQL = `"isDirectOrder" DESC`;
  * робуксов так и не получил. Без отдельной ступени его обгонял бы любой
  * заказ, поднятый позже (у ⚡ первым идёт поднятый последним).
  */
-export const REBUY_ORDER_SQL = `"rebuyAt" DESC NULLS LAST`;
+const REBUY_ORDER_SQL = `"rebuyAt" DESC NULLS LAST`;
 
 /** Порядок блока «Первым делом» на обеих главных: 🔁 → ⚡ → прямые → возраст. */
 export const FIRST_IN_LINE_ORDER_SQL =
@@ -294,7 +292,7 @@ export const isPrioritized = (order: { priorityAt?: Date | string | null }): boo
 
 export const GAMEPASS_EXPORT_TABS = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
 export type GamepassExportTab = (typeof GAMEPASS_EXPORT_TABS)[number];
-export const GAMEPASS_EXPORT_LIMIT = 500;
+const GAMEPASS_EXPORT_LIMIT = 500;
 
 export const isGamepassExportTab = (value: string): value is GamepassExportTab =>
   (GAMEPASS_EXPORT_TABS as readonly string[]).includes(value);
@@ -314,7 +312,7 @@ export interface GamepassExportItem {
   waitingHours: number;
 }
 
-export interface GamepassExport {
+interface GamepassExport {
   tab: GamepassExportTab;
   generatedAt: string;
   total: number;

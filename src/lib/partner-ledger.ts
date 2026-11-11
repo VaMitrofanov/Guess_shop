@@ -1,4 +1,4 @@
-export type PartnerLedgerTaskRef = {
+type PartnerLedgerTaskRef = {
   id: string;
   robloxUsername: string | null;
   gamepassId: string | null;
@@ -23,7 +23,7 @@ export type PartnerLedgerRow = {
   createdAt: string;
 };
 
-export type PartnerLedgerTimelineItem =
+type PartnerLedgerTimelineItem =
   | { kind: "entry"; entry: PartnerLedgerRow }
   | {
       kind: "buyout-group";

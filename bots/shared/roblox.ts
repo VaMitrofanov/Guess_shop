@@ -795,7 +795,7 @@ export async function resolveRobloxUserId(username: string): Promise<number | nu
   }
 }
 
-export interface RobloxUserProfile {
+interface RobloxUserProfile {
   id:          string;
   name:        string;
   displayName: string;
@@ -861,7 +861,7 @@ export async function getRobloxUserProfileDirect(
   }
 }
 
-export interface NickSearchPayload {
+interface NickSearchPayload {
   /** null → Roblox says there is no such account (or it is banned). */
   account:    RobloxUserProfile | null;
   gamepasses: GamepassSearchResult[];
@@ -897,14 +897,14 @@ export async function searchGamepassesByNickDirect(username: string): Promise<Ni
  * `fallbackUsername` is used for the `sellerName` field if Roblox's creator
  * blob doesn't carry it back (rare, but happens for legacy gamepasses).
  */
-export async function listForSaleGamepasses(
+async function listForSaleGamepasses(
   userId: number,
   fallbackUsername: string,
 ): Promise<GamepassSearchResult[]> {
   return (await listForSaleGamepassesWithGames(userId, fallbackUsername)).gamepasses;
 }
 
-export async function listForSaleGamepassesWithGames(
+async function listForSaleGamepassesWithGames(
   userId: number,
   fallbackUsername: string,
 ): Promise<{ gamepasses: GamepassSearchResult[]; games: { visibility: GamesVisibility; count: number } }> {
@@ -1069,7 +1069,7 @@ export async function getGamepassDetails(
 // Purchase helpers (admin auto-buy)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface GamepassProductInfo {
+interface GamepassProductInfo {
   productId:           number;
   priceInRobux:        number;
   userBasePriceInRobux: number;
@@ -1224,7 +1224,7 @@ export function isLegacyPurchaseFlowFailure(reason: string | null | undefined): 
   return /invalid.?arguments|invalid.?parameter/i.test(String(reason ?? ""));
 }
 
-export async function purchaseGamepassDirect(
+async function purchaseGamepassDirect(
   productId: number,
   expectedPrice: number,
   expectedSellerId: number,
@@ -1282,14 +1282,6 @@ export async function getRobuxBalance(cookie: string): Promise<number | null> {
   return result.ok ? result.session?.balance ?? null : null;
 }
 
-export async function getAuthenticatedUser(
-  cookie: string,
-): Promise<{ id: number; name: string } | null> {
-  const result = await getBrowserSession(cookie);
-  return result.ok && result.session
-    ? { id: result.session.accountId, name: result.session.accountName }
-    : null;
-}
 
 // ── Контрольная проверка владения после ошибки выкупа (Ф1) ──────────────────
 //
@@ -1323,7 +1315,7 @@ export async function verifyGamepassOwnership(
   return result.ok ? result.gamepass?.owned ?? null : null;
 }
 
-export interface VerifiedPurchaseResult extends PurchaseResult {
+interface VerifiedPurchaseResult extends PurchaseResult {
   /** Покупка провалилась по ответу Roblox, но владение подтвердилось проверкой. */
   recovered?: boolean;
 }
@@ -1398,7 +1390,7 @@ export async function purchaseGamepassVerified(
 
 const OPEN_CLOUD_GAMEPASS_BASE = "https://apis.roblox.com/game-passes/v1/universes";
 
-export interface CreateGamePassParams {
+interface CreateGamePassParams {
   /** Open Cloud API-ключ клиента (API System `game-passes`: read + write). */
   apiKey: string;
   /** Цена в робуксах — единственное, что реально важно бизнесу. */
@@ -1413,7 +1405,7 @@ export interface CreateGamePassParams {
   username?: string;
 }
 
-export interface CreateGamePassResult {
+interface CreateGamePassResult {
   ok: boolean;
   gamePassId?: number;
   universeId?: string;
@@ -1499,7 +1491,7 @@ function isValidGamePassPrice(p: unknown): p is number {
  *   no_universe    — Roblox ответил, игр у аккаунта нет вовсе;
  *   bad_game_link  — присланная ссылка не ведёт на игру.
  */
-export type UniverseLookupFailure = "nick_not_found" | "network" | "games_hidden" | "no_universe" | "bad_game_link";
+type UniverseLookupFailure = "nick_not_found" | "network" | "games_hidden" | "no_universe" | "bad_game_link";
 
 /** Ник → id, отличая «ника нет» от «Roblox не ответил». */
 async function lookupRobloxUserId(username: string): Promise<number | "not_found" | "network"> {
@@ -1713,7 +1705,7 @@ async function createGamePassOnce(
  * Именно так проверка отвечает на вопрос «ключ рабочий?» целиком: разрешение на
  * запись без пробы на запись — это обещание, которое вскроется на заказе.
  */
-export interface VerifyGamePassKeyResult {
+interface VerifyGamePassKeyResult {
   ok: boolean;
   /** Опыт, на котором проверяли (он же — первый годный кандидат). */
   universeId?: string;

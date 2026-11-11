@@ -22,7 +22,7 @@ function parseList(raw: string | undefined): Set<string> {
   );
 }
 
-export function adminTelegramIds(): Set<string> {
+function adminTelegramIds(): Set<string> {
   return parseList(process.env.ADMIN_IDS);
 }
 
@@ -52,7 +52,7 @@ export function adminSetVersion(): string {
  * роли в базе недостаточно намеренно — иначе достаточно было бы дотянуться до
  * БД, чтобы выписать себе админку в обход `ADMIN_IDS`.
  */
-export function breakGlassEmails(): Set<string> {
+function breakGlassEmails(): Set<string> {
   return parseList(process.env.ADMIN_BREAKGLASS_EMAILS?.toLowerCase());
 }
 

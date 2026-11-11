@@ -33,7 +33,7 @@
 export const STALE_BUYOUT_DAYS = 21;
 
 /** Оценка WB, ниже или равная которой отзыв считается плохим. */
-export const BAD_REVIEW_MAX_STARS = 3;
+const BAD_REVIEW_MAX_STARS = 3;
 
 /** Максимум заморозок за один прогон свипа — защита от бурста на первом запуске. */
 export const GATE_FREEZE_CAP = 25;
@@ -174,7 +174,7 @@ export function isGateReviewHold(hold: { reason: string; createdBy: string }): b
 }
 
 /** Что гейт решил сделать с заказом (для лога и уведомления). */
-export interface GateDecision {
+interface GateDecision {
   wbCode: string;
   reason: string;
   rule: "bad_review" | "stale";
@@ -216,7 +216,7 @@ export function decideGate(order: GateOrder, feedbacks: WbFeedback[], now: numbe
 }
 
 /** Зависимости свипа — всё, что трогает мир, приходит снаружи (тестируемость). */
-export interface BuyoutGateDeps {
+interface BuyoutGateDeps {
   /** Заказы, которые сейчас можно выкупить и которые ещё ни разу не морозили. */
   loadBuyableOrders: () => Promise<GateOrder[]>;
   /** Заказы под заморозкой гейта по отзыву — кандидаты на разморозку. */
@@ -233,11 +233,11 @@ export interface BuyoutGateDeps {
   enabled?: boolean;
 }
 
-export interface GateRelease extends FixedReview {
+interface GateRelease extends FixedReview {
   wbCode: string;
 }
 
-export interface BuyoutGateResult {
+interface BuyoutGateResult {
   checked: number;
   frozen: GateDecision[];
   released: GateRelease[];

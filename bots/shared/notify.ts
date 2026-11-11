@@ -40,7 +40,7 @@ export function tgMessageId(sent: unknown): number | null {
  * через час получит тот же отказ. GP-watch раньше считал любой отказ
  * временным и каждый час заново будил админов одним и тем же алертом
  * (FLBDVYK, 11.10.2026). Пустой ответ (мост не ответил) — временный. */
-export type TgDeliveryOutcome = "delivered" | "permanent" | "transient";
+type TgDeliveryOutcome = "delivered" | "permanent" | "transient";
 
 const PERMANENT_TG_REFUSALS = [
   "bot was blocked by the user",
@@ -256,7 +256,7 @@ function vkApiUrl(method: string): string {
   return `https://api.vk.com/method/${method}`;
 }
 
-export type VkPublicProfile = {
+type VkPublicProfile = {
   name: string;
   username: string | null;
   image: string | null;

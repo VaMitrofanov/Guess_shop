@@ -37,13 +37,13 @@ export type * from "@/types/admin-overview";
 
 /** Сколько заказов головы очереди отдаём. Экран показывает пять старейших —
  *  остальное живёт в «Заказах»; запас нужен на те, что выкупят прямо здесь. */
-export const OVERVIEW_QUEUE_HEAD = 10;
+const OVERVIEW_QUEUE_HEAD = 10;
 
 /** Порог «номинал кончается»: ниже него партию пора печатать. */
 const CODES_LOW_THRESHOLD = 60;
 
 /** Heartbeat старше этого считается протухшим. Тот же порог, что в TWA. */
-export const HEARTBEAT_STALE_SECONDS = 360;
+const HEARTBEAT_STALE_SECONDS = 360;
 
 function iso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null;

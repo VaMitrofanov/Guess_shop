@@ -44,7 +44,7 @@ export type BridgePass = {
   image: string;
 };
 
-export type BridgeGamepassDetails = {
+type BridgeGamepassDetails = {
   id: string;
   name: string;
   price: number;
@@ -100,7 +100,7 @@ export async function bridgeRobloxUser(ref: { username?: string; userId?: string
   return user ?? null;
 }
 
-export type BridgeNickSearch = {
+type BridgeNickSearch = {
   /** `false` — Roblox ответил, что такого ника нет. */
   userExists: boolean;
   account: BridgeAccount | null;

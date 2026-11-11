@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 export const BOT_PAYMENT_TIMESTAMP_HEADER = "x-bot-payment-timestamp";
 export const BOT_PAYMENT_SIGNATURE_HEADER = "x-bot-payment-signature";
-export const BOT_PAYMENT_MAX_CLOCK_SKEW_MS = 5 * 60_000;
+const BOT_PAYMENT_MAX_CLOCK_SKEW_MS = 5 * 60_000;
 
 function secret() {
   const value = process.env.BOT_PAYMENT_API_SECRET?.trim();

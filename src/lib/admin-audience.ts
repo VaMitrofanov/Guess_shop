@@ -9,7 +9,7 @@ import { logAdminTiming } from "@/lib/admin-performance";
 export type AdminAudienceChannel = "TG" | "VK" | "EMAIL";
 export type AdminAudienceFilter = "all" | "tg" | "vk" | "email" | "multi" | "unlinked";
 
-export type AdminAudienceUser = {
+type AdminAudienceUser = {
   id: string;
   name: string | null;
   username: string | null;
@@ -29,7 +29,7 @@ export type AdminAudienceUser = {
   isAdmin: boolean;
 };
 
-export type CommunityAudienceMetric = {
+type CommunityAudienceMetric = {
   platform: "TG" | "VK";
   label: string;
   handle: string;

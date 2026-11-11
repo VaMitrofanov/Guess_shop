@@ -44,7 +44,7 @@ export function buildTinkoffToken(params: Record<string, unknown>, secretKey: st
   return crypto.createHash("sha256").update(concatenated, "utf8").digest("hex");
 }
 
-export type CanonicalPaymentInit = {
+type CanonicalPaymentInit = {
   /** Stable customer-facing order ID used by our status page. */
   publicOrderId: string;
   /** Unique provider-side OrderId; differs from publicOrderId on a retry. */

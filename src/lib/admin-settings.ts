@@ -2,7 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 
-export type AdminSettingsUpdate = {
+type AdminSettingsUpdate = {
   purchaseRate?: number | null;
   usdToRub?: number;
   gamepassTargetMarginPct?: number;
@@ -10,7 +10,7 @@ export type AdminSettingsUpdate = {
   autoBuyRate?: number;
 };
 
-export type AdminSettingsPayload = {
+type AdminSettingsPayload = {
   purchaseRate: number | null;
   usdToRub: number;
   gamepassTargetMarginPct: number | null;
@@ -18,7 +18,7 @@ export type AdminSettingsPayload = {
   autoBuyRate: number;
 };
 
-export type AdminSettingsOverview = AdminSettingsPayload & {
+type AdminSettingsOverview = AdminSettingsPayload & {
   bestRate: { rateUSD: number; provider: string; inventory: number } | null;
   pendingOrders: number;
 };

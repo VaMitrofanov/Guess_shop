@@ -23,7 +23,7 @@ const ACTIVE_ORDER_STATUSES = [
   "IN_PROGRESS",
 ];
 
-export type ReviewEligibility =
+type ReviewEligibility =
   | { kind: "eligible"; orderId: string }
   | { kind: "already_granted"; grantedAt: Date | null; expiresAt: Date | null; balance: number }
   | { kind: "active_order"; status: string; wbCode: string }

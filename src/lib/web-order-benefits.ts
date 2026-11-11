@@ -18,9 +18,9 @@ import { BONUS_REASONS, applyBonusDeltaTx, webOrderBonusRevisionRevertKey } from
  * протухших заказов, — и они могут сработать почти одновременно.
  */
 
-export type RevertReason = "PAYMENT_INIT_FAILED" | "BANK_REJECTED" | "ABANDONED";
+type RevertReason = "PAYMENT_INIT_FAILED" | "BANK_REJECTED" | "ABANDONED";
 
-export type RevertResult =
+type RevertResult =
   | { reverted: true; bonusRobux: number; discountKopecks: number }
   | { reverted: false; reason: "not_found" | "already" | "nothing_to_revert" | "paid" };
 
@@ -38,7 +38,7 @@ export type LatePaymentBenefitOrder = {
   orderSource: string;
 };
 
-export type LatePaymentBenefitResult =
+type LatePaymentBenefitResult =
   | { reserved: true; revision: number }
   | { reserved: false; reason: "benefits_changed" };
 

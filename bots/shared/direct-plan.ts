@@ -33,9 +33,9 @@ import { acceptGamepasses, type AcceptanceResult } from "./gamepass-acceptance";
 import { getGamepassDetails } from "./roblox";
 import type { GamesVisibility } from "./roblox-owned-games";
 
-export type DirectPlanAction = "keyStored" | "key" | "guide" | "pick" | "nick" | "back" | "cancel";
+type DirectPlanAction = "keyStored" | "key" | "guide" | "pick" | "nick" | "back" | "cancel";
 
-export interface DirectPlanButton {
+interface DirectPlanButton {
   action: DirectPlanAction;
   label: string;
   /** Для `guide` — адрес инструкции. */

@@ -87,7 +87,7 @@ export async function applyBonusDeltaTx(tx: any, input: BonusDeltaInput): Promis
   return true;
 }
 
-export type RevertOutcome = {
+type RevertOutcome = {
   reverted: boolean;
   bonusRobux: number;
   discountKopecks: number;
@@ -159,7 +159,7 @@ export async function revertOrderBenefits(
 }
 
 /** Заказы, брошенные без оплаты дольше этого срока, отменяются автоматически. */
-export const STALE_WEB_ORDER_MS = 2 * 60 * 60 * 1000;
+const STALE_WEB_ORDER_MS = 2 * 60 * 60 * 1000;
 const CREATED_PAYMENT_STALE_MS = 2 * 60 * 1000;
 const LIVE_ATTEMPT_STATUSES = ["CREATED", "INITIATED", "AUTHORIZED"] as const;
 

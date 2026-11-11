@@ -10,7 +10,7 @@ type SiteAcquiringInput = {
   percentage?: string;
 };
 
-export type SiteAcquiringDecision = {
+type SiteAcquiringDecision = {
   masterEnabled: boolean;
   mode: SiteAcquiringMode;
   eligible: boolean;

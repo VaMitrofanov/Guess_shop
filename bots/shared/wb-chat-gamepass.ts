@@ -99,7 +99,7 @@ export function findGamepassRefInChatText(text: string, nmId?: number | null): s
   return bare.length === 1 ? bare[0] : null;
 }
 
-export type ChatGamepassOutcome =
+type ChatGamepassOutcome =
   | { kind: "skipped" }
   | { kind: "attached"; gamepassId: string; price: number; nick: string; wbCode: string }
   | { kind: "rejected"; gamepassId: string; reason: string };
@@ -279,7 +279,7 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
 type PassDetails = NonNullable<Awaited<ReturnType<typeof getGamepassDetails>>>;
 type PassVerdict = { ok: true; creator: string } | { ok: false; reason: string };
 
-export function checkChatPass(details: PassDetails, expectedPrice: number): PassVerdict {
+function checkChatPass(details: PassDetails, expectedPrice: number): PassVerdict {
   // Закрытый плейс сам по себе больше не отказ: выкуп ручной, и если Roblox
   // подтверждает продажу и цену, заказ собирается (решение владельца 13.09.2026,
   // проверка первоисточника — в `getGamepassDetailsDirect`). Признаки остаются

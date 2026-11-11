@@ -135,7 +135,7 @@ type ListOrder =
   };
 type ActionOrder = Prisma.WbMarketplaceOrderGetPayload<{ include: typeof actionOrderInclude }>;
 
-export const WbDeliveryActionSchema = z.object({
+const WbDeliveryActionSchema = z.object({
   action: z.enum([
     "sync",
     "request_code",
@@ -169,7 +169,6 @@ export const WbDeliveryActionSchema = z.object({
   force: z.boolean().optional(),
 });
 
-export type WbDeliveryActionInput = z.infer<typeof WbDeliveryActionSchema>;
 
 export class WbDeliveryWorkflowError extends Error {
   constructor(
@@ -541,7 +540,7 @@ const WB_NAMED_LIMIT = 3;
 const WB_DBS_SYNC_SERVICE = "wb-dbs-sync";
 
 /** Сколько раз в сутки можно попросить у покупателя код получения (О7). */
-export const WB_CODE_ASK_DAILY_LIMIT = 3;
+const WB_CODE_ASK_DAILY_LIMIT = 3;
 
 /**
  * Лёгкий срез очереди DBS для главной.

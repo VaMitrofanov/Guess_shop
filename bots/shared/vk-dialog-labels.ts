@@ -27,7 +27,7 @@
 import { classifyBuyerMessage } from "./buyer-contact";
 import { isRobuxSupportContext } from "./support-metric";
 
-export type VkLabelKey =
+type VkLabelKey =
   | "human" | "held" | "queue" | "pass" | "stale" | "pay" | "bought" | "ready"
   | "regular" | "once" | "abandoned" | "fresh";
 
@@ -57,13 +57,13 @@ export const VK_LABELS: Record<VkLabelKey, { name: string; color: (typeof VK_TAG
 /** Метки «где человек сейчас»; без них ставится метка истории. */
 const STAGE_KEYS: readonly VkLabelKey[] = ["queue", "pass", "stale", "pay", "bought", "ready"];
 
-export const VK_LABEL_KEYS = Object.keys(VK_LABELS) as VkLabelKey[];
+const VK_LABEL_KEYS = Object.keys(VK_LABELS) as VkLabelKey[];
 
 /**
  * Желаемый цвет, а если он занят — свободный. Сначала из тех, что не задуманы
  * для других наших меток: иначе замена одной сдвигала бы цвета по цепочке.
  */
-export function pickFreeColor(wanted: string, used: ReadonlySet<string>): string | null {
+function pickFreeColor(wanted: string, used: ReadonlySet<string>): string | null {
   if (!used.has(wanted)) return wanted;
   const reserved = new Set<string>(Object.values(VK_LABELS).map((l) => l.color));
   return VK_TAG_COLORS.find((c) => !used.has(c) && !reserved.has(c))
@@ -76,7 +76,7 @@ const DAY = 24 * HOUR;
 const PASS_FRESH_MS = 72 * HOUR;
 const PAY_FRESH_MS = 24 * HOUR;
 /** Roblox держит купленные робуксы «в ожидании» до 5 дней (`robux-eta`). */
-export const ROBUX_PENDING_MS = 5 * DAY;
+const ROBUX_PENDING_MS = 5 * DAY;
 const READY_KEEP_MS = 14 * DAY;
 /** Сколько ждём ответа менеджера, прежде чем метка уходит сама. Не 72 ч:
  * пробный прогон 11.11 показал троих, кому не ответили больше трёх суток, —
@@ -210,7 +210,7 @@ export function desiredVkLabels(snap: VkLabelSnapshot, now: Date): Set<VkLabelKe
 
 /* ── Синхронизация ─────────────────────────────────────────────────────── */
 
-export interface VkTagApi {
+interface VkTagApi {
   /** Вызов метода VK API. Бросает при ошибке; `code` — VK error_code. */
   call(method: string, params: Record<string, string | number>): Promise<unknown>;
 }
@@ -227,7 +227,7 @@ function vkErrorCode(err: unknown): number | null {
 }
 
 /** Диалог сообщества и id меток, которые на нём стоят сейчас. */
-export interface VkConversationTags {
+interface VkConversationTags {
   vkId: string;
   tags: number[];
 }
@@ -400,7 +400,7 @@ export class VkDialogLabelSync {
  * заказ в очереди старше 45 дней оставался без метки), прочие — за 45 дней;
  * выкупы за всё время — для меток истории.
  */
-export const VK_LABEL_SNAPSHOT_SQL = `
+const VK_LABEL_SNAPSHOT_SQL = `
 select u."vkId" as "vkId",
        coalesce(json_agg(json_build_object(
          'status', w.status, 'isDirectOrder', w."isDirectOrder",
@@ -422,7 +422,7 @@ where u."vkId" = any($1::text[])
 group by u.id`;
 
 /** Обращения через «Поддержку» VK-бота за окно «Нужен человек». */
-export const VK_SUPPORT_REQUESTS_SQL = `
+const VK_SUPPORT_REQUESTS_SQL = `
 select coalesce(e.payload->>'vkId', u."vkId") as "vkId",
        e."createdAt" as "at",
        e.payload->>'text' as "text",

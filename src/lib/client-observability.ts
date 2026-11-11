@@ -18,7 +18,7 @@ export const ClientSignalSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-export type ClientSignal = z.infer<typeof ClientSignalSchema>;
+type ClientSignal = z.infer<typeof ClientSignalSchema>;
 
 export function formatClientSignal(signal: ClientSignal): string {
   if (signal.type === "web-vital") {

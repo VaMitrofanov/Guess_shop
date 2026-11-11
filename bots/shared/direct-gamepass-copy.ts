@@ -14,7 +14,7 @@ import { expectedGamepassPrice } from "./gamepass-plan";
 import type { DirectRequote } from "./direct-requote";
 
 /** Продажа ключа: почему это лучший путь. Одна формулировка на все экраны. */
-export const KEY_PITCH_LINES = [
+const KEY_PITCH_LINES = [
   "🔑 <b>Сделаем за тебя</b> — самый быстрый путь",
   "Пришлёшь один ключ из Roblox — создадим геймпасс сами, с точной ценой.",
   "• пароль не нужен, ключ отзывается в любой момент",
@@ -22,10 +22,6 @@ export const KEY_PITCH_LINES = [
   "• минута против 3–5 минут ручной возни и цены, которую легко ошибиться",
 ] as const;
 
-export function keyPitchText(plain = false): string {
-  const lines = KEY_PITCH_LINES.join("\n");
-  return plain ? lines.replace(/<\/?b>/g, "") : lines;
-}
 
 /**
  * Пасс есть, но он не под этот заказ.
@@ -62,20 +58,6 @@ export function priceMismatchText(opts: {
   return opts.plain ? text.replace(/<\/?b>/g, "") : text;
 }
 
-/** Пассов у ника не нашлось вовсе. */
-export function noGamepassText(opts: { nick: string; passPrice: number; plain?: boolean }): string {
-  const text = [
-    `⚠️ У <b>${opts.nick}</b> не нашли геймпассов на продаже.`,
-    "",
-    `Для заказа нужен один — на <b>${opts.passPrice} R$</b>.`,
-    "",
-    ...KEY_PITCH_LINES,
-    "",
-    "📖 Хочешь сам — покажем каждое нажатие с картинкой.",
-    "🔢 Пасс уже есть, но поиск его не видит (например, плейс скрыт) — пришли ссылку или номер.",
-  ].join("\n");
-  return opts.plain ? text.replace(/<\/?b>/g, "") : text;
-}
 
 /** Сколько чистых R$ несёт пасс — та же формула, что в `direct-requote`. */
 function robuxOf(passRobux: number): number {

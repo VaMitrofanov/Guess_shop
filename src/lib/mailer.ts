@@ -17,7 +17,7 @@ import nodemailer, { type Transporter } from "nodemailer";
  * deploy env only, with no caller importing nodemailer directly.
  */
 
-export interface MailerConfig {
+interface MailerConfig {
   host: string;
   port: number;
   user: string;
@@ -25,7 +25,7 @@ export interface MailerConfig {
   from: string;
 }
 
-export interface MailMessage {
+interface MailMessage {
   to: string;
   subject: string;
   text: string;
@@ -84,10 +84,6 @@ function transporter(config: MailerConfig): Transporter {
   return cached;
 }
 
-/** Test seam: drop the memoized transport so a new config is picked up. */
-export function resetMailerForTests(): void {
-  cached = null;
-}
 
 export type SendResult = { ok: true } | { ok: false; reason: "not_configured" | "send_failed" };
 

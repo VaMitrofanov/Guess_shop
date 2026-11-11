@@ -45,7 +45,7 @@ async function callTbank(method: "GetState" | "Cancel", paymentId: string) {
   return body;
 }
 
-export type TbankPaymentState = {
+type TbankPaymentState = {
   paymentId: string;
   orderId: string | null;
   amountKopecks: number | null;

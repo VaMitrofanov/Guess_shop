@@ -1,6 +1,6 @@
 export const ORDER_NOTE_LIMIT = 2000;
 
-export type RecoverableOrder = {
+type RecoverableOrder = {
   status: string;
   wbCode: string;
   gamepassUrl: string | null;
@@ -9,7 +9,7 @@ export type RecoverableOrder = {
   adminNote: string | null;
 };
 
-export type RestoreToBuyoutResult =
+type RestoreToBuyoutResult =
   | {
       ok: true;
       data: {
@@ -83,9 +83,9 @@ export function buildRestoreToBuyoutData(
    Причина обязательна — её читает тот, кто будет выкупать повторно.
    ────────────────────────────────────────────────────────────────────────── */
 
-export const REBUY_REASON_LIMIT = 300;
+const REBUY_REASON_LIMIT = 300;
 
-export type RebuyableOrder = RecoverableOrder & {
+type RebuyableOrder = RecoverableOrder & {
   heldAt?: Date | string | null;
   completedAt?: Date | string | null;
   purchaserUsername?: string | null;
@@ -94,7 +94,7 @@ export type RebuyableOrder = RecoverableOrder & {
   closedBy?: string | null;
 };
 
-export type RebuyResult =
+type RebuyResult =
   | {
       ok: true;
       data: {

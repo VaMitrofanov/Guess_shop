@@ -5,7 +5,7 @@ const OptionalString = z.string().nullish().transform((value) => value ?? undefi
 const OptionalNumber = z.number().nullish().transform((value) => value ?? undefined);
 const OptionalArray = <T extends z.ZodTypeAny>(item: T) => z.array(item).nullish().transform((value) => value ?? []);
 
-export const WbDbsOrderSchema = z.object({
+const WbDbsOrderSchema = z.object({
   id: WbId,
   salePrice: OptionalNumber,
   orderUid: OptionalString,
@@ -72,7 +72,7 @@ export const WbDbsClientResponseSchema = z.object({
   })),
 }).passthrough();
 
-export type WbDbsClient = z.infer<typeof WbDbsClientResponseSchema>["orders"][number];
+type WbDbsClient = z.infer<typeof WbDbsClientResponseSchema>["orders"][number];
 
 /** WB order IDs arrive as `orderID` or `orderId` depending on the endpoint. */
 export function wbClientOrderId(row: WbDbsClient): string | undefined {
@@ -83,7 +83,7 @@ export function wbClientOrderId(row: WbDbsClient): string | undefined {
  * A passport-style FIO is cut to its first word, and anything that is only
  * punctuation or digits (WB has served `"-"` and phone-like strings) is
  * rejected so the queue never renders a name that is not one. */
-export function wbNormalizeBuyerName(raw: string | undefined | null): string | undefined {
+function wbNormalizeBuyerName(raw: string | undefined | null): string | undefined {
   const first = raw?.trim().split(/\s+/)[0];
   if (!first) return undefined;
   // A name has to contain at least one letter; `+7 926…` and `—` are not names.
@@ -163,7 +163,7 @@ export const WbChatsResponseSchema = z.object({
   }).passthrough()),
 }).passthrough();
 
-export const WbChatEventSchema = z.object({
+const WbChatEventSchema = z.object({
   chatID: z.string(),
   eventID: z.string(),
   eventType: z.string().optional().default("message"),
@@ -255,7 +255,7 @@ export function deliveryWindow(
    покупатель уже открыл возврат — и бот двое суток слал «ваши 500 R$ ждут».
    Связь с нашим заказом — по `srid`, это тот же `rid`, что у доставки.
    ───────────────────────────────────────────────────────────────────────── */
-export const WbClaimSchema = z.object({
+const WbClaimSchema = z.object({
   id: z.string(),
   srid: OptionalString,
   nm_id: OptionalNumber,
@@ -272,4 +272,3 @@ export const WbClaimsResponseSchema = z.object({
   total: OptionalNumber,
 });
 
-export type WbClaim = z.infer<typeof WbClaimSchema>;

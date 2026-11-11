@@ -16,12 +16,12 @@
  */
 
 /** Источники, заказ из которых по природе прямой (оплачен нам, а не WB). */
-export const DIRECT_SOURCES: readonly string[] = ["DIRECT", "SITE"];
+const DIRECT_SOURCES: readonly string[] = ["DIRECT", "SITE"];
 
 export const isDirectSource = (source: string | null | undefined): boolean =>
   !!source && DIRECT_SOURCES.includes(source);
 
-export type DirectSyncOrder = {
+type DirectSyncOrder = {
   orderSource: string;
   isDirectOrder: boolean;
   paidAt: Date | string | null;
@@ -29,7 +29,7 @@ export type DirectSyncOrder = {
   paymentDetails?: string | null;
 };
 
-export type DirectSyncPatch = {
+type DirectSyncPatch = {
   isDirectOrder?: boolean;
   paidAt?: Date;
   paymentDetails?: string;

@@ -16,12 +16,12 @@
    молча выкинуть его значило бы потерять его из виду.
    ───────────────────────────────────────────────────────────────────────── */
 
-export interface Packable {
+interface Packable {
   /** Грязные робуксы: цена геймпасса, которая спишется с аккаунта. */
   expectedPrice: number;
 }
 
-export interface BuyoutFit<T extends Packable> {
+interface BuyoutFit<T extends Packable> {
   /** Что кладём в этот аккаунт — в порядке очереди. */
   picked: T[];
   /** Заказы дешевле баланса, но в этот аккаунт уже не влезшие. */

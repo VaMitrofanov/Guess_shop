@@ -26,9 +26,9 @@ import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
  * (`MAX_AUTO_PARTS`). До 24.09.2026 здесь стояло 2, и набор под 3200
  * (1500 + 1000 + 700) молча обрезался до двух пассов.
  */
-export const MAX_TARGETS = MAX_AUTO_PARTS;
-export const MIN_PRICE = 1;
-export const MAX_PRICE = 100_000;
+const MAX_TARGETS = MAX_AUTO_PARTS;
+const MIN_PRICE = 1;
+const MAX_PRICE = 100_000;
 export const CODE_RE = /^[A-Z0-9]{7}$/;
 
 export interface CreatedPass {
@@ -38,7 +38,7 @@ export interface CreatedPass {
   universeId?: string;
 }
 
-export interface KeyCreateOutcome {
+interface KeyCreateOutcome {
   created: CreatedPass[];
   /** Машинный код отказа: `bad_scope`, `not_authorized`, … Пусто — всё создано. */
   error?: string;

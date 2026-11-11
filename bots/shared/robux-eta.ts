@@ -13,7 +13,7 @@
  */
 
 /** Старше этого вопрос уже не про Pending: карточку не показываем. */
-export const ROBUX_ETA_LOOKBACK_DAYS = 30;
+const ROBUX_ETA_LOOKBACK_DAYS = 30;
 /** Сколько заказов перечисляем в одном ответе. */
 const MAX_ORDERS = 4;
 
@@ -28,7 +28,7 @@ export function fmtDateRu(d: Date): string {
 }
 
 /** Главная мысль про Pending — одна на все тексты (26.10.2026). */
-export function ourPartDoneText(fmt: RobuxEtaFormat): string {
+function ourPartDoneText(fmt: RobuxEtaFormat): string {
   return (
     `✅ ${b(fmt, "С нашей стороны всё сделано:")} геймпасс выкуплен, робуксы уже на твоём аккаунте — в статусе Pending. ` +
     `Дальше всё зависит от Roblox: он сам решает, когда перевести их на баланс. Ускорить это не может ни наша поддержка, ни мы.`
@@ -72,7 +72,7 @@ export function isArrivalQuestion(text: string): boolean {
 
 // ── Тексты ──────────────────────────────────────────────────────────────────
 
-export interface RobuxEtaOrder {
+interface RobuxEtaOrder {
   amount: number;
   completedAt: Date;
   /** Аккаунт Roblox заказа — на него ушли робуксы. */
@@ -80,9 +80,9 @@ export interface RobuxEtaOrder {
   wbCode?: string | null;
 }
 
-export type RobuxEtaFormat = "html" | "plain";
+type RobuxEtaFormat = "html" | "plain";
 
-export interface RobuxEtaReply {
+interface RobuxEtaReply {
   text: string;
 }
 
@@ -91,7 +91,7 @@ function b(fmt: RobuxEtaFormat, s: string): string {
 }
 
 /** Отсеивает старое и сортирует: свежий выкуп сверху. */
-export function etaOrders(orders: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaOrder[] {
+function etaOrders(orders: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaOrder[] {
   const from = now.getTime() - ROBUX_ETA_LOOKBACK_DAYS * DAY_MS;
   return orders
     .filter((o) => o.completedAt.getTime() >= from && o.completedAt.getTime() <= now.getTime())
@@ -146,7 +146,7 @@ export function buildRobuxEtaReply(
 export const NO_ROBUX_BUTTON = "💬 Робуксов нет";
 
 /** Ссылка на объяснение «что такое геймпасс и Pending». */
-export function infoLine(fmt: RobuxEtaFormat): string {
+function infoLine(fmt: RobuxEtaFormat): string {
   return fmt === "html"
     ? `📖 <a href="${PENDING_INFO_URL}">Как работает геймпасс и почему робуксы «заморожены»</a> — 1 минута, со скриншотами.`
     : `📖 Как работает геймпасс и почему робуксы «заморожены» (1 минута, со скриншотами): ${PENDING_INFO_URL}`;
@@ -195,9 +195,6 @@ export interface SelfCheckContext {
   robloxUsername?: string | null;
 }
 
-function amountText(c: SelfCheckContext): string {
-  return c.amount ? `${c.amount} R$` : "сумма заказа";
-}
 
 /** Шаг самопроверки после кнопки «Робуксов нет». */
 export function robuxSelfCheckText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}): string {

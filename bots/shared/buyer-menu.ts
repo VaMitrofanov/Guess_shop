@@ -31,7 +31,7 @@
 import { expectedGamepassPrice } from "./gamepass-plan";
 import { fmtDateRu } from "./completed-messages";
 
-export interface BuyerMenuOrder {
+interface BuyerMenuOrder {
   amount: number;
   status: string;
   wbCode?: string | null;
@@ -44,7 +44,7 @@ export interface BuyerMenuOrder {
   rejectionReason?: string | null;
 }
 
-export interface BuyerMenuInput {
+interface BuyerMenuInput {
   /** Ник Roblox из профиля покупателя (не из заказа). */
   nick?: string | null;
   /** Имя из мессенджера — когда ника ещё нет. */
@@ -61,7 +61,7 @@ export interface BuyerMenuInput {
   now?: Date;
 }
 
-export interface BuyerMenuText {
+interface BuyerMenuText {
   /** HTML для TG; VK получает его через `stripHtml`. */
   text: string;
   /** Сколько заказов спрятано за кнопкой «Другие заказы». */

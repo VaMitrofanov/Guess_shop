@@ -37,7 +37,7 @@ export type VerifiedIdentityInput = VerifiedIdentityProfile & {
  */
 export type MergeMethod = "dual-fresh-auth" | "gate-code-owner-confirmed" | "gate-code-bearer";
 
-export type MergeDb = Pick<PrismaClient, "$transaction">;
+type MergeDb = Pick<PrismaClient, "$transaction">;
 
 export function normalizeSubject(provider: UserIdentityProvider, subject: string): string {
   const normalized = provider === "EMAIL" ? subject.trim().toLowerCase() : subject.trim();
@@ -73,7 +73,7 @@ export function legacyCreateData(
   }
 }
 
-export function legacyColumn(provider: UserIdentityProvider, subject: string) {
+function legacyColumn(provider: UserIdentityProvider, subject: string) {
   return provider === "TG" ? { tgId: subject }
     : provider === "VK" ? { vkId: subject }
     : { email: subject };
@@ -99,7 +99,7 @@ function laterDate(a: Date | null, b: Date | null) {
   return a > b ? a : b;
 }
 
-export type MergeResult = {
+type MergeResult = {
   userId: string;
   merged: boolean;
   alreadyLinked: boolean;

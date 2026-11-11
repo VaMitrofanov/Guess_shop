@@ -30,7 +30,7 @@ export const BONUS_MIN_PACK = 0;
 export const DIRECT_PACKS: readonly number[] = [100, 200, 300, 400, 500, 800, 1000, 1200, 1500, 2000];
 
 /** Progressive brackets: [upper bound of the bracket in R$, RUB per R$ inside it]. */
-export const PRICE_BRACKETS: readonly (readonly [number, number])[] = [
+const PRICE_BRACKETS: readonly (readonly [number, number])[] = [
   [200, 1],
   [500, 0.9],
   [Infinity, 0.8],
@@ -49,7 +49,7 @@ function bracketPrice(amount: number): number {
 }
 
 /** Pre-2026-09-28 target RUB retained per paid R$; still caps large orders. */
-export function legacyTargetNetRate(amount: number): number {
+function legacyTargetNetRate(amount: number): number {
   if (!Number.isFinite(amount) || amount < 1) return 0;
 
   if (amount <= 10) return 3 - ((3 - 2) / (10 - 1)) * (amount - 1);

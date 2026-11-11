@@ -124,7 +124,7 @@ const CLAIM_HOLD_LINE: Record<ClaimHoldOutcome, string> = {
   failed: "⚠️ Заморозка не встала — выкуп всё равно заблокирован гардом, но проверить карточку",
 };
 
-export function claimHoldLine(outcome: ClaimHoldOutcome | undefined): string | null {
+function claimHoldLine(outcome: ClaimHoldOutcome | undefined): string | null {
   return outcome ? CLAIM_HOLD_LINE[outcome] : null;
 }
 
@@ -284,7 +284,7 @@ export type WbCancellationOutcome =
   | "no_internal_order";
 
 /** Детали, которые меняют текст, но не исход. */
-export type WbCancellationFacts = {
+type WbCancellationFacts = {
   /** Код аннулирован — предъявить его больше нельзя. */
   revoked?: boolean;
   /** Номинал выкупленного заказа: цена этой отмены в робуксах. */
@@ -416,7 +416,7 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
  * человеку. Код доставки идёт прямо в сообщении — без него оператор не закроет
  * заказ в кабинете WB, а идти за ним в консоль в пределах часового окна WB
  * значит терять то самое время, ради которого уведомление и существует. */
-export type HeldDeliveryCode = { deliveryCode: string; ageHours: number };
+type HeldDeliveryCode = { deliveryCode: string; ageHours: number };
 
 /** «121 ч» заставляет оператора делить в уме под часовым окном WB. */
 function ageLabel(hours: number): string {

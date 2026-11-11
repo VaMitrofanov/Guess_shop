@@ -11,7 +11,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 import { prisma } from "@/lib/prisma";
 
-export interface EnrichOrder {
+interface EnrichOrder {
   id: string;
   userId: string;
   status: string;

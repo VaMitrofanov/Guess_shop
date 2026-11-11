@@ -18,7 +18,7 @@
 
 const VK_APP_ID = process.env.NEXT_PUBLIC_VK_APP_ID ?? "54539012";
 
-export interface VerifiedVkUser {
+interface VerifiedVkUser {
   vkId: string;
   /** Full name from VK; empty string when VK returned no name parts. */
   name: string;

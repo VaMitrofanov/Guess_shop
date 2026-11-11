@@ -28,7 +28,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export interface WebOrderCard {
+interface WebOrderCard {
   id: string;
   amount: number;
   gamepassUrl: string;

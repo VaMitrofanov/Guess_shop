@@ -1,13 +1,13 @@
-export interface OrderMoneySettings {
+interface OrderMoneySettings {
   purchaseRate?: number | null;
   usdToRub?: number | null;
 }
 
-export interface OrderMoneySource {
+interface OrderMoneySource {
   saleAmountKopecks?: number | null;
 }
 
-export interface OrderProfitSnapshot {
+interface OrderProfitSnapshot {
   purchaseRate: number;
   purchaseRobuxAmount: number;
   purchaseRateUsdPer1k: number;

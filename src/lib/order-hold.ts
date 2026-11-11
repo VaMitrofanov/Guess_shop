@@ -36,7 +36,7 @@ export type { ProblemKind } from "../../bots/shared/order-hold";
 import { HOLD_NOTE_MARK, UNHOLD_NOTE_MARK } from "../../bots/shared/order-hold";
 
 /** Строка заметки, разобранная для показа в карточке TWA. */
-export interface NoteLine {
+interface NoteLine {
   /** `[ЗАМОРОЗКА 30.08 14:12 · Вадим]` — подпись над текстом. */
   tag: string | null;
   text: string;

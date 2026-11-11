@@ -10,11 +10,8 @@ import type { ConflictReason } from "./cross-platform-claim";
    ───────────────────────────────────────────────────────────────────────── */
 
 const PLATFORM_WORD = { TG: "Telegram", VK: "ВКонтакте" } as const;
-export type PlatformKey = keyof typeof PLATFORM_WORD;
+type PlatformKey = keyof typeof PLATFORM_WORD;
 
-export function platformWord(key: PlatformKey): string {
-  return PLATFORM_WORD[key];
-}
 
 /** Заказ нашёлся и площадки связаны. `from` — где заказ был оформлен. */
 export function xlinkLinkedText(code: string, from: PlatformKey | null): string {

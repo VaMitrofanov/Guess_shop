@@ -88,7 +88,7 @@ export function modelPriceKop(netRobux: number, prices: Record<number, number>):
   return directPrice(netRobux) * 100;
 }
 
-export interface ComputedOrder {
+interface ComputedOrder {
   order: EconomicsOrder;
   /** Робуксы, оплаченные деньгами (выдано минус бонус). */
   paidRobux: number;
@@ -141,7 +141,7 @@ export function computeOrder(
   };
 }
 
-export interface EconomicsTotals {
+interface EconomicsTotals {
   orders: number;
   withRevenue: number;
   revenueKop: number;

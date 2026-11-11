@@ -18,7 +18,7 @@ import { escapeHtml } from "./notify";
  * её человек ищет в первую очередь.
  */
 
-export type NoticeMarker =
+type NoticeMarker =
   /** Автоматика работает, промежуточный этап. Делать нечего. */
   | "progress"
   /** Мяч на стороне клиента. Делать нечего, но ждём. */
@@ -42,7 +42,7 @@ const MARKER: Record<NoticeMarker, string> = {
 };
 
 /** Продуктовая область. Позволяет отфильтровать глазами за долю секунды. */
-export type NoticeZone =
+type NoticeZone =
   | "DBS" | "ПРЯМОЙ" | "WB" | "САЙТ" | "ВЫКУП" | "ОТЗЫВ" | "ПОДДЕРЖКА" | "СИСТЕМА";
 
 export type AdminNotice = {
@@ -82,7 +82,7 @@ export function formatAdminNotice(notice: AdminNotice): string {
  * Теперь ключей всегда два — номер заказа WB и код гейта, — и стоят они в
  * одном и том же месте. Код в `<code>`: тап по нему копирует.
  */
-export type OrderRefParts = {
+type OrderRefParts = {
   wbOrderId?: string | null;
   /** Код гейта (он же код ВБ): ZZF7T5B. */
   code?: string | null;
@@ -105,7 +105,7 @@ export function orderRef(
 }
 
 /** Деньги и номинал в одном формате во всех сообщениях. */
-export function denomLine(denomination: number | null | undefined, priceKopecks?: number | null): string | null {
+function denomLine(denomination: number | null | undefined, priceKopecks?: number | null): string | null {
   const parts: string[] = [];
   if (denomination) parts.push(`<b>${denomination.toLocaleString("ru-RU")} R$</b>`);
   if (priceKopecks) parts.push(`${Math.round(priceKopecks / 100).toLocaleString("ru-RU")} ₽`);

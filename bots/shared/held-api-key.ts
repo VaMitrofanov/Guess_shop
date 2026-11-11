@@ -13,7 +13,7 @@
 
 export const HELD_KEY_TTL_MS = 15 * 60_000;
 
-export interface HeldApiKeyStore {
+interface HeldApiKeyStore {
   hold(userId: string | number, key: string): void;
   /** Ключ, если он ещё жив; просроченный стирается. */
   get(userId: string | number): string | null;

@@ -15,17 +15,6 @@ type TokenCache = {
   expiresAt: number;
 };
 
-export type GoogleSheetInfo = {
-  title: string;
-  sheetId: number;
-  index: number;
-  hidden: boolean;
-};
-
-export type GoogleSheetRows = {
-  range: string;
-  values: unknown[][];
-};
 
 export type GoogleSheetsValueUpdate = {
   range: string;
@@ -35,7 +24,7 @@ export type GoogleSheetsValueUpdate = {
 /** Структурный request для spreadsheets.batchUpdate (updateCells/addProtectedRange/...). */
 export type GoogleSheetsRequest = Record<string, unknown>;
 
-export type GoogleSheetsBatchReply = {
+type GoogleSheetsBatchReply = {
   addProtectedRange?: { protectedRange?: { protectedRangeId?: number } };
 };
 
@@ -52,7 +41,7 @@ export type GoogleProtectedRangeInfo = {
   };
 };
 
-export class GoogleSheetsError extends Error {
+class GoogleSheetsError extends Error {
   status: number;
   code: string;
 
@@ -96,7 +85,7 @@ export function isGoogleSheetsConfigured() {
   return Boolean(process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim());
 }
 
-export function getGoogleServiceAccountEmail() {
+function getGoogleServiceAccountEmail() {
   try {
     return getServiceAccount().client_email;
   } catch {
@@ -211,16 +200,6 @@ export async function listGoogleSheets(spreadsheetId: string) {
     .sort((a, b) => a.index - b.index);
 }
 
-export async function readGoogleSheetRows(spreadsheetId: string, title: string, range = "A:F") {
-  const encodedRange = encodeURIComponent(`${quoteGoogleSheetTitle(title)}!${range}`);
-  const data = await googleFetch<GoogleSheetRows>(
-    `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodedRange}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE`,
-  );
-  return {
-    range: data.range,
-    values: data.values || [],
-  };
-}
 
 /**
  * Чтение сразу многих диапазонов одним values:batchGet — квота Google считает это

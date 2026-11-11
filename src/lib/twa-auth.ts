@@ -117,7 +117,7 @@ function verifyJwt(token: string, secret: string): TwaJwtClaims | null {
   return claims;
 }
 
-export type TwaTokenUser = {
+type TwaTokenUser = {
   userId: number;
   firstName: string;
   /** Unix-секунды истечения — нужно для тихого продления в /api/twa/ping. */

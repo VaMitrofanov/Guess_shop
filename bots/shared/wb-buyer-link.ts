@@ -16,7 +16,7 @@ import { wbSecretHmac } from "./wb-delivery-crypto";
 type Db = Pick<PrismaClient, "user" | "wbOrder" | "wbCode" | "wbDeliverySecret" | "$transaction">;
 
 /** Технический пользователь, на который падают «ничьи» заказы. */
-export const SERVICE_USER_TG_ID = "admin";
+const SERVICE_USER_TG_ID = "admin";
 
 /**
  * Сколько времени после получения кода доставки бот привязывает покупателя сам.
@@ -40,7 +40,7 @@ export function isServiceOwned(user: { tgId: string | null } | null | undefined)
   return user?.tgId === SERVICE_USER_TG_ID;
 }
 
-export type BuyerLinkResult =
+type BuyerLinkResult =
   | { ok: true; userId: string; display: string; wbCode: string; alreadyLinked: boolean }
   | { ok: false; reason: "user_not_found" | "order_not_found" | "owned_by_other" };
 
@@ -117,7 +117,7 @@ export async function linkWbOrderToBuyer(
   return { ok: true, userId: buyer.id, display: displayName(buyer), wbCode: activationCode, alreadyLinked: false };
 }
 
-export type DeliveryCodeMatch = {
+type DeliveryCodeMatch = {
   marketplaceOrderId: string;
   wbOrderId: string;
   activationCode: string | null;

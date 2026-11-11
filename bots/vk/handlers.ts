@@ -824,12 +824,6 @@ async function isVkSubscribed(_ctx: MessageContext, vkUserId: number): Promise<b
   }
 }
 
-/** Inline keyboard with a single "Нужна помощь?" button that sends a support alert. */
-function vkSupportKb(ctxKey: string) {
-  return Keyboard.builder()
-    .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: ctxKey }, color: "secondary" })
-    .inline();
-}
 
 const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
@@ -849,12 +843,6 @@ function vkFaqKb() {
     .inline();
 }
 
-function vkFaqOrSupportKb(order: any, ctxKey = "general") {
-  if (order && orderAgeMsFromOrder(order) < SUPPORT_COOLDOWN_MS) {
-    return vkFaqKb();
-  }
-  return vkSupportKb(ctxKey);
-}
 
 function orderAgeMsFromOrder(order: any): number {
   if (!order?.createdAt) return Infinity;
@@ -3277,9 +3265,6 @@ async function handleGamepassLink(
 // B2 — Gamepass search by Roblox nick (item 7)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ROBLOX_NICK_RE now imported from shared/admin
-/** Max gamepass matches we show as inline buttons. */
-const MAX_PICK_BUTTONS = 5;
 
 /**
  * Запасной вход в заказ, когда поиск по нику ничего не нашёл.

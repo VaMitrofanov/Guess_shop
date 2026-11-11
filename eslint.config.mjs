@@ -52,6 +52,8 @@ const eslintConfig = defineConfig([
     ".claude/worktrees/**",
     // Локальная песочница (в .gitignore) — не часть кодовой базы.
     "scratch/**",
+    // Скрипт Telegram WebApp SDK, лежит как есть (чужой код) — не наш стиль.
+    "public/vendor/**",
   ]),
 ]);
 

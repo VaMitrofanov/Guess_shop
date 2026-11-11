@@ -26,7 +26,7 @@ export type RiskKind =
   | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
   /** С 01.11.2026 — из обращений покупателя (buyer-contact-sweep). */
   | "BUYER_CANCEL" | "BUYER_HELP";
-export type RiskAction = "frozen" | "released" | "none";
+type RiskAction = "frozen" | "released" | "none";
 
 export const RISK_AUTO_ACTOR = "авто";
 
@@ -165,7 +165,7 @@ export function claimEvents(order: RiskOrder, now: Date): RiskEventInput[] {
  * не позже чем через 30 дней после заказа. Гейт (замок на деньги) это окно не
  * сужает: там лучше перестраховаться.
  */
-export const RISK_REVIEW_MAX_DAYS_AFTER_ORDER = 30;
+const RISK_REVIEW_MAX_DAYS_AFTER_ORDER = 30;
 
 export function reviewBelongsInFeed(order: RiskOrder, review: WbFeedback): boolean {
   const t = review.createdDate ? Date.parse(review.createdDate) : NaN;

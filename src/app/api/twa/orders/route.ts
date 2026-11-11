@@ -6,10 +6,24 @@ import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepass
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { getGamepassById } from "@/lib/roblox";
 import { bridgeConfigured, bridgeGamepassDetails } from "@/lib/roblox-bridge";
-import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import {
+  BuyoutError,
+  purchaseGamepassWithCookie,
+  resolveGamepass,
+  resolveGamepassForBuyer,
+  verifyGamepassOwnership,
+  type ResolvedGamepass,
+} from "@/lib/roblox-buyout";
 import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
-import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, PRICE_TOL, checkGamepassPrice, expectedGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import {
+  BUYOUT_ERROR_LEGACY_PURCHASE_FLOW,
+  BUYOUT_ERROR_REGIONAL_PRICE,
+  PRICE_TOL,
+  checkGamepassPrice,
+  expectedGamepassPrice,
+  sellerMatchesOrder,
+} from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRebuyData, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 import { recordOrderStatusChange } from "@/lib/order-status-event";
@@ -19,7 +33,7 @@ import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
 import { directPatchForSource, isDirectSource } from "@/lib/order-direct";
-import { PAID_BUYOUT_SCOPE, isUnpaidDirect } from "@/lib/buyout-queue";
+import { isUnpaidDirect } from "@/lib/buyout-queue";
 import {
   assertSplitCoversOrder,
   buildSplitParts,
@@ -38,7 +52,11 @@ import {
   type FilterTab,
 } from "@/lib/order-queue";
 import {
-  assertOrderBuyable, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
+  assertOrderBuyable,
+  heldRefusal,
+  holdByCode,
+  normalizeHoldCode,
+  releaseByCode,
 } from "@/lib/order-hold";
 import { humanNoteLine, prependNote } from "../../../../../bots/shared/order-hold";
 import { isRevokedCode } from "@/lib/wb-code-revocation";

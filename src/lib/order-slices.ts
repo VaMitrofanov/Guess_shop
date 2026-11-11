@@ -28,25 +28,23 @@ import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, NEW_CUTOFF_HOURS, SILENT_REMINDERS, 
 export const SLICE_KEYS = ["BUYOUT", "ERROR", "AWAITING_LINK", "DONE"] as const;
 export type SliceKey = (typeof SLICE_KEYS)[number];
 
-export const isSliceKey = (value: string): value is SliceKey =>
-  (SLICE_KEYS as readonly string[]).includes(value);
 
 export type LaneId = "WB" | "WB_DBS" | "DIRECT";
 
-export interface SliceLane {
+interface SliceLane {
   id: LaneId;
   orders: number;
   /** Грязные робуксы полосы — ширина сегмента считается по ним, а не по заказам. */
   gross: number;
 }
 
-export interface SliceAgeBucket {
+interface SliceAgeBucket {
   id: string;
   label: string;
   count: number;
 }
 
-export interface SliceBlockers {
+interface SliceBlockers {
   /** Рег. цена на доноре: выкуп сорвётся, замена по нику не найдена. */
   regional: number;
   /** Заказ разбит на части, куплены не все. */
@@ -132,7 +130,7 @@ const LINK_AGE_BUCKETS: AgeBucketDef[] = [
   { id: "b3", label: "> 2 нед", fromHours: 336,     toHours: null, overdue: true },
 ];
 
-export function ageBucketsFor(tab: FilterTab): AgeBucketDef[] {
+function ageBucketsFor(tab: FilterTab): AgeBucketDef[] {
   return tab === "AWAITING_LINK" || tab === "STALE_LINK" || tab === "NEW"
     ? LINK_AGE_BUCKETS
     : BUYOUT_AGE_BUCKETS;

@@ -19,7 +19,7 @@
 import { prisma } from "@/lib/prisma";
 import { createHmac } from "crypto";
 
-export interface IntentUserRef {
+interface IntentUserRef {
   id: string;
   tgId?: string | null;
   vkId?: string | null;

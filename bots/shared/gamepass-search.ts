@@ -26,7 +26,7 @@ import {
 } from "./roblox";
 import type { GamesVisibility } from "./roblox-owned-games";
 
-export interface AnnotatedGamepass extends GamepassSearchResult {
+interface AnnotatedGamepass extends GamepassSearchResult {
   /** `Math.abs(robux − expectedPrice) ≤ PRICE_MATCH_TOLERANCE`. */
   isPriceMatch: boolean;
 }
@@ -40,7 +40,7 @@ export type GamepassSearchOutcome =
   | ({ status: "ok";             nick: string;           expectedPrice: number; userId: number; all: AnnotatedGamepass[]; matches: AnnotatedGamepass[]; nonMatches: AnnotatedGamepass[] } & GamesInfo);
 
 /** Same ±tolerance we used in Phase A — Roblox rounds prices, this preserves UX. */
-export const PRICE_MATCH_TOLERANCE = 2;
+const PRICE_MATCH_TOLERANCE = 2;
 
 export async function searchGamepassesByNick(
   nick: string,

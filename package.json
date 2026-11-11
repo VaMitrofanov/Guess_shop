@@ -30,8 +30,8 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
     "@babel/runtime": "^7.29.7",
-    "@prisma/adapter-pg": "^7.9.1",
-    "@prisma/client": "^7.9.1",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@vkid/sdk": "^2.6.6",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
@@ -39,17 +39,17 @@
     "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
-    "next": "16.3.0",
+    "next": "16.4.6",
     "next-auth": "5.0.0-beta.32",
-    "nodemailer": "9.0.3",
+    "nodemailer": "10.5.0",
     "pg": "^8.12.0",
-    "puppeteer-core": "25.3.0",
+    "puppeteer-core": "25.17.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "ws": "^8.20.0",
-    "zod": "^4.3.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -61,9 +61,9 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.0",
+    "eslint-config-next": "16.4.6",
     "jest": "^30.3.0",
-    "prisma": "^7.9.1",
+    "prisma": "^7.10.1",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.9",
     "tsx": "^4.23.11",
@@ -73,9 +73,9 @@
     "seed": "node prisma/seed.js"
   },
   "overrides": {
-    "nodemailer": "9.0.3",
+    "nodemailer": "10.5.0",
     "minimatch@3.1.5": {
-      "brace-expansion": "1.1.18"
+      "brace-expansion": "1.1.22"
     },
     "uuid@8.3.2": "11.1.1"
   }

@@ -14,7 +14,7 @@ import { HOLD_KINDS, HOLD_KIND_META, isHoldKind, type HoldKind } from "./hold-ki
 
 export { HOLD_KINDS, HOLD_KIND_META, isHoldKind, type HoldKind };
 
-export function holdKindOf(order: { heldBy?: string | null; heldReason?: string | null }): HoldKind {
+function holdKindOf(order: { heldBy?: string | null; heldReason?: string | null }): HoldKind {
   if (order.heldBy === GATE_ACTOR) {
     return (order.heldReason ?? "").startsWith(BAD_REVIEW_REASON_HEAD) ? "review" : "stale";
   }

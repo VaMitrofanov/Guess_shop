@@ -17,7 +17,7 @@ import { splitUsableAmounts } from "@/lib/order-gamepass-split";
 import { PRICE_TOL, expectedGamepassPrice } from "@/lib/purchase-guard";
 
 /** Что строка значит для ЭТОГО заказа. */
-export type GamepassFitKind =
+type GamepassFitKind =
   /** Этот пасс уже стоит на заказе. */
   | "current"
   /** Цена сходится с номиналом заказа — можно закрыть им одним. */

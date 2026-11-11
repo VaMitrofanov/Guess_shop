@@ -29,7 +29,7 @@ import {
  * Сколько пассов создаём за раз — столько же частей умеет заказ. До 24.09.2026
  * здесь стояло 2, и эталонный набор под 3200 (1500 + 1000 + 700) обрезался.
  */
-export const MAX_KEY_TARGETS = MAX_AUTO_PARTS;
+const MAX_KEY_TARGETS = MAX_AUTO_PARTS;
 /**
  * Предел одного сообщения в Telegram и во ВКонтакте. Ключ приходит текстом, и
  * всё, что мессенджер физически способен доставить, мы обязаны принять: свой
@@ -38,16 +38,16 @@ export const MAX_KEY_TARGETS = MAX_AUTO_PARTS;
  */
 export const MAX_KEY_LEN = 4096;
 /** Короче этого ключа не бывает — обрезанная вставка отсекается без похода в Roblox. */
-export const MIN_KEY_LEN = 20;
+const MIN_KEY_LEN = 20;
 
-export interface AutocreatedPass {
+interface AutocreatedPass {
   gamePassId: number;
   priceInRobux: number;
   name?: string;
   universeId?: string;
 }
 
-export interface AutocreateOutcome {
+interface AutocreateOutcome {
   /** Что реально создано (может быть половина набора). */
   created: AutocreatedPass[];
   /** Машинный код отказа: `bad_key`, `bad_scope`, … Пусто — всё создано. */

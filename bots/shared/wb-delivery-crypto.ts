@@ -7,7 +7,7 @@ const ENVELOPE_VERSION = "v1";
  * «reply-sign» нельзя даже с правильным ключом шифрования. `roblox-api-key` —
  * Open Cloud ключ покупателя, которым бот создаёт геймпасс (см. RobloxApiKey).
  */
-export type SecretPurpose = "delivery-code" | "reply-sign" | "roblox-api-key";
+type SecretPurpose = "delivery-code" | "reply-sign" | "roblox-api-key";
 const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,6})(?!\d)/g;
 /** The buyer naming it themselves ("код 7760778") removes the ambiguity that
  * makes a bare five- or seven-digit run untrustworthy in prose. */
@@ -118,7 +118,3 @@ export function redactWbChatText(text: string): string {
     .slice(0, 2_000);
 }
 
-export function maskWbCode(code: string | null | undefined): string | null {
-  if (!code) return null;
-  return `•••••${code.slice(-2)}`;
-}

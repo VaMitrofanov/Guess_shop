@@ -10,7 +10,7 @@ function iso(value: Date | null | undefined) {
   return value?.toISOString() ?? null;
 }
 
-export type AdminOrderRow = {
+type AdminOrderRow = {
   id: string;
   code: string;
   publicOrderId: string | null;
@@ -38,7 +38,7 @@ export type AdminOrderRow = {
   attention: boolean;
 };
 
-export type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "ERROR";
+type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "ERROR";
 
 export type AdminOrdersPage = {
   orders: AdminOrderRow[];
@@ -520,7 +520,7 @@ export async function getAdminDashboardData() {
   return result;
 }
 
-export type AdminActivityItem = {
+type AdminActivityItem = {
   id: string;
   kind: "order" | "payment" | "notification" | "refund" | "identity";
   tone: "neutral" | "success" | "warning" | "danger";

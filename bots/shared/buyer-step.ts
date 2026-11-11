@@ -28,7 +28,7 @@ import { PLACE_HELP_EVENT, placeGuideUrl, placeHelpInfo, STUDIO_DOWNLOAD_URL } f
 
 /* ── 1. Что прислал покупатель ─────────────────────────────────────────── */
 
-export type BuyerInput =
+type BuyerInput =
   | { kind: "gamepass"; passId: string }
   | { kind: "api_key" }
   | { kind: "game" }
@@ -78,9 +78,9 @@ export function classifyBuyerInput(raw: string): BuyerInput {
 export type BuyerStepKind = "create" | "key" | "link" | "passid" | "sale" | "nick" | "place" | "custom";
 
 /** Где пункт стоит в меню: вся инструкция, её часть или свои слова. */
-export type BuyerStepGroup = "whole" | "part" | "custom";
+type BuyerStepGroup = "whole" | "part" | "custom";
 
-export interface BuyerStepOption {
+interface BuyerStepOption {
   kind: BuyerStepKind;
   group: BuyerStepGroup;
   icon: string;
@@ -117,7 +117,7 @@ export function isBuyerStepKind(value: unknown): value is BuyerStepKind {
  * у TG и VK разные строки для одного действия (`find_gp` / `find_gp_start`),
  * и переводит их отправитель (`BUYER_STEP_COMMANDS`).
  */
-export type BuyerStepButton =
+type BuyerStepButton =
   | { label: string; url: string }
   | { label: string; action: "nick" | "link" };
 
@@ -158,7 +158,7 @@ export function buyerGuideUrl(order: BuyerStepOrder, stage?: "key" | "passid" | 
   return url;
 }
 
-export interface BuyerStepMessage {
+interface BuyerStepMessage {
   /** Telegram HTML. Для VK — `stripHtml`. */
   html: string;
   buttons: BuyerStepButton[][];
@@ -281,7 +281,7 @@ export const DEAD_END_REASONS = {
   key_no_nick: "прислал ключ, но ника в заказе нет",
 } as const;
 
-export type DeadEndReason = keyof typeof DEAD_END_REASONS;
+type DeadEndReason = keyof typeof DEAD_END_REASONS;
 
 /** Минимум от Prisma-клиента (db в ботах, prisma в Web). */
 export type BuyerStepClient = {
@@ -290,7 +290,7 @@ export type BuyerStepClient = {
 };
 
 /** Заказ, которому бот примет ключ вне шага ключа. */
-export interface StrayKeyOrder {
+interface StrayKeyOrder {
   id: string;
   wbCode: string;
   amount: number;

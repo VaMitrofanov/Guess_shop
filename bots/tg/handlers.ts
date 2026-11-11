@@ -37,7 +37,6 @@ import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/ga
 import { parseExperienceRef, type GamesVisibility } from "../shared/roblox-owned-games";
 import {
   createTargetsFor,
-  netFromPrice,
   planFromOwned,
   singlePassFits,
   splitRequiredMessage,
@@ -56,7 +55,6 @@ import {
   questKeyWorkingText,
   questNoAccountScreen,
   questResultScreen,
-  questSearchDownScreen,
   type QuestScreen,
 } from "../shared/gamepass-quest";
 import { gamepassAutocreateEnabled } from "../shared/gamepass-autocreate-flag";
@@ -2306,15 +2304,6 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   return { text, keyboard };
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
-  PAYMENT_PENDING:   "💳 Ожидаем оплату",
-  AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
-  PENDING:     "⏳ В обработке",
-  IN_PROGRESS: "🔧 В работе",
-  COMPLETED:   "✅ Выполнен",
-  REJECTED:    "❌ Отклонён",
-};
 
 /**
  * Buyer "mini profile" / home hub — the place a customer lands once the WB flow

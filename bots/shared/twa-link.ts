@@ -16,7 +16,7 @@ import crypto from "crypto";
 const LINK_TOKEN_VERSION = "v1";
 
 /** Ссылка живёт 30 дней: Menu Button ставится один раз на старте бота. */
-export const TWA_LINK_TTL_SEC = 30 * 24 * 60 * 60;
+const TWA_LINK_TTL_SEC = 30 * 24 * 60 * 60;
 
 function linkSecret(): Buffer | null {
   const raw = process.env.TWA_LINK_SECRET?.trim();

@@ -85,8 +85,8 @@ export interface JourneyLive {
 
 export type JourneyWho = "buyer" | "us" | "problem";
 export type JourneyTone = "wait" | "us" | "bad" | "done" | "muted";
-export type JourneyStepState = "done" | "current" | "bad" | "todo";
-export type JourneyGroup = "Код и ник" | "Геймпасс" | "Выкуп";
+type JourneyStepState = "done" | "current" | "bad" | "todo";
+type JourneyGroup = "Код и ник" | "Геймпасс" | "Выкуп";
 
 export interface JourneyItem {
   who: JourneyWho;
@@ -143,7 +143,7 @@ function channelWord(channel: unknown): string {
 }
 
 /** Событие → строка истории. `null` — событие пути не касается. */
-export function journeyItem(event: JourneyEventRow): JourneyItem | null {
+function journeyItem(event: JourneyEventRow): JourneyItem | null {
   const p = (event.payload ?? {}) as Record<string, unknown>;
   const at = iso(event.createdAt);
   switch (event.type) {
@@ -205,7 +205,6 @@ function fmtWait(fromMs: number, nowMs: number): string {
   return `${Math.floor(h / 24)} д`;
 }
 
-export { fmtWait as journeyWaitText };
 
 export function buyerJourney(
   order: JourneyOrder,

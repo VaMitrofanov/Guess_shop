@@ -45,7 +45,7 @@ export type WbDeliveryPolicyOrder = {
 /** Сутки и два напоминания — после этого «покупатель идёт по воронке» перестаёт
  * быть правдой. Ровно в этот момент оператору уходит «покупатель не открыл свой
  * код», так что консоль и уведомление говорят об одном и том же. */
-export const GATE_STALLED_AFTER_MS = 24 * 60 * 60_000;
+const GATE_STALLED_AFTER_MS = 24 * 60 * 60_000;
 
 /** Where the buyer actually stands inside our own funnel once the gate is out.
  * `in_bot` on its own is too coarse to act on: an order waiting for a nick and
@@ -243,7 +243,7 @@ export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
   return "new";
 }
 
-export type WbDeliverySecretState = {
+type WbDeliverySecretState = {
   consumedAt?: Date | null;
   encryptedValue: string;
   expiresAt: Date;
@@ -362,7 +362,7 @@ export const WB_RECEIVE_MAX_ATTEMPTS = WB_RECEIVE_RETRY_DELAYS_MIN.length + 1;
  * случае делает ровно одно: приносит код доставки в админку. */
 export const WB_AUTO_RECEIVE_ORDER_AGE_MS = 4 * 60 * 60_000;
 
-export type WbOrderPlacement = {
+type WbOrderPlacement = {
   /** Слово самого WB о том, когда заказ оформлен. */
   wbCreatedAt?: Date | string | null;
   /** Когда заказ увидел воркер. Fallback для заказов, заведённых до появления
@@ -427,7 +427,7 @@ export function wbReceiveRetryCutoff(now = new Date()): Date {
   return new Date(now.getTime() - WB_RECEIVE_RETRY_INTERVAL_MS);
 }
 
-export type WbReceiveRetryState = {
+type WbReceiveRetryState = {
   failedAttempts: number;
   /** Когда пробовали в прошлый раз: строку секрета трогают только захват и отказ. */
   updatedAt: Date | string;
@@ -436,7 +436,7 @@ export type WbReceiveRetryState = {
 };
 
 /** Пауза перед следующей попыткой. `null` — расписание кончилось. */
-export function wbReceiveRetryDelayMs(failedAttempts: number): number | null {
+function wbReceiveRetryDelayMs(failedAttempts: number): number | null {
   if (failedAttempts < 1) return 0;
   const minutes = WB_RECEIVE_RETRY_DELAYS_MIN[failedAttempts - 1];
   return minutes === undefined ? null : minutes * 60_000;

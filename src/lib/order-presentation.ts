@@ -43,7 +43,7 @@ export interface PresentableOrder {
 }
 
 /** Результат живой проверки геймпасса (`gp-live-check`). */
-export interface GpLive {
+interface GpLive {
   isForSale?: boolean | null;
   livePrice?: number | null;
   priceMismatch?: boolean | null;
@@ -140,9 +140,9 @@ export function orderBadge(order: PresentableOrder): { label: string; tone: Tone
    предлагал бы в «Выкупить» и в «Все» разные кнопки — и однажды не ту.
    ────────────────────────────────────────────────────────────────────────── */
 
-export type OrderActionKind = "action" | "contact";
+type OrderActionKind = "action" | "contact";
 
-export interface PrimaryAction {
+interface PrimaryAction {
   kind: OrderActionKind;
   /** POST-действие `/api/admin/orders`; пусто у `contact`. */
   action?: string;
@@ -407,7 +407,7 @@ export function packDuplicates<T extends { id: string; wbCode: string; status: s
    экран берёт из тона сам.
    ────────────────────────────────────────────────────────────────────────── */
 
-export type StepState = "done" | "now" | "wait" | "bad" | "todo";
+type StepState = "done" | "now" | "wait" | "bad" | "todo";
 
 export interface Readiness {
   /** Оплата · Ник · Пасс · Выкуп. */
@@ -420,7 +420,6 @@ export interface Readiness {
   ready: boolean;
 }
 
-export const READINESS_STEPS = ["Оплата", "Ник", "Пасс", "Выкуп"] as const;
 
 export function readinessFor(order: PresentableOrder & { probableNick?: string | null }, live?: GpLive | null): Readiness {
   const split = order.splitGamepasses ?? [];

@@ -21,7 +21,7 @@ export interface PriceWatchPart {
   position: number;
 }
 
-export interface PriceWatchTarget {
+interface PriceWatchTarget {
   gamepassId: string;
   /** Номинал, с которым сверяется цена пасса. */
   amount: number;

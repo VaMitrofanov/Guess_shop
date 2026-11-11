@@ -15,7 +15,7 @@ export const FIRST_UNDO_MS = 5_000;
 
 export type FirstGroupId = FirstInLineOrder["reason"];
 
-export interface FirstGroupMeta {
+interface FirstGroupMeta {
   id: FirstGroupId;
   icon: string;
   title: string;

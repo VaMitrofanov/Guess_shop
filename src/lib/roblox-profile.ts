@@ -3,10 +3,10 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getRobloxPublicProfile, getRobloxPublicProfileById, type RobloxPublicProfile } from "@/lib/roblox";
 
-export const ROBLOX_PROFILE_TTL_MS = 24 * 60 * 60 * 1000;
-export const ROBLOX_USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+const ROBLOX_PROFILE_TTL_MS = 24 * 60 * 60 * 1000;
+const ROBLOX_USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 
-export type CustomerRobloxAccountSource = "ORDER_HISTORY" | "MANUAL";
+type CustomerRobloxAccountSource = "ORDER_HISTORY" | "MANUAL";
 
 export type CustomerRobloxProfile = {
   accountId: string;
@@ -456,5 +456,3 @@ export async function disconnectCustomerRobloxProfile(userId: string, accountId?
   return { status: "missing-username" as const, profile: null, accounts: [], suggestedUsername: null };
 }
 
-// Backward-compatible name for callers that used PATCH as "link profile".
-export const refreshCustomerRobloxProfile = addCustomerRobloxAccount;

@@ -36,7 +36,7 @@ export function numbersIn(line: string): number[] {
   return out;
 }
 
-export interface PendingRead {
+interface PendingRead {
   /** Нашли подпись «Pending». Без неё число не доверяем. */
   labelFound: boolean;
   /** Число в строке Pending Robux (или сразу под ней). */
@@ -98,7 +98,7 @@ export function readPendingFromText(text: string, nick?: string | null): Pending
   return { labelFound, pending, nickSeen };
 }
 
-export type PendingVerdict = "ok" | "low" | "unreadable";
+type PendingVerdict = "ok" | "low" | "unreadable";
 
 export function pendingVerdict(read: PendingRead, amount: number | null | undefined): PendingVerdict {
   if (!read.labelFound || read.pending === null || !amount) return "unreadable";
@@ -134,7 +134,7 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 let langs = "eng+rus";
 
 /** Текст картинки через `tesseract`; `null` — нет бинаря/таймаут/сбой. */
-export async function ocrImage(image: Buffer, psm = 6): Promise<string | null> {
+async function ocrImage(image: Buffer, psm = 6): Promise<string | null> {
   const first = await runTesseract(image, psm, langs);
   if (first !== null || langs === "eng") return first;
   const fallback = await runTesseract(image, psm, "eng");
@@ -166,7 +166,7 @@ function runTesseract(image: Buffer, psm: number, lang: string): Promise<string 
  * запросы отвечает 429 HTML-страницей — её нельзя принять за картинку
  * (27.10.2026): проверяем тип и один раз повторяем через 2 с.
  */
-export async function fetchImage(url: string, attempt = 1): Promise<Buffer | null> {
+async function fetchImage(url: string, attempt = 1): Promise<Buffer | null> {
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     const type = r.headers.get("content-type") ?? "";

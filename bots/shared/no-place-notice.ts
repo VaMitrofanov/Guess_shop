@@ -8,7 +8,7 @@ import { formatAdminNotice, orderRef } from "./notify-format";
 import { escapeHtml } from "./notify";
 import { PLACE_HELP_EVENT } from "./no-place";
 
-export interface PlaceHelpShown {
+interface PlaceHelpShown {
   via: "tg-bot" | "vk-bot" | "site";
   /** Вердикт ключа: `no_universe` — игр нет вовсе, `games_hidden` — не видим. */
   verdict: string;

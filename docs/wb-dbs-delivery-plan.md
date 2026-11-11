@@ -499,7 +499,7 @@ Exactly-once обеспечен CAS по `chatState` **до** отправки: 
 DBS-заказы визуально сливались с обычными. Теперь источник рендерится через
 `wbOrderSourceLabel(platform, orderSource)` → `WB DBS → TG`, а карточки «НОВЫЙ КЛИЕНТ»
 получают отдельную строку `wbDbsBadgeLine`. Покрыто: `bots/shared/admin.ts`,
-`bots/tg/handlers.ts` (обе карточки), `bots/tg/admin/hub-orders.ts`, `bots/vk/handlers.ts`.
+`bots/tg/handlers.ts` (обе карточки), `bots/vk/handlers.ts` (`hub-orders.ts` удалён 11.11.2026).
 `sendAdminOrderCard` доразрешает источник по коду сам, если вызывающий его не передал, —
 забыть нельзя. Тест запрещает любой карточке снова печатать голую платформу как источник.
 

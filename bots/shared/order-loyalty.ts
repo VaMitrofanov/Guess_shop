@@ -20,7 +20,7 @@ export const LOYALTY_EXCLUDED_STATUSES = [
   "PAYMENT_PENDING",
 ] as const;
 
-export type LoyaltyCountClient = {
+type LoyaltyCountClient = {
   wbOrder: { count: (args: { where: Record<string, unknown> }) => Promise<number> };
 };
 

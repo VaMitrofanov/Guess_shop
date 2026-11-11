@@ -108,23 +108,7 @@ export const pendingReviewRejectReason = new Map<number, { orderId: string; user
 
 // ── Admin dashboard session states ───────────────────────────────────────────
 
-/** Admin's last widget message_id per hub — for editMessageText reuse. */
-export const adminWidgetMsg = new Map<number, number>();
 
-/** Admin is in "add codes" input mode. Value = denomination for the codes. */
-export const pendingCodesInput = new Map<number, { denomination: number }>();
-
-/** Admin is in "change purchase rate" input mode. */
-export const pendingRateInput = new Map<number, true>();
-
-/** Admin is in "search order" input mode. */
-export const pendingAdminSearch = new Map<number, true>();
-
-/** Admin is in "batch fulfillment" input mode — waiting for confirmation. */
-export const pendingBatchFulfill = new Map<number, true>();
-
-/** Admin is in "edit product price" input mode. Value = nmID. */
-export const pendingPriceInput = new Map<number, { nmID: number }>();
 
 // ── Progressive Disclosure: per-session failure counters ─────────────────────
 // Tracks how many times a user has hit each validation error in their current
@@ -138,35 +122,6 @@ export interface LinkFailState {
 
 export const linkFailCounts = new Map<number, LinkFailState>();
 
-/** Admin is typing an answer to a WB review or question. */
-export const pendingReviewAnswer = new Map<number, { id: string; isQuestion: boolean; article: string }>();
-
-/** Admin is setting the cost price for a WB product. */
-export const pendingCostInput = new Map<number, { nmID: number; vendorCode: string }>();
-
-/** Admin is updating logistics cost for a WB product. */
-export const pendingLogisticsInput = new Map<number, { nmID: number; vendorCode: string }>();
-
-/** Admin is setting advertising cost per unit for a WB product. */
-export const pendingAdInput = new Map<number, { nmID: number; vendorCode: string }>();
-
-/** Admin is setting a denomination (Robux count) for a WB product. */
-export const pendingDenomInput = new Map<number, { nmID: number; vendorCode: string }>();
-
-/** Admin is updating a global WB unit econ setting. */
-export const pendingUeSettingInput = new Map<number, { field: "kursRb" | "kursUsd" | "fixedCost" }>();
-
-/** Admin is using the what-if unit-econ calculator (typing "номинал цена [маржа%]"). */
-export const pendingWhatIfInput = new Set<number>();
-
-/** Admin is entering the auto-buy target rate. */
-export const pendingAutoBuyRateInput = new Map<number, true>();
-
-/** Admin is typing a gamepass name to search on bossrobux. */
-export const pendingBossrobuxSearch = new Map<number, true>();
-
-/** Cached search results per admin (cleared after successful purchase). */
-export const bossrobuxSearchCache = new Map<number, import("../shared/bossrobux").BossrobuxGamepass[]>();
 
 // ── Client-side: gamepass search by Roblox nick (item 7) ─────────────────────
 

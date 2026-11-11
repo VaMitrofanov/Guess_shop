@@ -51,7 +51,6 @@ describe("считают все карточки одним счётом", () =>
   test.each([
     "bots/tg/handlers.ts",
     "bots/vk/handlers.ts",
-    "bots/tg/admin/hub-orders.ts",
     "src/app/api/wb-code/select-gamepass/route.ts",
   ])("%s не заводит свой фильтр статусов", (file) => {
     const source = read(file);

@@ -30,7 +30,7 @@ export const ADMIN_WINDOW_MAX_DAYS = 7;
 /** Первый в жизни заход: окна ещё нет, показываем прошедшие сутки. */
 const FIRST_VISIT_HOURS = 24;
 
-export interface AdminPresenceWindow {
+interface AdminPresenceWindow {
   /** С какого момента считать диф. */
   windowStartAt: Date;
   /** Когда этот админ был здесь до текущей загрузки. `null` — впервые. */
@@ -105,12 +105,3 @@ export async function touchAdminPresence(actor: AdminActor, now = new Date()): P
   };
 }
 
-/** Кто ещё из админов был здесь недавно — для будущей отметки «в работе». */
-export async function listRecentAdmins(withinMinutes = 15, now = new Date()) {
-  const since = new Date(now.getTime() - withinMinutes * 60_000);
-  return prisma.adminPresence.findMany({
-    where: { lastSeenAt: { gte: since } },
-    orderBy: { lastSeenAt: "desc" },
-    select: { telegramId: true, displayName: true, lastSeenAt: true, currentOrderId: true },
-  });
-}

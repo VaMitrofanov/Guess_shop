@@ -14,7 +14,7 @@ function poolSize() {
   return Number.isInteger(configured) ? Math.min(10, Math.max(2, configured)) : 5;
 }
 
-export const databasePoolMax = poolSize();
+const databasePoolMax = poolSize();
 
 function buildPoolerUrl(raw: string): string {
   try {

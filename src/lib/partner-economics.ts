@@ -1,14 +1,14 @@
 export type PartnerRateBasisValue = "DIRTY" | "NET";
-export type PartnerCostBasisValue = "ASSUMED" | "RATE" | "ACTUAL" | "MANUAL";
+type PartnerCostBasisValue = "ASSUMED" | "RATE" | "ACTUAL" | "MANUAL";
 
-export type PartnerEconomicPolicy = {
+type PartnerEconomicPolicy = {
   saleRateUsdtPer1000: number;
   purchaseRateUsdtPer1000: number;
   rateBasis: PartnerRateBasisValue;
   robloxFeePct: number;
 };
 
-export type PartnerSettlement = PartnerEconomicPolicy & {
+type PartnerSettlement = PartnerEconomicPolicy & {
   grossRobux: number;
   netRobux: number;
   billedRobux: number;
@@ -24,7 +24,7 @@ export type PartnerTaskEconomicSnapshot = PartnerSettlement & {
   snapshotSource: "task" | "batch";
 };
 
-export type PartnerLedgerEconomicSource = {
+type PartnerLedgerEconomicSource = {
   taskId?: string | null;
   rateUsdtPer1000?: number | null;
   purchaseRateUsdtPer1000?: number | null;
@@ -36,7 +36,7 @@ export type PartnerLedgerEconomicSource = {
 
 // Google Sheets keeps the partner balance below one cent. With a rate stored to
 // four decimals and an integer R$ amount, C * F / 1000 needs up to 7 decimals.
-export function roundPartnerMoney(value: number) {
+function roundPartnerMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 10_000_000) / 10_000_000;
 }
 

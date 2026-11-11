@@ -11,9 +11,9 @@
 import { FLAG_META, flagLabel, flagsOf, type OrderFlagKind } from "../../bots/shared/order-flags";
 import type { Tone } from "./order-presentation";
 
-export type SignalState = "block" | "attention" | "info" | "resolved";
+type SignalState = "block" | "attention" | "info" | "resolved";
 
-export interface OrderSignal {
+interface OrderSignal {
   id: string;
   state: SignalState;
   tone: Tone;
@@ -30,7 +30,7 @@ export interface OrderSignal {
   actionLabel?: string;
 }
 
-export interface SignalOrder {
+interface SignalOrder {
   heldAt?: string | Date | null;
   heldReason?: string | null;
   heldBy?: string | null;

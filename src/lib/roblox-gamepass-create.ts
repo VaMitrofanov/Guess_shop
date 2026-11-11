@@ -15,7 +15,7 @@
 
 const CREATE_TIMEOUT_MS = 45_000;
 
-export interface CreateGamePassViaBridgeParams {
+interface CreateGamePassViaBridgeParams {
   /** Open Cloud API-ключ клиента (API System `game-passes`: read + write). */
   apiKey: string;
   /** Цена в робуксах — то, ради чего всё затевается. */
@@ -30,7 +30,7 @@ export interface CreateGamePassViaBridgeParams {
   username?: string;
 }
 
-export interface CreateGamePassOutcome {
+interface CreateGamePassOutcome {
   ok: boolean;
   gamePassId?: number;
   universeId?: string;
@@ -52,9 +52,6 @@ export interface CreateGamePassOutcome {
   detail?: string;
 }
 
-export function gamepassCreateBridgeConfigured(): boolean {
-  return Boolean(process.env.VALIDATOR_SOURCE_URL?.trim());
-}
 
 /**
  * Создать покупаемый пасс нужного номинала на опыте клиента через мост.
@@ -102,7 +99,7 @@ export async function createGamePassViaBridge(
   }
 }
 
-export interface VerifyGamePassKeyOutcome {
+interface VerifyGamePassKeyOutcome {
   ok: boolean;
   universeId?: string;
   /** Канонический ник, как его пишет Roblox (регистр может отличаться от введённого). */

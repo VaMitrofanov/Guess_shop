@@ -1,7 +1,7 @@
 export type CustomerOrderKind = "legacy" | "canonical";
 export type CustomerOrderTone = "waiting" | "progress" | "success" | "danger" | "neutral";
 
-export type CustomerOrderSnapshot = {
+type CustomerOrderSnapshot = {
   id: string;
   kind: CustomerOrderKind;
   status: string;
@@ -9,14 +9,14 @@ export type CustomerOrderSnapshot = {
   createdAt: Date;
 };
 
-export type CustomerOrderStatus = {
+type CustomerOrderStatus = {
   label: string;
   tone: CustomerOrderTone;
   active: boolean;
   completed: boolean;
 };
 
-export type CustomerNotice = {
+type CustomerNotice = {
   id: string;
   title: string;
   text: string;

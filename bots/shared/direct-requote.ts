@@ -19,7 +19,7 @@ import { expectedGamepassPrice } from "./gamepass-plan";
 import { CUSTOM_MAX, CUSTOM_MIN, directPrice } from "./retail-pricing";
 
 /** Допуск цены — тот же, что у прайс-гарда выкупа (`PRICE_TOL`). */
-export const PASS_PRICE_TOL = 2;
+const PASS_PRICE_TOL = 2;
 
 /**
  * Сколько чистых R$ донесёт до покупателя пасс за такую цену.

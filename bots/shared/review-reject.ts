@@ -10,7 +10,7 @@
  * байт, лимит Telegram 64 — ключ не длиннее 8 символов (тест).
  */
 
-export interface ReviewRejectReason {
+interface ReviewRejectReason {
   key: string;
   /** Кнопка в админ-чате. */
   button: string;

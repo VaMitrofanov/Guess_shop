@@ -248,7 +248,7 @@ const cache: {
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-export interface TwaStats30d {
+interface TwaStats30d {
   orders: z.infer<typeof OrderSchema>[];
   sales:  z.infer<typeof SaleSchema>[];
 }
@@ -286,7 +286,7 @@ async function loadStats30d(): Promise<TwaStats30d | null> {
   return cache.stats?.data ?? null;
 }
 
-export interface TwaStockItem {
+interface TwaStockItem {
   article: string;
   quantity: number;
   quantityFull: number;
@@ -342,7 +342,7 @@ export async function getStocks(): Promise<TwaStockItem[] | null> {
   return result;
 }
 
-export interface TwaAdvertData {
+interface TwaAdvertData {
   totalActive: number;
   totalPaused: number;
   totalBudget: number;
@@ -402,7 +402,7 @@ export async function getAdvertData(): Promise<TwaAdvertData | null> {
   };
 }
 
-export interface TwaRealizData {
+interface TwaRealizData {
   period: { from: string; to: string };
   salesCount:     number;
   returnCount:    number;
@@ -415,7 +415,7 @@ export interface TwaRealizData {
   byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number; storagePerUnit: number; penaltyPerUnit: number }[];
 }
 
-export interface AdvertPeriodData {
+interface AdvertPeriodData {
   spend:           number;
   spendByNmId:     Record<number, number>; // nmId → ₽ spent in period
   advertisedNmIds: number[];               // nmIds with any spend > 0
@@ -560,7 +560,7 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
   return realiz;
 }
 
-export interface NmFunnelItem {
+interface NmFunnelItem {
   article:   string;
   orders:    number;
   buyouts:   number;
@@ -569,7 +569,7 @@ export interface NmFunnelItem {
   retPct:    number;
 }
 
-export interface TwaGoodItem {
+interface TwaGoodItem {
   nmID:            number;
   article:         string;
   price:           number;
@@ -577,7 +577,7 @@ export interface TwaGoodItem {
   discountedPrice: number;
 }
 
-export interface FeedbackSummary {
+interface FeedbackSummary {
   unansweredFeedbacks: number;
   unansweredQuestions: number;
   items: {
@@ -587,7 +587,7 @@ export interface FeedbackSummary {
   }[];
 }
 
-export interface TwaSupply {
+interface TwaSupply {
   id: string; done: boolean;
   createdAt: string; closedAt: string | null;
   name: string; cargoType: number;

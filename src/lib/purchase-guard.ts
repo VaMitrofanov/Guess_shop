@@ -23,7 +23,7 @@ export type RobloxPriceDiscountDetail = {
   EndTime?: string | null;
 };
 
-export type BuyerPriceClassification = {
+type BuyerPriceClassification = {
   kind: "FULL_PRICE" | "ROBLOX_PLUS" | "UNSAFE_DISCOUNT";
   discountPercent: number | null;
   discountAmount: number;

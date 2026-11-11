@@ -5,7 +5,7 @@ export type TelegramWebLoginMode = "login" | "link";
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
-export function telegramWebLoginStateHash(state: string): string {
+function telegramWebLoginStateHash(state: string): string {
   return crypto.createHash("sha256").update(state).digest("hex");
 }
 

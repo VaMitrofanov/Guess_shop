@@ -2,7 +2,7 @@
  * shipped, or generated on demand by the DBS courier-delivery gate. The corridor
  * that follows is identical, so the origin is only recoverable from the code's
  * link to its marketplace order — record it on the WbOrder while we still know. */
-export type WbOrderSource = "WB" | "WB_DBS";
+type WbOrderSource = "WB" | "WB_DBS";
 
 type MinimalTx = {
   wbMarketplaceOrder: {
@@ -17,7 +17,7 @@ type MinimalTx = {
  * под каким номером заказ живёт на WB и в какое сообщение упирается его ветка
  * у каждого админа. Раньше отсюда возвращался только источник, и карточка
  * DBS-заказа не могла ни назвать номер WB, ни пришиться к живой карточке. */
-export type WbOrderRef = {
+type WbOrderRef = {
   source: WbOrderSource;
   wbOrderId: string | null;
   /** `{ "<adminTgId>": <messageId> }` живой карточки DBS — корень ветки. */

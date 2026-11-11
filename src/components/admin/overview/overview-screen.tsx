@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Snowflake,
   TriangleAlert,
-  Truck,
 } from "lucide-react";
 import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
 import type { AdminOverview, OverviewFeedRow, OverviewQueueOrder } from "@/types/admin-overview";

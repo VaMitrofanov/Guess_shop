@@ -635,20 +635,3 @@ export async function getCheckoutGamepassDetails(
   };
 }
 
-export async function verifyUserGamepass(username: string, gamepassId: string, _requiredRobux: number) {
-  const user = await getRobloxUser(username);
-  if (!user) return { success: false, message: "User not found" };
-
-  const gamepass = await getGamepassDetails(gamepassId);
-  if (!gamepass) return { success: false, message: "Gamepass not found" };
-
-  if (String(gamepass.creatorId) !== String(user.id)) {
-    return { success: false, message: "Gamepass does not belong to this user" };
-  }
-
-  if (!gamepass.isActive) {
-    return { success: false, message: "Gamepass is not for sale" };
-  }
-
-  return { success: true, user, gamepass };
-}

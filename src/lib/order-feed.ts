@@ -16,7 +16,7 @@ import { FLAG_META, flagLabel, flagsOf, type OrderFlagKind } from "../../bots/sh
 import type { Tone } from "./order-presentation";
 
 /** Метка заметки человека из поля «Добавить заметку». */
-export const NOTE_TAG = "ЗАМЕТКА";
+const NOTE_TAG = "ЗАМЕТКА";
 
 export interface FeedOrder {
   adminNote?: string | null;
@@ -29,7 +29,7 @@ export interface FeedOrder {
   createdAt?: string | Date | null;
 }
 
-export interface FeedEntry {
+interface FeedEntry {
   key: string;
   text: string;
   /** Слова покупателя — единственное, что выделяется в ленте. */
@@ -40,7 +40,7 @@ export interface FeedEntry {
   ts: number;
 }
 
-export interface OrderNow {
+interface OrderNow {
   tone: Tone;
   title: string | null;
   sub?: string | null;

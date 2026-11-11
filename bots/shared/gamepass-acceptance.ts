@@ -30,7 +30,7 @@ import {
 } from "./gamepass-plan";
 
 /** Допуск цены — тот же, что у прайс-гарда выкупа (`PRICE_TOL`). */
-export const ACCEPT_PRICE_TOL = 2;
+const ACCEPT_PRICE_TOL = 2;
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 const PASS_ID_RE = /^\d{1,20}$/;
@@ -43,13 +43,13 @@ export type AcceptanceDetails = {
   creatorName?: string | null;
 } | null;
 
-export interface AcceptancePart {
+interface AcceptancePart {
   gamepassId: string;
   /** Номинал части — робуксы, которые она приносит. */
   amount: number;
 }
 
-export type AcceptanceErrorCode =
+type AcceptanceErrorCode =
   | "BAD_SPLIT"
   /** Заказ больше донора, а пасс один: нужен набор (2000 = 1500 + 500). */
   | "NEEDS_SPLIT"

@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 
 export type BotPaymentMethod = "SITE" | "BOT_ACQUIRING" | "MANUAL_TRANSFER";
-export type BotPaymentPlatform = "TG" | "VK";
+type BotPaymentPlatform = "TG" | "VK";
 
-export type BotPaymentResult = {
+type BotPaymentResult = {
   ok: true;
   orderId: string;
   publicOrderId: string;
@@ -41,7 +41,7 @@ export function isTerminalBotPaymentError(error: unknown): boolean {
   return error instanceof BotPaymentApiError && error.code != null && TERMINAL_CODES.has(error.code);
 }
 
-export function botPaymentSignature(timestamp: string, body: string) {
+function botPaymentSignature(timestamp: string, body: string) {
   return crypto.createHmac("sha256", requiredSecret()).update(`${timestamp}.${body}`, "utf8").digest("hex");
 }
 

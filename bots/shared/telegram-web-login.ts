@@ -2,7 +2,7 @@ import crypto from "crypto";
 
 export type TelegramWebLoginMode = "login" | "link";
 
-export type TelegramWebLoginUser = {
+type TelegramWebLoginUser = {
   id: number;
   first_name: string;
   last_name?: string;

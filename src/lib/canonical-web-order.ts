@@ -11,8 +11,8 @@ import {
 } from "@/lib/gamepass-plan";
 import { BONUS_REASONS, webOrderBonusKey } from "@/lib/bonus-ledger";
 
-export const WEB_ORDER_TERMS_VERSION = "2026-04-28";
-export const MIN_PAYMENT_KOPECKS = 1_000;
+const WEB_ORDER_TERMS_VERSION = "2026-04-28";
+const MIN_PAYMENT_KOPECKS = 1_000;
 
 export class WebOrderError extends Error {
   constructor(

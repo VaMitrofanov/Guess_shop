@@ -63,7 +63,7 @@ export const REVOKED_CODE_REFUSAL =
   "Этот код больше не действует: заказ на Wildberries был отменён и деньги вернулись покупателю. " +
   "Если это ошибка — напиши нам, разберёмся.";
 
-export interface RevocableCode {
+interface RevocableCode {
   status?: string | null;
 }
 
@@ -106,7 +106,7 @@ export interface RevokeInput {
   actor: string;
 }
 
-export type RevokeResult =
+type RevokeResult =
   | { ok: true; code: string }
   | { ok: false; error: string };
 

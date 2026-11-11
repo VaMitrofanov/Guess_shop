@@ -10,7 +10,6 @@ import {
   ChevronRight,
   Clipboard,
   Clock3,
-  Gamepad2,
   KeyRound,
   Loader2,
   MessageCircle,

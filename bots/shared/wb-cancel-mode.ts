@@ -41,7 +41,7 @@ type Db = PrismaClient;
 export const WB_CANCEL_BY_SELLER_CHAT = "чат WB";
 const HOLD_REASON = "Отмена заказа WB";
 
-export type WbCancelIntent = "cancel" | "resume" | null;
+type WbCancelIntent = "cancel" | "resume" | null;
 
 /* Команда оператора из кабинета WB — сообщение продавца, которое НАЧИНАЕТСЯ
    со слова: «Отмена…», «Оформляем отмену…» / «Продолжаем…», «Отмена снята…».
@@ -103,7 +103,7 @@ function liveCode(secret: Parameters<typeof wbDeliverySecretIsLive>[0] & { encry
   }
 }
 
-export type WbCancelResult =
+type WbCancelResult =
   | { ok: true; already: boolean; hasCode: boolean; askedBuyer: boolean }
   | { ok: false; error: string; code: "NOT_FOUND" | "ALREADY_CANCELLED" | "DELIVERY_CLOSED" };
 
@@ -163,7 +163,7 @@ export async function requestWbOrderCancel(
   return { ok: true, already: false, hasCode: Boolean(code), askedBuyer };
 }
 
-export type WbResumeResult =
+type WbResumeResult =
   | { ok: true; changed: true }
   | { ok: false; error: string; code: "NOT_FOUND" | "NOT_IN_CANCEL" };
 

@@ -4,12 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { sendMail, type SendResult } from "@/lib/mailer";
 
 export const PRIVACY_POLICY_VERSION = "2026-07-18";
-export const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1_000;
-export const PASSWORD_RESET_TTL_MS = 30 * 60 * 1_000;
+const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1_000;
+const PASSWORD_RESET_TTL_MS = 30 * 60 * 1_000;
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-export type ConsumeEmailTokenResult = "success" | "invalid" | "expired" | "conflict";
+type ConsumeEmailTokenResult = "success" | "invalid" | "expired" | "conflict";
 
 function emailHtml(input: { preheader: string; title: string; body: string; link: string; button: string; note: string }) {
   return `<!doctype html><html lang="ru"><body style="margin:0;background:#f6f3ff;font-family:Arial,sans-serif;color:#241b43"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${input.preheader}</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 12px;background:#f6f3ff"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border:1px solid #e4ddfa;border-radius:20px"><tr><td style="padding:32px"><p style="margin:0 0 22px;font-size:18px;font-weight:700;color:#7050e8">RobloxBank</p><h1 style="margin:0 0 14px;font-size:28px;line-height:1.15">${input.title}</h1><p style="margin:0 0 26px;font-size:16px;line-height:1.55;color:#6f6784">${input.body}</p><p style="margin:0 0 26px"><a href="${input.link}" style="display:inline-block;padding:14px 22px;border-radius:12px;background:#7352e8;color:#fff;text-decoration:none;font-weight:700">${input.button}</a></p><p style="margin:0;font-size:13px;line-height:1.55;color:#8b839f">${input.note}</p><p style="margin:22px 0 0;font-size:12px;line-height:1.5;color:#8b839f">Если кнопка не работает, откройте ссылку:<br><a href="${input.link}" style="color:#7050e8;word-break:break-all">${input.link}</a></p></td></tr></table></td></tr></table></body></html>`;
@@ -52,7 +52,7 @@ function ttlFor(purpose: EmailActionPurpose) {
   return purpose === EmailActionPurpose.VERIFY_EMAIL ? EMAIL_VERIFY_TTL_MS : PASSWORD_RESET_TTL_MS;
 }
 
-export async function issueEmailActionToken(userId: string, purpose: EmailActionPurpose, now = new Date()) {
+async function issueEmailActionToken(userId: string, purpose: EmailActionPurpose, now = new Date()) {
   const token = crypto.randomBytes(32).toString("base64url");
   const tokenHash = emailActionTokenHash(token);
   const expiresAt = new Date(now.getTime() + ttlFor(purpose));

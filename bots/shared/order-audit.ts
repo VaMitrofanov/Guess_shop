@@ -36,7 +36,7 @@ export const ORDER_AUDIT_TYPE = {
   GAMEPASS_AUTOCREATED: "AUDIT_GAMEPASS_AUTOCREATED",
 } as const;
 
-export type OrderAuditType = typeof ORDER_AUDIT_TYPE[keyof typeof ORDER_AUDIT_TYPE];
+type OrderAuditType = typeof ORDER_AUDIT_TYPE[keyof typeof ORDER_AUDIT_TYPE];
 
 /**
  * Ключ идемпотентности: одна строка на «заказ + тип + предмет».

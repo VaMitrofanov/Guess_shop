@@ -75,18 +75,11 @@ describe("пути выкупа под гардом", () => {
     expectGuardBefore(block(handlers, 'if (data.startsWith("admin_ok:"))'), 'status: "COMPLETED"');
   });
 
-  it("TG-хаб: массовое «выполнено» пропускает замороженные", () => {
-    const hub = block(read("bots/tg/admin/hub-orders.ts"), "export async function confirmBatchFulfill");
-    expect(hub).toContain("...NOT_HELD");
-    expectGuardBefore(hub, 'status: "COMPLETED"');
-  });
-
   it("каждый файл, который тратит робуксы на заказ, знает гард", () => {
     // Не про заказы: слив донора, задачи партнёра и закупка у поставщика.
     const exempt = new Set([
       "src/app/api/twa/drain/route.ts",
       "src/app/api/twa/partners/[slug]/tasks/route.ts",
-      "bots/tg/admin/hub-autobuy.ts",
     ]);
     const spenders = [
       "src/app/api/twa/orders/route.ts",

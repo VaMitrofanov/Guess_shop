@@ -27,7 +27,7 @@ import { rateLimit } from "@/lib/rate-limit";
  */
 
 export const SIGNIN_IP_CAPACITY = 10;
-export const SIGNIN_IP_REFILL_PER_SEC = 0.2;
+const SIGNIN_IP_REFILL_PER_SEC = 0.2;
 /** Must stay > SIGNIN_IP_CAPACITY: see the lockout note above. */
 export const SIGNIN_EMAIL_CAPACITY = 20;
 export const SIGNIN_EMAIL_REFILL_PER_SEC = 0.1;

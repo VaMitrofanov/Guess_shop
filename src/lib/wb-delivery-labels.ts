@@ -92,7 +92,7 @@ export const WB_FUNNEL_HINT: Partial<Record<WbFunnelStep, string>> = {
   failed: "Разберите заказ во вкладке «Заказы»",
 };
 
-export const WB_GATE_STATE_LABEL: Record<string, string> = {
+const WB_GATE_STATE_LABEL: Record<string, string> = {
   NOT_ISSUED: "Не выпущен",
   ISSUED: "Выпущен",
   SENDING: "Отправляется",
@@ -102,16 +102,9 @@ export const WB_GATE_STATE_LABEL: Record<string, string> = {
   SERVED_EXTERNALLY: "Выдан вне системы",
 };
 
-export const WB_CHAT_STATE_LABEL: Record<string, string> = {
-  WAITING_BUYER_CHAT: "Покупатель не писал",
-  READY: "Чат открыт",
-  CODE_REQUESTED: "Код запрошен",
-  REQUEST_SEND_UNKNOWN: "Запрос — исход неизвестен",
-  CODE_RECEIVED: "Код получен",
-};
 
 /** WB's own vocabulary for the marketplace side of the order. */
-export const WB_SUPPLIER_STATUS_LABEL: Record<string, string> = {
+const WB_SUPPLIER_STATUS_LABEL: Record<string, string> = {
   new: "Новый",
   confirm: "На сборке",
   deliver: "В доставке",
