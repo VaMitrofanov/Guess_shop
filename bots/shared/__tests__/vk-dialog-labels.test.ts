@@ -120,7 +120,7 @@ describe("метки диалогов ВК — синхронизация", () =
       api: {
         call: async (method: string, p: Record<string, string | number>) => {
           if (method === "groups.getTagList") return tags.map((t) => ({ ...t }));
-          if (method === "groups.tagAdd") { tags.push({ id: next++, name: String(p.tag_name) }); return 1; }
+          if (method === "groups.tagAdd") { tags.push({ id: next++, name: String(p.tag_name), color: `#${p.tag_color}` } as never); return 1; }
           if (method === "groups.tagBind") {
             const name = tags.find((t) => t.id === p.tag_id)?.name;
             calls.push(`${p.act}:${p.user_id}:${name}`);
@@ -132,6 +132,28 @@ describe("метки диалогов ВК — синхронизация", () =
       },
     };
   }
+
+  it("цвет занят ручной меткой — берёт свободный (ВК требует уникальный цвет)", async () => {
+    const f = fakeApi();
+    f.tags.push({ id: 2, name: "Не та цена", color: "#ffc107" } as never);
+    const added: string[] = [];
+    const api = { call: async (m: string, p: Record<string, string | number>) => {
+      if (m === "groups.tagAdd") {
+        const color = String(p.tag_color);
+        if (added.includes(color) || color === "ffc107") throw Object.assign(new Error("color has been used already"), { code: 100 });
+        added.push(color);
+      }
+      return f.api.call(m, p);
+    } };
+    const sync = new VkDialogLabelSync(api, 1, 0);
+    const ids = await sync.ensureLabels();
+    expect(ids.size).toBe(Object.keys(VK_LABELS).length);
+    expect(added).not.toContain("ffc107");
+    expect(new Set(added).size).toBe(added.length);
+    // Замена не отнимает цвет у других наших меток.
+    expect(added).toContain(VK_LABELS.ready.color);
+    expect(added).toContain(VK_LABELS.pay.color);
+  });
 
   it("создаёт недостающие метки и не трогает ручные", async () => {
     const f = fakeApi();

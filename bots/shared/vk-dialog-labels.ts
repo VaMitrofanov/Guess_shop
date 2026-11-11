@@ -47,6 +47,18 @@ export const VK_LABELS: Record<VkLabelKey, { name: string; color: (typeof VK_TAG
 
 export const VK_LABEL_KEYS = Object.keys(VK_LABELS) as VkLabelKey[];
 
+/**
+ * Желаемый цвет, а если он занят — свободный. Сначала из тех, что не задуманы
+ * для других наших меток: иначе замена одной сдвигала бы цвета по цепочке.
+ */
+export function pickFreeColor(wanted: string, used: ReadonlySet<string>): string | null {
+  if (!used.has(wanted)) return wanted;
+  const reserved = new Set<string>(Object.values(VK_LABELS).map((l) => l.color));
+  return VK_TAG_COLORS.find((c) => !used.has(c) && !reserved.has(c))
+    ?? VK_TAG_COLORS.find((c) => !used.has(c))
+    ?? null;
+}
+
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const PASS_FRESH_MS = 72 * HOUR;
@@ -215,10 +227,20 @@ export class VkDialogLabelSync {
       ((await this.api.call("groups.getTagList", { group_id: this.groupId })) as { id: number; name: string }[]) ?? [];
     let tags = await list();
     let created = false;
+    // Цвет у меток сообщества уникален: «color has been used already» (прод,
+    // 11.11 — `ffc107` уже был у ручной «Не пришли рб»). Занятый — берём
+    // ближайший свободный из списка.
+    const used = new Set(tags.map((t) => String((t as { color?: string }).color ?? "").replace(/^#/, "").toLowerCase()));
     for (const key of VK_LABEL_KEYS) {
-      const { name, color } = VK_LABELS[key];
+      const { name, color: wanted } = VK_LABELS[key];
       if (tags.some((t) => t.name === name)) continue;
+      const color = pickFreeColor(wanted, used);
+      if (!color) {
+        console.warn(`[vk-labels] нет свободного цвета для «${name}» — метка не создана`);
+        continue;
+      }
       await this.api.call("groups.tagAdd", { group_id: this.groupId, tag_name: name, tag_color: color });
+      used.add(color);
       created = true;
       await sleep(this.gapMs);
     }
