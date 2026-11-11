@@ -432,6 +432,12 @@ export default function OrderDossier({
                 <div>{order.heldReason ?? "причина не указана"} · выключен из выкупа, очередей и пачки</div>
               </div>
             )}
+            {!order.heldAt && order.manualReleaseAt && (
+              <div className={styles.box}>
+                <div className={styles.boxHead}>🛡 Разморожен вручную<em>{order.manualReleaseBy ?? ""}</em></div>
+                <div>{fmtAge(order.manualReleaseAt)} назад · автоматика не морозит, кроме нового плохого отзыва и возврата денег</div>
+              </div>
+            )}
             {/* ★ Отзыв покупателя и досье (30.10.2026). */}
             <OrderRiskBlock risk={order.risk} />
             <BasketChip risk={order.risk} full />

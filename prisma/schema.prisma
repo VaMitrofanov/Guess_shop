@@ -483,6 +483,11 @@ model WbOrder {
   heldAt                 DateTime?
   heldReason             String?
   heldBy                 String?
+  /// 🛡 Админ сам разморозил (11.11.2026): после этого автоматика морозит заказ
+  /// только по НОВОМУ плохому отзыву или когда деньги ушли покупателю. Копия
+  /// `OrderHold.manualReleaseAt` — для пометки в карточке без джойна.
+  manualReleaseAt        DateTime?
+  manualReleaseBy        String?
   /// Ручной приоритет: «этот выкупать первым».
   ///
   /// Признак поверх статуса, как и заморозка. Очередь по умолчанию отсортирована
@@ -582,6 +587,11 @@ model OrderHold {
   createdAt  DateTime  @default(now())
   releasedAt DateTime?
   releasedBy String?
+  /// Последняя разморозка ЧЕЛОВЕКОМ (11.11.2026). Автоматика её не стирает:
+  /// гейт, снявший свой замок, не отменяет решение админа. Стирает только
+  /// ручная заморозка — админ передумал.
+  manualReleaseAt DateTime?
+  manualReleaseBy String?
   updatedAt  DateTime  @updatedAt
 
   // Крон-свип и алерт поддержки читают только активные заморозки.

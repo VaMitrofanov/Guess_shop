@@ -118,6 +118,10 @@ interface Order {
   heldAt: string | null;
   heldReason: string | null;
   heldBy: string | null;
+  /** 🛡 Разморожен админом вручную (11.11.2026): автоматика больше не морозит,
+   *  кроме нового плохого отзыва и возврата денег. */
+  manualReleaseAt?: string | null;
+  manualReleaseBy?: string | null;
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Тоже поверх статуса. */
   priorityAt?: string | null;
   priorityBy?: string | null;
@@ -3170,6 +3174,28 @@ function OrderCard({
         </div>
       )}
 
+      {/* 🛡 Пометка «разморожен вручную» (11.11.2026): видно, что автоматика
+          этот заказ больше не тронет — и почему он не замёрз по заявке WB. */}
+      {!order.heldAt && order.manualReleaseAt && (
+        <div style={{
+          display: "flex", gap: 11, margin: 0, padding: "11px 14px",
+          borderRadius: 14, background: `${C.green}14`, border: `1px solid ${C.green}40`,
+        }}>
+          <span style={{ fontSize: 17, lineHeight: 1.25 }}>🛡</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+            <strong style={{ fontSize: 14, fontWeight: 700, color: C.green, letterSpacing: ".01em" }}>
+              РАЗМОРОЖЕН ВРУЧНУЮ
+            </strong>
+            <span style={{ fontSize: 14, color: C.textSecondary, lineHeight: 1.4 }}>
+              Автоматика не морозит, кроме нового плохого отзыва и возврата денег
+            </span>
+            <span style={{ fontSize: 14, color: C.textTertiary, fontFamily: MONO }}>
+              {order.manualReleaseBy ?? "—"} · {fmtAge(order.manualReleaseAt)} назад
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ★ Отзыв покупателя и досье (30.10.2026): рядом с заморозкой — «почему
           заморожен» и «что написал человек» читаются вместе. */}
       {order.risk?.review && <ReviewPlaque review={order.risk.review} />}
@@ -4271,6 +4297,9 @@ export default function OrdersScreen({
               heldAt: held ? new Date().toISOString() : null,
               heldReason: held ? (reason ?? null) : null,
               heldBy: held ? (o.heldBy ?? "я") : null,
+              // Ручная заморозка снимает отметку, ручная разморозка — ставит.
+              manualReleaseAt: held ? null : new Date().toISOString(),
+              manualReleaseBy: held ? null : "я",
             }
           : o));
         haptic.notify("success");

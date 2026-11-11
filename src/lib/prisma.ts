@@ -49,6 +49,11 @@ export const prisma =
   new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === "development" ? ["query"] : [],
+    // P2028 «Unable to start a transaction in the given time» (11.11.2026):
+    // по умолчанию Prisma ждёт старта транзакции 2 с, а новое соединение
+    // RF → Neon в эпизоды флапа открывается дольше. 4 отказа за сутки
+    // приходились на выбор пасса покупателем. Ждём до 10 с.
+    transactionOptions: { maxWait: 10_000, timeout: 15_000 },
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;

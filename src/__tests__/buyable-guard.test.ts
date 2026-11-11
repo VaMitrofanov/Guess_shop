@@ -192,22 +192,27 @@ describe("assertOrderBuyable", () => {
     expect(state.order!.heldAt).toBeInstanceOf(Date);
   });
 
-  it("админ разморозил после открытия заявки — заявка больше не морозит", async () => {
+  it("админ разморозил вручную — заявка больше не морозит, деньги ушли ПОСЛЕ — морозят (11.11)", async () => {
     const opened = new Date("2026-11-09T00:00:00Z");
+    const releasedAt = new Date("2026-11-09T06:00:00Z");
     const dbs = { cancelledAt: null, claimOpenedAt: opened, claimResolvedAt: null, claimReason: "не приходят рб" };
-    const released = { releasedAt: new Date("2026-11-09T06:00:00Z") };
-    const human = fakeDb({ order: baseOrder(), dbs, hold: { ...released, releasedBy: "Demid" } });
+    const manual = { releasedAt, releasedBy: "Demid", manualReleaseAt: releasedAt };
+    const human = fakeDb({ order: baseOrder(), dbs, hold: manual });
     expect((await assertOrderBuyable(human.db, "o1")).held).toBe(false);
     expect(human.calls.holds).toHaveLength(0);
-    // Снятие автоматикой — не решение человека.
-    const auto = fakeDb({ order: baseOrder(), dbs, hold: { ...released, releasedBy: "гейт выкупа" } });
+    // Даже заявка, открытая уже после разморозки, решение админа не отменяет.
+    const later = fakeDb({ order: baseOrder(), dbs: { ...dbs, claimOpenedAt: new Date("2026-11-10T00:00:00Z") }, hold: manual });
+    expect((await assertOrderBuyable(later.db, "o1")).held).toBe(false);
+    // Снятие автоматикой — не решение человека: отметки нет, заявка морозит.
+    const auto = fakeDb({ order: baseOrder(), dbs, hold: { releasedAt, releasedBy: "гейт выкупа" } });
     expect((await assertOrderBuyable(auto.db, "o1")).held).toBe(true);
-    // Разморозка ДО заявки ничего не разрешает.
-    const early = fakeDb({ order: baseOrder(), dbs, hold: { releasedAt: new Date("2026-11-08T00:00:00Z"), releasedBy: "Demid" } });
-    expect((await assertOrderBuyable(early.db, "o1")).held).toBe(true);
-    // Отмена на WB разморозкой не обходится.
-    const cancelled = fakeDb({ order: baseOrder(), dbs: { ...dbs, cancelledAt: new Date() }, hold: { ...released, releasedBy: "Demid" } });
-    expect((await assertOrderBuyable(cancelled.db, "o1")).held).toBe(true);
+    // Отмена на WB, которую админ уже видел, — его решение.
+    const seenCancel = fakeDb({ order: baseOrder(), dbs: { ...dbs, cancelledAt: new Date("2026-11-09T03:00:00Z") }, hold: manual });
+    expect((await assertOrderBuyable(seenCancel.db, "o1")).held).toBe(false);
+    // Отмена ПОСЛЕ разморозки — деньги ушли, морозим снова.
+    const freshCancel = fakeDb({ order: baseOrder(), dbs: { ...dbs, cancelledAt: new Date("2026-11-10T03:00:00Z") }, hold: manual });
+    expect((await assertOrderBuyable(freshCancel.db, "o1")).held).toBe(true);
+    expect(freshCancel.state.order!.adminNote).toContain("размораживали вручную");
   });
 
   it("решённая заявка (отказ в возврате) сама по себе не блокирует — решает человек", async () => {

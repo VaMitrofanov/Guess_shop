@@ -2067,7 +2067,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   const [holdRows, internal] = await Promise.all([
     db.orderHold.findMany({
       where: { wbCode: { in: allCodes } },
-      select: { wbCode: true, releasedAt: true, releasedBy: true },
+      select: { wbCode: true, releasedAt: true, releasedBy: true, manualReleaseAt: true },
     }),
     db.wbOrder.findMany({
       where: { wbCode: { in: allCodes } },
@@ -2075,7 +2075,15 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     }),
   ]);
   const gateReleased = new Set(holdRows.filter((h) => h.releasedAt && h.releasedBy === GATE_ACTOR).map((h) => h.wbCode));
-  const blocked = new Set(holdRows.filter((h) => !gateReleased.has(h.wbCode)).map((h) => h.wbCode));
+  /* Снятые админом вручную гейт смотрит снова (11.11.2026), но только на
+     НОВЫЙ плохой отзыв: «хуёвый отзыв — заморозка» действует всегда, а старый
+     отзыв и висяк админ уже видел, когда размораживал (`decideGate`). */
+  const manualReleased = new Map(holdRows
+    .filter((h) => h.releasedAt && h.manualReleaseAt)
+    .map((h) => [h.wbCode, h.manualReleaseAt as Date] as const));
+  const blocked = new Set(holdRows
+    .filter((h) => !gateReleased.has(h.wbCode) && !manualReleased.has(h.wbCode))
+    .map((h) => h.wbCode));
   const internalByCode = new Map(internal.map((o) => [o.wbCode, o]));
 
   const toGateOrder = (code: string): GateOrder => {
@@ -2091,7 +2099,8 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
       buyerName: meta?.buyerName ?? null,
       // Висяк — только у PENDING с пассом и только если гейт его ещё не
       // отпускал: исправивший отзыв по нашей просьбе на связи, подтверждать нечего.
-      staleCheck: pendingCodes.has(code) && !gateReleased.has(code),
+      staleCheck: pendingCodes.has(code) && !gateReleased.has(code) && !manualReleased.has(code),
+      manualReleaseAt: manualReleased.get(code) ?? null,
     };
   };
 
@@ -2117,8 +2126,14 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     loadBuyableOrders: async () => gateOrders,
     loadReviewHolds: async () => holdOrders,
     loadFeedbacks: async () => loaded,
-    freeze: async (wbCode, reason) => {
-      await holdByCode(db, { wbCode, reason, actor: GATE_ACTOR });
+    freeze: async (wbCode, reason, decision) => {
+      const res = await holdByCode(db, {
+        wbCode, reason, actor: GATE_ACTOR,
+        auto: decision?.rule === "bad_review"
+          ? { kind: "BAD_REVIEW", eventAt: decision.review?.createdDate ?? null }
+          : { kind: "STALE" },
+      });
+      return !res.skippedByManualRelease;
     },
     release: async (wbCode) => {
       await releaseByCode(db, { wbCode, actor: GATE_ACTOR });
@@ -2146,7 +2161,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
       stars: Number(d.review.productValuation ?? 0),
       text: reviewText(d.review),
       reviewedAt: d.review.createdDate ? new Date(d.review.createdDate) : null,
-      refrozen: gateReleased.has(d.wbCode),
+      refrozen: gateReleased.has(d.wbCode) || manualReleased.has(d.wbCode),
     });
   }
   for (const r of res.released) {

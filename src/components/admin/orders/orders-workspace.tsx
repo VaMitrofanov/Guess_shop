@@ -458,7 +458,7 @@ export default function OrdersWorkspace({
         leaves: slice === "HELD",
         label: `❄ ${order.wbCode} разморожен`,
         inverse: { action: "hold", reason: order.heldReason ?? "заморожен повторно" },
-        patch: { heldAt: null, heldReason: null },
+        patch: { heldAt: null, heldReason: null, manualReleaseAt: new Date().toISOString() },
       });
       return;
     }
@@ -473,7 +473,7 @@ export default function OrdersWorkspace({
     await run(order, { action: "hold", reason }, {
       label: `❄ ${order.wbCode} заморожен`,
       inverse: { action: "unhold" },
-      patch: { heldAt: new Date().toISOString(), heldReason: reason || "не указана" },
+      patch: { heldAt: new Date().toISOString(), heldReason: reason || "не указана", manualReleaseAt: null },
     });
   }, [run, slice, askFor]);
 

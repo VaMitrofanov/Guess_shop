@@ -24,6 +24,9 @@ export interface AdminOrder {
   /** Отзыв и покупатель WB (30.10.2026). */
   risk?: OrderRisk | null;
   heldBy: string | null;
+  /** 🛡 Разморожен админом вручную (11.11.2026) — автоматика не морозит. */
+  manualReleaseAt?: string | null;
+  manualReleaseBy?: string | null;
   /** ⚡ Поднят руками наверх очереди («выкупать первым»). Поверх статуса. */
   priorityAt?: string | null;
   priorityBy?: string | null;

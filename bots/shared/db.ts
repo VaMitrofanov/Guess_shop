@@ -55,6 +55,11 @@ function createBotClient(): PrismaClient {
   return new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : [],
+    // P2028 «Unable to start a transaction in the given time» (11.11.2026):
+    // по умолчанию Prisma ждёт старта транзакции 2 с, а новое соединение
+    // RF → Neon в эпизоды флапа открывается дольше. 4 отказа за сутки
+    // приходились на выбор пасса покупателем. Ждём до 10 с.
+    transactionOptions: { maxWait: 10_000, timeout: 15_000 },
   });
 }
 

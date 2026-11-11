@@ -1457,7 +1457,7 @@ export async function POST(req: NextRequest) {
 
     const result = action === "hold"
       ? await holdByCode(prisma, { wbCode, reason: String(body.reason ?? ""), actor: actor.displayName })
-      : await releaseByCode(prisma, { wbCode, actor: actor.displayName });
+      : await releaseByCode(prisma, { wbCode, actor: actor.displayName, manual: true });
 
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
     cachedCounts = null;

@@ -164,6 +164,8 @@ export async function revokeGateCode(db: any, input: RevokeInput): Promise<Revok
     wbCode: code,
     reason: revocationHoldReason(input.wbOrderId),
     actor: input.actor,
+    // Деньги вернулись — пробивает и ручную разморозку, но не стирает её отметку.
+    auto: { kind: "CODE_REVOKED" },
   }).catch(() => undefined);
 
   return { ok: true, code };

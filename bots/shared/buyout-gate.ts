@@ -71,6 +71,9 @@ export interface GateOrder {
    * По умолчанию — проверять.
    */
   staleCheck?: boolean;
+  /** Админ разморозил вручную (11.11.2026): висяк не считаем вовсе, а отзыв —
+   *  только написанный ПОСЛЕ разморозки. Старый админ уже видел. */
+  manualReleaseAt?: Date | null;
 }
 
 export function normalizeName(value: string | null | undefined): string {
@@ -186,8 +189,12 @@ export interface GateDecision {
  * Чистая функция: свип ниже только применяет её результат.
  */
 export function decideGate(order: GateOrder, feedbacks: WbFeedback[], now: number = Date.now()): GateDecision | null {
+  const manualAt = order.manualReleaseAt?.getTime() ?? null;
   const bad = matchBadReview(order, feedbacks);
-  if (bad) {
+  const badIsNew = bad && (manualAt === null
+    || (bad.createdDate ? new Date(bad.createdDate).getTime() > manualAt : false));
+  if (manualAt !== null && !badIsNew) return null;
+  if (bad && badIsNew) {
     const stars = Number(bad.productValuation ?? 0);
     const when = bad.createdDate ? String(bad.createdDate).slice(0, 10) : "?";
     return {
@@ -217,7 +224,8 @@ export interface BuyoutGateDeps {
   /** Все отзывы кабинета; `complete=false` — часть выдачи не пришла. */
   loadFeedbacks: () => Promise<{ feedbacks: WbFeedback[]; complete: boolean }>;
   /** Заморозить заказ по коду (тот же `holdByCode`, что у ручной заморозки). */
-  freeze: (wbCode: string, reason: string) => Promise<void>;
+  /** `false` — заморозка не встала (админ разморозил вручную, событие старое). */
+  freeze: (wbCode: string, reason: string, decision?: GateDecision) => Promise<boolean | void>;
   /** Снять заморозку гейта (тот же `releaseByCode`, что у кнопки). */
   release?: (wbCode: string) => Promise<void>;
   now?: number;
@@ -267,7 +275,8 @@ export async function runBuyoutGate(deps: BuyoutGateDeps): Promise<BuyoutGateRes
       result.skippedByCap += 1;
       continue;
     }
-    await deps.freeze(decision.wbCode, decision.reason);
+    const applied = await deps.freeze(decision.wbCode, decision.reason, decision);
+    if (applied === false) continue;
     result.frozen.push(decision);
   }
 
