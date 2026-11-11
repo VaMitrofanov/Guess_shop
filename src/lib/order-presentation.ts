@@ -124,8 +124,6 @@ export function orderBadge(order: PresentableOrder): { label: string; tone: Tone
   if (order.status === "COMPLETED") return { label: "Готово", tone: "green" };
   if (order.status === "REJECTED") return { label: "Отменено", tone: "red" };
   if (order.status === "ERROR") return { label: "Ошибка", tone: "red" };
-  if (order.orderSource === "AVITO" && ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
-    return { label: "Авито", tone: "orange" };
   if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status))
     return { label: "Прямой", tone: "blue" };
   if (order.status === "AWAITING_GAMEPASS" && created > cutoff) return { label: "Новый", tone: "accent" };

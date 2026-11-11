@@ -1,5 +1,4 @@
 "use client";
-import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import BottomNav, { type QuickAction } from "./BottomNav";
@@ -78,7 +77,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
   orders:     "Заказы",
   wb:         "Wildberries",
   delivery:   "WB Доставка",
-  account:    DONOR_ENABLED ? "Аккаунт" : "Антон",
+  account:    "Антон",
   settings:   "Настройки",
   system:     "Система",
   economics:  "Экономика",

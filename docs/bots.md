@@ -1275,10 +1275,9 @@ Roblox вовсе.
 заморозки на заказы, созданные после них. Покрывает все 11 мест, где рождается `WbOrder`, не
 трогая ни одно из них. За безопасность траты не отвечает — она на `assertOrderNotHeld`.
 
-Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.
-Сохранение новой donor-cookie в TWA или через `/setcookie` только проверяет аккаунт и обновляет
-`GlobalSettings`; оно намеренно не меняет `autoBuyoutEnabled`. После обязательных 3/3 canary
-автомат включается отдельно через `/autobuy on`.
+**Автовыкуп и автослив донора удалены 11.11.2026** (воркеры, команды `/autobuy` и `/autodrain`,
+`bots/shared/drain.ts`): донора как модели нет, браузерный сервис не работает, оба kill-switch
+стояли OFF. Движок покупки по cookie остался — им пользуются партнёрские задачи и ручной выкуп.
 
 Donor-readiness теперь означает успешный SG `/session`, а не `/health` и не прямой запрос
 Roblox из процесса бота. Buyer-specific preflight возвращает одновременно product/ownership
@@ -1315,7 +1314,7 @@ kill-switch без изменений и сообщает менеджеру т�
   Chrome profile. Недоступный buyer lookup или
   browser transport останавливает денежную операцию. Три production canary обязательны до
   включения kill-switch; если новый donor имеет Plus, минимум один canary должен быть Plus.
-  Управление: `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
+  (Команды `/autobuy` удалены 11.11.2026 вместе с автовыкупом.)
   **Подтверждение покупки (17.07).** Browser driver ждёт до 35 секунд: inventory должен
   перейти `false→true`, а currency API — показать точную ожидаемую дельту. Inventory у Roblox
   обновляется раньше баланса, поэтому остановка polling на одном ownership давала ложную

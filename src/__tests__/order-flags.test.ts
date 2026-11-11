@@ -69,15 +69,11 @@ describe("сигналы заказа", () => {
   });
 });
 
-describe("срез «С пометками» и автовыкуп", () => {
+describe("срез «С пометками»", () => {
   it("срез исключает замороженные и закрытые", () => {
     expect(TAB_SQL.FLAGGED).toContain('"flaggedAt" IS NOT NULL');
     expect(TAB_SQL.FLAGGED).toContain('"heldAt" IS NULL');
     expect(buildTabWhere("FLAGGED")).toMatchObject({ flaggedAt: { not: null }, heldAt: null });
-  });
-  it("автовыкуп не берёт заказ с нерешённой пометкой", () => {
-    const src = readFileSync(join(process.cwd(), "bots/tg/auto-workers.ts"), "utf8");
-    expect(src).toContain("flaggedAt: null");
   });
   it("висяк гейта ставит пометку, а не заморозку", () => {
     const src = readFileSync(join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");

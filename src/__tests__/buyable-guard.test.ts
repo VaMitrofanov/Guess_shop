@@ -65,10 +65,6 @@ describe("пути выкупа под гардом", () => {
     expectGuardBefore(block(src, "export async function POST"), "purchaseGamepassWithCookie(cookie");
   });
 
-  it("автовыкуп", () => {
-    expectGuardBefore(block(read("bots/tg/auto-workers.ts"), "for (const order of orders)"), "purchaseGamepassVerified(");
-  });
-
   it("TG-бот: выкуп и «✅ Выкуплено»", () => {
     const handlers = read("bots/tg/handlers.ts");
     expectGuardBefore(block(handlers, 'if (data.startsWith("pb:"))'), "purchaseGamepassVerified(");
@@ -84,7 +80,6 @@ describe("пути выкупа под гардом", () => {
     const spenders = [
       "src/app/api/twa/orders/route.ts",
       "src/app/api/twa/roblox-account/purchase/route.ts",
-      "bots/tg/auto-workers.ts",
       "bots/tg/handlers.ts",
       ...exempt,
     ];

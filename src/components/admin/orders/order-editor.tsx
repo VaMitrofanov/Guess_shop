@@ -39,7 +39,6 @@ const SOURCES = [
   { id: "WB", label: "Wildberries — карта с кодом" },
   { id: "WB_DBS", label: "WB DBS — доставка продавцом" },
   { id: "DIRECT", label: "Прямой — оплата напрямую" },
-  { id: "AVITO", label: "Авито" },
   { id: "MANUAL", label: "Ручной" },
 ];
 

@@ -1,5 +1,4 @@
 "use client";
-import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { C } from "../theme";
 import { useEffect, useState, useCallback } from "react";
 import { haptic } from "../haptics";
@@ -55,26 +54,6 @@ function NumInput({ value, onChange, placeholder, step = 0.1 }: { value: string;
   );
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div
-      className="twa-press-sm"
-      onClick={() => { haptic.impact("rigid"); onChange(!on); }}
-      style={{
-        width: 51, height: 31, borderRadius: 16, flexShrink: 0,
-        background: on ? C.green : C.elevated,
-        position: "relative", cursor: "pointer", transition: "background 0.2s",
-      }}
-    >
-      <div style={{
-        position: "absolute", top: 2, left: on ? 22 : 2,
-        width: 27, height: 27, borderRadius: "50%",
-        background: "#fff", transition: "left 0.2s",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-      }} />
-    </div>
-  );
-}
 
 function SaveBtn({ onSave, saving, saved }: { onSave: () => void; saving: boolean; saved: boolean }) {
   return (
@@ -93,40 +72,6 @@ function SaveBtn({ onSave, saving, saved }: { onSave: () => void; saving: boolea
   );
 }
 
-function StatusPill({ enabled, bestRate, targetRate, pending }: {
-  enabled: boolean; bestRate: Settings["bestRate"]; targetRate: number; pending: number;
-}) {
-  const conditionMet = bestRate && bestRate.rateUSD <= targetRate;
-  return (
-    <div style={{
-      background: enabled
-        ? conditionMet ? "rgba(48,209,88,0.08)" : "rgba(191,90,242,0.08)"
-        : "rgba(142,142,147,0.08)",
-      border: `1px solid ${enabled
-        ? conditionMet ? "rgba(48,209,88,0.2)" : "rgba(191,90,242,0.15)"
-        : "rgba(142,142,147,0.15)"}`,
-      borderRadius: 12, padding: "10px 14px",
-      display: "flex", alignItems: "center", gap: 10,
-    }}>
-      <div style={{
-        width: 8, height: 8, borderRadius: "50%",
-        background: enabled ? (conditionMet ? C.green : C.accent) : C.muted,
-        boxShadow: enabled ? `0 0 6px ${conditionMet ? C.green : C.accent}` : "none",
-      }} />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 14, color: "#e5e5ea", fontWeight: 500 }}>
-          {!enabled ? "Автобай выключен" : conditionMet ? "Условие выполнено — выкупает" : "Ожидание подходящего курса"}
-        </div>
-        <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 2 }}>
-          {bestRate
-            ? `Лучший: $${bestRate.rateUSD}/1K · ${bestRate.provider} · ${bestRate.inventory.toLocaleString("ru-RU")} R$`
-            : "Нет данных о рыночном курсе"}
-          {pending > 0 && ` · ${pending} в очереди`}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ───────────── Test codes — list + one-tap reset, for QA runs ───────────── */
 interface TestCode {
@@ -312,29 +257,6 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
   return (
     <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
 
-      {/* AutoBuy status — донорский автобай, спрятан вместе с донором (donor-mode.ts). */}
-      {DONOR_ENABLED && <section>
-        <SectionHeader title="Автобай" />
-        <StatusPill
-          enabled={autoBuyEnabled}
-          bestRate={settings.bestRate}
-          targetRate={parseFloat(autoBuyRateStr) || settings.autoBuyRate}
-          pending={settings.pendingOrders}
-        />
-        <div style={{ marginTop: 10 }}>
-          <Card>
-            <SettingRow label="Включён">
-              <Toggle on={autoBuyEnabled} onChange={setAutoBuyEnabled} />
-            </SettingRow>
-            <SettingRow label="Целевой курс ($/1K R$)" last>
-              <NumInput value={autoBuyRateStr} onChange={setAutoBuyRateStr} placeholder="4.0" step={0.1} />
-            </SettingRow>
-          </Card>
-        </div>
-        <div style={{ fontSize: 14, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
-          buyer.py проверяет рынок каждые 60 сек. Выкупает когда курс ≤ целевого.
-        </div>
-      </section>}
 
       {/* Rates */}
       <section>

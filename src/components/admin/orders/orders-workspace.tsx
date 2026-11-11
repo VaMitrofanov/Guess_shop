@@ -24,7 +24,6 @@ import { orderStateWord } from "@/lib/order-feed";
    ───────────────────────────────────────────────────────────────────────── */
 
 import FirstInLinePanel from "@/components/admin/first-in-line/first-in-line-panel";
-import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -687,28 +686,6 @@ export default function OrdersWorkspace({
     }
   }, [slice, showToast]);
 
-  const selectFitDonor = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/buyout/donor", { cache: "no-store" });
-      if (!res.ok) throw new Error("Баланс донора недоступен");
-      const data = await res.json();
-      const balance = Number(data?.balance ?? data?.robux ?? 0);
-      if (!Number.isFinite(balance) || balance <= 0) throw new Error("Баланс донора не прочитался");
-      const next = new Set<string>();
-      let spent = 0;
-      for (const order of orders) {
-        if (!canComplete(order)) continue;
-        const price = grossOf(order.amount);
-        if (spent + price > balance) continue;
-        next.add(order.id);
-        spent += price;
-      }
-      setSelected(next);
-      showToast({ text: `Набрано ${next.size} на ${num(spent)} R$ · баланс ${num(balance)} R$` });
-    } catch (error) {
-      showToast({ text: (error as Error).message, error: true });
-    }
-  }, [orders, showToast]);
 
   /* ── Клавиатура ───────────────────────────────────────────────────────── */
 
@@ -1133,7 +1110,6 @@ export default function OrdersWorkspace({
           <span className={styles.bulkSum}>{num(selectedGross)} R$ грязными · готовы к выкупу {completableSelected.length}</span>
           <span className={styles.spacer} />
           <button type="button" className={styles.mini} onClick={copySelectedIds}>⧉ ID пассов</button>
-          {DONOR_ENABLED && <button type="button" className={styles.mini} onClick={() => void selectFitDonor()}>Набрать под баланс</button>}
           <button type="button" className={styles.mini} onClick={() => void bulkHold()}>❄ Заморозить</button>
           <button type="button" className={styles.mini} onClick={() => void bulkError()}>⚠ В «Починить»</button>
           <button
@@ -1193,8 +1169,7 @@ export default function OrdersWorkspace({
             <h3>Фильтры</h3>
             <p>Всё, что не является ежедневной работой. Выбор заменяет срез.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {/* Авито закрыт: пустую кнопку не показываем. */}
-              {EXTRA_TABS.filter(tab => tab.key !== "AVITO" || (counts[tab.key] ?? 0) > 0).map(tab => (
+              {EXTRA_TABS.map(tab => (
                 <button
                   key={tab.key}
                   type="button"

@@ -2,7 +2,6 @@
 import { basketLabel } from "@/lib/wb-basket";
 import { flagsConfirmText } from "@/lib/order-signals";
 import { orderFeed, orderHeadline, orderNow, orderStateWord } from "@/lib/order-feed";
-import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type React from "react";
 import { RefreshCw } from "lucide-react";
@@ -245,7 +244,6 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   ALL:           { label: "Все",            color: C.textPrimary },
   BUYOUT:        { label: "К выкупу",       color: C.green },
   DIRECT:        { label: "Прямой",         color: C.blue },
-  AVITO:         { label: "Авито",          color: C.orange },
   NEW:           { label: "Новые",          color: C.accent },
   ERROR:         { label: "Ошибка",         color: C.red },
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
@@ -282,7 +280,7 @@ const SLICE_IDS = new Set<string>(SLICES.map(s => s.id));
    «Все», и своей строкой она стояла бы в шторке дважды. Её строка — отдельная,
    ниже. */
 const SHEET_FILTERS: FilterTab[] = [
-  "ALL", "WORK", "NEW", "DIRECT", "AVITO", "FAVORITES", "REJECTED", "FLAGGED", "HELD", "STALE_LINK",
+  "ALL", "WORK", "NEW", "DIRECT", "FAVORITES", "REJECTED", "FLAGGED", "HELD", "STALE_LINK",
 ];
 
 const LANE_META: Record<LaneId, { label: string; color: string }> = {
@@ -292,8 +290,8 @@ const LANE_META: Record<LaneId, { label: string; color: string }> = {
 };
 /* Очереди, где выгрузка ID геймпассов имеет смысл: заказ уже с геймпассом и ждёт выкупа.
    Список синхронен `GAMEPASS_EXPORT_TABS` в `api/twa/orders`. */
-const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"]);
-const COUNTABLE_EXPORT_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO"]);
+const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "WORK", "ERROR", "ATTENTION"]);
+const COUNTABLE_EXPORT_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT"]);
 
 function orderTabBadge(order: Order): { label: string; color: string } | null {
   const badge = sharedOrderBadge(order as never);
@@ -792,7 +790,6 @@ function ActionPanel({
   const showPanel =
     currentTab === "BUYOUT" ||
     currentTab === "DIRECT" ||
-    currentTab === "AVITO" ||
     currentTab === "ERROR" ||
     // ❄️ В своём разделе панель нужна ради одной кнопки — «Разморозить».
     currentTab === "HELD";
@@ -808,33 +805,6 @@ function ActionPanel({
     busyRef.current = false;
   }
 
-  async function doPurchase() {
-    if (busyRef.current) return;
-    if (!(await confirmFlags(order, token))) return;
-    busyRef.current = true;
-    setLoading(true);
-    try {
-      const r = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action: "purchase", orderId: order.id }),
-      });
-      const d = await r.json();
-      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
-      if (d.success) {
-        haptic.notify("success");
-        // У разбитого заказа успех бывает промежуточным: часть куплена, заказ
-        // ещё открыт. Тост обязан это различать, иначе «✅» читается как
-        // «заказ закрыт», и следующую часть никто не выкупит.
-        toast(d.splitDone === false ? `🧩 ${d.msg}` : `✅ ${d.msg}`, "success");
-        onPurchaseDone?.();
-      } else {
-        haptic.notify("error");
-        toast(`❌ ${d.msg}`, "error");
-      }
-    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
-    finally { busyRef.current = false; setLoading(false); }
-  }
 
   const showError = currentTab !== "ERROR";
   const split = order.splitGamepasses ?? [];
@@ -896,18 +866,6 @@ function ActionPanel({
       <div style={{ display: "flex", gap: 8 }}>
       {/* «Выкупить» — автовыкуп с донора. Стоял рядом с «Выкуплено» (одна буква
           разницы) и звал в мёртвый браузерный сервис; спрятан с донором. */}
-      {hasGamepass && DONOR_ENABLED && (
-        <button className="twa-press" onClick={doPurchase} disabled={loading}
-          style={{ flex: 2, padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          {loading
-            ? "⏳…"
-            : split.length > 0
-              // Кнопка называет, что именно произойдёт по нажатию: покупается
-              // одна часть, а не весь заказ.
-              ? `Выкупить часть ${Math.min(splitDone + 1, split.length)}/${split.length}`
-              : isError ? "Повторить выкуп" : "Выкупить"}
-        </button>
-      )}
       {splitAllDone && (
         <span style={{
           flex: 2, display: "flex", alignItems: "center", justifyContent: "center",
@@ -947,7 +905,6 @@ function ActionPanel({
 const MOVE_TARGETS: { id: string; label: string; color: string }[] = [
   { id: "BUYOUT", label: "К выкупу", color: C.green },
   { id: "DIRECT", label: "Прямой выкуп", color: C.blue },
-  { id: "AVITO", label: "Авито", color: C.orange },
   { id: "NEW", label: "Новые", color: C.accent },
   { id: "ERROR", label: "Ошибка", color: C.red },
   { id: "AWAITING_LINK", label: "Ждут ссылку", color: C.yellow },
@@ -1424,14 +1381,13 @@ function RebindModal({ order, token, onDone, onClose }: {
 }
 
 /* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
-type SourceFilter = "ALL" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
+type SourceFilter = "ALL" | "WB" | "WB_DBS" | "DIRECT" | "MANUAL" | "SITE";
 const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
   { id: "ALL",    label: "Все",     color: C.textPrimary },
   { id: "WB",     label: "WB",      color: C.green },
   { id: "WB_DBS", label: "WB DBS",  color: C.accent },
   { id: "DIRECT", label: "Прямой",  color: C.blue },
   { id: "SITE",   label: "Сайт",    color: C.blue },
-  { id: "AVITO",  label: "Авито",   color: C.orange },
   { id: "MANUAL", label: "Ручные",  color: C.textTertiary },
 ];
 
@@ -1479,7 +1435,7 @@ function buildDoneGroups(orders: Order[], sourceFilter: SourceFilter): DoneGroup
 }
 
 function countBySource(orders: Order[]): Record<SourceFilter, number> {
-  const c: Record<string, number> = { ALL: orders.length, WB: 0, WB_DBS: 0, DIRECT: 0, AVITO: 0, MANUAL: 0 };
+  const c: Record<string, number> = { ALL: orders.length, WB: 0, WB_DBS: 0, DIRECT: 0, MANUAL: 0 };
   for (const o of orders) c[o.orderSource] = (c[o.orderSource] ?? 0) + 1;
   return c as Record<SourceFilter, number>;
 }
@@ -2264,7 +2220,6 @@ function OrderMenuSheet({
         && row("reject", "✕", "Отменить заказ", undefined, "red")}
 
       <div className="twa-oc-menu-group">Редко</div>
-      {canPurchase && DONOR_ENABLED && row("purchase", "🛒", "Выкупить автоматом (донор)", undefined, "dim")}
       {canRefund && row("refund", "↩️", "Оформить возврат", "T-Bank", "dim")}
       {row("trace", "🕵", "След покупателя", undefined, "dim")}
     </BottomSheet>
@@ -2589,7 +2544,7 @@ function OrderCard({
   // те же кнопки действий и формат суммы, что видел бы менеджер в BUYOUT/ERROR/….
   const viewTab = currentTab === "ATTENTION" ? orderToTab(order) : currentTab;
 
-  const showDirty = viewTab === "BUYOUT" || viewTab === "DIRECT" || viewTab === "AVITO" || viewTab === "ERROR";
+  const showDirty = viewTab === "BUYOUT" || viewTab === "DIRECT" || viewTab === "ERROR";
   const dirtyAmount = Math.ceil(order.amount / 0.7);
   const displayAmount = showDirty ? dirtyAmount : order.amount;
   const showCleanHint = viewTab === "BUYOUT";
@@ -4335,7 +4290,7 @@ export default function OrdersScreen({
     else if (action === "set-error") { newStatus = "ERROR"; toTab = "ERROR"; }
     else if (action === "restore-to-buyout" || action === "rebuy") {
       newStatus = "PENDING";
-      toTab = order.orderSource === "AVITO" ? "AVITO" : isUnpaidDirect(order) ? "DIRECT" : "BUYOUT";
+      toTab = isUnpaidDirect(order) ? "DIRECT" : "BUYOUT";
     }
     else return { ok: false, error: "Invalid action" };
 
@@ -5411,8 +5366,6 @@ function FiltersSheet({ open, active, attention, counts, onPick, onAttention, on
       {SHEET_FILTERS.map(id => {
         const meta = TAB_META[id];
         const count = (counts[id] ?? 0) + (id === "DIRECT" ? (counts.INTENTS ?? 0) : 0);
-        // Авито закрыт: пустую строку не показываем (как и самоуходящий чип).
-        if (id === "AVITO" && count === 0) return null;
         return (
           <button
             key={id}
@@ -5762,7 +5715,6 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     ALL: "Заказов пока нет",
     BUYOUT: "Нет заказов к выкупу",
     DIRECT: "Нет прямых заказов",
-    AVITO: "Нет заказов Авито",
     NEW: "Нет новых заказов",
     ERROR: "Нет ошибок",
     AWAITING_LINK: "Все оформили заказы",

@@ -16,7 +16,7 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
 /** Срезы, где место в списке = очередь работы. */
 const QUEUE_TABS: FilterTab[] = [
-  "WORK", "BUYOUT", "DIRECT", "AVITO", "ERROR", "ATTENTION", "AWAITING_LINK", "STALE_LINK",
+  "WORK", "BUYOUT", "DIRECT", "ERROR", "ATTENTION", "AWAITING_LINK", "STALE_LINK",
 ];
 /** Срезы-история: приоритет там ничего не значит. */
 const HISTORY_TABS: FilterTab[] = ["DONE", "REJECTED", "FAVORITES", "HELD", "ALL", "NEW"];
@@ -47,7 +47,6 @@ describe("сортировка очереди", () => {
     // Во вкладке «Прямой» все заказы прямые — ось там ничего не значит и
     // только маскировала бы возраст.
     expect(JSON.stringify(orderByForTab("DIRECT"))).not.toContain("isDirectOrder");
-    expect(JSON.stringify(orderByForTab("AVITO"))).not.toContain("isDirectOrder");
   });
 
   it("NULLS LAST задан явно — в Postgres DESC по умолчанию NULLS FIRST", () => {
@@ -69,11 +68,6 @@ describe("все потребители очереди читают приори
     const overview = read("src/lib/admin-overview.ts");
     expect(overview).toContain("PRIORITY_ORDER_SQL");
     expect(overview).toContain('ORDER BY o.${PRIORITY_ORDER_SQL}');
-  });
-
-  it("автовыкуп бота берёт поднятый заказ раньше старейшего", () => {
-    const worker = read("bots/tg/auto-workers.ts");
-    expect(worker).toContain('orderBy: [{ priorityAt: { sort: "desc", nulls: "last" } }, { pendingAt: "asc" }]');
   });
 
   it("выгрузка ID закупщику идёт тем же порядком, что и лента", () => {

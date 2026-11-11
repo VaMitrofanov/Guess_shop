@@ -1,6 +1,5 @@
 "use client";
 
-import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useRef, useState } from "react";
 import {
   Activity,
@@ -145,9 +144,7 @@ export default function BottomNav({
           </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("account")}>
             <span className="twa-more-icon is-purple"><CircleUserRound size={19} /></span>
-            {DONOR_ENABLED
-              ? <span><strong>Аккаунт</strong><small>Донор, автобай и выкуп</small></span>
-              : <span><strong>Антон</strong><small>Партнёр: задачи, баланс, сверка</small></span>}
+            <span><strong>Антон</strong><small>Партнёр: задачи, баланс, сверка</small></span>
             <span aria-hidden="true">›</span>
           </button>
           <div className="twa-more-group">Магазин</div>

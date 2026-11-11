@@ -89,7 +89,8 @@ describe("мобильный контракт Control Center", () => {
 
   it("не меняет даты после hydration из-за timezone браузера", () => {
     expect(adminTime).toContain('ADMIN_TIME_ZONE = "Europe/Moscow"');
-    for (const source of [buyout, economics, anton]) {
+    // buyout-client дат не показывает с 11.11.2026 (донорские панели истории удалены).
+    for (const source of [economics, anton]) {
       expect(source).toContain("ADMIN_TIME_ZONE");
     }
   });

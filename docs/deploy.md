@@ -3,6 +3,16 @@
 > Секреты, IP-адреса серверов, Coolify-панель и UUID сервисов — в локальном `HANDOFF.md`
 > (в `.gitignore`, не в публичном репо).
 
+## 🧹 11.11.2026: Guide-контейнер удалён из кода
+
+`Dockerfile.guide`, `next.config.guide.ts`, `docker-compose.yml` (эксперимент мая) и
+`scripts/deploy-web-and-guide.sh` удалены. Деплой Web вручную — `scripts/deploy-web.sh`
+(ждёт webhook, `--force-web` — только если он проверенно не пришёл; потом смоук). Смоук
+коридора принимает чанки гейта с обычного `/_next/`. Заголовок `X-RobloxBank-Guide-Release`
+оставлен как метка версии гейта (его читает сторож `drift-watch` на RF-хосте). Приложение
+`RobloxBank-Guide` в Coolify остановлено — удалить в панели. Всё ниже про отдельный Guide —
+история.
+
 ## 🧭 02.11.2026: Guide выведен, `/guide` отдаёт Web; Prisma собирается без сети
 
 **Почему.** Алерт «Guide отстал от Web» приходил месяцами. Причин две, обе в сборке, а не в коде:
@@ -403,9 +413,8 @@ Wildberries сборкой на несколько коммитов старше
 Теперь есть:
 
 ```bash
-scripts/deploy-web-and-guide.sh              # ждём webhook Web → Guide → smoke
-scripts/deploy-web-and-guide.sh --guide-only # Web уже уехал автодеплоем
-scripts/deploy-web-and-guide.sh --force-web  # только если webhook проверенно не сработал
+scripts/deploy-web.sh              # ждём webhook Web → smoke (с 11.11; Guide-шаг удалён)
+scripts/deploy-web.sh --force-web  # только если webhook проверенно не сработал
 ```
 
 Скрипт читает `COOLIFY_URL`, `COOLIFY_TOKEN`, `COOLIFY_WEB_UUID`, `COOLIFY_GUIDE_UUID` из

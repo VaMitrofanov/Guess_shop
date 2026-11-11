@@ -29,12 +29,6 @@ describe("donor cookie single-egress contract", () => {
     expect(source).not.toContain("economy.roblox.com/v1/purchases/products");
   });
 
-  test("автослив не передаёт donorCookie в direct-fetch helpers", () => {
-    const source = read("bots/shared/drain.ts");
-    expect(source).not.toMatch(/(?:drainAuthedUser|drainCurrency|getCsrf)\(donorCookie\)/);
-    expect(source).not.toContain("economy.roblox.com/v1/purchases/products");
-  });
-
   test("ручные скрипты не теряют donor account guard", () => {
     const web = read("src/app/api/twa/orders/route.ts");
     const tg = read("bots/tg/handlers.ts");
@@ -42,12 +36,6 @@ describe("donor cookie single-egress contract", () => {
     expect(web).toContain("buyerUserId: info.buyerAccountId");
     expect(tg).toContain("if (!info.buyerUserId)");
     expect(tg).toContain("buyerUserId: info.buyerUserId");
-  });
-
-  test("auto-workers ставят backoff при недоступной donor session", () => {
-    const source = read("bots/tg/auto-workers.ts");
-    expect(source).toContain("backoffUntil = Date.now() + 15 * 60 * 1000");
-    expect(source).toContain("browserFailureMessage(donorSession.reason, donorSession.code)");
   });
 
   test("browser service не пишет cookie или script в structured logs", () => {

@@ -16,7 +16,7 @@ type BuyoutCountRow = {
 async function loadBuyoutCounts() {
   /* Те же правила, что у ленты (`TAB_SQL`). Своя копия до 20.10 не знала о
      заморозке: «К выкупу 41» здесь против «Выкупить 25» в рабочем месте. */
-  const tabs = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
+  const tabs = ["BUYOUT", "DIRECT", "WORK", "ERROR", "ATTENTION"] as const;
   const rows = await prisma.$queryRawUnsafe<BuyoutCountRow[]>(`
     SELECT ${tabs.map(tab => `COUNT(*) FILTER (WHERE ${TAB_SQL[tab]}) AS "${tab}"`).join(", ")}
     FROM "WbOrder"

@@ -365,7 +365,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"].includes(tab);
+  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -409,7 +409,7 @@ export async function GET(req: NextRequest) {
   }
 
   const notTest = { isTest: false };
-  const sourceWhere = sourceFilter && ["WB", "DIRECT", "AVITO", "MANUAL", "SITE"].includes(sourceFilter)
+  const sourceWhere = sourceFilter && ["WB", "DIRECT", "MANUAL", "SITE"].includes(sourceFilter)
     ? { orderSource: sourceFilter }
     : {};
   // Сужение из шапки среза: тап по полосе источника, корзине возраста,
@@ -498,8 +498,8 @@ export async function GET(req: NextRequest) {
           }).catch(() => 0);
           // Все предикаты — из `TAB_SQL` (order-queue.ts): одно правило на ленту,
           // «Выкуп», значок и шапку среза.
-          const countable = ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const;
-          const summable = ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const;
+          const countable = ["WORK", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const;
+          const summable = ["BUYOUT", "DIRECT", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const;
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
@@ -514,10 +514,10 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const)
+          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const)
             counts[k] = Number(r[k] ?? 0);
           counts["INTENTS"] = await intentsPromise;
-          for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const)
+          for (const k of ["BUYOUT", "DIRECT", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const)
             sums[k] = Number(r[`SUM_${k}`] ?? 0);
           const oldest: Record<string, string | null> = {
             BUYOUT: r["OLDEST_BUYOUT"] ? new Date(r["OLDEST_BUYOUT"]).toISOString() : null,
@@ -824,70 +824,6 @@ export async function POST(req: NextRequest) {
 
   const { action, orderId, reason } = body;
 
-  if (action === "create-avito") {
-    const { amount, gamepassUrl, robloxUsername, note } = body;
-    const saleRubles = Number(body.saleRubles);
-    if (!amount || typeof amount !== "number" || amount < 1)
-      return NextResponse.json({ error: "amount обязателен (число > 0)" }, { status: 400 });
-    if (!Number.isFinite(saleRubles) || saleRubles <= 0)
-      return NextResponse.json({ error: "saleRubles обязателен для точной прибыли Авито" }, { status: 400 });
-
-    // Дедуп: на этот геймпасс уже есть активный заказ → 409, пока менеджер
-    // явно не подтвердит повтор (force: true). COMPLETED/REJECTED не блокируют.
-    const gpMatch = String(gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/);
-    if (gpMatch && body.force !== true) {
-      const candidates = await (prisma as any).wbOrder.findMany({
-        where: {
-          isTest: false,
-          status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] },
-          // U18: точное сравнение по индексу вместо `contains` + постфильтра.
-          gamepassId: gpMatch[1],
-        },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        select: { wbCode: true, status: true, orderSource: true, createdAt: true },
-      });
-      const existing = candidates[0];
-      if (existing) {
-        return NextResponse.json(
-          {
-            error: `На этот геймпасс уже есть активный заказ ${existing.wbCode}`,
-            existing: { wbCode: existing.wbCode, status: existing.status, orderSource: existing.orderSource, createdAt: existing.createdAt },
-          },
-          { status: 409 },
-        );
-      }
-    }
-
-    const code = `AV-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-
-    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
-
-    const created = await (prisma as any).wbOrder.create({
-      data: {
-        amount,
-        gamepassUrl: gamepassUrl || null,
-        robloxUsername: robloxUsername || null,
-        status: gamepassUrl ? "PENDING" : "AWAITING_GAMEPASS",
-        platform: "TG",
-        wbCode: code,
-        isDirectOrder: false,
-        orderSource: "AVITO",
-        saleAmountKopecks: Math.round(saleRubles * 100),
-        adminNote: note || null,
-        pendingAt: gamepassUrl ? new Date() : null,
-        purchaserUsername: settings?.robloxAccountName ?? null,
-        user: {
-          connectOrCreate: {
-            where: { tgId: "admin" },
-            create: { tgId: "admin", name: "Admin (Avito)" },
-          },
-        },
-      },
-    });
-    cachedCounts = null;
-    return NextResponse.json({ ok: true, order: created });
-  }
 
   // П4 (PLAN «+7»): живая валидация полей модалки «➕ Создать заказ».
   // Ничего не создаёт; предупреждения (цена/продавец) НЕ блокируют создание.
@@ -1741,7 +1677,6 @@ export async function POST(req: NextRequest) {
     const statusMap: Record<string, string> = {
       BUYOUT: "PENDING",
       DIRECT: "PENDING",
-      AVITO: "PENDING",
       NEW: "AWAITING_GAMEPASS",
       ERROR: "ERROR",
       AWAITING_LINK: "AWAITING_GAMEPASS",
@@ -1772,8 +1707,6 @@ export async function POST(req: NextRequest) {
       data.isDirectOrder = false;
       data.orderSource = order.orderSource === "AVITO" ? "MANUAL" : order.orderSource;
     }
-    // Вкладка «Авито» фильтрует по orderSource — одного статуса мало.
-    if (target === "AVITO")  { data.isDirectOrder = false; data.orderSource = "AVITO"; }
     // Перенос в «Готово» — тихая переклассификация (без уведомления клиенту,
     // в отличие от кнопки «Выкуплено»); курс фиксируем как при обычном выкупе.
     if (target === "DONE") {
@@ -1786,7 +1719,7 @@ export async function POST(req: NextRequest) {
     if (target === "DONE" || target === "REJECTED") { data.priorityAt = null; data.priorityBy = null; }
     if (target !== "ERROR") data.buyoutErrorCode = null;
     if (target === "AWAITING_LINK" || target === "NEW") data.pendingAt = null;
-    if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO")
+    if ((target === "BUYOUT" || target === "DIRECT")
         && (order.status !== "PENDING" && order.status !== "IN_PROGRESS")) {
       data.pendingAt = new Date();
     }
@@ -2250,40 +2183,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  if (action === "edit-avito") {
-    if (order.orderSource !== "AVITO")
-      return NextResponse.json({ error: "Только для Авито-заказов" }, { status: 400 });
-    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
-      return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
-
-    const data: any = {};
-    if (body.amount !== undefined) {
-      const amt = Number(body.amount);
-      if (!amt || amt < 1) return NextResponse.json({ error: "amount должен быть > 0" }, { status: 400 });
-      data.amount = amt;
-    }
-    if (body.robloxUsername !== undefined) data.robloxUsername = body.robloxUsername || null;
-    if (body.note !== undefined) data.adminNote = typeof body.note === "string" ? body.note.trim().slice(0, 2000) || null : null;
-    if (body.gamepassUrl !== undefined) {
-      const raw = String(body.gamepassUrl ?? "").trim();
-      if (raw) {
-        data.gamepassUrl = raw.includes("roblox.com") ? raw : /^\d+$/.test(raw) ? `https://www.roblox.com/game-pass/${raw}` : raw;
-        data.buyoutErrorCode = null;
-        if (!order.gamepassUrl) { data.status = "PENDING"; data.pendingAt = new Date(); }
-      } else {
-        data.gamepassUrl = null;
-        data.buyoutErrorCode = null;
-        data.status = "AWAITING_GAMEPASS";
-        data.pendingAt = null;
-      }
-    }
-    if (Object.keys(data).length === 0)
-      return NextResponse.json({ error: "Нет данных для обновления" }, { status: 400 });
-
-    await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
-    cachedCounts = null;
-    return NextResponse.json({ ok: true });
-  }
 
   // Универсальное редактирование заказа из карточки (обобщение edit-avito на
   // все источники): менеджер правит номинал/ник/геймпасс ЗА клиента — кейс
@@ -2373,7 +2272,7 @@ export async function POST(req: NextRequest) {
        «поправить источник» без него значило бы «поправить на неверный». */
     if (body.orderSource !== undefined) {
       const src = String(body.orderSource ?? "");
-      if (!["WB", "WB_DBS", "DIRECT", "AVITO", "MANUAL"].includes(src))
+      if (!["WB", "WB_DBS", "DIRECT", "MANUAL"].includes(src))
         return NextResponse.json({ error: "Неизвестный источник заказа" }, { status: 400 });
       if (src !== order.orderSource) {
         data.orderSource = src;
@@ -2450,7 +2349,7 @@ export async function POST(req: NextRequest) {
 
   if (action === "set-source") {
     const src = body.source as string;
-    if (!["WB", "DIRECT", "AVITO", "MANUAL"].includes(src))
+    if (!["WB", "DIRECT", "MANUAL"].includes(src))
       return NextResponse.json({ error: "Invalid source" }, { status: 400 });
     if (unpaidDirect && !isDirectSource(src)) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     await (prisma as any).wbOrder.update({

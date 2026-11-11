@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
  * Синтетический смоук WB-коридора (docs/corridor-and-site.md, риск №16 в
- * docs/security.md). «Страница 200» ничего не гарантирует: HTML гейта отдаёт
- * Guide-контейнер, JS-чанки идут через префикс /_next-guide, а поломка VK
- * видна только в браузере клиента. Скрипт проверяет всё это с точки зрения
- * клиента:
+ * docs/security.md). «Страница 200» ничего не гарантирует: поломка чанков и VK
+ * видна только в браузере клиента. С 02.11.2026 гейт отдаёт Web (отдельный
+ * Guide-контейнер выведен, удалён 11.11), чанки — обычные /_next/. Скрипт
+ * проверяет всё с точки зрения клиента:
  *
- *   1. GET /guide?source=wb            → 200 + маркер Guide-контейнера;
- *   2. каждый чанк /_next-guide/...    → 200 (рассинхрон Web/Guide = 404);
+ *   1. GET /guide?source=wb            → 200 + маркер страницы гейта;
+ *   2. каждый чанк гейта               → 200;
  *   3. каждый public/vendor/*.js       → 200 (self-hosted SDK на месте);
  *   4. CSP guide-ответа содержит vk.ru-хосты SDK в connect-src и frame-src;
  *   5. GET /api/wb-code?code=TESTDEV   → 200 (жив Prisma-путь чтения кода);
@@ -92,8 +92,8 @@ const gateRes = await expectStatus(`${BASE}/guide?source=wb`, 200, "/guide?sourc
 let gateHtml = "";
 if (gateRes) {
   gateHtml = await gateRes.text();
-  if (gateHtml.includes("RobloxBank-Guide")) ok("ответ пришёл из Guide-контейнера (__svc marker)");
-  else fail("__svc marker", "HTML без data-served-by=RobloxBank-Guide — отвечает не Guide?");
+  if (gateHtml.includes("RobloxBank-Guide")) ok("страница гейта на месте (маркер data-served-by)");
+  else fail("маркер гейта", "HTML без data-served-by=RobloxBank-Guide — отвечает не страница гейта?");
 }
 
 // ── 1.1 Web/Guide source fingerprint ───────────────────────────────────────
@@ -117,11 +117,12 @@ try {
 
 // ── 2. Все чанки гейта (префикс /_next-guide, НЕ голый /_next!) ────────────
 if (!DRIFT_ONLY) {
-console.log("\n2) JS/CSS-чанки гейта (/_next-guide)");
+console.log("\n2) JS/CSS-чанки гейта");
+// До 02.11 гейт отдавал Guide-контейнер с префиксом /_next-guide; теперь Web — /_next.
 const chunkSet = new Set(
-  [...gateHtml.matchAll(/"(\/_next-guide\/_next\/static\/[^"\\]+)"/g)].map((m) => m[1])
+  [...gateHtml.matchAll(/"(\/(?:_next-guide\/)?_next\/static\/[^"\\]+)"/g)].map((m) => m[1])
 );
-if (chunkSet.size === 0 && gateHtml) fail("чанки", "в HTML не найдено ни одного /_next-guide-ассета");
+if (chunkSet.size === 0 && gateHtml) fail("чанки", "в HTML гейта не найдено ни одного /_next/static-ассета");
 // Заодно копим тела чанков: ниже по ним проверяется, что бандл VK ID реально
 // попал в сборку гейта (он подключается ленивым import, поэтому в HTML его нет).
 let chunkBodies = "";

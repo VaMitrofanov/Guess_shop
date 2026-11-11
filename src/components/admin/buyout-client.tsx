@@ -1,14 +1,23 @@
 "use client";
 
 import { SOURCE_SHORT, statusLabel } from "@/lib/order-presentation";
-import { DONOR_ENABLED } from "@/lib/donor-mode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check, CheckCheck, ClipboardCheck, Copy, Download, ExternalLink, Loader2,
-  RefreshCw, ShoppingBasket, SquareTerminal, TriangleAlert, Wallet, X,
+  Check,
+  CheckCheck,
+  ClipboardCheck,
+  Copy,
+  Download,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  ShoppingBasket,
+  TriangleAlert,
+  Wallet,
+  X,
 } from "lucide-react";
 import styles from "./admin-shell.module.css";
-import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
+
 import { BALANCE_PRESETS, fitToBalance } from "@/lib/buyout-packing";
 import { cn } from "@/lib/utils";
 import { bulkPause, shouldStopBatch, sleep, type BatchItem } from "@/lib/buyout-batch";
@@ -46,7 +55,7 @@ const TAB_LABEL: Record<string, string> = {
   ERROR: "Ошибки",
   ATTENTION: "Требуют внимания",
 };
-const TABS = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
+const TABS = ["BUYOUT", "DIRECT", "WORK", "ERROR", "ATTENTION"] as const;
 type Tab = (typeof TABS)[number];
 
 interface ExportItem {
@@ -100,8 +109,6 @@ function plural(count: number, one: string, few: string, many: string) {
   if (mod10 >= 2 && mod10 <= 4) return few;
   return many;
 }
-const dateTime = (iso: string) =>
-  new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 function waitLabel(hours: number) {
   if (hours < 1) return "только что";
@@ -118,7 +125,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
   const [tab, setTab] = useState<Tab>("BUYOUT");
   const [data, setData] = useState<BuyoutData | null>(initialData);
   const [donor, setDonor] = useState<Donor | null>(null);
-  const [donorLoading, setDonorLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -174,8 +180,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
       setDonor(res.ok ? await res.json() : null);
     } catch {
       setDonor(null);
-    } finally {
-      setDonorLoading(false);
     }
   }, []);
 
@@ -242,7 +246,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
    *  вся очередь. ID — для скрипта, ссылки — чтобы открыть пасс руками. */
   const selectedIds = selectedItems.map((i) => i.gamepassId).join("\n");
   const selectedLinks = selectedItems.map((i) => i.gamepassUrl).join("\n");
-  const shortfall = donor?.balance != null ? selectedGross - donor.balance : null;
 
   const toggle = (orderId: string) => {
     if (running) return;
@@ -280,35 +283,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
   const selectNone = () => setSelected(new Set());
   // ── Скрипт покупки ──────────────────────────────────────────────────────────
 
-  const copyScript = async (item: ExportItem) => {
-    setRowState((s) => ({ ...s, [item.orderId]: { kind: "buying" } }));
-    try {
-      const res = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "purchase-script", orderId: item.orderId }),
-      });
-      const d = await res.json().catch(() => null);
-      if (!res.ok || !d?.script) {
-        setRowState((s) => ({ ...s, [item.orderId]: { kind: "failed", reason: d?.error ?? `HTTP ${res.status}` } }));
-        return;
-      }
-      setRowState((s) => ({ ...s, [item.orderId]: { kind: "idle" } }));
-      setScriptModal({
-        script: d.script,
-        name: d.name ?? "Game Pass",
-        price: d.price ?? item.expectedPrice,
-        base: d.base ?? item.amount,
-        creatorName: d.creatorName ?? "—",
-        gamepassId: d.gamepassId ?? item.gamepassId,
-        pageUrl: d.pageUrl ?? `https://www.roblox.com/game-pass/${item.gamepassId}`,
-        wbCode: item.wbCode,
-      });
-      setScriptCopied(false);
-    } catch {
-      setRowState((s) => ({ ...s, [item.orderId]: { kind: "failed", reason: "ошибка сети" } }));
-    }
-  };
 
   const copyScriptToClipboard = async () => {
     if (!scriptModal) return;
@@ -416,13 +390,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
     await load(tab);
   };
 
-  const buyOne = async (item: ExportItem) => {
-    if (running) return;
-    setRunning(true);
-    const result = await purchaseOne(item);
-    setRunning(false);
-    if (result.ok) { await load(tab); await loadDonor(); }
-  };
 
   /**
    * Пачка. Батч пишется прогрессивно (start → item → finish), как в TWA:
@@ -596,7 +563,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
 
           <div style={{ padding: "14px 19px 0" }}>
             <div className={styles.toolbar}>
-              {TABS.filter((t) => t !== "AVITO" || (data?.counts?.[t] ?? 0) > 0 || tab === t).map((t) => (
+              {TABS.map((t) => (
                 <button
                   key={t} type="button" disabled={running || loading}
                   className={cn(styles.chip, tab === t && styles.chipActive)}
@@ -651,13 +618,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                   <button type="button" className={styles.primaryButton} onClick={pickForBalance} disabled={running || !(balance > 0)}>
                     Набрать под баланс
                   </button>
-                  {DONOR_ENABLED && donor?.balance != null && (
-                    <button
-                      type="button" className={styles.ghostButton} disabled={running}
-                      onClick={() => setBalance(donor.balance as number)}
-                      title="Подставить живой баланс донора"
-                    >Донор: {rbx(donor.balance)}</button>
-                  )}
                 </div>
 
                 {balance > 0 && (
@@ -771,24 +731,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                           {state.kind === "failed" && <span className={styles.bad} title={state.reason}>{state.reason}</span>}
                           {state.kind === "idle" && (
                             <>
-                              {DONOR_ENABLED && <>
-                              <button
-                                type="button" className={cn(styles.ghostButton, styles.iconButton)} disabled={running}
-                                onClick={() => void copyScript(i)}
-                                aria-label="Скопировать скрипт покупки"
-                                title={copied === `script:${i.orderId}` ? "Скрипт скопирован" : "Скрипт покупки для браузера донора — с зашитой ожидаемой ценой"}
-                              >
-                                {copied === `script:${i.orderId}` ? <ClipboardCheck /> : <SquareTerminal />}
-                              </button>
-                              <button
-                                type="button" className={cn(styles.ghostButton, styles.iconButton)} disabled={running}
-                                onClick={() => void buyOne(i)}
-                                aria-label="Купить автоматически"
-                                title="Купить автоматически через серверный браузер"
-                              >
-                                <ShoppingBasket />
-                              </button>
-                              </>}
                               <button
                                 type="button" className={styles.buyButton} disabled={running}
                                 onClick={() => void markOne(i)}
@@ -831,51 +773,6 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
 
         {/* ── Правая колонка ── */}
         <div className={styles.stack}>
-          {/* Донор, история пачек автовыкупа и сливы — спрятаны с донором (donor-mode.ts). */}
-          {DONOR_ENABLED && <section className={styles.panel}>
-            <div className={styles.donorCard}>
-              <div className={styles.donorHead}>
-                <div>
-                  <span>Донор</span>
-                  <strong>{donorLoading ? "проверяем…" : donor?.accountName ?? "—"}</strong>
-                </div>
-                <button type="button" className={styles.ghostButton} onClick={() => { setDonorLoading(true); void loadDonor(); }} disabled={donorLoading || running}>
-                  <RefreshCw /> {donorLoading ? "…" : "Обновить"}
-                </button>
-              </div>
-
-              <div>
-                <span style={{ color: "var(--admin-muted)", fontSize: 12 }}>Баланс</span>
-                <div className={cn(styles.donorBalance, shortfall != null && shortfall > 0 && styles.bad)}>
-                  {donor?.balance != null ? rbx(donor.balance) : donorLoading ? "…" : "—"}
-                </div>
-              </div>
-
-              {donor?.balance != null && data && data.export.totalGrossRobux > 0 && (
-                <div>
-                  <div className={cn(styles.donorMeter, donor.balance < data.export.totalGrossRobux && styles.donorMeterShort)}>
-                    <i style={{ width: `${Math.min(100, Math.round((donor.balance / data.export.totalGrossRobux) * 100))}%` }} />
-                  </div>
-                  <p style={{ margin: "8px 0 0", color: "var(--admin-muted)", fontSize: 12.5, lineHeight: 1.5 }}>
-                    {donor.balance < data.export.totalGrossRobux
-                      ? <>На всю очередь «{TAB_LABEL[tab]}» не хватает <b className={styles.bad}>{rbx(data.export.totalGrossRobux - donor.balance)}</b>.</>
-                      : <>Баланса хватает на всю очередь «{TAB_LABEL[tab]}».</>}
-                  </p>
-                </div>
-              )}
-
-              {donor?.cookieUpdatedAt && (
-                <div className={styles.detailRow}>
-                  <span>Cookie обновлён</span>
-                  <strong>{dateTime(donor.cookieUpdatedAt)}</strong>
-                </div>
-              )}
-
-              {donor?.problem && (
-                <div className={styles.noteWarn}><TriangleAlert /><div>{donor.problem}</div></div>
-              )}
-            </div>
-          </section>}
 
           {/* Пачка: основное действие — закрыть заказы, выкупленные вручную */}
           {buyable && (selected.size > 0 || running) && (
@@ -943,75 +840,13 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                       Для заказов, которые уже выкуплены руками по выгрузке: закроет их и
                       уведомит клиентов.
                     </p>
-                    {DONOR_ENABLED && <>
-                    <div className={styles.divider} />
-                    <div className={styles.detailRow}>
-                      <span>Спишется с донора при авто-выкупе</span>
-                      <strong className={styles.numeric}>{rbx(selectedGross)}</strong>
-                    </div>
-                    {shortfall != null && shortfall > 0 && (
-                      <div className={styles.noteWarn}>
-                        <TriangleAlert />
-                        <div>
-                          Выбрано на <b>{rbx(shortfall)}</b> больше, чем есть на балансе донора.
-                        </div>
-                      </div>
-                    )}
-                    <button type="button" className={styles.ghostButton} onClick={() => setConfirming("buy")}>
-                      <ShoppingBasket /> Выкупить автоматически ({selected.size})
-                    </button>
-                    </>}
                   </>
                 )}
               </div>
             </section>
           )}
 
-          {DONOR_ENABLED && <section className={styles.panel}>
-            <div className={styles.panelHeader}><strong>История пачек</strong><span>последние {data?.batches.length ?? 0}</span></div>
-            <div className={styles.logList}>
-              {(data?.batches ?? []).map((b) => (
-                <div key={b.id} className={styles.logItem}>
-                  <div className={cn(styles.logIcon, b.failCount > 0 ? styles.logIconWarning : styles.logIconSuccess)}>
-                    <Wallet />
-                  </div>
-                  <div className={styles.logCopy}>
-                    <strong>{b.accountName ?? "—"}</strong>
-                    <span>
-                      {b.okCount} ок{b.failCount > 0 && ` · ${b.failCount} ошибок`}
-                      {!b.finishedAt && " · не завершена"}
-                    </span>
-                  </div>
-                  <div className={styles.logMeta}>
-                    <time>{dateTime(b.startedAt)}</time>
-                    <b>− {rbx(b.totalGross)}</b>
-                  </div>
-                </div>
-              ))}
-              {(data?.batches.length ?? 0) === 0 && <div className={styles.empty}>Пачек ещё не было</div>}
-            </div>
-          </section>}
 
-          {DONOR_ENABLED && (data?.drains.length ?? 0) > 0 && (
-            <section className={styles.panel}>
-              <div className={styles.panelHeader}><strong>Сливы остатка</strong></div>
-              <div className={styles.logList}>
-                {(data?.drains ?? []).map((d) => (
-                  <div key={d.id} className={styles.logItem}>
-                    <div className={styles.logIcon}><Wallet /></div>
-                    <div className={styles.logCopy}>
-                      <strong>{d.donorName ?? "—"} → {d.drainName ?? "—"}</strong>
-                      <span>{d.source === "auto" ? "автослив" : "вручную"}</span>
-                    </div>
-                    <div className={styles.logMeta}>
-                      <time>{dateTime(d.createdAt)}</time>
-                      <b>− {rbx(d.amount)}</b>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
         </div>
       </div>
     </div>

@@ -16,7 +16,7 @@ import { parseGamepassId } from "@/lib/roblox-buyout";
    ───────────────────────────────────────────────────────────────────────── */
 
 export type FilterTab =
-  | "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW"
+  | "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "NEW"
   | "ERROR" | "AWAITING_LINK" | "STALE_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION"
   | "HELD" | "FLAGGED";
 
@@ -102,8 +102,6 @@ export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
   BUYOUT: BUYOUT_QUEUE_SQL,
   DIRECT: `"isDirectOrder" = true AND ${NOT_HELD_SQL} AND "isFavorite" = false
     AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR')`,
-  AVITO: `"orderSource" = 'AVITO' AND ${NOT_HELD_SQL} AND "isFavorite" = false
-    AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR')`,
   NEW: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
     AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`,
   ERROR: `status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false`,
@@ -163,8 +161,6 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
       };
     case "DIRECT":
       return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false, ...NOT_HELD };
-    case "AVITO":
-      return { orderSource: "AVITO", status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"] }, isFavorite: false, ...NOT_HELD };
     case "NEW":
       return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false, ...NOT_HELD };
     case "ERROR":
@@ -250,7 +246,7 @@ export const FIRST_IN_LINE_ORDER_SQL =
 
 /** Срезы, где место в списке означает очередь работы, а не историю. */
 const PRIORITY_TABS: readonly FilterTab[] = [
-  "WORK", "BUYOUT", "DIRECT", "AVITO", "ERROR", "ATTENTION", "AWAITING_LINK", "STALE_LINK",
+  "WORK", "BUYOUT", "DIRECT", "ERROR", "ATTENTION", "AWAITING_LINK", "STALE_LINK",
 ];
 
 export function orderByForTab(
@@ -260,9 +256,9 @@ export function orderByForTab(
     tab === "WORK" ? [{ updatedAt: "desc" }, { createdAt: "desc" }]
     // «К выкупу» — единственная очередь, где прямые обгоняют по определению:
     // это общий список, в котором они иначе тонут среди WB-заказов. Во вкладках
-    // «Прямой» и «Авито» ось не нужна (там один тип), в остальных — не про выкуп.
+    // «Прямой» ось не нужна (там один тип), в остальных — не про выкуп.
     : tab === "BUYOUT" ? [DIRECT_ORDER_BY as Prisma.WbOrderOrderByWithRelationInput, { pendingAt: "asc" }, { createdAt: "asc" }]
-    : tab === "DIRECT" || tab === "AVITO" ? [{ pendingAt: "asc" }, { createdAt: "asc" }]
+    : tab === "DIRECT" ? [{ pendingAt: "asc" }, { createdAt: "asc" }]
     : tab === "ERROR" || tab === "AWAITING_LINK" || tab === "STALE_LINK" || tab === "ATTENTION" ? [{ createdAt: "asc" }]
     // Свежая заморозка сверху: её причину чаще всего и уточняют.
     : tab === "HELD" ? [{ heldAt: "desc" }]
@@ -290,7 +286,7 @@ export const isPrioritized = (order: { priorityAt?: Date | string | null }): boo
    список короче очереди.
    ──────────────────────────────────────────────────────────────────────── */
 
-export const GAMEPASS_EXPORT_TABS = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
+export const GAMEPASS_EXPORT_TABS = ["BUYOUT", "DIRECT", "WORK", "ERROR", "ATTENTION"] as const;
 export type GamepassExportTab = (typeof GAMEPASS_EXPORT_TABS)[number];
 const GAMEPASS_EXPORT_LIMIT = 500;
 

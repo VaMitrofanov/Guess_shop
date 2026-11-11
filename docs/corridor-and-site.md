@@ -958,7 +958,7 @@ owner/sale/price guard перед `Init` сохранён.
 `redirect_uri=https://robloxbank.ru`.
 
 Переменная **build-time**, поэтому правки в панели недостаточно — Web и Guide пересобраны
-через `scripts/deploy-web-and-guide.sh`. Чтобы это не повторилось незаметно, в
+через `scripts/deploy-web-and-guide.sh` (удалён 11.11.2026, теперь `deploy-web.sh`). Чтобы это не повторилось незаметно, в
 `smoke-corridor` добавлена 32-я проверка: какой app id реально уехал в бандл гейта.
 Подробности и почему смоук раньше молчал — [security.md](security.md) риск №34.
 

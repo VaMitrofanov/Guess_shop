@@ -20,9 +20,8 @@ import { THEME_BOOT_SCRIPT } from "./src/lib/theme-boot";
 export const THEME_BOOT_CSP_HASH = `'sha256-${createHash("sha256").update(THEME_BOOT_SCRIPT, "utf8").digest("base64")}'`;
 
 /**
- * Shared response headers for the main storefront and the separately-built
- * guide container. Keep this file outside `src/`: both Next configs import it
- * during build, before route pruning in Dockerfile.guide.
+ * Shared response headers for the storefront (and /guide, которую с 02.11.2026
+ * отдаёт тот же Web — отдельный Guide-контейнер удалён 11.11.2026).
  *
  * CSP intentionally permits the bundled official VK SDK and the Next runtime. A
  * nonce-based policy is a later hardening step: it needs WebView coverage for
@@ -49,10 +48,9 @@ const commonCsp = [
   "form-action 'self'",
 ].join("; ");
 
-// Web and Guide are built as separate Coolify applications. Hash only inputs
-// that survive Dockerfile.guide route pruning; the same checkout must produce
-// the same value in both containers, while an older Guide build exposes a
-// different header and fails scripts/smoke-corridor.mjs.
+// Отпечаток кода гейта в заголовке X-RobloxBank-Guide-Release. Раньше сверял
+// Web с отдельным Guide-контейнером; теперь /guide отдаёт Web, и заголовок —
+// просто метка версии гейта для смоука и сторожа drift-watch на RF-хосте.
 const GUIDE_RELEASE_INPUTS = [
   "next-security.ts",
   "package.json",

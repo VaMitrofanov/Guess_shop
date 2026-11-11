@@ -131,7 +131,6 @@ export const EXTRA_TABS: { key: string; label: string }[] = [
   { key: "WORK", label: "В работе" },
   { key: "NEW", label: "Новые" },
   { key: "DIRECT", label: "Прямые" },
-  { key: "AVITO", label: "Авито" },
   { key: "FAVORITES", label: "Избранное" },
   { key: "ATTENTION", label: "Требуют внимания" },
   { key: "STALE_LINK", label: "🫥 Молчат" },

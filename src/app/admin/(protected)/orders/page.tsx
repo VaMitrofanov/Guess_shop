@@ -7,7 +7,7 @@ export const revalidate = 0;
 /** Срезы ряда + всё, что доступно из шторки фильтров. */
 const ALLOWED_SLICES = new Set<string>([
   ...SLICE_KEYS,
-  "ALL", "WORK", "NEW", "DIRECT", "AVITO", "FAVORITES", "ATTENTION", "STALE_LINK", "HELD", "REJECTED",
+  "ALL", "WORK", "NEW", "DIRECT", "FAVORITES", "ATTENTION", "STALE_LINK", "HELD", "REJECTED",
 ]);
 
 /**

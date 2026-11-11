@@ -7,7 +7,7 @@ const read = (rel: string) => fs.readFileSync(path.join(__dirname, "..", rel), "
 
 describe("счётчики вкладок — одно правило на все экраны (20.10.2026)", () => {
   test("рабочие вкладки исключают заморозку", () => {
-    for (const tab of ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION"] as const)
+    for (const tab of ["WORK", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION"] as const)
       expect(TAB_SQL[tab]).toContain(NOT_HELD_SQL);
   });
 

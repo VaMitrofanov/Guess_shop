@@ -18,7 +18,7 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
 /** Вкладки, из которых замороженный заказ обязан исчезнуть. */
 const WORK_TABS: FilterTab[] = [
-  "WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION",
+  "WORK", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION",
 ];
 
 describe("границы очередей", () => {
@@ -92,16 +92,6 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
 });
 
 describe("гарды выкупа", () => {
-  it("автовыкуп фильтрует heldAt и перепроверяет OrderHold", () => {
-    const worker = read("bots/tg/auto-workers.ts");
-    // Первый рубеж: заморозка в `where` самой выборки.
-    expect(worker).toContain("...NOT_HELD");
-    // Второй рубеж: заказ мог родиться по заранее замороженному коду уже
-    // после того, как крон-свип прошёл, — `heldAt` его ещё не знает.
-    expect(worker).toContain("activeHoldCodes");
-    expect(worker).toContain("heldCodes.has(order.wbCode)");
-  });
-
   it("ручной выкуп из TWA отказывает до траты", () => {
     const route = read("src/app/api/twa/orders/route.ts");
     const purchase = route.slice(route.indexOf('if (action === "purchase")'));
