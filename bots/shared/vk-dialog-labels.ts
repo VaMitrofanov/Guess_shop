@@ -90,6 +90,11 @@ export interface VkLabelOrder {
   updatedAt: Date;
   completedAt: Date | null;
   held: boolean;
+  /** Для комментария диалога: код, номинал, ник, источник. */
+  wbCode?: string;
+  amount?: number;
+  nick?: string | null;
+  source?: string;
 }
 
 export interface VkLabelSnapshot {
@@ -208,6 +213,40 @@ export function desiredVkLabels(snap: VkLabelSnapshot, now: Date): Set<VkLabelKe
   return out;
 }
 
+/* ── Комментарий диалога ─────────────────────────────────────────────────
+   Поле «Комментарий» над перепиской в «Сообщениях» сообщества пишется методом
+   `groups.setUserNote` (проверено 11.11.2026): до 96 символов, клиенту не видно,
+   прочитать через API нельзя — только перезаписать. Кладём туда код заказа,
+   номинал, ник и источник, чтобы не искать их в переписке. */
+
+const NOTE_MAX = 96;
+const SOURCE_SHORT: Record<string, string> = { WB_DBS: "DBS", WB: "WB", DIRECT: "прямой", SITE: "сайт", MANUAL: "ручной", AVITO: "Авито" };
+
+/** Строка комментария: активные заказы (иначе последний выкупленный) · ник · источник. */
+export function vkDialogNote(snap: Pick<VkLabelSnapshot, "orders">): string {
+  const withCode = snap.orders.filter((o) => o.wbCode);
+  const active = withCode
+    .filter((o) => o.status !== "COMPLETED" && o.status !== "REJECTED")
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const done = withCode
+    .filter((o) => o.status === "COMPLETED")
+    .sort((a, b) => (b.completedAt ?? b.updatedAt).getTime() - (a.completedAt ?? a.updatedAt).getTime());
+  const pick = active.length > 0 ? active : done.slice(0, 1);
+  if (pick.length === 0) return "";
+  const shown = pick.slice(0, 2);
+  const codes = shown.length === 1
+    ? `${shown[0].wbCode} · ${(shown[0].amount ?? 0).toLocaleString("ru-RU")} R$`
+    : `${shown.map((o) => `${o.wbCode} ${o.amount ?? 0}`).join(", ")} R$`;
+  const more = pick.length > 2 ? ` +${pick.length - 2}` : "";
+  const nick = pick.find((o) => o.nick)?.nick;
+  const src = SOURCE_SHORT[shown[0].source ?? ""] ?? null;
+  const done1 = active.length === 0 ? "✅ " : "";
+  const parts = [`${done1}${codes}${more}`, nick, src].filter(Boolean) as string[];
+  let note = parts.join(" · ");
+  if (note.length > NOTE_MAX) note = note.slice(0, NOTE_MAX - 1) + "…";
+  return note;
+}
+
 /* ── Синхронизация ─────────────────────────────────────────────────────── */
 
 interface VkTagApi {
@@ -236,6 +275,8 @@ export class VkDialogLabelSync {
   private ids: Map<VkLabelKey, number> | null = null;
   /** vkId → для какого обращения уже нашли ответ менеджера (мс). */
   private answered = new Map<string, number>();
+  /** vkId → комментарий, который мы уже записали (ВК его не отдаёт — помним сами). */
+  private notes = new Map<string, string>();
   private running = false;
 
   constructor(
@@ -352,11 +393,12 @@ export class VkDialogLabelSync {
   async run(
     load: (vkIds: string[]) => Promise<VkLabelSnapshot[]>,
     now = new Date(),
-  ): Promise<{ dialogs: number; bound: number; unbound: number }> {
-    if (this.running) return { dialogs: 0, bound: 0, unbound: 0 };
+  ): Promise<{ dialogs: number; bound: number; unbound: number; notes: number }> {
+    if (this.running) return { dialogs: 0, bound: 0, unbound: 0, notes: 0 };
     this.running = true;
     let bound = 0;
     let unbound = 0;
+    let notes = 0;
     try {
       const ids = await this.ensureLabels();
       const conversations = await this.listConversations();
@@ -371,6 +413,19 @@ export class VkDialogLabelSync {
         }
         const want = desiredVkLabels(snap, now);
         const has = new Set(conv.tags);
+        // Комментарий: пишем только изменившийся и никогда не стираем — известный
+        // код заказа должен оставаться над перепиской и после закрытия заказа.
+        const note = vkDialogNote(snap);
+        if (note && this.notes.get(conv.vkId) !== note) {
+          try {
+            await this.api.call("groups.setUserNote", { group_id: this.groupId, user_id: conv.vkId, note });
+            this.notes.set(conv.vkId, note);
+            notes++;
+            await sleep(this.gapMs);
+          } catch (err) {
+            console.warn(`[vk-labels] комментарий ${conv.vkId}: ${(err as Error)?.message ?? err}`);
+          }
+        }
         // ВК не ответил про историю — «Нужен человек» оставляем как стоит.
         const humanId = ids.get("human");
         if (humanUnknown && humanId) {
@@ -386,7 +441,7 @@ export class VkDialogLabelSync {
           }
         }
       }
-      return { dialogs: conversations.length, bound, unbound };
+      return { dialogs: conversations.length, bound, unbound, notes };
     } finally {
       this.running = false;
     }
@@ -405,7 +460,8 @@ select u."vkId" as "vkId",
        coalesce(json_agg(json_build_object(
          'status', w.status, 'isDirectOrder', w."isDirectOrder",
          'createdAt', w."createdAt", 'updatedAt', w."updatedAt",
-         'completedAt', w."completedAt", 'held', w."heldAt" is not null
+         'completedAt', w."completedAt", 'held', w."heldAt" is not null,
+         'wbCode', w."wbCode", 'amount', w.amount, 'nick', w."robloxUsername", 'source', w."orderSource"
        )) filter (where w.id is not null), '[]') as orders,
        (select max(i."createdAt") from "DirectIntent" i
          where i."userId" = u.id and i.status = 'PENDING') as "pendingIntentAt",
@@ -471,6 +527,10 @@ export async function loadVkLabelSnapshots(db: RawDb, vkIds: readonly string[]):
         createdAt: utc(o.createdAt),
         updatedAt: utc(o.updatedAt),
         completedAt: o.completedAt ? utc(o.completedAt) : null,
+        wbCode: o.wbCode,
+        amount: Number(o.amount),
+        nick: o.nick ?? null,
+        source: o.source,
       })),
     });
   }

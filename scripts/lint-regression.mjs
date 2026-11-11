@@ -119,7 +119,9 @@ import { ESLint } from "eslint";
 const BASELINE_WARNING_COUNT = 688;
 // 2026-11-11 (688 → 688): редизайн шторки заказа ТВА блоками — состав warning тот же,
 // отпечаток сдвинулся только из-за смещения строк в OrdersScreen.tsx.
-const BASELINE_SHA256 = "ebb11629324fbcd5bef3d20a19677d126c606a1833439e9fa6113d2ffe00f064";
+// 2026-11-11 (688 → 688): живой закреп заказа — новых warning нет, сдвиг строк старых `any`
+// в bots/vk/bot.ts и bots/tg/auto-workers.ts.
+const BASELINE_SHA256 = "28d936fad7d709bb95b725b0bf5d3b0e0bbaf16b4d0372f35b8bda349d034ac8";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

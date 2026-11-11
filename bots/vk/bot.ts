@@ -33,6 +33,7 @@ import { startIndependentPaymentWorkerWatchdog } from "../shared/payment-worker-
 import { syncVkActor } from "../shared/user-profile-sync";
 import { db } from "../shared/db";
 import { VkDialogLabelSync, loadVkLabelSnapshots } from "../shared/vk-dialog-labels";
+import { syncOrderPins } from "../shared/order-pin";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
 
@@ -107,13 +108,44 @@ if (process.env.VK_DIALOG_LABELS !== "off") {
   );
   const tick = async () => {
     try {
-      const { dialogs, bound, unbound } = await labels.run((vkIds) => loadVkLabelSnapshots(db, vkIds));
-      if (bound || unbound) console.log(`[vk-labels] диалогов ${dialogs}: +${bound} / −${unbound}`);
+      const { dialogs, bound, unbound, notes } = await labels.run((vkIds) => loadVkLabelSnapshots(db, vkIds));
+      if (bound || unbound || notes) console.log(`[vk-labels] диалогов ${dialogs}: +${bound} / −${unbound}, комментариев ${notes}`);
     } catch (err) {
       console.error("[vk-labels] tick:", err);
     }
   };
   setTimeout(() => { void tick(); setInterval(() => void tick(), 2 * 60 * 1000); }, 30_000);
+}
+
+/* Живой закреп заказа (bots/shared/order-pin.ts): правим карточку на месте;
+   если ВК не даёт править (старое сообщение) — новая карточка и закреп её.
+   Писать человеку нельзя (901 и т. п.) — стадию двигаем, не бьёмся вечно. */
+{
+  const pinTick = () => syncOrderPins(db, "VK", async (pin, text) => {
+    const peer_id = Number(pin.chatId);
+    if (pin.cmid) {
+      try {
+        await vk.api.call("messages.edit", { peer_id, conversation_message_id: pin.cmid, message: text, group_id: groupId, keep_forward_messages: 1 });
+        return {};
+      } catch { /* ниже — новая карточка */ }
+    }
+    try {
+      const sent = (await vk.api.call("messages.send", { peer_ids: String(peer_id), random_id: Math.floor(Math.random() * 2 ** 31), message: text })) as Array<{ conversation_message_id?: number }>;
+      const cmid = sent?.[0]?.conversation_message_id;
+      if (cmid) await vk.api.call("messages.pin", { peer_id, conversation_message_id: cmid }).catch(() => undefined);
+      return { cmid };
+    } catch (err) {
+      const code = (err as { code?: number })?.code;
+      if (code === 901 || code === 900 || code === 902 || code === 7) {
+        console.warn(`[order-pin] VK ${pin.code}: писать нельзя (${code})`);
+        return {};
+      }
+      throw err;
+    }
+  })
+    .then((n) => { if (n) console.log(`[order-pin] VK обновлено закрепов: ${n}`); })
+    .catch((e) => console.error("[order-pin] VK tick:", e));
+  setTimeout(() => { void pinTick(); setInterval(() => void pinTick(), 2 * 60 * 1000); }, 60_000);
 }
 
 if (process.env.VALIDATOR_KEY) {

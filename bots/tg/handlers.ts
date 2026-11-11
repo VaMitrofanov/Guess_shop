@@ -8,6 +8,7 @@
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
+import { orderPinText, recordOrderPin } from "../shared/order-pin";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
@@ -156,7 +157,6 @@ import {
 import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
 import {
   BUYER_HINT_CONTEXT, BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel,
-  orderCodePinText,
 } from "../shared/buyer-contact";
 import type { WbOrderStatus } from "@prisma/client";
 
@@ -417,9 +417,11 @@ function supportBtn(label = "💬 Написать в поддержку", ctxKe
  */
 async function pinOrderCodeTg(ctx: any, code: string, denomination: number): Promise<void> {
   try {
-    const sent = await ctx.reply(orderCodePinText(code, denomination, "html"), { parse_mode: "HTML" });
+    const sent = await ctx.reply(orderPinText({ code, amount: denomination, stage: "wait", format: "html" }), { parse_mode: "HTML" });
     if (sent?.message_id && ctx.chat?.id) {
       await ctx.telegram.pinChatMessage(ctx.chat.id, sent.message_id, { disable_notification: true });
+      // Дальше карточку правит свип (bots/shared/order-pin.ts) по мере выкупа.
+      await recordOrderPin(db, code, { platform: "TG", chatId: String(ctx.chat.id), messageId: sent.message_id, stage: "wait" });
     }
   } catch (err) {
     console.warn("[TG] закреп кода заказа:", (err as Error)?.message ?? err);

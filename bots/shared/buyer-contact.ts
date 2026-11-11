@@ -367,15 +367,3 @@ export function recentContactExistsSql(hours = BUYER_RUSH_WINDOW_HOURS): string 
                  JOIN "WbCode" c ON c."id" = m."wbCodeId"
                 WHERE c."code" = "WbOrder"."wbCode" AND ce."sender" = 'client' AND ce."sentAt" >= ${since}))`;
 }
-
-/* ─── Закреп «Код вашего заказа» в боте ───────────────────────────────────
-   Сразу после активации бот присылает и закрепляет короткую карточку с
-   кодом: она всегда наверху чата, и «напишите код» больше не тупик. Номера
-   заказа WB тут нет и не будет: покупатель знает код с карты, а номер WB ему
-   ничего не скажет (см. feedback «никаких номеров заказов клиенту»).
-   ───────────────────────────────────────────────────────────────────────── */
-export function orderCodePinText(code: string, denomination: number, format: "html" | "plain"): string {
-  const shown = format === "html" ? `<code>${code}</code>` : code;
-  return `📌 Код вашего заказа: ${shown} · ${denomination.toLocaleString("ru-RU")} R$\n`
-    + "Сохраните его. Если напишете в поддержку — назовите код, так мы сразу найдём ваш заказ.";
-}

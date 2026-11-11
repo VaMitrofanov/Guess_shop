@@ -22,6 +22,7 @@ import { searchGamepassesByNick } from "../shared/gamepass-search";
 
 import { runWbTokenWatch } from "../shared/wb-token-watch";
 import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
+import { syncOrderPins } from "../shared/order-pin";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -200,6 +201,27 @@ export function startAutoWorkers(bot: Telegraf): void {
     .catch((e) => console.error("[buyer-contacts] tick:", e));
   setTimeout(buyerSweep, 150_000);
   setInterval(buyerSweep, 3 * 60 * 1000);
+
+  // Живой закреп заказа: «ждём пасс → в очереди → выкуплен» правится на месте.
+  // Сообщение удалено / бот заблокирован — стадию двигаем, чтобы не биться вечно.
+  const pinSweep = () => syncOrderPins(db, "TG", async (pin, text) => {
+    try {
+      await bot.telegram.editMessageText(pin.chatId, pin.messageId, undefined, text, { parse_mode: "HTML" });
+      return {};
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      if (/message is not modified/i.test(msg)) return {};
+      if (/message to edit not found|chat not found|bot was blocked|user is deactivated|MESSAGE_ID_INVALID/i.test(msg)) {
+        console.warn(`[order-pin] TG ${pin.code}: закреп недоступен (${msg.slice(0, 80)})`);
+        return {};
+      }
+      throw err;
+    }
+  })
+    .then((n) => { if (n) console.log(`[order-pin] TG обновлено закрепов: ${n}`); })
+    .catch((e) => console.error("[order-pin] TG tick:", e));
+  setTimeout(pinSweep, 90_000);
+  setInterval(pinSweep, 2 * 60 * 1000);
 
   console.log("[gp-watch] worker started ✅ (kill-switch in GlobalSettings.gpWatchEnabled)");
 }

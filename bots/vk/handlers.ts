@@ -10,6 +10,7 @@
  */
 
 import type { MessageContext } from "vk-io";
+import { orderPinText, recordOrderPin } from "../shared/order-pin";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
 import { vkGetName, vkSend, vkSendPhoto, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
@@ -162,7 +163,7 @@ import {
 } from "../shared/cross-platform-notify";
 import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
 import {
-  BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel, orderCodePinText,
+  BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel,
 } from "../shared/buyer-contact";
 import { vkCommunityDialogUrl, vkDialogLink } from "../shared/vk-links";
 import type { WbOrderStatus } from "@prisma/client";
@@ -2472,10 +2473,12 @@ async function settleForeignCodeClaimVk(
  */
 async function pinOrderCodeVk(ctx: MessageContext, vkUserId: number, code: string, denomination: number): Promise<void> {
   try {
-    const sent: any = await ctx.reply(orderCodePinText(code, denomination, "plain"));
+    const sent: any = await ctx.reply(orderPinText({ code, amount: denomination, stage: "wait", format: "plain" }));
     const cmid = sent?.conversationMessageId ?? sent?.conversation_message_id;
     if (_vkApi && cmid) {
       await _vkApi.messages.pin({ peer_id: vkUserId, conversation_message_id: cmid });
+      // Дальше карточку правит свип (bots/shared/order-pin.ts) по мере выкупа.
+      await recordOrderPin(db, code, { platform: "VK", chatId: String(vkUserId), cmid, stage: "wait" });
     }
   } catch (err) {
     console.warn("[VK] закреп кода заказа:", (err as Error)?.message ?? err);

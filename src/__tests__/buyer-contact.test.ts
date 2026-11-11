@@ -6,7 +6,6 @@ import {
   extractBuyerHints,
   findOrderByBuyerHints,
   isWbReplyEcho,
-  orderCodePinText,
   summarizeRush,
   type BuyerContact,
 } from "../../bots/shared/buyer-contact";
@@ -85,12 +84,6 @@ describe("поиск заказа без кода", () => {
 });
 
 describe("тексты покупателю", () => {
-  it("закреп называет код и не называет номер заказа WB", () => {
-    const text = orderCodePinText("GSR9TNF", 500, "plain");
-    expect(text).toContain("Код вашего заказа: GSR9TNF");
-    expect(text).not.toMatch(/номер/i);
-  });
-
   it("цитата — одна строка с обрезкой", () => {
     expect(contactQuote("a\n\nb   c")).toBe("a b c");
     expect(contactQuote("x".repeat(200), 10)).toHaveLength(10);

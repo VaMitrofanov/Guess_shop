@@ -4,6 +4,7 @@ import {
   VkDialogLabelSync,
   desiredVkLabels,
   needsHuman,
+  vkDialogNote,
   type VkLabelOrder,
   type VkLabelSnapshot,
   type VkSupportRequest,
@@ -230,5 +231,26 @@ describe("метки диалогов ВК — синхронизация", () =
     const res = await new VkDialogLabelSync(f.api, 1, 0).run(loader([]), NOW);
     expect(res.dialogs).toBe(450);
     expect(res.bound).toBe(450); // все — «Новый клиент»
+  });
+});
+
+describe("комментарий диалога ВК — код заказа над перепиской", () => {
+  const o = (wbCode: string, status: string, ageH: number, extra: Partial<VkLabelOrder> = {}): VkLabelOrder =>
+    order(status, { ageH, wbCode, amount: 500, nick: "S_Pavel1107", source: "WB_DBS", ...extra });
+
+  it("активный заказ: код · номинал · ник · источник", () => {
+    expect(vkDialogNote({ orders: [o("79PT6B3", "PENDING", 2)] })).toBe("79PT6B3 · 500 R$ · S_Pavel1107 · DBS");
+  });
+  it("два активных — оба кода, свежий первым; больше двух — «+N»", () => {
+    const orders = [o("AAA1111", "PENDING", 5), o("BBB2222", "AWAITING_GAMEPASS", 1, { amount: 1000 }), o("CCC3333", "PENDING", 9)];
+    expect(vkDialogNote({ orders })).toBe("BBB2222 1000, AAA1111 500 R$ +1 · S_Pavel1107 · DBS");
+  });
+  it("активных нет — последний выкупленный с ✅; заказов нет — пусто", () => {
+    expect(vkDialogNote({ orders: [o("F5TKFQW", "COMPLETED", 30, { completedAt: hoursAgo(20) })] })).toBe("✅ F5TKFQW · 500 R$ · S_Pavel1107 · DBS");
+    expect(vkDialogNote({ orders: [] })).toBe("");
+  });
+  it("не длиннее 96 символов (лимит ВК)", () => {
+    const long = o("79PT6B3", "PENDING", 1, { nick: "x".repeat(120) });
+    expect(vkDialogNote({ orders: [long] }).length).toBeLessThanOrEqual(96);
   });
 });
