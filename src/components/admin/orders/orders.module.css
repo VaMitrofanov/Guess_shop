@@ -820,13 +820,12 @@
 .nextStep { margin-top: 8px; font-size: 13.5px; font-weight: 600; line-height: 1.35; }
 .nextStep span { color: var(--o-muted); font-weight: 500; margin-right: 4px; }
 
-/* Досье на телефоне (P1.3): вторичные действия — под «··· Ещё». */
-.actionMoreToggle { display: none !important; }
-@media (max-width: 767px) {
-  .actions .actionMore { display: none; }
-  .actionsOpen .actionMore { display: inline-flex; }
-  .actionMoreToggle { display: inline-flex !important; }
-}
+/* Вторичные действия — под «··· Ещё» на любой ширине (редизайн 11.11.2026; с P1.3
+   так было только на телефоне, на десктопе стояли два ряда из девяти кнопок).
+   Горячие клавиши F/P/E работают и со скрытыми кнопками — их ловит рабочее место. */
+.actions .actionMore { display: none; }
+.actionsOpen .actionMore { display: inline-flex; }
+.actionMoreToggle { display: inline-flex !important; margin-left: auto; }
 
 
 /* ── 21.10: готовность и ID пасса в досье ──────────────────────────────────── */

@@ -345,7 +345,7 @@ export default function OrderDossier({
           )}
           {/* Правка — рядом с главным действием: чаще всего в досье приходят
               именно дописать ник или ID пасса, которого не нашёл поиск. */}
-          <button type="button" className={styles.btn} onClick={onEdit}>✎ Правка <kbd>I</kbd></button>
+          <button type="button" className={styles.btn} onClick={onEdit}>✏️ Правка <kbd>I</kbd></button>
           {/* 📨 Своя кнопка с 28.10.2026: в «Инструментах пасса» о ней не знали. */}
           {hasGamepassTool(order, "ask") && (
             <button type="button" className={styles.btn} onClick={() => {
@@ -353,8 +353,8 @@ export default function OrderDossier({
               requestAnimationFrame(() => askRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
             }}>📨 Инструкция <kbd>M</kbd></button>
           )}
-          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onHold}>
-            {order.heldAt ? "❄ Разморозить" : "❄ Заморозить"} <kbd>F</kbd>
+          <button type="button" className={styles.btn} onClick={onHold}>
+            {order.heldAt ? "❄️ Разморозить" : "❄️ Заморозить"} <kbd>F</kbd>
           </button>
           <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onFavorite}>{order.isFavorite ? "★ Из избранного" : "★ В избранное"}</button>
           {/* ⚡ Место в очереди. У замороженного заказа очереди нет — кнопки
@@ -376,8 +376,8 @@ export default function OrderDossier({
             <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>✕ Отменить заказ</button>
           )}
           <a className={`${styles.btn} ${styles.actionMore}`} href={`/admin/orders/${order.id}`}>Полная карточка ↗</a>
-          {/* На телефоне ряд из девяти кнопок занимал два-три экрана: сверху
-              остаются главное действие, ID и правка, остальное — здесь. */}
+          {/* Ряд из девяти кнопок занимал два ряда на десктопе и два-три экрана на
+              телефоне: сверху — главное, правка, инструкция, заморозка; остальное здесь. */}
           <button type="button" className={`${styles.btn} ${styles.actionMoreToggle}`} onClick={() => setMoreActions(v => !v)} aria-expanded={moreActions}>
             {moreActions ? "Скрыть" : "··· Ещё"}
           </button>
