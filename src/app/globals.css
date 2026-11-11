@@ -532,6 +532,9 @@ html.twa-route-active [contenteditable="true"] {
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  /* clip, а не только hidden: hidden-контейнер iOS всё равно прокручивает
+     программно при фокусе на поле, и экран уезжал вбок. clip не прокручивается. */
+  overflow: clip;
   /* Telegram iOS reports the usable mini-app viewport through its SDK CSS
    * variable. 100dvh can include Telegram's native header, which pushes the
    * bottom tab bar below the visible webview and leaves a large empty plate. */
@@ -765,7 +768,9 @@ html.twa-route-active [contenteditable="true"] {
 .twa-sheet-handle-zone { flex: 0 0 auto; display: grid; place-items: center; height: 26px; }
 .twa-sheet-handle { width: 44px; height: 14px; padding: 0; border: 0; background: transparent; }
 .twa-sheet-handle::after { content: ""; display: block; width: 36px; height: 4px; margin: auto; border-radius: 999px; background: rgba(255,255,255,.28); }
-.twa-sheet-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+/* overflow-x: hidden обязателен: при одном `overflow-y: auto` ось X тоже становится
+   прокручиваемой, и всё, что шире шторки, уводило её вбок (11.11.2026). */
+.twa-sheet-scroll { min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .twa-sheet-footer { flex: 0 0 auto; padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid rgba(255,255,255,.10); background: linear-gradient(180deg, rgba(28,23,41,.88), rgba(28,23,41,.99)); box-shadow: 0 -12px 30px rgba(3,0,12,.24); }
 .twa-sheet-footer > button { width: 100%; min-height: 56px; }
 @keyframes twa-sheet-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
@@ -1912,7 +1917,9 @@ html.twa-route-active [contenteditable="true"] {
   padding: 11px 12px 9px; border: 0; background: transparent; color: #f7f5ff;
   text-align: left; font-family: inherit;
 }
-.twa-oc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Меток бывает много (первый, корзина, возврат, отзыв, код) — переносятся, а не
+   распирают карточку и шторку: в одну строку им нужно было 521 px при 372 (11.11). */
+.twa-oc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
 .twa-oc-top > b { flex: 0 0 auto; font-size: 12px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
 .twa-oc-top > small { flex: 0 0 auto; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .twa-oc-bell { flex: 0 0 auto; color: #ff9f0a; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }

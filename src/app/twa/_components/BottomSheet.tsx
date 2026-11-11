@@ -63,7 +63,9 @@ export default function BottomSheet({
     telegramBack?.show();
     telegramBack?.onClick(close);
 
-    const frame = window.requestAnimationFrame(() => sheetRef.current?.focus());
+    // preventScroll: фокус на самой шторке не должен двигать прокрутку — без
+    // него браузер «доводил» шторку в видимую область и экран дёргался при открытии.
+    const frame = window.requestAnimationFrame(() => sheetRef.current?.focus({ preventScroll: true }));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -118,10 +120,63 @@ export default function BottomSheet({
    * прокрутки не должны раскрывать шторку обратно. */
   const collapsedAt = useRef(0);
   useEffect(() => { if (!expanded) collapsedAt.current = Date.now(); }, [expanded]);
+  /* Раскрывает только палец. Прокрутку запускает и iOS сам — когда доводит до
+   * поля при фокусе; раньше это раскрывало шторку, её высота анимировалась, и
+   * поле «улетало» из-под пальца (жалоба владельца 11.11.2026). Окно 900 мс
+   * покрывает инерцию после отпускания. */
+  const lastTouchAt = useRef(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const onScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    // Вбок шторка не ездит никогда: даже если что-то внутри шире, iOS при
+    // фокусе прокручивал контейнер по X, и картинка уезжала влево.
+    if (el.scrollLeft !== 0) el.scrollLeft = 0;
     if (!expandable || expanded || Date.now() - collapsedAt.current < 600) return;
-    if (event.currentTarget.scrollTop > 12) onExpandedChange?.(true);
+    if (Date.now() - lastTouchAt.current > 900) return;
+    if (el.scrollTop > 12) onExpandedChange?.(true);
   };
+
+  /* Поле в фокусе держим в центре видимой части шторки. iOS доводит до поля
+   * сам, но по высоте ДО того, как клавиатура и шторка доедут (шторка
+   * уменьшается вместе с visualViewport, переход 0,25 с), — и поле оказывалось
+   * под клавиатурой или у края. Выравниваем после того, как всё встало. */
+  useEffect(() => {
+    if (!open) return;
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const timers: number[] = [];
+    let target: HTMLElement | null = null;
+    const center = () => {
+      if (!target || document.activeElement !== target || !scroller.contains(target)) return;
+      const box = scroller.getBoundingClientRect();
+      const field = target.getBoundingClientRect();
+      const visibleBottom = Math.min(box.bottom, window.visualViewport ? window.visualViewport.height + window.visualViewport.offsetTop : box.bottom);
+      const mid = box.top + (visibleBottom - box.top) / 2;
+      const delta = field.top + field.height / 2 - mid;
+      if (Math.abs(delta) > 8) scroller.scrollTo({ top: scroller.scrollTop + delta, left: 0, behavior: "smooth" });
+    };
+    const schedule = () => {
+      timers.splice(0).forEach(window.clearTimeout);
+      // Клавиатура и переход высоты шторки (0,25 с) — выравниваем, когда доедут.
+      timers.push(window.setTimeout(center, 120), window.setTimeout(center, 380));
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      const el = event.target as HTMLElement | null;
+      if (!el || !el.matches("input, textarea, select, [contenteditable='true']")) return;
+      target = el;
+      schedule();
+    };
+    const onFocusOut = () => { target = null; };
+    scroller.addEventListener("focusin", onFocusIn);
+    scroller.addEventListener("focusout", onFocusOut);
+    window.visualViewport?.addEventListener("resize", schedule);
+    return () => {
+      timers.forEach(window.clearTimeout);
+      scroller.removeEventListener("focusin", onFocusIn);
+      scroller.removeEventListener("focusout", onFocusOut);
+      window.visualViewport?.removeEventListener("resize", schedule);
+    };
+  }, [open]);
 
   /* Тянуть вниз за само содержимое, когда оно у верха: развёрнутая шторка
    * сворачивается, свёрнутая закрывается. Раньше вернуться можно было только
@@ -129,9 +184,11 @@ export default function BottomSheet({
    * Telegram теперь выключены в TwaApp). Пока палец тянет, шторка едет за ним. */
   const pull = useRef<{ y: number; atTop: boolean; dy: number } | null>(null);
   const onBodyTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    lastTouchAt.current = Date.now();
     pull.current = { y: event.touches[0]?.clientY ?? 0, atTop: event.currentTarget.scrollTop <= 0, dy: 0 };
   };
   const onBodyTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    lastTouchAt.current = Date.now();
     const p = pull.current;
     if (!p || !p.atTop || !sheetRef.current) return;
     p.dy = (event.touches[0]?.clientY ?? p.y) - p.y;
@@ -141,6 +198,7 @@ export default function BottomSheet({
     }
   };
   const onBodyTouchEnd = () => {
+    lastTouchAt.current = Date.now();
     const p = pull.current;
     pull.current = null;
     const sheet = sheetRef.current;
@@ -176,6 +234,7 @@ export default function BottomSheet({
           />
         </div>
         <div
+          ref={scrollRef}
           className="twa-sheet-scroll"
           onScroll={onScroll}
           onTouchStart={onBodyTouchStart}
