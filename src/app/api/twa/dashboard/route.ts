@@ -10,6 +10,7 @@ import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
 import { loadOverviewDiff } from "@/lib/admin-overview";
 import { loadOverviewFeed } from "@/lib/overview-feed";
 import { touchAdminPresence } from "@/lib/admin-presence";
+import { loadVkNeedsHuman } from "@/lib/vk-needs-human";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Главная TWA отвечает на один вопрос: что выкупать сейчас и сколько это стоит.
@@ -194,7 +195,7 @@ export async function GET(req: NextRequest) {
       displayName: twaUser.firstName || `TG ${twaUser.userId}`,
     }).catch(() => null);
 
-  const [statsRaw, core, feedbackRaw, donor, shiftData] = await Promise.all([
+  const [statsRaw, core, feedbackRaw, donor, shiftData, vkHumanRaw] = await Promise.all([
     // WB API — внешний и медленный; главная его не ждёт дольше 400 мс (кэш
     // прогреется в фоне, данные придут со следующим опросом через 30 с).
     withTimeout(getStats30d().catch(() => null), 400),
@@ -211,7 +212,11 @@ export async function GET(req: NextRequest) {
         loadOverviewFeed(shiftWindow.windowStartAt).catch(() => []),
       ])
       : Promise.resolve(null),
+    // «Ждут ответа в ВК»: обращения, на которые нужен человек, без ответа
+    // менеджера. Ответ проверяется в ВК (кэш 2 мин) — главная не ждёт дольше 1,5 с.
+    withTimeout(loadVkNeedsHuman().catch(() => null), 1_500),
   ]);
+  const vkNeedsHuman = vkHumanRaw === PENDING ? null : vkHumanRaw;
   const { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine } = core;
 
   const statsPending = statsRaw === PENDING;
@@ -322,6 +327,7 @@ export async function GET(req: NextRequest) {
     shift,
     donorCoverage,
     inbox,
+    vkNeedsHuman,
     dbs,
     // Пока WB догружается в фоне (холодный кэш), плашку «недоступен» не
     // показываем: данные придут со следующим опросом.

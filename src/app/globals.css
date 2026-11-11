@@ -982,6 +982,9 @@ html.twa-route-active [contenteditable="true"] {
   background: transparent; color: #f7f5ff; text-align: left; font-family: inherit;
 }
 .twa-result-row:last-child, .twa-inset-row:last-child { border-bottom: 0; }
+/* «Ждут ответа в ВК» раскрытым списком — с отступом под иконку строки-заголовка. */
+.twa-inset-row.twa-vk-human { min-height: 50px; padding-left: 58px; }
+.twa-inset-row.twa-vk-human > svg { flex: 0 0 auto; color: #aaa4b8; }
 .twa-result-row > span:nth-child(2), .twa-inset-row > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .twa-result-row strong, .twa-inset-row strong { overflow: hidden; color: #f7f5ff; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .twa-result-row small, .twa-inset-row small { overflow: hidden; color: #aaa4b8; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

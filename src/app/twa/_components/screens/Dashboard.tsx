@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   CircleAlert,
+  ExternalLink,
   MessageCircleQuestion,
+  MessagesSquare,
   RefreshCw,
   Snowflake,
   TriangleAlert,
@@ -15,6 +17,7 @@ import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import type { FirstInLine } from "@/types/first-in-line";
+import type { VkNeedsHuman } from "@/types/vk-needs-human";
 import FirstInLineBlock from "../FirstInLineBlock";
 import type { OverviewDiff, OverviewFeedRow } from "@/types/admin-overview";
 import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
@@ -64,6 +67,8 @@ interface DashData {
   /** ⚡ Первым делом: поднятые руками и прямые заказы. */
   firstInLine: FirstInLine | null;
   inbox: { available: boolean; feedbacks: number; questions: number; total: number };
+  /** «Ждут ответа в ВК» — обращения, где нужен человек, без ответа менеджера. `null` — ВК не успел. */
+  vkNeedsHuman?: VkNeedsHuman | null;
   /** Смена: что случилось с прошлого захода этого админа. `null` — окно не собралось. */
   shift: { since: string; firstVisit: boolean; diff: OverviewDiff; feed: OverviewFeedRow[] } | null;
   dbs: DbsSnapshot | null;
@@ -100,6 +105,13 @@ function rub(value: number) {
   return `${value.toLocaleString("ru-RU")} ₽`;
 }
 
+/** Внешняя ссылка из ТВА: внутри Telegram — его браузером, иначе новой вкладкой. */
+function openExternal(url: string) {
+  const tg = (window as unknown as { Telegram?: { WebApp?: { openLink?: (u: string) => void } } }).Telegram?.WebApp;
+  if (tg?.openLink) tg.openLink(url);
+  else window.open(url, "_blank", "noopener");
+}
+
 function plural(count: number, one: string, few: string, many: string) {
   const mod100 = count % 100;
   const mod10 = count % 10;
@@ -122,6 +134,8 @@ export default function Dashboard({
   onCreateOrder?: (mode: "manual" | "direct") => void;
 }) {
   const [data, setData] = useState<DashData | null>(null);
+  // «Ждут ответа в ВК» свёрнуто по умолчанию: одна строка среди дел, список — по тапу.
+  const [vkOpen, setVkOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   /** Когда данные последний раз пришли с сервера — из этого «живая · N с». */
@@ -185,6 +199,7 @@ export default function Dashboard({
   // доставка WB к этому моменту закрыта (иначе гейт бы не ушёл). Решения
   // требует только незакрытая доставка или ход за нами.
   const dbsNeedsDecision = Boolean(dbs && (dbs.unclosed > 0 || dbs.needsUs > 0));
+  const vkHuman = data.vkNeedsHuman && data.vkNeedsHuman.total > 0 ? data.vkNeedsHuman : null;
   const dbsOldest = dbs?.unclosed ? dbs.unclosedOldestAt : dbs?.needsUsOldestAt ?? null;
 
   function openOrders(tab: OrdersTab) {
@@ -285,7 +300,7 @@ export default function Dashboard({
       />
 
       {/* ── Требует решения ──────────────────────────────────────────────── */}
-      {(dbsNeedsDecision || errors.count > 0 || inbox.total > 0) ? (
+      {(dbsNeedsDecision || errors.count > 0 || inbox.total > 0 || vkHuman) ? (
         <>
           <div className="twa-section-label">Ждут тебя · по срочности</div>
           <div className="twa-inset-group twa-action-list">
@@ -347,6 +362,43 @@ export default function Dashboard({
                 </div>
                 <ChevronRight size={20} />
               </button>
+            )}
+
+            {/* «Нужен человек» из ВК: обращения, которые бот не решит, а
+                менеджер ещё не ответил. Одна строка; список — по тапу, ответ —
+                сразу в диалоге СООБЩЕСТВА. Уходит сама, когда менеджер ответил. */}
+            {vkHuman && (
+              <>
+                <button type="button" className="twa-inset-row twa-press-sm" aria-expanded={vkOpen}
+                  onClick={() => { haptic.select(); setVkOpen(open => !open); }}>
+                  <span className="twa-result-icon is-inbox"><MessagesSquare size={21} /></span>
+                  <div>
+                    <strong>{vkHuman.total} {plural(vkHuman.total, "ждёт", "ждут", "ждут")} ответа в ВК</strong>
+                    <small>
+                      нужен человек
+                      {vkHuman.oldestAt && <> · дольше всех <b style={{ color: ageColor(vkHuman.oldestAt) }}>{fmtAge(vkHuman.oldestAt)}</b></>}
+                    </small>
+                  </div>
+                  <ChevronRight size={20} style={{ transform: vkOpen ? "rotate(90deg)" : undefined, transition: "transform .2s" }} />
+                </button>
+                {vkOpen && vkHuman.items.map(item => (
+                  <button key={item.vkId} type="button" className="twa-inset-row twa-vk-human twa-press-sm"
+                    onClick={() => { haptic.select(); openExternal(item.dialogUrl); }}>
+                    <div>
+                      <strong>{item.name ?? `VK ${item.vkId}`} · {item.wbCode}</strong>
+                      <small>
+                        {item.quote ? `«${item.quote}»` : "без текста"} · <b style={{ color: ageColor(item.at) }}>{fmtAge(item.at)}</b>
+                      </small>
+                    </div>
+                    <ExternalLink size={17} />
+                  </button>
+                ))}
+                {vkOpen && vkHuman.total > vkHuman.items.length && (
+                  <div className="twa-inset-row twa-vk-human"><div><small>
+                    ещё {vkHuman.total - vkHuman.items.length} — в «Сообщениях» сообщества, метка «Нужен человек»
+                  </small></div></div>
+                )}
+              </>
             )}
           </div>
 
