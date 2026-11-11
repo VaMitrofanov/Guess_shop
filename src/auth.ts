@@ -17,6 +17,7 @@ import { isRevokedCode } from "../bots/shared/wb-code-revocation";
 import { noteDbsBuyerSignedIn } from "../bots/shared/wb-dbs-thread";
 import { recordOrderCardRoot } from "../bots/shared/order-thread";
 import { formatAdminNotice, orderRef, orderStatusWord } from "../bots/shared/notify-format";
+import { vkCommunityDialogUrl, vkDialogLink } from "../bots/shared/vk-links";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -303,7 +304,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 title: "код активируют вторым аккаунтом",
                 lines: [
                   orderRef({ code: wbCode }),
-                  `👤 Пытался: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a> · VK ID <code>${vkId}</code>`,
+                  `👤 Пытался: ${vkDialogLink(vkId, escapeHtml(name))} · VK ID <code>${vkId}</code>`,
                   `🕵️ Похоже на код, вскрытый на ПВЗ (риск №15 в docs/security.md)`,
                 ],
                 next: "проверить, кому код принадлежит, и при подтверждении заморозить его",
@@ -376,7 +377,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               const foldedIntoDbsCard = isActiveActivation
                 ? await noteDbsBuyerSignedIn(prisma, wbCode!, "VK", {
                     display: name,
-                    url: `https://vk.com/id${vkId}`,
+                    url: vkCommunityDialogUrl(vkId),
                     isNew: isNewUser,
                   }).catch(() => false)
                 : false;
@@ -398,7 +399,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                       passPrice ? [`геймпасс ${passPrice} R$`] : []),
                     isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
                     `📘 Источник: <b>VK (сайт)</b>`,
-                    `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a>`,
+                    `👤 Юзер: ${vkDialogLink(vkId, escapeHtml(name))}`,
                     `📅 ${dateStr}`,
                   ],
                   next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
@@ -453,7 +454,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                         ? `🔎 Код <code>${escapeHtml(unknownCode)}</code> не найден — опечатка или чужой код`
                         : `🗂 Заказа в работе нет`,
                     `📘 Источник: <b>VK (сайт)</b>`,
-                    `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a> · VK ID <code>${vkId}</code>`,
+                    `👤 Юзер: ${vkDialogLink(vkId, escapeHtml(name))} · VK ID <code>${vkId}</code>`,
                   ],
                   next: liveOrder
                     ? "ничего — покупатель вернулся к своему заказу"

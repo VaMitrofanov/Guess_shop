@@ -19,6 +19,7 @@ import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 import { formatAdminNotice, mskTime, orderRef, orderStatusWord } from "./notify-format";
 import { getGamepassDetails } from "./roblox";
+import { vkDialogLink } from "./vk-links";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -332,7 +333,9 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
     ],
     next: p.platform === "TG" && p.tgId
       ? `<a href="tg://user?id=${p.tgId}">написать пользователю</a>`
-      : "ответить из чата платформы",
+      : p.platform === "VK" && p.vkId
+        ? vkDialogLink(p.vkId, "ответить из сообщества")
+        : "ответить из чата платформы",
   });
 
   // Кнопка ведёт в дашборд, уже наведённый на этот заказ: последний шаг, ради
@@ -482,7 +485,7 @@ export async function notifyBotError(p: {
       for (const [k, t] of botErrorSeen) if (now - t > BOT_ERROR_TTL_MS) botErrorSeen.delete(k);
     }
     const userRef = p.platform === "VK"
-      ? `<a href="https://vk.com/id${p.userId}">vk.com/id${p.userId}</a>`
+      ? vkDialogLink(p.userId, `диалог VK ${p.userId}`)
       : `<a href="tg://user?id=${p.userId}">tg://${p.userId}</a>`;
     const time = new Date().toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
@@ -605,7 +608,7 @@ export function formatUserHandleHtml(u: UserHandleSource): string {
     return `<a href="tg://user?id=${u.tgId}">${label}</a>`;
   }
   if (u.vkId) {
-    return `<a href="https://vk.com/id${u.vkId}">${label}</a>`;
+    return vkDialogLink(u.vkId, label);
   }
   return label;
 }

@@ -61,6 +61,7 @@ import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } fr
 import type { OrderRisk } from "@/lib/order-risk-types";
 import { HOLD_KINDS, HOLD_KIND_META, type HoldKind } from "@/lib/hold-kinds-meta";
 import { BuyerDossierSheet, BuyerLine, ReviewPlaque } from "../RiskBits";
+import { vkCommunityDialogUrl } from "../../../../../bots/shared/vk-links";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -538,7 +539,7 @@ function openContact(user: Order["user"]) {
     return;
   }
   if (user.vkId) {
-    const url = `https://vk.com/im?sel=${user.vkId}`;
+    const url = vkCommunityDialogUrl(user.vkId);
     if (tg?.openLink) tg.openLink(url);
     else window.open(url, "_blank");
   }

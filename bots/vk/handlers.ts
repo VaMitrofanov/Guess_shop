@@ -164,6 +164,7 @@ import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from
 import {
   BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel, orderCodePinText,
 } from "../shared/buyer-contact";
+import { vkCommunityDialogUrl, vkDialogLink } from "../shared/vk-links";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -259,7 +260,7 @@ async function triggerSupport(
   }
 
   await notifySupportShown({
-    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${escapeHtml(firstName)})`,
+    platform: "VK", userDisplay: vkDialogLink(vkUserId, escapeHtml(firstName)),
     // ❄️ vkId — по нему алерт узнаёт замороженного клиента (в TG эту роль
     // играет tgId; без него VK-обращение приходило бы без признака).
     vkId: String(vkUserId),
@@ -319,7 +320,7 @@ async function deliverSupportIntake(
 
   await notifySupportShown({
     platform: "VK",
-    userDisplay: `vk.com/id${vkUserId} (${escapeHtml(firstName)})`,
+    userDisplay: vkDialogLink(vkUserId, escapeHtml(firstName)),
     vkId: String(vkUserId),
     contextKey: intake?.contextKey ?? "general",
     wbCode: hint.wbCode,
@@ -803,7 +804,7 @@ async function hasPendingProofPhoto(vkUserId: number): Promise<boolean> {
 
 function vkUserDisplay(name: string, vkUserId: number): string {
   // Names go into HTML admin cards — escape so "<Имя>" can't break the message.
-  return `<a href="https://vk.com/id${vkUserId}">${escapeHtml(name)}</a>`;
+  return vkDialogLink(vkUserId, escapeHtml(name));
 }
 
 // generateDirectCode() now imported from shared/admin
@@ -1910,7 +1911,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const fullName = await vkGetName(vkUserId);
     const adminText =
       `❌ <b>Заказ <code>${ucdOrder.wbCode}</code> отменён покупателем</b>\n` +
-      `👤 <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK)\n` +
+      `👤 ${vkDialogLink(vkUserId, escapeHtml(fullName))} (VK)\n` +
       `💎 ${baseAmount} R$`;
     await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
     return;
@@ -2679,7 +2680,7 @@ async function handleRefActivation(
       zone: "DBS",
       title: "покупатель нашёлся сам",
       lines: [orderRef({ code: wbCode.code, denomination: totalAmount }, [
-        `<a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a>`,
+        vkDialogLink(vkUserId, escapeHtml(fullName)),
       ])],
       next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
     });
@@ -2693,7 +2694,7 @@ async function handleRefActivation(
   const foldedIntoDbsCard = provisionalCreated
     ? await noteDbsBuyerSignedIn(db, wbCode.code, "VK", {
         display: fullName,
-        url: `https://vk.com/id${vkUserId}`,
+        url: vkCommunityDialogUrl(vkUserId),
         isNew: userIsNew,
       }).catch(() => false)
     : false;
@@ -2715,7 +2716,7 @@ async function handleRefActivation(
           wbDbsBadgeLine(notifySource).trim() || null,
           isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
           `📘 Источник: <b>VK</b>`,
-          `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK ID: ${vkUserId})`,
+          `👤 Юзер: ${vkDialogLink(vkUserId, escapeHtml(fullName))} (VK ID: ${vkUserId})`,
           `📅 ${dateStr}`,
         ],
         next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
@@ -5087,7 +5088,7 @@ async function handleReviewScreenshot(
           await tgSend(
             adminId,
             `⚠️ <b>VK отзыв: не удалось извлечь фото — нужна ручная проверка</b>\n` +
-            `VK ID: <code>${vkUserId}</code> (<a href="https://vk.com/id${vkUserId}">vk.com/id${vkUserId}</a>)\n\n` +
+            `VK ID: <code>${vkUserId}</code> (${vkDialogLink(vkUserId, "диалог")})\n\n` +
             `Пользователь прислал скрин отзыва, авто-извлечение URL не сработало. Проверь диалог и начисли бонус вручную.`
           );
         }
@@ -5129,7 +5130,7 @@ async function handleReviewScreenshot(
         await tgSend(
           adminId,
           `⚠️ <b>Скриншот ВБ отзыва — пользователь не найден в БД</b>\n` +
-          `VK ID: <code>${vkUserId}</code> (<a href="https://vk.com/id${vkUserId}">vk.com/id${vkUserId}</a>)\n\n` +
+          `VK ID: <code>${vkUserId}</code> (${vkDialogLink(vkUserId, "диалог")})\n\n` +
           `Пользователь отправил скрин, но записи в базе нет. Нужна ручная проверка.`
         );
       }

@@ -14,6 +14,7 @@ import { noteProbableNickByCode } from "@/lib/capture-nick";
 import { sendTelegramMessageId } from "@/lib/telegram";
 import { formatAdminNotice } from "../../../../../bots/shared/notify-format";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
+import { vkDialogLink } from "../../../../../bots/shared/vk-links";
 
 /**
  * Ключ для геймпассов в личном кабинете.
@@ -250,7 +251,7 @@ async function notifyAdmins(opts: {
     const display = user?.username
       ? `@${user.username}`
       : user?.vkId
-        ? `<a href="https://vk.com/id${user.vkId}">${escape(user.name ?? "покупатель")}</a>`
+        ? vkDialogLink(user.vkId, escape(user.name ?? "покупатель"))
         : escape(user?.name ?? user?.email ?? "покупатель");
 
     // Что уведомление ДОЛЖНО сказать — что произошло с живым заказом. Голое

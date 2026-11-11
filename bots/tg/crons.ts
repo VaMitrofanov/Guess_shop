@@ -20,6 +20,7 @@ import { expectedGamepassPrice } from "../shared/gamepass-plan";
 import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { priceWatchFlagged, priceWatchTargets, type PriceWatchPart } from "../shared/queued-price-watch";
 import { notifyBuyerViaWbChat, wbChatGamepassNudgeMessage } from "../shared/wb-chat-notify";
+import { vkDialogLink } from "../shared/vk-links";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -657,7 +658,7 @@ export function startReviewReminderCron(bot: Telegraf): void {
         for (const { who, ctx } of silent) {
           await notifyUserHurdle({
             platform: ctx.platform,
-            userDisplay: who.tgId ? `tg:${who.tgId}` : `vk.com/id${who.vkId}`,
+            userDisplay: who.tgId ? `tg:${who.tgId}` : who.vkId ? vkDialogLink(who.vkId, `VK ${who.vkId}`) : "—",
             tgId: who.tgId ?? undefined,
             vkId: who.vkId ?? undefined,
             contextKey: ctx.contextKey,

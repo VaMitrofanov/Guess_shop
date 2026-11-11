@@ -15,9 +15,7 @@ import { pendingAdminSearch, pendingBatchFulfill } from "../session";
 import { formatOrderAge } from "../../shared/order-age";
 import { countPreviousOrders } from "../../shared/order-loyalty";
 import { NOT_HELD, assertOrderBuyable } from "../../shared/order-hold";
-
-// ── VK community ID for direct-message links ────────────────────────────────
-const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
+import { vkCommunityDialogUrl, vkDialogLink } from "../../shared/vk-links";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -161,10 +159,8 @@ export async function renderExtendedCard(order: any) {
         contactUrl = `tg://user?id=${order.user.tgId}`;
       }
     } else if (order.platform === "VK" && order.user.vkId) {
-      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${handle}</a>`;
-      contactUrl = VK_GROUP_ID
-        ? `https://vk.com/gim${VK_GROUP_ID}?sel=${order.user.vkId}`
-        : `https://vk.com/id${order.user.vkId}`;
+      userLabel = vkDialogLink(order.user.vkId, handle);
+      contactUrl = vkCommunityDialogUrl(order.user.vkId);
     }
   }
 

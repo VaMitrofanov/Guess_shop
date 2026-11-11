@@ -24,6 +24,7 @@ import {
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
+import { vkCommunityDialogUrl } from "../../../../../bots/shared/vk-links";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -260,7 +261,8 @@ export default async function AdminUsersPage({
                         }
                         const href = detail.channel === "TG"
                           ? detail.username ? `https://t.me/${detail.username}` : `tg://user?id=${detail.subject}`
-                          : detail.username ? `https://vk.com/${detail.username}` : `https://vk.com/id${detail.subject}`;
+                          // ВК — диалог СООБЩЕСТВА, а не профиль: отвечать надо от сообщества.
+                          : vkCommunityDialogUrl(detail.subject);
                         return (
                           <a href={href} target="_blank" rel="noreferrer" key={detail.channel}>
                             {detail.channel === "TG" ? <Send /> : <MessagesSquare />}

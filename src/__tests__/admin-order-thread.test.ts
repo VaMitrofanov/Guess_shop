@@ -29,7 +29,7 @@ describe("Вход покупателя по DBS-заказу не порожд�
 
   it("личность покупателя уходит В карточку", () => {
     expect(auth).toContain('await noteDbsBuyerSignedIn(prisma, wbCode!, "VK", {');
-    expect(auth).toContain("url: `https://vk.com/id${vkId}`,");
+    expect(auth).toContain("url: vkCommunityDialogUrl(vkId),");
     expect(auth).toContain("isNew: isNewUser,");
   });
 });

@@ -4,6 +4,7 @@ import type { Tone } from "@/lib/order-presentation";
 import type { BuyoutOrderInput } from "@/lib/buyout-summary";
 import type { HoldKind } from "@/lib/hold-kinds-meta";
 import type { OrderRisk } from "@/lib/order-risk-types";
+import { vkCommunityDialogUrl } from "../../../../bots/shared/vk-links";
 
 /** Заказ в том виде, в котором его отдаёт `/api/admin/orders`. */
 export interface AdminOrder {
@@ -177,7 +178,7 @@ export function clientLabel(order: AdminOrder): string {
 /** Ссылка в мессенджер клиента — «написать» без выхода из админки. */
 export function contactHref(order: AdminOrder): string | null {
   if (order.user?.username) return `https://t.me/${order.user.username}`;
-  if (order.user?.vkId) return `https://vk.com/id${order.user.vkId}`;
+  if (order.user?.vkId) return vkCommunityDialogUrl(order.user.vkId);
   return null;
 }
 

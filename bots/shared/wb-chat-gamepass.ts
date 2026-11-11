@@ -43,6 +43,7 @@ import type { DbsRef } from "./wb-delivery-admin-notify";
 import { createDbsBuyoutOrder } from "./dbs-buyout-order";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { wbChatSafeText } from "./wb-gate-link";
+import { vkDialogLink } from "./vk-links";
 
 /**
  * Ссылки на пасс: самый надёжный признак, ищем в любом месте строки.
@@ -436,7 +437,7 @@ async function sendBuyoutCard(
   const userDisplay = user?.username
     ? `@${user.username}`
     : user?.vkId
-      ? `<a href="https://vk.com/id${user.vkId}">${safeName}</a>`
+      ? vkDialogLink(user.vkId, safeName)
       : user?.tgId
         ? `<a href="tg://user?id=${user.tgId}">${safeName}</a>`
         : safeName;

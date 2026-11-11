@@ -9,6 +9,7 @@ import { acceptGamepasses, ownerSwitchNote } from "../../../../../bots/shared/ga
 import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from "@/lib/order-audit";
 import { countPreviousOrders } from "../../../../../bots/shared/order-loyalty";
 import { REVOKED_CODE_REFUSAL, isRevokedCode } from "@/lib/wb-code-revocation";
+import { vkDialogLink } from "../../../../../bots/shared/vk-links";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -244,7 +245,7 @@ export async function POST(request: Request) {
         .replace(/>/g, "&gt;");
       let userDisplay: string;
       if (order.platform === "VK" && user?.vkId) {
-        userDisplay = `<a href="https://vk.com/id${user.vkId}">${safeName}</a>`;
+        userDisplay = vkDialogLink(user.vkId, safeName);
       } else if (user?.username) {
         userDisplay = `@${user.username}`;
       } else if (user?.tgId) {
