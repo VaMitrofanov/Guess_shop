@@ -140,9 +140,12 @@ describe("canonical bot order", () => {
       await expect(call()).rejects.toMatchObject({ code: "GAMEPASS_CHANGED" });
     });
 
-    test("пасс уже выкуплен по другому заказу — заказ не создаётся", async () => {
-      orderFindFirst.mockResolvedValue({ wbCode: "M8L74FX" });
-      await expect(call()).rejects.toMatchObject({ code: "GAMEPASS_CHANGED" });
+    test("пасс из закрытого заказа — не отказ: выкуп с другого аккаунта (11.11.2026)", async () => {
+      // Постоянный клиент присылает свой прошлый пасс. С 21.10 выкуп идёт с
+      // разных аккаунтов, и отказ здесь терял 26 из 29 таких заявок.
+      orderFindFirst.mockResolvedValue({ wbCode: "33J5XH4" });
+      transaction.mockImplementation(async () => { throw new Error("дошли до транзакции"); });
+      await expect(call()).rejects.toThrow("дошли до транзакции");
     });
 
     test("Roblox молчит — оплату не блокируем: это наша недоступность, не вина клиента", async () => {

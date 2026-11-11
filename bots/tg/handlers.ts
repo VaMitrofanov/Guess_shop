@@ -124,7 +124,7 @@ import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
 import { browserFailureMessage, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
-import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
+import { createBotPayment, isTerminalBotPaymentError, type BotPaymentMethod } from "../shared/bot-payment-api";
 import {
   allowDeliveryCodeAttempt,
   findDbsOrderByDeliveryCode,
@@ -235,10 +235,35 @@ async function completeTelegramBotPayment(ctx: any, intentId: string, method: Bo
   }
 }
 
+/* Email, уже присланный в этой сессии: повторный выбор способа после отказа
+   не должен снова просить email (см. VK, 05.11.2026). */
+const tgReceiptEmails = new Map<number, string>();
+
+/**
+ * Отказ подготовить оплату. Неповторяемый (пасс, срок, бонус) — «Оформить
+ * заново», а не кнопки способов: те вели в петлю «способ → email → отказ».
+ */
+async function replyTelegramPaymentFailure(ctx: any, intentId: string, error: unknown, afterEmail: boolean) {
+  const reason = escapeHtml(error instanceof Error ? error.message : "Не удалось подготовить оплату");
+  const emailOk = afterEmail ? "✅ Email принят.\n\n" : "";
+  if (isTerminalBotPaymentError(error)) {
+    await ctx.reply(`${emailOk}❌ ${reason}.`, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.callback("💎 Оформить заново", CB.startDirect)]]),
+    });
+    return;
+  }
+  await ctx.reply(`${emailOk}❌ ${reason}. Выбери способ ещё раз — email вводить заново не нужно.`, {
+    parse_mode: "HTML",
+    ...botPaymentChoiceKb(intentId),
+  });
+}
+
 async function startTelegramBotPayment(ctx: any, intentId: string, method: BotPaymentMethod) {
   const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { email: true } });
-  if (user?.email) {
-    await completeTelegramBotPayment(ctx, intentId, method, user.email);
+  const knownEmail = user?.email ?? tgReceiptEmails.get(ctx.from.id);
+  if (knownEmail) {
+    await completeTelegramBotPayment(ctx, intentId, method, knownEmail);
     return;
   }
   pendingDirectPaymentEmail.set(ctx.from.id, { intentId, method });
@@ -2626,11 +2651,12 @@ export function registerText(bot: Telegraf): void {
         return;
       }
       pendingDirectPaymentEmail.delete(ctx.from.id);
+      tgReceiptEmails.set(ctx.from.id, text.trim());
       try {
-        await completeTelegramBotPayment(ctx, paymentEmail.intentId, paymentEmail.method, text);
+        await completeTelegramBotPayment(ctx, paymentEmail.intentId, paymentEmail.method, text.trim());
       } catch (error) {
         console.error("[TG] bot payment create failed:", error);
-        await ctx.reply(`❌ ${escapeHtml(error instanceof Error ? error.message : "Не удалось подготовить оплату")}. Нажми способ оплаты ещё раз.`, { parse_mode: "HTML" });
+        await replyTelegramPaymentFailure(ctx, paymentEmail.intentId, error, true);
       }
       return;
     }
@@ -6660,10 +6686,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await startTelegramBotPayment(ctx, intentId, method);
       } catch (error) {
         console.error("[TG] payment choice failed:", error);
-        await ctx.reply(`❌ ${escapeHtml(error instanceof Error ? error.message : "Не удалось подготовить оплату")}. Попробуй другой способ или повтори позже.`, {
-          parse_mode: "HTML",
-          ...botPaymentChoiceKb(intentId),
-        });
+        await replyTelegramPaymentFailure(ctx, intentId, error, false);
       }
       return;
     }

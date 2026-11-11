@@ -1224,22 +1224,24 @@ async function paymentCardPassLine(orderId: string): Promise<{ text: string; ala
     where: { gamepassId: String(order.gamepassId), status: "COMPLETED", isTest: false, id: { not: orderId } },
     select: { wbCode: true },
   }).catch(() => null);
-  if (reused) {
-    return { text: `♻️ Пасс <code>${order.gamepassId}</code> УЖЕ выкуплен в ${reused.wbCode} — второй раз не покупается`, alarm: true };
-  }
+  // С 21.10 повтор закрытого — справка: выкуп с разных аккаунтов, `AlreadyOwned`
+  // даст только тот же. Цену при этом всё равно сверяем ниже.
+  const reusedNote = reused
+    ? `\n♻️ Пасс уже покупали в ${reused.wbCode} — выкупать с ДРУГОГО аккаунта`
+    : "";
 
   const pass = await getGamepassDetails(String(order.gamepassId)).catch(() => null);
   if (!pass || pass.validationSkipped) {
-    return { text: `🎫 Пасс <code>${order.gamepassId}</code> · ожидаем ${expected} R$ (Roblox не ответил)`, alarm: false };
+    return { text: `🎫 Пасс <code>${order.gamepassId}</code> · ожидаем ${expected} R$ (Roblox не ответил)${reusedNote}`, alarm: false };
   }
   if (!pass.isActive) {
-    return { text: `⛔ Пасс <code>${order.gamepassId}</code> снят с продажи`, alarm: true };
+    return { text: `⛔ Пасс <code>${order.gamepassId}</code> снят с продажи${reusedNote}`, alarm: true };
   }
   const ok = Math.abs(pass.price - expected) <= 2;
   return {
-    text: ok
+    text: (ok
       ? `🎫 Пасс <b>${pass.price} R$</b> — сходится с заказом`
-      : `⚠️ Пасс <b>${pass.price} R$</b>, а для ${order.amount} R$ нужен <b>${expected} R$</b>`,
+      : `⚠️ Пасс <b>${pass.price} R$</b>, а для ${order.amount} R$ нужен <b>${expected} R$</b>`) + reusedNote,
     alarm: !ok,
   };
 }

@@ -85,22 +85,14 @@ async function assertIntentGamepassStillValid(intentId: string, platform: BotPla
     throw new BotPaymentError("GAMEPASS_CHANGED", "Геймпасс принадлежит другому аккаунту Roblox — оформи заказ заново со своим");
   }
 
-  /* Уже выкупленный нами пасс второй раз не продаётся: Roblox ответит
-     `AlreadyOwned`, а другой донор заплатил бы за то, что у нас уже есть.
-     Клиент Kratos01395 привязал к заказу на 200 R$ пасс, купленный нами
-     четырьмя днями раньше по другому заказу (08.09.2026). */
-  for (const id of new Set(accepted.parts.map((part) => part.gamepassId))) {
-    const reused = await prisma.wbOrder.findFirst({
-      where: { gamepassId: id, status: "COMPLETED", isTest: false },
-      select: { wbCode: true },
-    }).catch(() => null);
-    if (reused) {
-      throw new BotPaymentError(
-        "GAMEPASS_CHANGED",
-        "Этот геймпасс уже выкуплен по прошлому заказу — создай новый и оформи заказ заново",
-      );
-    }
-  }
+  /* Повтор пасса из ЗАКРЫТОГО заказа — не отказ (11.11.2026).
+     С 08.09 здесь стоял запрет «уже выкуплен по прошлому заказу», но с 21.10
+     выкуп идёт с разных аккаунтов, и повтор стал справкой в досье, а не флагом
+     (`order-presentation.ts`): `AlreadyOwned` отдаёт только тот же аккаунт.
+     Запрет остался только тут и бил по постоянным клиентам: они присылают свой
+     прошлый пасс, бот принимал его на шаге пасса и отказывал уже после email —
+     29 из 69 заявок за 60 дней, назад вернулись трое. Выкупающий видит повтор
+     в карточке оплаты и в шторке заказа и берёт другой аккаунт. */
 }
 
 export async function createCanonicalBotOrder(input: {

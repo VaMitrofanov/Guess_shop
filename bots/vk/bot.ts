@@ -31,6 +31,8 @@ import { notifyBotError } from "../shared/admin";
 import { startBridgeServer } from "../shared/bridge";
 import { startIndependentPaymentWorkerWatchdog } from "../shared/payment-worker-watchdog";
 import { syncVkActor } from "../shared/user-profile-sync";
+import { db } from "../shared/db";
+import { VkDialogLabelSync, loadVkLabelSnapshots } from "../shared/vk-dialog-labels";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
 
@@ -95,6 +97,26 @@ vk.updates.on("group_join" as any, async (ctx: any) => {
 
 // ── Bridge server ────────────────────────────────────────────────────────────
 // Start when VALIDATOR_KEY is set.
+/* Метки диалогов в «Сообщениях» сообщества: кто ждёт робуксы, кто пропал без
+   пасса, кто в поддержке (bots/shared/vk-dialog-labels.ts). Выключатель —
+   VK_DIALOG_LABELS=off. */
+if (process.env.VK_DIALOG_LABELS !== "off") {
+  const labels = new VkDialogLabelSync(
+    { call: (method, params) => (vk.api as any).call(method, params) },
+    groupId,
+  );
+  const tick = async () => {
+    try {
+      const snapshots = await loadVkLabelSnapshots(db as any);
+      const { bound, unbound } = await labels.sync(snapshots);
+      if (bound || unbound) console.log(`[vk-labels] диалогов ${snapshots.length}: +${bound} / −${unbound}`);
+    } catch (err) {
+      console.error("[vk-labels] tick:", err);
+    }
+  };
+  setTimeout(() => { void tick(); setInterval(() => void tick(), 2 * 60 * 1000); }, 30_000);
+}
+
 if (process.env.VALIDATOR_KEY) {
   startBridgeServer();
 } else {

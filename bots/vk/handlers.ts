@@ -130,7 +130,7 @@ import { passFitsAmount } from "../shared/direct-requote";
 import { loadRobloxApiKeyForUser, rememberRobloxApiKey, type RobloxApiKeyClient } from "../shared/roblox-api-key-store";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { assertOwnsIntent, vkActor } from "../shared/ownership";
-import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
+import { createBotPayment, isTerminalBotPaymentError, type BotPaymentMethod } from "../shared/bot-payment-api";
 import {
   allowDeliveryCodeAttempt,
   findDbsOrderByDeliveryCode,
@@ -331,6 +331,9 @@ async function deliverSupportIntake(
     type: SUPPORT_METRIC_EVENT.DELIVERED, wbCode: hint.wbCode, via: "vk-bot",
     payload: {
       contextKey: intake?.contextKey ?? "general",
+      // Диалог, на который вешать «Нужен человек» (vk-dialog-labels.ts): заказ
+      // мог оформить другой профиль, а писал этот.
+      vkId: String(vkUserId),
       // Текст — для «Торопят» и стопа по просьбе вернуть деньги (buyer-contact.ts).
       text: clipProblemText(text)?.slice(0, 300) || null,
       robux: isRobuxSupportContext(intake?.contextKey) || isArrivalQuestion(text),
@@ -444,10 +447,39 @@ async function completeVkBotPayment(ctx: MessageContext, vkUserId: number, inten
   }
 }
 
+/* Email, который человек уже прислал в этой сессии. Без него отказ после ввода
+   email (сеть, «реквизиты недоступны») снова просил email — и человек видел
+   ответ про пасс прямо под своим адресом, будто бот принял email за пасс. */
+const vkReceiptEmails = new Map<number, string>();
+
+/**
+ * Ответ на отказ подготовить оплату. Отказ, который повтором не лечится (пасс,
+ * срок, бонус), получает «Оформить заново», а не кнопки способов: те вели в
+ * петлю «способ → email → тот же отказ» (05.11.2026).
+ */
+async function replyVkPaymentFailure(ctx: MessageContext, intentId: string, error: unknown, afterEmail: boolean) {
+  const reason = error instanceof Error ? error.message : "Не удалось подготовить оплату";
+  const emailOk = afterEmail ? "✅ Email принят.\n\n" : "";
+  if (isTerminalBotPaymentError(error)) {
+    await ctx.reply({
+      message: `${emailOk}❌ ${reason}.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "💎 Оформить заново", payload: { command: "start_direct" }, color: "positive" })
+        .inline(),
+    });
+    return;
+  }
+  await ctx.reply({
+    message: `${emailOk}❌ ${reason}. Выбери способ ещё раз — email вводить заново не нужно.`,
+    keyboard: vkPaymentChoiceKb(intentId),
+  });
+}
+
 async function startVkBotPayment(ctx: MessageContext, vkUserId: number, intentId: string, method: BotPaymentMethod) {
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { email: true } });
-  if (user?.email) {
-    await completeVkBotPayment(ctx, vkUserId, intentId, method, user.email);
+  const knownEmail = user?.email ?? vkReceiptEmails.get(vkUserId);
+  if (knownEmail) {
+    await completeVkBotPayment(ctx, vkUserId, intentId, method, knownEmail);
     return;
   }
   setState(vkUserId, { type: "AWAITING_DIRECT_RECEIPT", intentId, method });
@@ -1808,10 +1840,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await startVkBotPayment(ctx, vkUserId, intentId, method);
     } catch (error) {
       console.error("[VK] payment choice failed:", error);
-      await ctx.reply({
-        message: `❌ ${error instanceof Error ? error.message : "Не удалось подготовить оплату"}. Попробуй ещё раз.`,
-        keyboard: vkPaymentChoiceKb(intentId),
-      });
+      await replyVkPaymentFailure(ctx, intentId, error, false);
     }
     return;
   }
@@ -2019,14 +2048,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
     const paymentState = state;
     clearState(vkUserId);
+    vkReceiptEmails.set(vkUserId, text.trim());
     try {
-      await completeVkBotPayment(ctx, vkUserId, paymentState.intentId, paymentState.method, text);
+      await completeVkBotPayment(ctx, vkUserId, paymentState.intentId, paymentState.method, text.trim());
     } catch (error) {
       console.error("[VK] bot payment create failed:", error);
-      await ctx.reply({
-        message: `❌ ${error instanceof Error ? error.message : "Не удалось подготовить оплату"}. Выбери способ ещё раз.`,
-        keyboard: vkPaymentChoiceKb(paymentState.intentId),
-      });
+      await replyVkPaymentFailure(ctx, paymentState.intentId, error, true);
     }
     return;
   }
