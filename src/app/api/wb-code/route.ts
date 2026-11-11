@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     const now = new Date();
 
     // ── 1. Atomic lookup + reservation in a single transaction ────────
-    const txResult = await (db as any).$transaction(async (tx: any) => {
+    const txResult = await db.$transaction(async (tx: any) => {
       const wbCode = await tx.wbCode.findFirst({
         where: { code: { equals: rawCode, mode: "insensitive" } },
       });
@@ -139,7 +139,7 @@ const VK_REACH_STATUSES = new Set([null, "AWAITING_GAMEPASS", "PENDING", "IN_PRO
 async function vkMessagesMissing(userId: string, orderStatus: string | null): Promise<boolean> {
   if (!VK_REACH_STATUSES.has(orderStatus)) return false;
   try {
-    const user = await (db as any).user.findUnique({
+    const user = await db.user.findUnique({
       where: { id: userId },
       select: { tgId: true, vkId: true },
     });
@@ -159,7 +159,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid code" }, { status: 400 });
   }
   try {
-    const wbCode = await (db as any).wbCode.findFirst({
+    const wbCode = await db.wbCode.findFirst({
       where: { code: { equals: code, mode: "insensitive" } },
       select: { status: true, userId: true, denomination: true },
     });
@@ -176,7 +176,7 @@ export async function GET(request: Request) {
     let orderStatus: string | null = null;
     let robloxUsername: string | null = null;
     try {
-      const order = await (db as any).wbOrder.findFirst({
+      const order = await db.wbOrder.findFirst({
         where: { wbCode: { equals: code, mode: "insensitive" } },
         select: { platform: true, status: true, robloxUsername: true },
       });

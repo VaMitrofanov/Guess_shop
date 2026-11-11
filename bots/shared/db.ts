@@ -13,7 +13,7 @@
  *   On VPS it uses the same standard TCP connection — no WebSocket needed.
  *
  * NOTE: Run `npx prisma generate` after any schema migration.
- *       Until then, cast to `(db as any)` for new schema fields.
+ *       Until then, cast to `db` for new schema fields.
  */
 
 import { Prisma, PrismaClient, UserIdentityProvider } from "@prisma/client";
@@ -77,7 +77,7 @@ g.__botPrisma = db;
 if (!(g.__neonKeepalive as boolean)) {
   g.__neonKeepalive = true;
   setInterval(() => {
-    (db as any).$queryRawUnsafe("SELECT 1").catch(() => {});
+    db.$queryRawUnsafe("SELECT 1").catch(() => {});
   }, 4 * 60 * 1000);
 }
 
@@ -221,10 +221,10 @@ export async function getCustomerStatus(
       ? { tgId: String(platformId) }
       : { vkId: String(platformId) };
 
-    const user = await (db as any).user.findUnique({ where, select: { id: true } });
+    const user = await db.user.findUnique({ where, select: { id: true } });
     if (!user) return { isReturning: false, orderCount: 0 };
 
-    const orderCount = await (db as any).wbOrder.count({ where: { userId: user.id } });
+    const orderCount = await db.wbOrder.count({ where: { userId: user.id } });
     return { isReturning: orderCount > 0, orderCount };
   } catch (err: unknown) {
     const errObj = err instanceof Error ? err : new Error(String(err));

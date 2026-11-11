@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   }
 
   const [codes, total] = await Promise.all([
-    (prisma as any).wbCode.findMany({
+    prisma.wbCode.findMany({
       where,
       orderBy: [{ updatedAt: "desc" }],
       skip: (page - 1) * limit,
@@ -46,13 +46,13 @@ export async function GET(req: NextRequest) {
         user: { select: { id: true, tgId: true, vkId: true, name: true, username: true } },
       },
     }),
-    (prisma as any).wbCode.count({ where }),
+    prisma.wbCode.count({ where }),
   ]);
 
   // Attach order linkage (one query, batched by code values)
   const codeValues = codes.map((c: any) => c.code);
   const orders = codeValues.length
-    ? await (prisma as any).wbOrder.findMany({
+    ? await prisma.wbOrder.findMany({
         where:  { wbCode: { in: codeValues } },
         select: { id: true, wbCode: true, status: true, createdAt: true, amount: true },
       })

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
@@ -54,7 +55,7 @@ function buildReport(accountName: string | null, items: BatchItem[], totalGross:
 export async function GET(req: NextRequest) {
   if (!await requireAdmin(req))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const batches = await (prisma as any).purchaseBatch.findMany({
+  const batches = await prisma.purchaseBatch.findMany({
     orderBy: { startedAt: "desc" },
     take: 20,
   });
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
   // у которых finish так и не случился.
 
   if (body.action === "start") {
-    const batch = await (prisma as any).purchaseBatch.create({
+    const batch = await prisma.purchaseBatch.create({
       data: {
         accountName: body.accountName ? String(body.accountName) : null,
         startedAt: body.startedAt ? new Date(body.startedAt) : new Date(),
@@ -94,30 +95,30 @@ export async function POST(req: NextRequest) {
     const item = body.item as BatchItem | undefined;
     if (!batchId || !item?.orderId)
       return NextResponse.json({ error: "batchId и item обязательны" }, { status: 400 });
-    const batch = await (prisma as any).purchaseBatch.findUnique({ where: { id: batchId } });
+    const batch = await prisma.purchaseBatch.findUnique({ where: { id: batchId } });
     if (!batch) return NextResponse.json({ error: "Батч не найден" }, { status: 404 });
     // Клиент шлёт item'ы последовательно (await) — read-modify-write безопасен.
-    const items: BatchItem[] = Array.isArray(batch.items) ? batch.items : [];
+    const items = (Array.isArray(batch.items) ? batch.items : []) as unknown as BatchItem[];
     items.push(item);
-    await (prisma as any).purchaseBatch.update({ where: { id: batchId }, data: { items } });
+    await prisma.purchaseBatch.update({ where: { id: batchId }, data: { items: items as unknown as Prisma.InputJsonValue } });
     return NextResponse.json({ ok: true, count: items.length });
   }
 
   if (body.action === "finish") {
     const batchId = String(body.batchId ?? "");
     if (!batchId) return NextResponse.json({ error: "batchId обязателен" }, { status: 400 });
-    const batch = await (prisma as any).purchaseBatch.findUnique({ where: { id: batchId } });
+    const batch = await prisma.purchaseBatch.findUnique({ where: { id: batchId } });
     if (!batch) return NextResponse.json({ error: "Батч не найден" }, { status: 404 });
     // Клиентский список item'ов авторитетен (мог не долететь какой-то item-POST).
     const items: BatchItem[] = Array.isArray(body.items) && body.items.length > 0
       ? body.items
-      : (Array.isArray(batch.items) ? batch.items : []);
+      : ((Array.isArray(batch.items) ? batch.items : []) as unknown as BatchItem[]);
     const okCount = items.filter(i => i.ok).length;
     const failCount = items.length - okCount;
     const totalGross = items.filter(i => i.ok).reduce((s, i) => s + (Number(i.gross) || 0), 0);
-    await (prisma as any).purchaseBatch.update({
+    await prisma.purchaseBatch.update({
       where: { id: batchId },
-      data: { finishedAt: new Date(), items, okCount, failCount, totalGross },
+      data: { finishedAt: new Date(), items: items as unknown as Prisma.InputJsonValue, okCount, failCount, totalGross },
     });
     // Отчёт уходит в Telegram тому, кто запустил пачку. Это TG ID из
     // `ADMIN_IDS` (`actor.telegramId`), а НЕ внутренний `User.id`: у запасного
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
   const totalGross = items.filter(i => i.ok).reduce((s, i) => s + (Number(i.gross) || 0), 0);
   const accountName = body.accountName ? String(body.accountName) : null;
 
-  const batch = await (prisma as any).purchaseBatch.create({
+  const batch = await prisma.purchaseBatch.create({
     data: {
       accountName,
       startedAt: body.startedAt ? new Date(body.startedAt) : new Date(),
@@ -146,7 +147,7 @@ export async function POST(req: NextRequest) {
       totalGross,
       okCount,
       failCount,
-      items,
+      items: items as unknown as Prisma.InputJsonValue,
     },
   });
 

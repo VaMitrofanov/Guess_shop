@@ -9,7 +9,7 @@ import { assertOrderBuyable } from "@/lib/order-hold";
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
 async function getCookie(): Promise<string | null> {
-  const s = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+  const s = await prisma.globalSettings.findUnique({ where: { id: "global" } });
   return s?.robloxCookie ?? null;
 }
 
@@ -31,7 +31,7 @@ async function findExistingOrders(gamepassIds: (string | number)[]): Promise<Rec
   const ids = [...new Set(gamepassIds.map(String).filter((s) => /^\d+$/.test(s)))];
   if (ids.length === 0) return {};
   try {
-    const orders = await (prisma as any).wbOrder.findMany({
+    const orders = await prisma.wbOrder.findMany({
       where: {
         isTest: false,
         status: { notIn: ["REJECTED"] },
@@ -238,7 +238,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Геймпасс не на продаже" }, { status: 409 });
 
     {
-      const candidates = await (prisma as any).wbOrder.findMany({
+      const candidates = await prisma.wbOrder.findMany({
         where: {
           isTest: false,
           isDirectOrder: true,
@@ -258,7 +258,7 @@ export async function POST(req: NextRequest) {
       // ЦЕНА-СТОП (PLAN-gp-price-guard Ш3): валидируем глобальную цену
       // продавца и отдельно запрещаем buyer-specific regional price. Все
       // значения перечитаны сервером; productId/price/sellerId из body не доверяем.
-      const linkedCandidates = await (prisma as any).wbOrder.findMany({
+      const linkedCandidates = await prisma.wbOrder.findMany({
         where: {
           isTest: false,
           status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
@@ -269,7 +269,7 @@ export async function POST(req: NextRequest) {
       /* ❄️ Пасс привязан к замороженному или спорному заказу (возврат на WB,
          отмена, возврат платежа) — покупать его «мимо очереди» нельзя тем
          более. Смотрим и отклонённые: отменённый на WB заказ — REJECTED. */
-      const guardCandidates = await (prisma as any).wbOrder.findMany({
+      const guardCandidates = await prisma.wbOrder.findMany({
         where: { isTest: false, status: { not: "COMPLETED" }, gamepassId: gpIdRaw },
         select: { id: true, wbCode: true },
         take: 5,
@@ -296,7 +296,7 @@ export async function POST(req: NextRequest) {
             { status: 409 },
           );
         if (buyerInfo.hasUnsafeBuyerPrice) {
-          await (prisma as any).wbOrder.update({
+          await prisma.wbOrder.update({
             where: { id: linked.id },
             data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
           });
@@ -325,7 +325,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.success) {
-      const settings = await (prisma as any).globalSettings.findUnique({
+      const settings = await prisma.globalSettings.findUnique({
         where: { id: "global" },
         select: { robloxAccountName: true },
       });

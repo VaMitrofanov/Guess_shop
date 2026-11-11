@@ -45,7 +45,7 @@ export async function noteProbableNick(opts: {
   });
 
   try {
-    const order = await (db as any).wbOrder.findFirst({
+    const order = await db.wbOrder.findFirst({
       where: { wbCode: { equals: code, mode: "insensitive" }, status: { not: "COMPLETED" } },
       select: { id: true, robloxUsername: true, adminNote: true },
     });
@@ -56,7 +56,7 @@ export async function noteProbableNick(opts: {
 
     const stamp = new Date().toISOString().slice(0, 10);
     const prefix = order.adminNote ? `${order.adminNote}\n` : "";
-    await (db as any).wbOrder.update({
+    await db.wbOrder.update({
       where: { id: order.id },
       data: {
         adminNote: `${prefix}[НИК? ${stamp}] ${nick} (${opts.source})`.slice(0, 2000),

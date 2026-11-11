@@ -41,7 +41,7 @@ export function sbpQrUrl(): string {
 /** QR из GlobalSettings.sbpQrBase64 (та же колонка, что читают боты). */
 export async function getSbpQrBuffer(): Promise<Buffer | null> {
   try {
-    const settings = await (prisma as any).globalSettings.findUnique({
+    const settings = await prisma.globalSettings.findUnique({
       where: { id: "global" },
       select: { sbpQrBase64: true },
     });

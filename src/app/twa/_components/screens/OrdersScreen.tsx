@@ -774,7 +774,7 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
 
 /* ───────────── ActionPanel per tab ───────────── */
 function ActionPanel({
-  order, currentTab, token, onRunAction, onPurchaseDone, showComplete = true,
+  order, currentTab, onRunAction, showComplete = true,
 }: {
   order: Order;
   /** «Выкуплено» уже стоит в закреплённом низу шторки — второй раз не нужно. */
@@ -2138,7 +2138,7 @@ type MenuAction =
   | "purchase" | "refund" | "trace" | "rebuy";
 
 function OrderMenuSheet({
-  open, order, passId, splitIds, grossAmount, canEdit, canRefund, canMove, canPurchase, canPrioritize, busy,
+  open, order, passId, splitIds, grossAmount, canEdit, canRefund, canMove, canPrioritize, busy,
   onClose, onCopy, onPick,
 }: {
   open: boolean;
@@ -2149,7 +2149,6 @@ function OrderMenuSheet({
   canEdit: boolean;
   canRefund: boolean;
   canMove: boolean;
-  canPurchase: boolean;
   canPrioritize: boolean;
   busy: boolean;
   onClose: () => void;
@@ -3011,7 +3010,6 @@ function OrderCard({
       canEdit={isEditable}
       canRefund={canRefund}
       canMove={showMoveBtn}
-      canPurchase={!order.heldAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (!!order.gamepassUrl || split.length > 0)}
       canPrioritize={canPrioritize}
       busy={primaryBusy}
       onClose={() => setMenuOpen(false)}

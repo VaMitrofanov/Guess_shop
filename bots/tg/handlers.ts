@@ -158,6 +158,7 @@ import {
   BUYER_HINT_CONTEXT, BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel,
   orderCodePinText,
 } from "../shared/buyer-contact";
+import type { WbOrderStatus } from "@prisma/client";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -258,7 +259,7 @@ async function replyTelegramPaymentFailure(ctx: any, intentId: string, error: un
 }
 
 async function startTelegramBotPayment(ctx: any, intentId: string, method: BotPaymentMethod) {
-  const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { email: true } });
+  const user = await db.user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { email: true } });
   const knownEmail = user?.email ?? tgReceiptEmails.get(ctx.from.id);
   if (knownEmail) {
     await completeTelegramBotPayment(ctx, intentId, method, knownEmail);
@@ -336,7 +337,7 @@ function buildPackCatalogKb(userBonus = 0, rubleDiscount = 0) {
 
 /** Параметры клавиатуры паков (бонус/скидка/прошлый пак) — для катал./возврата. */
 async function getDirectKbParams(tgId: string): Promise<{ bonus: number; rubleDiscount: number; lastOrderAmount?: number }> {
-  const u = await (db as any).user.findUnique({
+  const u = await db.user.findUnique({
     where: { tgId },
     select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true },
   }).catch(() => null);
@@ -347,7 +348,7 @@ async function getDirectKbParams(tgId: string): Promise<{ bonus: number; rubleDi
   const rubleDiscount = u?.rubleDiscount ?? 0;
   let lastOrderAmount: number | undefined;
   if (u?.id) {
-    const lastOrder = await (db as any).wbOrder.findFirst({
+    const lastOrder = await db.wbOrder.findFirst({
       where: { userId: u.id, status: "COMPLETED", isDirectOrder: true },
       orderBy: { createdAt: "desc" },
       select: { amount: true },
@@ -434,9 +435,9 @@ async function supportOrderHint(ctx: any): Promise<{ wbCode?: string; denominati
   let denomination = pendingLink.get(ctx.from.id)?.denomination;
   if (!wbCode) {
     try {
-      const u = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
+      const u = await db.user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
       if (u) {
-        const o = await (db as any).wbOrder.findFirst({
+        const o = await db.wbOrder.findFirst({
           where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
         });
         if (o) { wbCode = o.wbCode; denomination = o.amount; }
@@ -479,7 +480,7 @@ async function deliverSupportIntakeTg(
   if (photoFileId && isPendingScreenshotContext(intake?.contextKey)) {
     try {
       const order = hint.wbCode
-        ? await (db as any).wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
+        ? await db.wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
         : null;
       const link = await bot.telegram.getFileLink(photoFileId);
       ocr = await checkPendingScreenshot(String(link), order?.amount ?? hint.denomination, order?.robloxUsername);
@@ -557,9 +558,9 @@ async function fireHurdleAlert(ctx: any, ctxKey: string): Promise<void> {
     let wbCode = pendingLink.get(ctx.from.id)?.wbCode;
     let denom  = pendingLink.get(ctx.from.id)?.denomination;
     if (!wbCode) {
-      const u = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      const u = await db.user.findUnique({ where: { tgId }, select: { id: true } });
       if (u) {
-        const o = await (db as any).wbOrder.findFirst({
+        const o = await db.wbOrder.findFirst({
           where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
         });
         if (o) { wbCode = o.wbCode; denom = o.amount; }
@@ -731,9 +732,9 @@ export function registerStart(bot: Telegraf): void {
 
       // Check for active AWAITING_GAMEPASS order — show personalized instruction
       if (!isAdmin) {
-        const startUser = await (db as any).user.findUnique({ where: { tgId } });
+        const startUser = await db.user.findUnique({ where: { tgId } });
         if (startUser) {
-          const awaitingOrders = await (db as any).wbOrder.findMany({
+          const awaitingOrders = await db.wbOrder.findMany({
             where: { userId: startUser.id, status: "AWAITING_GAMEPASS" },
             orderBy: { createdAt: "desc" },
           });
@@ -791,9 +792,9 @@ export function registerStart(bot: Telegraf): void {
       // above, so a website one-tap order (PENDING) fell through to the «рады снова,
       // покупай напрямую» upsell — stale info for someone mid-order.
       if (!isAdmin) {
-        const liveUser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+        const liveUser = await db.user.findUnique({ where: { tgId }, select: { id: true } });
         if (liveUser) {
-          const liveOrder = await (db as any).wbOrder.findFirst({
+          const liveOrder = await db.wbOrder.findFirst({
             where: { userId: liveUser.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS"] } },
             select: { id: true },
           });
@@ -874,7 +875,7 @@ export function registerStart(bot: Telegraf): void {
     }
 
     // Case-insensitive code lookup (handles any stored-case variations)
-    const wbCode = await (db as any).wbCode.findFirst({
+    const wbCode = await db.wbCode.findFirst({
       where: { code: { equals: code, mode: "insensitive" } },
     });
     if (!wbCode) {
@@ -902,7 +903,7 @@ export function registerStart(bot: Telegraf): void {
       // materialised it from the website one-tap), greet with the order status
       // instead of the "уже активирован" dead-end.
       const greetOwnerIfPlaced = async (ownerId: string): Promise<boolean> => {
-        const placedOrder = await (db as any).wbOrder.findFirst({
+        const placedOrder = await db.wbOrder.findFirst({
           where: { userId: ownerId, wbCode: { equals: code, mode: "insensitive" } },
           orderBy: { createdAt: "desc" },
           select: { id: true, status: true },
@@ -928,7 +929,7 @@ export function registerStart(bot: Telegraf): void {
         return true;
       };
 
-      const owner = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      const owner = await db.user.findUnique({ where: { tgId }, select: { id: true } });
       let justLinked = false;
       if (owner && owner.id === wbCode.userId) {
         if (await greetOwnerIfPlaced(owner.id)) return;
@@ -938,7 +939,7 @@ export function registerStart(bot: Telegraf): void {
         if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
         justLinked = true;
         // Площадки связаны: заказ теперь и здесь — показываем его статус.
-        const linked = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+        const linked = await db.user.findUnique({ where: { tgId }, select: { id: true } });
         if (linked && await greetOwnerIfPlaced(linked.id)) return;
       }
       // Заказ есть, но он не в тех статусах, которые умеет показать приветствие
@@ -965,12 +966,12 @@ export function registerStart(bot: Telegraf): void {
     }
 
     // Lazy registration: find or create user
-    let user = await (db as any).user.findUnique({ where: { tgId } });
+    let user = await db.user.findUnique({ where: { tgId } });
     /** Покупателя завели прямо сейчас — строка «новый клиент» в карточке DBS. */
     let userIsNew = false;
     if (!user) {
       userIsNew = true;
-      user = await (db as any).user.create({
+      user = await db.user.create({
         data: {
           tgId,
           name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
@@ -979,13 +980,13 @@ export function registerStart(bot: Telegraf): void {
       });
     } else if (ctx.from.username && user.username !== ctx.from.username) {
       // Backfill @handle for existing users so TWA "Написать" button works
-      user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
+      user = await db.user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
     }
 
     // Код числится за другим профилем — Б1 решает, тупик это или вторая площадка.
     if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
       if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
-      user = await (db as any).user.findUnique({ where: { tgId } });
+      user = await db.user.findUnique({ where: { tgId } });
       if (!user) return;
     }
 
@@ -1012,7 +1013,7 @@ export function registerStart(bot: Telegraf): void {
     try {
       // Use the DB-cased wbCode.code (not the payload-cased `code`) so the
       // unique-where update can't silently miss a code stored in another case.
-      provisionalOrder = await (db as any).$transaction(async (tx: any) => {
+      provisionalOrder = await db.$transaction(async (tx: any) => {
         const existingOrder = await tx.wbOrder.findUnique({
           where: { wbCode: wbCode.code },
           include: { user: { select: { tgId: true } } },
@@ -1236,7 +1237,7 @@ async function getAdminKeyboard(uid?: string | number) {
 
 async function handleDirectPackChosen(bot: Telegraf, ctx: any, amt: number): Promise<void> {
   const tgId = String(ctx.from.id);
-  const dirUser = await (db as any).user.findUnique({
+  const dirUser = await db.user.findUnique({
     where: { tgId },
     select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
   });
@@ -1292,7 +1293,7 @@ async function showNickStep(bot: Telegraf, ctx: any): Promise<void> {
   const tgId = String(ctx.from.id);
   const flow = pendingDirectFlow.get(ctx.from.id);
   if (!flow) return;
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { tgId }, select: { robloxUsername: true },
   });
   const savedNick = user?.robloxUsername;
@@ -1454,7 +1455,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
 
   if (result.status !== "user_not_found") {
     // Nick confirmed by Roblox (userId resolved) — only now persist it.
-    await (db as any).user.updateMany({ where: { tgId }, data: { robloxUsername: nick } });
+    await db.user.updateMany({ where: { tgId }, data: { robloxUsername: nick } });
   }
 
   if (result.status === "user_not_found") {
@@ -1736,7 +1737,7 @@ const corridorOverride = createCorridorOverride();
 async function corridorHoldShown(ctx: any, opts?: { force?: boolean }): Promise<boolean> {
   if (opts?.force || corridorOverride.taken(ctx.from.id)) return false;
   const tgId = String(ctx.from.id);
-  const dirUser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true, robloxUsername: true } });
+  const dirUser = await db.user.findUnique({ where: { tgId }, select: { id: true, robloxUsername: true } });
   if (!dirUser?.id) return false;
   const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, dirUser.id);
   if (!held) return false;
@@ -1767,7 +1768,7 @@ async function startDirectFlow(ctx: any, opts?: { force?: boolean }): Promise<vo
   // прямой покупке ОДНИМ экраном: продолжить его или всё-таки купить ещё.
   if (await corridorHoldShown(ctx, opts)) return;
 
-  const dirUser = await (db as any).user.findUnique({
+  const dirUser = await db.user.findUnique({
     where: { tgId },
     select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true, promoExpiresAt: true, robloxUsername: true },
   });
@@ -1780,7 +1781,7 @@ async function startDirectFlow(ctx: any, opts?: { force?: boolean }): Promise<vo
 
   let lastOrderAmount: number | undefined;
   if (dirUser?.id) {
-    const lastOrder = await (db as any).wbOrder.findFirst({
+    const lastOrder = await db.wbOrder.findFirst({
       where: { userId: dirUser.id, status: "COMPLETED", isDirectOrder: true },
       orderBy: { createdAt: "desc" },
       select: { amount: true },
@@ -1840,7 +1841,7 @@ export function registerStatus(bot: Telegraf): void {
     // прямые заказы (владелец: никакого WB после выполненного заказа).
     let guideUrl: string | null = null;
     try {
-      const helpUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+      const helpUser = await db.user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (helpUser) {
         const helpOrder = await findRelevantOrder(helpUser.id);
         const stillActive = helpOrder && CHANGEABLE_ORDER_STATUSES.includes(helpOrder.status);
@@ -1918,7 +1919,7 @@ const robuxEtaDb = db as unknown as RobuxEtaDb;
 
 /** «Где робуксы?» при живом невыкупленном заказе — карточка этапа. */
 async function replyActiveOrderStage(ctx: any, tgId: string): Promise<boolean> {
-  const user = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+  const user = await db.user.findUnique({ where: { tgId }, select: { id: true } });
   if (!user) return false;
   const active = await findActiveOrders(user.id);
   if (active.length === 0) return false;
@@ -1938,7 +1939,7 @@ async function replyActiveOrderStage(ctx: any, tgId: string): Promise<boolean> {
 /** Заказ для самопроверки «Робуксов нет»: сумма, аккаунт, код. */
 async function selfCheckContextTg(tgId: string): Promise<SelfCheckContext & { wbCode?: string | null }> {
   try {
-    const user = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+    const user = await db.user.findUnique({ where: { tgId }, select: { id: true } });
     if (!user) return {};
     const orders = await loadRobuxEtaOrders(robuxEtaDb, user.id);
     const target = orders ? selfCheckTarget(orders) : null;
@@ -1953,7 +1954,7 @@ async function selfCheckContextTg(tgId: string): Promise<SelfCheckContext & { wb
  * (нет выкупа за 30 дней или есть заказ в работе), вопрос идёт дальше штатно.
  */
 async function replyRobuxEta(ctx: any, tgId: string, opts: { forceFull?: boolean } = {}): Promise<boolean> {
-  const user = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } }).catch(() => null);
+  const user = await db.user.findUnique({ where: { tgId }, select: { id: true } }).catch(() => null);
   if (!user) return false;
   const orders = await loadRobuxEtaOrders(robuxEtaDb, user.id).catch(() => null);
   if (!orders) return false;
@@ -1986,20 +1987,20 @@ interface StatusMessage {
   nickButton?: ReturnType<typeof Markup.inlineKeyboard>;
 }
 
-const ACTIVE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+const ACTIVE_STATUSES: WbOrderStatus[] = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
 
 async function findRelevantOrder(userId: string): Promise<any | null> {
-  const active = await (db as any).wbOrder.findFirst({
+  const active = await db.wbOrder.findFirst({
     where: { userId, status: { in: ACTIVE_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
   if (active) return active;
-  const completed = await (db as any).wbOrder.findFirst({
+  const completed = await db.wbOrder.findFirst({
     where: { userId, status: "COMPLETED" },
     orderBy: { createdAt: "desc" },
   });
   if (completed) return completed;
-  return (db as any).wbOrder.findFirst({
+  return db.wbOrder.findFirst({
     where: { userId },
     orderBy: { createdAt: "desc" },
   });
@@ -2008,7 +2009,7 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
 // Statuses where the user may still re-pick their Roblox nick / gamepass — i.e.
 // the order hasn't been bought yet. COMPLETED/REJECTED are deliberately excluded
 // (paid is final; rejected has its own "fix link" resubmit flow).
-const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
+const CHANGEABLE_ORDER_STATUSES: WbOrderStatus[] = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
 /** Сколько заказов показываем списком. Больше — уже не выбор, а простыня;
  * остальные всё равно доступны по коду. */
@@ -2020,7 +2021,7 @@ const ORDER_PICKER_LIMIT = 5;
  * получателя, — и тогда у человека одновременно два независимых заказа с
  * разными никами. Пока бот умел показывать только один, второй был невидим. */
 async function findActiveOrders(userId: string): Promise<any[]> {
-  return (db as any).wbOrder.findMany({
+  return db.wbOrder.findMany({
     where: { userId, status: { in: ACTIVE_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
@@ -2045,7 +2046,7 @@ async function resolveWorkingOrder(
   tgIdNum: number,
   userId: string,
 ): Promise<{ order: any } | { choose: any[] } | null> {
-  const orders = await (db as any).wbOrder.findMany({
+  const orders = await db.wbOrder.findMany({
     where: { userId, status: { in: CHANGEABLE_ORDER_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
@@ -2105,7 +2106,7 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   // order that hasn't been bought yet (offered only on the live WB statuses).
   const changeNickRow = [Markup.button.callback("⚠️ Ошибся с ником? Изменить заказ", CB.changeNick)];
 
-  const user = await (db as any).user.findUnique({ where: { tgId } });
+  const user = await db.user.findUnique({ where: { tgId } });
   if (!user) {
     return {
       text: "Есть WB-карта? Напиши код прямо сюда.\n\n📖 Инструкция — как создать геймпасс и получить робуксы:\n👉 https://robloxbank.ru/guide?source=wb",
@@ -2318,15 +2319,15 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
   let lastCompleted: any = null;
   let status = { isReturning: false, orderCount: 0 };
   try {
-    user = await (db as any).user.findUnique({ where: { tgId } });
+    user = await db.user.findUnique({ where: { tgId } });
     status = await getCustomerStatus(tgId, "TG");
     if (user) {
-      activeOrders = await (db as any).wbOrder.findMany({
+      activeOrders = await db.wbOrder.findMany({
         where: { userId: user.id, status: { in: ACTIVE_STATUSES } },
         orderBy: { createdAt: "desc" },
         take: 5,
       });
-      lastCompleted = await (db as any).wbOrder.findFirst({
+      lastCompleted = await db.wbOrder.findFirst({
         where: { userId: user.id, status: "COMPLETED" },
         orderBy: { completedAt: "desc" },
       });
@@ -2416,7 +2417,7 @@ export function registerText(bot: Telegraf): void {
       clearUserSession();
       let guideUrl: string | null = null;
       try {
-        const gu = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+        const gu = await db.user.findUnique({ where: { tgId }, select: { id: true } });
         if (gu) {
           const go = await findRelevantOrder(gu.id);
           const stillActive = go && CHANGEABLE_ORDER_STATUSES.includes(go.status);
@@ -2593,16 +2594,16 @@ export function registerText(bot: Telegraf): void {
     const paymentDetailsOrderId = pendingPaymentDetails.get(ctx.from.id);
     if (isAdmin && paymentDetailsOrderId) {
       pendingPaymentDetails.delete(ctx.from.id);
-      const dirOrder = await (db as any).wbOrder.findUnique({ where: { id: paymentDetailsOrderId } });
+      const dirOrder = await db.wbOrder.findUnique({ where: { id: paymentDetailsOrderId } });
       if (!dirOrder) {
         await ctx.reply("❌ Заказ не найден.", { parse_mode: "HTML" });
         return;
       }
-      await (db as any).wbOrder.update({
+      await db.wbOrder.update({
         where: { id: paymentDetailsOrderId },
         data: { paymentDetails: text, status: "PAYMENT_PENDING" },
       });
-      const payUser = await (db as any).user.findUnique({ where: { id: dirOrder.userId } });
+      const payUser = await db.user.findUnique({ where: { id: dirOrder.userId } });
       if (payUser?.tgId) {
         try {
           await bot.telegram.sendMessage(
@@ -2708,7 +2709,7 @@ export function registerText(bot: Telegraf): void {
         pendingNickEdit.set(ctx.from.id, true);
         return;
       }
-      await (db as any).user.update({ where: { tgId }, data: { robloxUsername: nick } });
+      await db.user.update({ where: { tgId }, data: { robloxUsername: nick } });
       await ctx.reply(`✅ Ник сохранён: <b>${escapeHtml(nick)}</b>`, { parse_mode: "HTML" });
       return;
     }
@@ -2748,7 +2749,7 @@ export function registerText(bot: Telegraf): void {
         // mirrors the /start wb_… flow. Only when the code actually exists:
         // a 7-char Roblox nick must fall through to session recovery below.
         if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
-          const codeExists = await (db as any).wbCode.findFirst({
+          const codeExists = await db.wbCode.findFirst({
             where: { code: { equals: text.toUpperCase(), mode: "insensitive" } },
             select: { id: true },
           });
@@ -2780,14 +2781,14 @@ export function registerText(bot: Telegraf): void {
         // DB-based session recovery — runs for ANY text, not just gamepass URLs.
         // This ensures users who type "привет" or "что делать" after bot restart
         // still get a meaningful response instead of "no active orders".
-        const tgUser = await (db as any).user.findUnique({
+        const tgUser = await db.user.findUnique({
           where: { tgId },
           select: { id: true, balance: true, robloxUsername: true },
         });
 
         if (tgUser) {
           // 1. AWAITING_GAMEPASS — restore session
-          const awaitingOrder = await (db as any).wbOrder.findFirst({
+          const awaitingOrder = await db.wbOrder.findFirst({
             where: { userId: tgUser.id, status: "AWAITING_GAMEPASS" },
             orderBy: { createdAt: "desc" },
           });
@@ -2843,7 +2844,7 @@ export function registerText(bot: Telegraf): void {
           // 3. REJECTED WB order — guide user to resubmit.
           // Skip REJECTED direct orders — they're dead (cancelled by manager).
           if (!state) {
-            const rejectedOrder = await (db as any).wbOrder.findFirst({
+            const rejectedOrder = await db.wbOrder.findFirst({
               where: { userId: tgUser.id, status: "REJECTED", isDirectOrder: false },
               orderBy: { updatedAt: "desc" },
             });
@@ -2993,7 +2994,7 @@ async function offerPreselectedGamepass(
 ): Promise<boolean> {
   try {
     if (!code) return false;
-    const wbCode = await (db as any).wbCode.findFirst({
+    const wbCode = await db.wbCode.findFirst({
       where: { code: { equals: code, mode: "insensitive" } },
       select: { selectedGamepassId: true },
     });
@@ -3001,7 +3002,7 @@ async function offerPreselectedGamepass(
     if (!/^\d{3,15}$/.test(gpId)) return false;
 
     // Case 1 — order already placed from the site.
-    const order = await (db as any).wbOrder.findFirst({
+    const order = await db.wbOrder.findFirst({
       where: { wbCode: { equals: code, mode: "insensitive" } },
       select: { id: true, status: true },
     });
@@ -3072,7 +3073,7 @@ async function offerPreselectedGamepass(
 async function sweepStaleOrderState(ctx: any, wbCode: string, text: string): Promise<"valid" | "cleared" | "replied"> {
   let order: any = null;
   try {
-    order = await (db as any).wbOrder.findFirst({
+    order = await db.wbOrder.findFirst({
       where: { wbCode },
       select: { status: true, wbCode: true },
     });
@@ -3090,7 +3091,7 @@ async function sweepStaleOrderState(ctx: any, wbCode: string, text: string): Pro
 
   // Валидный существующий WB-код не глотаем — пусть активируется штатно.
   if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
-    const codeExists = await (db as any).wbCode.findFirst({
+    const codeExists = await db.wbCode.findFirst({
       where: { code: { equals: text.toUpperCase(), mode: "insensitive" } },
       select: { id: true },
     }).catch(() => null);
@@ -3320,7 +3321,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
 
 /** Id нашего пользователя по Telegram-аккаунту — нужен, чтобы взять ЕГО ключ. */
 async function dbUserIdFor(ctx: any): Promise<string | null> {
-  const user = await (db as any).user
+  const user = await db.user
     .findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } })
     .catch(() => null);
   return user?.id ?? null;
@@ -3694,7 +3695,7 @@ async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Pr
     heldGameKeys.drop(ctx.from.id);
     // Ключ храним зашифрованным на пользователе — следующий заказ создаст пасс
     // сам, без единого действия покупателя. Это и есть обещание «раз и навсегда».
-    const dbUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
+    const dbUser = await db.user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { id: true } });
     await rememberRobloxApiKey(db as any, {
       key,
       robloxUsername: pending.nick,
@@ -3966,7 +3967,7 @@ async function processGamepassSubmission(
 
     const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
-    const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+    const user = await db.user.findUnique({ where: { tgId: String(ctx.from.id) } });
     if (!user) {
       await showResult(
         "Что-то пошло не так — напиши нам, разберёмся вместе:",
@@ -3988,7 +3989,7 @@ async function processGamepassSubmission(
     let duplicateSubmission = false;
     let replacedGamepassUrl: string | null = null;
     try {
-      const txResult = await (db as any).$transaction(async (tx: any) => {
+      const txResult = await db.$transaction(async (tx: any) => {
         // Direct orders have a synthetic DIR- code — no WbCode record exists, skip claim step.
         if (!state.wbCode.startsWith("DIR-")) {
         const claimed = await tx.wbCode.updateMany({
@@ -4136,7 +4137,7 @@ async function processGamepassSubmission(
         // Синтетический P2002 бросается только для COMPLETED-заказа (см. tx выше);
         // настоящий P2002 (гонка create) — редкость. Уточняем статус, чтобы не
         // врать «обрабатывается» про давно выполненный заказ (кейс CXH5GAP).
-        const dupOrder = await (db as any).wbOrder.findUnique({
+        const dupOrder = await db.wbOrder.findUnique({
           where: { wbCode: state.wbCode }, select: { status: true },
         }).catch(() => null);
         if (dupOrder?.status === "COMPLETED") {
@@ -4188,7 +4189,7 @@ async function processGamepassSubmission(
     }
 
     if (validatedCreator) {
-      try { await (db as any).user.update({ where: { tgId: String(ctx.from.id) }, data: { robloxUsername: validatedCreator } }); } catch {}
+      try { await db.user.update({ where: { tgId: String(ctx.from.id) }, data: { robloxUsername: validatedCreator } }); } catch {}
     }
 
     // Аудит: что именно прислал покупатель и кому принадлежит этот пасс по
@@ -4247,7 +4248,7 @@ async function processGamepassSubmission(
 
     // Notify all Telegram admins (non-fatal — errors don't affect user)
     try {
-      const fullOrder = await (db as any).wbOrder.findUnique({
+      const fullOrder = await db.wbOrder.findUnique({
         where: { id: order.id },
         include: { user: true }
       });
@@ -4307,15 +4308,15 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
   // заход в базу стоит ~200 мс с прод-хоста, а зависимостей между этими тремя
   // нет — последовательные await превратили бы карточку в полсекунды ожидания.
   const [wbCode, splitRows, autoCreated] = await Promise.all([
-    (db as any).wbCode.findUnique({ where: { code: order.wbCode } }),
-    (db as any).wbOrderGamepass.findMany({
+    db.wbCode.findUnique({ where: { code: order.wbCode } }),
+    db.wbOrderGamepass.findMany({
       where: { orderId: order.id },
       orderBy: { position: "asc" },
       select: { gamepassId: true, amount: true },
     }).catch(() => []),
     // Признак берём из СОБЫТИЙ заказа, а не со слов клиента: маркер 🔑 говорит,
     // что цену и «в продаже» выставили мы, и отвечаем за них тоже мы.
-    (db as any).orderEvent.count({
+    db.orderEvent.count({
       where: { orderId: order.id, type: ORDER_AUDIT_TYPE.GAMEPASS_AUTOCREATED },
     }).catch(() => 0),
   ]);
@@ -4491,7 +4492,7 @@ async function settleForeignCodeClaim(
   code: string,
   denomination: number | null,
 ): Promise<"proceed" | "handled"> {
-  const claimant = await (db as any).user.findUnique({
+  const claimant = await db.user.findUnique({
     where: { tgId },
     select: { id: true, name: true },
   });
@@ -4522,7 +4523,7 @@ async function settleForeignCodeClaim(
   if (verdict.kind === "ask_owner") {
     // Владельцу нужно на что нажимать, поэтому предъявитель должен
     // существовать в базе до вопроса — иначе подтверждать будет некого.
-    const claimantUser = claimant ?? await (db as any).user.create({
+    const claimantUser = claimant ?? await db.user.create({
       data: {
         tgId,
         name: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
@@ -4555,7 +4556,7 @@ async function settleForeignCodeClaim(
     return "handled";
   }
   if (ctx.from?.username) {
-    await (db as any).user.updateMany({ where: { tgId }, data: { username: ctx.from.username } }).catch(() => {});
+    await db.user.updateMany({ where: { tgId }, data: { username: ctx.from.username } }).catch(() => {});
   }
   await ctx.reply(xlinkLinkedText(code, verdict.owner.vkId ? "VK" : null), { parse_mode: "HTML" });
   void notifyAdmins("linked");
@@ -4572,7 +4573,7 @@ async function handleAdminSearch(ctx: any, query: string) {
   }
 
   // Try search by order ID (full or short suffix)
-  let order = await (db as any).wbOrder.findFirst({
+  let order = await db.wbOrder.findFirst({
     where: {
       OR: [
         { id: lowerQ },
@@ -4585,9 +4586,9 @@ async function handleAdminSearch(ctx: any, query: string) {
 
   // Try search by WB code
   if (!order) {
-    const wbCode = await (db as any).wbCode.findUnique({ where: { code: q } });
+    const wbCode = await db.wbCode.findUnique({ where: { code: q } });
     if (wbCode) {
-      order = await (db as any).wbOrder.findFirst({
+      order = await db.wbOrder.findFirst({
         where: { wbCode: wbCode.code },
         include: { user: true },
         orderBy: { createdAt: "desc" }
@@ -4608,7 +4609,7 @@ async function handleAdminSearch(ctx: any, query: string) {
   if (!order && /^\d{5,6}$/.test(digits)) {
     const match = await findDbsOrderByDeliveryCode(db as any, digits).catch(() => null);
     if (match?.activationCode) {
-      order = await (db as any).wbOrder.findFirst({
+      order = await db.wbOrder.findFirst({
         where: { wbCode: match.activationCode },
         include: { user: true },
         orderBy: { createdAt: "desc" },
@@ -4628,7 +4629,7 @@ async function handleAdminSearch(ctx: any, query: string) {
      разворот, что в TWA (`gateCodesForWbOrderNumber`); бот не видит `src/`,
      поэтому запрос повторён здесь. */
   if (!order && digits.length >= 5) {
-    const rows = await (db as any).wbMarketplaceOrder.findMany({
+    const rows = await db.wbMarketplaceOrder.findMany({
       where: { wbOrderId: { contains: digits } },
       select: { wbOrderId: true, wbCode: { select: { code: true } } },
       orderBy: { firstSeenAt: "desc" },
@@ -4636,7 +4637,7 @@ async function handleAdminSearch(ctx: any, query: string) {
     }).catch(() => []);
     const codes = rows.map((row: any) => row.wbCode?.code).filter(Boolean);
     if (codes.length) {
-      order = await (db as any).wbOrder.findFirst({
+      order = await db.wbOrder.findFirst({
         where: { wbCode: { in: codes } },
         include: { user: true },
         orderBy: { createdAt: "desc" },
@@ -4663,7 +4664,7 @@ async function handleAdminSearch(ctx: any, query: string) {
     if (digits.length >= 5) {
       buyerWhere.push({ user: { tgId: digits } }, { user: { vkId: digits } });
     }
-    order = await (db as any).wbOrder.findFirst({
+    order = await db.wbOrder.findFirst({
       where: { OR: buyerWhere },
       include: { user: true },
       orderBy: { createdAt: "desc" },
@@ -4784,7 +4785,7 @@ async function handleWbDeliveryCodeEntry(ctx: DeliveryCodeCtx, tgId: string, cod
 async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text: string): Promise<void> {
   const codeInput = text.toUpperCase();
 
-  const wbCode = await (db as any).wbCode.findFirst({
+  const wbCode = await db.wbCode.findFirst({
     where: { code: { equals: codeInput, mode: "insensitive" } },
   });
 
@@ -4801,7 +4802,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
   // (bot claimed it but gamepass not sent yet), which should still be allowed through.
   if (wbCode.isUsed && wbCode.userId) {
-    const already = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+    const already = await db.user.findUnique({ where: { tgId }, select: { id: true } });
     if (!already || already.id !== wbCode.userId) {
       // Б1: вторая площадка того же человека — не тупик.
       if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
@@ -4811,9 +4812,9 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   }
 
   // Valid code — find or create user and set session
-  let user = await (db as any).user.findUnique({ where: { tgId } });
+  let user = await db.user.findUnique({ where: { tgId } });
   if (!user) {
-    user = await (db as any).user.create({
+    user = await db.user.create({
       data: {
         tgId,
         name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
@@ -4821,13 +4822,13 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       },
     });
   } else if (ctx.from.username && user.username !== ctx.from.username) {
-    user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
+    user = await db.user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
   }
 
   // Код числится за другим профилем — Б1 решает, тупик это или вторая площадка.
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
     if (await settleForeignCodeClaim(ctx, tgId, wbCode.code, wbCode.denomination) === "handled") return;
-    user = await (db as any).user.findUnique({ where: { tgId } });
+    user = await db.user.findUnique({ where: { tgId } });
     if (!user) return;
   }
 
@@ -4843,7 +4844,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   let provisionalCreated = false;
   let provisionalOrderId: string | null = null;
   try {
-    await (db as any).$transaction(async (tx: any) => {
+    await db.$transaction(async (tx: any) => {
       const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
       if (existingOrder) return;
       await tx.wbCode.update({
@@ -4972,7 +4973,7 @@ export function registerPhoto(bot: Telegraf): void {
       return;
     }
 
-    const user = await (db as any).user.findUnique({ where: { tgId } });
+    const user = await db.user.findUnique({ where: { tgId } });
     if (!user) return;
 
     // 0a. Payment screenshot for direct orders — in-memory path (takes priority)
@@ -4980,7 +4981,7 @@ export function registerPhoto(bot: Telegraf): void {
     if (paymentOrderId) {
       pendingPaymentScreenshot.delete(ctx.from.id);
       const fileId = ctx.message.photo.at(-1)!.file_id;
-      const payOrder = await (db as any).wbOrder.findUnique({ where: { id: paymentOrderId }, select: { amount: true } });
+      const payOrder = await db.wbOrder.findUnique({ where: { id: paymentOrderId }, select: { amount: true } });
       await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
       await sendAdminPaymentCard({
         orderId: paymentOrderId,
@@ -4994,7 +4995,7 @@ export function registerPhoto(bot: Telegraf): void {
 
     // 0b. DB recovery: bot restarted while user was in PAYMENT_PENDING state
     {
-      const pendingPayOrder = await (db as any).wbOrder.findFirst({
+      const pendingPayOrder = await db.wbOrder.findFirst({
         where: {
           userId: user.id,
           status: "PAYMENT_PENDING",
@@ -5164,7 +5165,7 @@ export function registerAdmin(bot: Telegraf): void {
       return;
     }
 
-    await (db as any).globalSettings.upsert({
+    await db.globalSettings.upsert({
       where: { id: "global" },
       update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: browser.session.accountName },
       create: { id: "global", usdToRub: 90, robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: browser.session.accountName },
@@ -5184,7 +5185,7 @@ export function registerAdmin(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     if (!ADMIN_IDS.includes(tgId)) return;
 
-    const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+    const settings = await db.globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
     if (!cookie) {
       await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
@@ -5215,7 +5216,7 @@ export function registerAdmin(bot: Telegraf): void {
     const arg = ctx.message.text.replace(/^\/gpwatch\s*/, "").trim().toLowerCase();
 
     if (arg === "on" || arg === "off") {
-      await (db as any).globalSettings.upsert({
+      await db.globalSettings.upsert({
         where: { id: "global" },
         update: { gpWatchEnabled: arg === "on" },
         create: { id: "global", usdToRub: 90, gpWatchEnabled: arg === "on" },
@@ -5226,7 +5227,7 @@ export function registerAdmin(bot: Telegraf): void {
 
     const modeMatch = arg.match(/^mode\s+(admin|customer|both)$/);
     if (modeMatch) {
-      await (db as any).globalSettings.upsert({
+      await db.globalSettings.upsert({
         where: { id: "global" },
         update: { gpWatchNotify: modeMatch[1] },
         create: { id: "global", usdToRub: 90, gpWatchNotify: modeMatch[1] },
@@ -5236,17 +5237,17 @@ export function registerAdmin(bot: Telegraf): void {
       return;
     }
 
-    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
+    const s = await db.globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
     const [watching, lastChecked, notified] = await Promise.all([
-      (db as any).wbOrder.count({
+      db.wbOrder.count({
         where: { status: "AWAITING_GAMEPASS", isTest: false, robloxUsername: null, probableNick: { not: null } },
       }),
-      (db as any).wbOrder.findFirst({
+      db.wbOrder.findFirst({
         where: { gpWatchLastCheckAt: { not: null } },
         orderBy: { gpWatchLastCheckAt: "desc" },
         select: { gpWatchLastCheckAt: true },
       }),
-      (db as any).wbOrder.count({
+      db.wbOrder.count({
         where: { status: "AWAITING_GAMEPASS", isTest: false, gpWatchNotifiedPassId: { not: null } },
       }),
     ]);
@@ -5314,7 +5315,7 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
     // Atomic guard: only reject orders still in an actionable state. Mirrors
     // admin_ok — prevents rejecting a COMPLETED order from a stale card or a
     // second admin's race.
-    const updated = await (db as any).wbOrder.updateMany({
+    const updated = await db.wbOrder.updateMany({
       where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
       data: {
         status: "REJECTED",
@@ -5324,7 +5325,7 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
     });
 
     if (updated.count === 0) {
-      const current = await (db as any).wbOrder.findUnique({
+      const current = await db.wbOrder.findUnique({
         where: { id: orderId },
         select: { status: true, wbCode: true },
       });
@@ -5337,7 +5338,7 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
       return;
     }
 
-    const order = await (db as any).wbOrder.findUnique({
+    const order = await db.wbOrder.findUnique({
       where: { id: orderId },
       include: { user: true },
     });
@@ -5379,7 +5380,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("xlink:")) {
       const parsed = parseXlinkPayload(data);
       if (!parsed) return;
-      const presser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      const presser = await db.user.findUnique({ where: { tgId }, select: { id: true } });
       if (!presser) {
         await ctx.answerCbQuery("Не нашёл твой профиль", { show_alert: true }).catch(() => {});
         return;
@@ -5459,7 +5460,7 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── ✏️ change_nick: re-pick nick/gamepass on an order that isn't bought yet ─
     if (data === CB.changeNick) {
       const tgIdNum = ctx.from.id;
-      const user = await (db as any).user.findUnique({
+      const user = await db.user.findUnique({
         where: { tgId: String(tgIdNum) },
         select: { id: true },
       });
@@ -5467,7 +5468,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Сессия истекла — напиши /start").catch(() => {});
         return;
       }
-      const order = await (db as any).wbOrder.findFirst({
+      const order = await db.wbOrder.findFirst({
         where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES }, isDirectOrder: false },
         orderBy: { createdAt: "desc" },
       });
@@ -5500,9 +5501,9 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       await ctx.answerCbQuery("✅ Подписка подтверждена").catch(() => {});
       const tgIdNum = ctx.from.id;
-      const subUser = await (db as any).user.findUnique({ where: { tgId: String(tgIdNum) } });
+      const subUser = await db.user.findUnique({ where: { tgId: String(tgIdNum) } });
       const pendingOrder = subUser
-        ? await (db as any).wbOrder.findFirst({
+        ? await db.wbOrder.findFirst({
             where: { userId: subUser.id, status: "AWAITING_GAMEPASS" },
             orderBy: { createdAt: "desc" },
           })
@@ -5676,7 +5677,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     if (data === CB.findGpStart || data === CB.findGpRetry) {
       const tgIdNum = ctx.from.id;
-      const user = await (db as any).user.findUnique({
+      const user = await db.user.findUnique({
         where: { tgId: String(tgIdNum) },
         select: { id: true, balance: true, robloxUsername: true },
       });
@@ -5786,7 +5787,7 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 🔎 find_gp_saved: auto-search by saved Roblox nick ──────────────
     if (data === CB.findGpSaved) {
       const tgIdNum = ctx.from.id;
-      const user = await (db as any).user.findUnique({
+      const user = await db.user.findUnique({
         where: { tgId: String(tgIdNum) },
         select: { id: true, robloxUsername: true },
       });
@@ -5821,7 +5822,7 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
       const tgIdNum = ctx.from.id;
-      const user = await (db as any).user.findUnique({
+      const user = await db.user.findUnique({
         where: { tgId: String(tgIdNum) },
         select: { id: true, balance: true },
       });
@@ -5931,7 +5932,7 @@ export function registerCallbacks(bot: Telegraf): void {
         explicitReviewAt.set(ctx.from.id, Date.now());
         return;
       }
-      const photoUser = await (db as any).user.findUnique({ where: { tgId } });
+      const photoUser = await db.user.findUnique({ where: { tgId } });
       if (!photoUser) return;
       await submitReviewPhotoTg(bot as any, ctx, photoUser, held.orderId, held.fileId);
       return;
@@ -5998,14 +5999,14 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.slice(3);
       try {
-        const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        const order = await db.wbOrder.findUnique({ where: { id: orderId } });
         if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {}); return; }
 
         const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
         if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс").catch(() => {}); return; }
         const gpId = gpMatch[1];
 
-        const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+        const settings = await db.globalSettings.findUnique({ where: { id: "global" } });
         const cookie = settings?.robloxCookie;
         if (!cookie) {
           await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
@@ -6036,7 +6037,7 @@ export function registerCallbacks(bot: Telegraf): void {
           lines.push(`\n⛔ <b>MANAGED PRICING ВКЛЮЧЁН!</b>`);
           lines.push(`Цена Roblox: <b>${info.priceInRobux} R$</b> · Цена продавца: <b>${info.userBasePriceInRobux} R$</b>`);
           lines.push(`Выкуп запрещён. Запусти заказ из TWA: там будет поиск полной замены по нику.`);
-          await (db as any).wbOrder.update({ where: { id: orderId }, data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" } });
+          await db.wbOrder.update({ where: { id: orderId }, data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" } });
           await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
           return;
         }
@@ -6083,7 +6084,7 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.slice(3);
       try {
-        const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        const order = await db.wbOrder.findUnique({ where: { id: orderId } });
         if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {}); return; }
         if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status)) {
           await ctx.answerCbQuery("⚠️ Заказ уже обработан").catch(() => {});
@@ -6103,7 +6104,7 @@ export function registerCallbacks(bot: Telegraf): void {
         if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс").catch(() => {}); return; }
         const gpId = gpMatch[1];
 
-        const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+        const settings = await db.globalSettings.findUnique({ where: { id: "global" } });
         const cookie = settings?.robloxCookie;
         if (!cookie) {
           await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
@@ -6135,7 +6136,7 @@ export function registerCallbacks(bot: Telegraf): void {
         }
 
         if (info.hasUnsafeBuyerPrice) {
-          await (db as any).wbOrder.update({
+          await db.wbOrder.update({
             where: { id: orderId },
             data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" },
           });
@@ -6162,14 +6163,14 @@ export function registerCallbacks(bot: Telegraf): void {
           const currentRate = settings?.purchaseRate ?? null;
           const purchaserUsername = settings?.robloxAccountName ?? null;
           const money = buildOrderProfitSnapshot(order, settings ?? {}, result.price ?? info.priceInRobux);
-          const updated = await (db as any).wbOrder.updateMany({
+          const updated = await db.wbOrder.updateMany({
             where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
             data: { status: "COMPLETED", buyoutErrorCode: null, adminId, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
           });
 
           if (updated.count > 0) {
             const user = order.userId
-              ? await (db as any).user.findUnique({ where: { id: order.userId } })
+              ? await db.user.findUnique({ where: { id: order.userId } })
               : null;
             if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
             await notifyAdminsRetailBuyout({
@@ -6189,7 +6190,7 @@ export function registerCallbacks(bot: Telegraf): void {
         } else {
           const infrastructureFailure = isBrowserInfrastructureFailure(result.reason ?? result.msg);
           if (!infrastructureFailure) {
-            await (db as any).wbOrder.updateMany({
+            await db.wbOrder.updateMany({
               where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
               data: {
                 status: "ERROR",
@@ -6230,16 +6231,16 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
         // Snapshot purchase rate at fulfillment time
-        const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+        const settings = await db.globalSettings.findUnique({ where: { id: "global" } });
         const currentRate = settings?.purchaseRate ?? null;
-        const moneyOrder = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        const moneyOrder = await db.wbOrder.findUnique({ where: { id: orderId } });
         const money = moneyOrder
           ? buildOrderProfitSnapshot(moneyOrder, settings ?? {}, Math.ceil(moneyOrder.amount / 0.7))
           : null;
 
         // Atomic guard: only update if the order is still in an actionable state.
         // Prevents double-notification when two admins click simultaneously.
-        const updatedCount = await (db as any).wbOrder.updateMany({
+        const updatedCount = await db.wbOrder.updateMany({
           where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
           data: { status: "COMPLETED", buyoutErrorCode: null, adminId, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
         });
@@ -6252,13 +6253,13 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
 
-        const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        const order = await db.wbOrder.findUnique({ where: { id: orderId } });
         if (!order) {
           await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {});
           return;
         }
         const user = order.userId
-          ? await (db as any).user.findUnique({ where: { id: order.userId } })
+          ? await db.user.findUnique({ where: { id: order.userId } })
           : null;
 
         const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ <code>${order.wbCode}</code> · ${order.amount} R$`;
@@ -6719,9 +6720,9 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingDirectFlow.delete(ctx.from.id);
       const recipient = accepted.recipient ?? flow.robloxUsername;
 
-      let dirUser = await (db as any).user.findUnique({ where: { tgId } });
+      let dirUser = await db.user.findUnique({ where: { tgId } });
       if (!dirUser) {
-        dirUser = await (db as any).user.create({
+        dirUser = await db.user.create({
           data: {
             tgId,
             name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
@@ -6731,7 +6732,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       // Guard: one active intent or order at a time
-      const existingIntent = await (db as any).directIntent.findFirst({
+      const existingIntent = await db.directIntent.findFirst({
         where: { userId: dirUser.id, status: "PENDING" },
       });
       if (existingIntent) {
@@ -6745,7 +6746,7 @@ export function registerCallbacks(bot: Telegraf): void {
         } catch { }
         return;
       }
-      const existingOrder = await (db as any).wbOrder.findFirst({
+      const existingOrder = await db.wbOrder.findFirst({
         where: { userId: dirUser.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
       });
       if (existingOrder) {
@@ -6762,7 +6763,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
       let intent: any;
       try {
-        intent = await (db as any).directIntent.create({
+        intent = await db.directIntent.create({
           data: {
             userId:        dirUser.id,
             amount:        flow.amount!,
@@ -6837,7 +6838,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Заявка уже обработана").catch(() => {});
         return;
       }
-      await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+      await db.directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
       try {
         await ctx.editMessageText("❌ Заявка отменена.", {
           parse_mode: "HTML",
@@ -6870,7 +6871,7 @@ export function registerCallbacks(bot: Telegraf): void {
     // ucd: user cancels their own direct order (AWAITING_PAYMENT only)
     if (data.startsWith("ucd:")) {
       const ucdOrderId = data.slice(4);
-      const ucdOrder = await (db as any).wbOrder.findUnique({
+      const ucdOrder = await db.wbOrder.findUnique({
         where: { id: ucdOrderId },
         include: { user: { select: { id: true, tgId: true, vkId: true, balance: true, rubleDiscount: true } } },
       });
@@ -6891,7 +6892,7 @@ export function registerCallbacks(bot: Telegraf): void {
       // вовсе. Теперь источник — фактически применённые значения, записанные в
       // заказ при его создании; движение баланса идёт через `increment` с
       // записью в `BonusLedger`.
-      await (db as any).wbOrder.update({
+      await db.wbOrder.update({
         where: { id: ucdOrderId },
         data: { status: "REJECTED", rejectionReason: "Отменён покупателем" },
       });
@@ -6931,7 +6932,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("spd:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const spdOrderId = data.slice(4);
-      const spdOrder = await (db as any).wbOrder.findUnique({ where: { id: spdOrderId } });
+      const spdOrder = await db.wbOrder.findUnique({ where: { id: spdOrderId } });
       if (!spdOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (spdOrder.status !== "AWAITING_PAYMENT") {
         await ctx.answerCbQuery("Реквизиты уже отправлены").catch(() => {});
@@ -6954,7 +6955,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("sqr:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const sqrOrderId = data.slice(4);
-      const sqrOrder = await (db as any).wbOrder.findUnique({ where: { id: sqrOrderId } });
+      const sqrOrder = await db.wbOrder.findUnique({ where: { id: sqrOrderId } });
       if (!sqrOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (!["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(sqrOrder.status)) {
         await ctx.answerCbQuery("Заказ уже обрабатывается или завершён").catch(() => {});
@@ -6973,12 +6974,12 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       const rublePrice  = directPrice(sqrOrder.amount);
-      await (db as any).wbOrder.update({
+      await db.wbOrder.update({
         where: { id: sqrOrderId },
         data:  { status: "PAYMENT_PENDING", paymentDetails: "СБП QR" },
       });
 
-      const sqrUser = await (db as any).user.findUnique({ where: { id: sqrOrder.userId } });
+      const sqrUser = await db.user.findUnique({ where: { id: sqrOrder.userId } });
       let delivered = false;
 
       if (sqrUser?.tgId) {
@@ -7033,17 +7034,17 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("cdo:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const cdoOrderId = data.slice(4);
-      const cdoOrder = await (db as any).wbOrder.findUnique({ where: { id: cdoOrderId } });
+      const cdoOrder = await db.wbOrder.findUnique({ where: { id: cdoOrderId } });
       if (!cdoOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (!["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(cdoOrder.status)) {
         await ctx.answerCbQuery("Заказ уже обрабатывается или завершён").catch(() => {});
         return;
       }
-      await (db as any).wbOrder.update({
+      await db.wbOrder.update({
         where: { id: cdoOrderId },
         data: { status: "REJECTED", rejectionReason: "Отменён менеджером" },
       });
-      const cdoUser = await (db as any).user.findUnique({ where: { id: cdoOrder.userId } });
+      const cdoUser = await db.user.findUnique({ where: { id: cdoOrder.userId } });
       if (cdoUser?.tgId) {
         try {
           await bot.telegram.sendMessage(
@@ -7077,11 +7078,11 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("sqi:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const intentId = data.slice(4);
-      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
+      const intent = await db.directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
       if (!intent) { await ctx.answerCbQuery("Заявка не найдена").catch(() => {}); return; }
       if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана").catch(() => {}); return; }
       if (Date.now() - new Date(intent.createdAt).getTime() > 24 * 60 * 60 * 1000) {
-        await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
+        await db.directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
         await ctx.answerCbQuery("Заявка просрочена (>24ч).catch(() => {})");
         return;
       }
@@ -7092,7 +7093,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const dirCode = generateDirectCode();
       let newOrder: any;
       try {
-        newOrder = await (db as any).$transaction(async (tx: any) => {
+        newOrder = await db.$transaction(async (tx: any) => {
           const consumed = await tx.directIntent.updateMany({
             where: { id: intentId, status: "PENDING" },
             data: { status: "CONSUMED" },
@@ -7187,11 +7188,11 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("spi:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const intentId = data.slice(4);
-      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
+      const intent = await db.directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
       if (!intent) { await ctx.answerCbQuery("Заявка не найдена").catch(() => {}); return; }
       if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана").catch(() => {}); return; }
       if (Date.now() - new Date(intent.createdAt).getTime() > 24 * 60 * 60 * 1000) {
-        await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
+        await db.directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
         await ctx.answerCbQuery("Заявка просрочена (>24ч).catch(() => {})");
         return;
       }
@@ -7199,7 +7200,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const dirCode = generateDirectCode();
       let newOrder: any;
       try {
-        newOrder = await (db as any).$transaction(async (tx: any) => {
+        newOrder = await db.$transaction(async (tx: any) => {
           const consumed = await tx.directIntent.updateMany({
             where: { id: intentId, status: "PENDING" },
             data: { status: "CONSUMED" },
@@ -7270,10 +7271,10 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("cai:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const intentId = data.slice(4);
-      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
+      const intent = await db.directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
       if (!intent) { await ctx.answerCbQuery("Заявка не найдена").catch(() => {}); return; }
       if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана").catch(() => {}); return; }
-      await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+      await db.directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
       if (intent.user.tgId) {
         try {
           await bot.telegram.sendMessage(intent.user.tgId,
@@ -7293,13 +7294,13 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("pay_ok:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, payOkOrderId, payOkUserId] = data.split(":");
-      const payOkOrder = await (db as any).wbOrder.findUnique({ where: { id: payOkOrderId } });
+      const payOkOrder = await db.wbOrder.findUnique({ where: { id: payOkOrderId } });
       if (!payOkOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (payOkOrder.status !== "PAYMENT_PENDING") {
         await ctx.answerCbQuery("Оплата уже обработана").catch(() => {});
         return;
       }
-      const payOkAttempt = await (db as any).paymentAttempt.findFirst({
+      const payOkAttempt = await db.paymentAttempt.findFirst({
         where: { orderId: payOkOrderId },
         orderBy: { createdAt: "desc" },
       });
@@ -7311,7 +7312,7 @@ export function registerCallbacks(bot: Telegraf): void {
       if (payOkOrder.gamepassUrl) {
         const confirmedAt = new Date();
         if (payOkAttempt) {
-          await (db as any).$transaction(async (tx: any) => {
+          await db.$transaction(async (tx: any) => {
             const attemptChanged = await tx.paymentAttempt.updateMany({
               where: { id: payOkAttempt.id, provider: "MANUAL_TRANSFER", status: "INITIATED" },
               data: { status: "CONFIRMED", finalizedAt: confirmedAt },
@@ -7338,7 +7339,7 @@ export function registerCallbacks(bot: Telegraf): void {
             });
           });
         } else {
-          await (db as any).wbOrder.update({
+          await db.wbOrder.update({
             where: { id: payOkOrderId },
             data: { status: "PENDING", pendingAt: confirmedAt, paidAt: confirmedAt },
           });
@@ -7347,11 +7348,11 @@ export function registerCallbacks(bot: Telegraf): void {
         // canonical manual flow. Sending here as well creates duplicate messages.
       } else {
         // Legacy flow: no gamepassUrl → need user to create gamepass
-        await (db as any).wbOrder.update({
+        await db.wbOrder.update({
           where: { id: payOkOrderId },
           data: { status: "AWAITING_GAMEPASS", paidAt: new Date() },
         });
-        const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
+        const payOkUser = await db.user.findUnique({ where: { id: payOkUserId } });
         if (payOkUser?.tgId) {
           const passPrice = Math.ceil(payOkOrder.amount / 0.7);
           pendingLink.set(parseInt(payOkUser.tgId), { wbCode: payOkOrder.wbCode, denomination: payOkOrder.amount });
@@ -7397,8 +7398,8 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("pay_no:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, payNoOrderId, payNoUserId] = data.split(":");
-      const payNoOrder = await (db as any).wbOrder.findUnique({ where: { id: payNoOrderId }, select: { paymentDetails: true } });
-      const payNoUser = await (db as any).user.findUnique({ where: { id: payNoUserId } });
+      const payNoOrder = await db.wbOrder.findUnique({ where: { id: payNoOrderId }, select: { paymentDetails: true } });
+      const payNoUser = await db.user.findUnique({ where: { id: payNoUserId } });
       if (payNoUser?.tgId) {
         pendingPaymentScreenshot.set(parseInt(payNoUser.tgId), payNoOrderId);
         const detailsLine = payNoOrder?.paymentDetails && !payNoOrder.paymentDetails.startsWith("MANUAL_TRANSFER:")
@@ -7456,7 +7457,7 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const existingOrder = await (db as any).wbOrder.findFirst({
+      const existingOrder = await db.wbOrder.findFirst({
         where: { wbCode: code },
         orderBy: { createdAt: "desc" },
       });
@@ -7467,7 +7468,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       // Verify the order belongs to the calling user
-      const callerUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+      const callerUser = await db.user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (!callerUser || existingOrder.userId !== callerUser.id) {
         await ctx.reply("⛔ Этот заказ не принадлежит твоему аккаунту.\n\nЕсли уверен, что это твой заказ:", { parse_mode: "HTML", ...withSupportKb() });
         await ctx.answerCbQuery("⛔ Нет доступа").catch(() => {});
@@ -7513,7 +7514,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const [, orderId, userId] = data.split(":");
 
       // Resolve which specific WB code to mark — prevents marking ALL codes for this user.
-      const reviewOrder = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+      const reviewOrder = await db.wbOrder.findUnique({ where: { id: orderId } });
       if (!reviewOrder) {
         await ctx.answerCbQuery("Заказ не найден").catch(() => {});
         return;
@@ -7523,7 +7524,7 @@ export function registerCallbacks(bot: Telegraf): void {
       // Direct orders (DIR- prefix) have no WbCode row — use user.reviewBonusGrantedAt as guard instead.
       const isDirectOrder = (reviewOrder.wbCode as string).startsWith("DIR-");
       let paid = false;
-      await (db as any).$transaction(async (tx: any) => {
+      await db.$transaction(async (tx: any) => {
         if (isDirectOrder) {
           // Idempotency for direct orders: check reviewBonusGrantedAt hasn't been set yet.
           const u = await tx.user.findUnique({ where: { id: userId }, select: { reviewBonusGrantedAt: true } });
@@ -7561,11 +7562,11 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const user = await (db as any).user.findUnique({ where: { id: userId } });
+      const user = await db.user.findUnique({ where: { id: userId } });
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() + 30);
       // Set bonusExpiresAt on the user
-      await (db as any).user.update({
+      await db.user.update({
         where: { id: userId },
         data: { bonusExpiresAt: expiryDate },
       });
@@ -7685,7 +7686,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("admin_view:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен").catch(() => {});
       const orderId = data.split(":")[1];
-      const order = await (db as any).wbOrder.findUnique({
+      const order = await db.wbOrder.findUnique({
         where: { id: orderId },
         include: { user: true }
       });
@@ -7703,7 +7704,7 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 📸 review_hint: prompt user to send review screenshot ────────────
     if (data === CB.reviewHint) {
       // Restore pendingReview so the text handler can remind them if they type instead of sending a photo
-      const tgUser = await (db as any).user.findUnique({
+      const tgUser = await db.user.findUnique({
         where: { tgId: adminId },
         select: { id: true, balance: true, reviewBonusGrantedAt: true },
       });
@@ -7742,9 +7743,9 @@ export function registerCallbacks(bot: Telegraf): void {
     // заказа мог уйти в первый.
     if (data.startsWith("ord:")) {
       const pickedCode = data.slice("ord:".length);
-      const pickUser = await (db as any).user.findUnique({ where: { tgId: adminId }, select: { id: true } });
+      const pickUser = await db.user.findUnique({ where: { tgId: adminId }, select: { id: true } });
       const pickedOrder = pickUser
-        ? await (db as any).wbOrder.findFirst({
+        ? await db.wbOrder.findFirst({
             where: { userId: pickUser.id, wbCode: pickedCode, status: { in: ACTIVE_STATUSES } },
           })
         : null;
@@ -7762,7 +7763,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 📦 orders_list — вернуться к списку своих заказов ────────────────
     if (data === CB.ordersList) {
-      const listUser = await (db as any).user.findUnique({ where: { tgId: adminId }, select: { id: true } });
+      const listUser = await db.user.findUnique({ where: { tgId: adminId }, select: { id: true } });
       const orders = listUser ? await findActiveOrders(listUser.id) : [];
       await ctx.answerCbQuery().catch(() => {});
       if (orders.length === 0) {
@@ -7827,15 +7828,15 @@ export async function notifyUserCompleted(
   // Ф5: два сообщения (операционное + бонусное) — тексты и ветвление в
   // bots/shared/completed-messages.ts (зеркало — src/lib/twa-notify.ts).
   const [completedCount, order, dbUser] = await Promise.all([
-    (db as any).wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
-    (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true, robloxUsername: true } }),
-    (db as any).user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
+    db.wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
+    db.wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true, robloxUsername: true } }),
+    db.user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
   ]);
 
   // Код этого заказа существует как WbCode и отзыв по нему ещё не оплачен
   // (отсекает AV-/DIR-/MN- псевдокоды — отзыв на WB там невозможен).
   const codeRow = order?.wbCode
-    ? await (db as any).wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
+    ? await db.wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
     : null;
 
   // Скидка 60 ₽ на вторую прямую покупку. Правило целиком — в
@@ -7979,7 +7980,7 @@ async function notifyReviewRejected(
   orderId: string,
   reason: string
 ): Promise<void> {
-  const user = await (db as any).user.findUnique({ where: { id: userId } });
+  const user = await db.user.findUnique({ where: { id: userId } });
   if (!user) return;
 
   const tgMsg =
@@ -8035,10 +8036,10 @@ export function registerChatMember(bot: Telegraf): void {
     const tgId = String(userId);
 
     try {
-      const user = await (db as any).user.findUnique({ where: { tgId } });
+      const user = await db.user.findUnique({ where: { tgId } });
       if (!user) return;
 
-      const pendingOrder = await (db as any).wbOrder.findFirst({
+      const pendingOrder = await db.wbOrder.findFirst({
         where: { userId: user.id, status: "AWAITING_GAMEPASS" },
         orderBy: { createdAt: "desc" },
       });

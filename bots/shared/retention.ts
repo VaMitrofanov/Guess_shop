@@ -35,7 +35,7 @@ export async function runRetention(now = Date.now()): Promise<RetentionReport> {
 
   // Потреблённые котировки связаны с заказом внешним ключом — удаляем только
   // те, что так и не были использованы.
-  const quotes = await (db as any).priceQuote.deleteMany({
+  const quotes = await db.priceQuote.deleteMany({
     where: {
       status: { not: "CONSUMED" },
       expiresAt: { lt: quoteCutoff },
@@ -43,11 +43,11 @@ export async function runRetention(now = Date.now()): Promise<RetentionReport> {
     },
   });
 
-  const tokens = await (db as any).emailActionToken.deleteMany({
+  const tokens = await db.emailActionToken.deleteMany({
     where: { expiresAt: { lt: tokenCutoff } },
   });
 
-  const orderEventsOverdue = await (db as any).orderEvent.count({
+  const orderEventsOverdue = await db.orderEvent.count({
     where: { createdAt: { lt: eventCutoff } },
   });
 

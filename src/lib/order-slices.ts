@@ -242,11 +242,11 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
   parts.push(`COUNT(*) FILTER (WHERE "pendingAt" >= ${dayStart})::int AS "TODAY_IN"`);
 
   const [rows, splitRows, nominalRows] = await Promise.all([
-    (prisma as any).$queryRawUnsafe(`SELECT ${parts.join(",\n")} FROM "WbOrder" WHERE "isTest" = false`) as Promise<any[]>,
+    prisma.$queryRawUnsafe(`SELECT ${parts.join(",\n")} FROM "WbOrder" WHERE "isTest" = false`) as Promise<any[]>,
     // Разбитые заказы требуют второй таблицы. `EXISTS` вместо джойна — чтобы
     // предикат очереди остался дословно тем же, что и в колонках выше: с
     // джойном его пришлось бы переписать с алиасом и однажды разойтись.
-    (prisma as any).$queryRawUnsafe(`
+    prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::int AS "n"
       FROM "WbOrder"
       WHERE "isTest" = false AND ${BUYOUT_QUEUE_SQL}
@@ -255,7 +255,7 @@ export async function loadOrderSlices(): Promise<OrderSlicesPayload> {
           WHERE g."orderId" = "WbOrder".id AND g."purchasedAt" IS NULL
         )
     `) as Promise<any[]>,
-    (prisma as any).$queryRawUnsafe(`
+    prisma.$queryRawUnsafe(`
       SELECT amount::int AS "amount", COUNT(*)::int AS "n"
       FROM "WbOrder"
       WHERE "isTest" = false AND ${BUYOUT_QUEUE_SQL}

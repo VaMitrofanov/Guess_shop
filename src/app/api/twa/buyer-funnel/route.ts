@@ -119,8 +119,8 @@ export async function GET(req: NextRequest) {
        GROUP BY bucket ORDER BY bucket`;
 
   const [nickRows, gpRows] = await Promise.all([
-    (prisma as any).$queryRawUnsafe(nickQuery) as Promise<any[]>,
-    (prisma as any).$queryRawUnsafe(gpQuery) as Promise<any[]>,
+    prisma.$queryRawUnsafe(nickQuery) as Promise<any[]>,
+    prisma.$queryRawUnsafe(gpQuery) as Promise<any[]>,
   ]);
 
   const nickMap = new Map<string, number>();

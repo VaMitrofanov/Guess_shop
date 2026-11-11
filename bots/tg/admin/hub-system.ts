@@ -193,7 +193,7 @@ interface NeonDbStats {
 
 async function fetchNeonDbStats(): Promise<NeonDbStats | null> {
   try {
-    const result = await (db as any).$queryRaw`
+    const result = await db.$queryRaw`
       SELECT
         pg_database_size(current_database())                                    AS size_bytes,
         (SELECT count(*) FROM "WbOrder")                                        AS order_count,

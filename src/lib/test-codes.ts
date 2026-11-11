@@ -46,10 +46,10 @@ export async function resetTestCodes(codes?: string[]): Promise<string[]> {
   if (codeStrs.length === 0) return [];
 
   // Drop leftover orders first (FK-safe: WbOrder → User, not the other way).
-  await (prisma as any).wbOrder.deleteMany({ where: { wbCode: { in: codeStrs } } });
+  await prisma.wbOrder.deleteMany({ where: { wbCode: { in: codeStrs } } });
 
   for (const { code, denomination } of targets) {
-    await (prisma as any).wbCode.upsert({
+    await prisma.wbCode.upsert({
       where:  { code },
       update: {
         denomination,

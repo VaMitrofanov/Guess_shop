@@ -104,7 +104,7 @@ export async function revertOrderBenefits(
 ): Promise<RevertOutcome> {
   const none: RevertOutcome = { reverted: false, bonusRobux: 0, discountKopecks: 0 };
 
-  return (db as any).$transaction(async (tx: any) => {
+  return db.$transaction(async (tx: any) => {
     const order = await tx.wbOrder.findUnique({
       where: { id: orderId },
       select: {
@@ -202,7 +202,7 @@ async function reserveLatePaymentBenefitsTx(tx: any, order: Record<string, any>,
 }
 
 async function reconcileConfirmedAttempt(attemptId: string, providerStatus: string, now: Date) {
-  return (db as any).$transaction(async (tx: any) => {
+  return db.$transaction(async (tx: any) => {
     const attempt = await tx.paymentAttempt.findUnique({
       where: { id: attemptId },
       include: { order: true },
@@ -271,7 +271,7 @@ async function closeUnpaidAttempt(
   providerStatus: string,
   now: Date,
 ) {
-  const closed = await (db as any).$transaction(async (tx: any) => {
+  const closed = await db.$transaction(async (tx: any) => {
     const attempt = await tx.paymentAttempt.findUnique({
       where: { id: attemptId },
       include: { order: true },
@@ -312,7 +312,7 @@ async function closeUnpaidAttempt(
   });
 
   if (!closed) return { closed: false, reverted: false };
-  const source = await (db as any).wbOrder.findUnique({ where: { id: closed }, select: { orderSource: true } });
+  const source = await db.wbOrder.findUnique({ where: { id: closed }, select: { orderSource: true } });
   const outcome = await revertOrderBenefits(closed, {
     reason: "ABANDONED",
     kind: source?.orderSource === "DIRECT" ? "DIRECT" : "WEB",
@@ -321,7 +321,7 @@ async function closeUnpaidAttempt(
 }
 
 async function closeOrderWithoutProviderAttempt(orderId: string) {
-  const updated = await (db as any).wbOrder.updateMany({
+  const updated = await db.wbOrder.updateMany({
     where: { id: orderId, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] }, paidAt: null },
     data: { status: "REJECTED", rejectionReason: "Оплата не была создана (авто-отмена через 2 ч)" },
   });
@@ -345,7 +345,7 @@ export async function sweepStaleWebOrders(now = Date.now()): Promise<{
   deferred: number;
 }> {
   const cutoff = new Date(now - STALE_WEB_ORDER_MS);
-  const stale = await (db as any).wbOrder.findMany({
+  const stale = await db.wbOrder.findMany({
     where: {
       orderSource: { in: ["SITE", "DIRECT"] },
       publicOrderId: { not: null },

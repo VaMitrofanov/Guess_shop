@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
 
   // 1. DB-only data (always fast, never fails)
   const [settings, productCosts] = await Promise.all([
-    (prisma as any).wbSettings.findFirst() as Promise<any>,
-    (prisma as any).wbProductCost.findMany() as Promise<any[]>,
+    prisma.wbSettings.findFirst() as Promise<any>,
+    prisma.wbProductCost.findMany() as Promise<any[]>,
   ]);
 
   const kursRb    = settings?.kursRb    ?? 4;

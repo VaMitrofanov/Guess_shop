@@ -1,3 +1,4 @@
+import type { OrderSource, Prisma } from "@prisma/client";
 import { revalidateTag } from "next/cache";
 import { after, NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-access";
@@ -255,10 +256,10 @@ async function resolveGamepassForBinding(
 // одна и та же пометка повторно не дублируется (как annotateOnce автовыкупа).
 async function appendAdminNote(orderId: string, line: string): Promise<void> {
   try {
-    const o = await (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true } });
+    const o = await prisma.wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true } });
     if (o?.adminNote?.includes(line)) return;
     const prefix = o?.adminNote ? `${o.adminNote}\n` : "";
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data: { adminNote: `${prefix}${line}`.slice(0, 2000) },
     });
@@ -287,7 +288,7 @@ async function findFullPriceReplacement(
   if (plausible.length === 0) return null;
 
   const [referenced, splitReferenced] = await Promise.all([
-    (prisma as any).wbOrder.findMany({
+    prisma.wbOrder.findMany({
       where: {
         id: { not: order.id },
         status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] },
@@ -300,7 +301,7 @@ async function findFullPriceReplacement(
     // же выбирается автоматом, и совпади она с соседней частью — один донор
     // получил бы тот же пасс дважды и AlreadyOwned. Поэтому автозамена сюда
     // не смотрит.
-    (prisma as any).wbOrderGamepass.findMany({
+    prisma.wbOrderGamepass.findMany({
       where: {
         OR: [
           { orderId: order.id },
@@ -311,7 +312,7 @@ async function findFullPriceReplacement(
     }),
   ]);
   const usedIds = new Set<string>([
-    ...referenced.map((row: any) => gpIdOf(row.gamepassUrl)).filter(Boolean),
+    ...referenced.map((row: any) => gpIdOf(row.gamepassUrl)).filter((id): id is string => Boolean(id)),
     ...splitReferenced.map((row: any) => String(row.gamepassId)),
   ]);
 
@@ -451,11 +452,11 @@ export async function GET(req: NextRequest) {
   if (q) {
     // Поиск — плоская выборка по всей базе: ни ранжирования «Требуют внимания»,
     // ни склейки «Ждут ссылку», иначе найденное зависит от того, где стояли.
-    ordersPromise = (prisma as any).wbOrder.findMany({ where, orderBy, skip, take, include: userInclude });
+    ordersPromise = prisma.wbOrder.findMany({ where, orderBy, skip, take, include: userInclude });
   } else if (tab === "ATTENTION") {
     // Секция небольшая по природе — берём одним куском (без пагинации)
     // и ранжируем по серьёзности уже в памяти.
-    ordersPromise = (prisma as any).wbOrder
+    ordersPromise = prisma.wbOrder
       .findMany({ where, orderBy, take: ATTENTION_TAKE, include: userInclude })
       // Ручной приоритет выше серьёзности: его для того и ставят руками.
       .then((rows: any[]) => rows.sort((a, b) =>
@@ -463,7 +464,7 @@ export async function GET(req: NextRequest) {
   } else if (tab === "AWAITING_LINK" && !q) {
     ordersPromise = fetchAwaitingLinkHybrid(where, skip, take, userInclude);
   } else {
-    ordersPromise = (prisma as any).wbOrder.findMany({ where, orderBy, skip, take, include: userInclude });
+    ordersPromise = prisma.wbOrder.findMany({ where, orderBy, skip, take, include: userInclude });
   }
 
   const emptyCounts = {
@@ -482,7 +483,7 @@ export async function GET(req: NextRequest) {
           // и зашли), а `total` обязан считать именно суженную выборку —
           // на нём стоит пагинация.
           const narrowTotal = narrowed
-            ? await (prisma as any).wbOrder.count({ where })
+            ? await prisma.wbOrder.count({ where })
             : null;
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
             return { total: narrowTotal ?? tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums, oldest: cachedCounts.oldest, slices: cachedCounts.slices };
@@ -493,14 +494,14 @@ export async function GET(req: NextRequest) {
           const slicesPromise = loadOrderSlices();
           // Заявки прямых заказов (DirectIntent, «ожидаем реквизиты») живут 24ч;
           // бейдж вкладки «Прямой» = заказы + заявки (клиент складывает сам).
-          const intentsPromise: Promise<number> = (prisma as any).directIntent.count({
+          const intentsPromise: Promise<number> = prisma.directIntent.count({
             where: { status: "PENDING", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } },
           }).catch(() => 0);
           // Все предикаты — из `TAB_SQL` (order-queue.ts): одно правило на ленту,
           // «Выкуп», значок и шапку среза.
           const countable = ["WORK", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD", "FLAGGED"] as const;
           const summable = ["BUYOUT", "DIRECT", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const;
-          const rows: any[] = await (prisma as any).$queryRawUnsafe(`
+          const rows: any[] = await prisma.$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
               ${countable.map(k => `COUNT(*) FILTER (WHERE ${TAB_SQL[k]})::int AS "${k}"`).join(",\n              ")},
@@ -528,13 +529,13 @@ export async function GET(req: NextRequest) {
           cachedCounts = { data: counts, sums, oldest, slices, ts: Date.now() };
           return { total: narrowTotal ?? tabTotal(tab, counts), counts, sums, oldest, slices };
         }
-        const cnt = await (prisma as any).wbOrder.count({ where });
+        const cnt = await prisma.wbOrder.count({ where });
         return { ...emptyCounts, total: cnt };
       })();
 
   // Подвкладки «Заморожены» по причине (30.10.2026) — тем же заходом, что лента.
   const heldKindsPromise = tab === "HELD" && !q && !skipCounts
-    ? countHoldKinds(prisma as any).catch(() => null)
+    ? countHoldKinds(prisma).catch(() => null)
     : Promise.resolve(null);
   const [rawOrders, { total, counts, sums, oldest, slices }, heldKinds] = await Promise.all([ordersPromise, countsPromise, heldKindsPromise]);
   const hasMore = skipCounts && rawOrders.length > limit;
@@ -581,7 +582,7 @@ export async function GET(req: NextRequest) {
       // ~210 мс на каждой загрузке ленты. Здесь нужен ровно джойн, поэтому он
       // и написан джойном; фильтр тот же самый — TG, VK или ник со страницы.
       pageTgIds.size > 0 || pageVkIds.size > 0 || pageRobloxNicks.size > 0
-        ? (prisma as any).$queryRaw`
+        ? prisma.$queryRaw<any[]>`
             SELECT o."createdAt", o."robloxUsername", u."tgId", u."vkId"
             FROM "WbOrder" o
             LEFT JOIN "User" u ON u."id" = o."userId"
@@ -595,13 +596,13 @@ export async function GET(req: NextRequest) {
           })))
         : [],
       completedWbOrders.length > 0
-        ? (prisma as any).wbCode.findMany({
+        ? prisma.wbCode.findMany({
             where: { code: { in: wbCodeValues } },
             select: { code: true, reviewBonusClaimed: true },
           })
         : [],
       completedWbOrders.length > 0
-        ? (prisma as any).wbOrder.groupBy({
+        ? prisma.wbOrder.groupBy({
             by: ["userId"],
             where: { userId: { in: uniqueUserIds }, status: "COMPLETED", isDirectOrder: false },
             _min: { createdAt: true },
@@ -715,7 +716,7 @@ export async function GET(req: NextRequest) {
   // ATTENTION отдаётся одним куском (до ATTENTION_TAKE) — пагинации нет.
   const pages = tab === "ATTENTION" ? 1 : Math.ceil(finalTotal / limit);
   const profitSummary = tab === "DONE" && !skipCounts
-    ? await (prisma as any).wbOrder.aggregate({
+    ? await prisma.wbOrder.aggregate({
         where,
         _sum: { profitKopecks: true },
         _count: { profitKopecks: true },
@@ -736,13 +737,13 @@ async function fetchAwaitingLinkHybrid(where: any, skip: number, take: number, i
   // одним `orderBy`, а склейкой «свежие сверху + хвост от старых», поэтому
   // приоритет приходится вносить сюда явно — иначе он работал бы во всех
   // очередях, кроме этой, и правило «поднятый заказ первый» стало бы ложью.
-  const pinned: any[] = await (prisma as any).wbOrder.findMany({
+  const pinned: any[] = await prisma.wbOrder.findMany({
     where: { ...where, priorityAt: { not: null } },
     orderBy: { priorityAt: "desc" },
     take: AWAITING_LINK_HEAD,
     include,
   });
-  const head: any[] = await (prisma as any).wbOrder.findMany({
+  const head: any[] = await prisma.wbOrder.findMany({
     where: pinned.length > 0 ? { ...where, id: { notIn: pinned.map(p => p.id) } } : where,
     orderBy: { createdAt: "desc" },
     take: AWAITING_LINK_HEAD,
@@ -752,7 +753,7 @@ async function fetchAwaitingLinkHybrid(where: any, skip: number, take: number, i
   const prefixSlice = prefix.slice(skip, skip + take);
   const tailTake = take - prefixSlice.length;
   if (tailTake <= 0) return prefixSlice;
-  const tail: any[] = await (prisma as any).wbOrder.findMany({
+  const tail: any[] = await prisma.wbOrder.findMany({
     where: { ...where, id: { notIn: prefix.map(h => h.id) } },
     orderBy: { createdAt: "asc" },
     skip: Math.max(0, skip - prefix.length),
@@ -795,7 +796,7 @@ async function enrichVkUsers(orders: any[]) {
       if (!order?.user?.vkId) return;
       const v = map.get(String(order.user.vkId));
       if (!v) return;
-      await (prisma as any).user.update({
+      await prisma.user.update({
         where: { id: uid },
         data: {
           name: v.name,
@@ -872,7 +873,7 @@ export async function POST(req: NextRequest) {
       if (!/^[A-Z0-9]{7}$/.test(rawCode)) {
         out.code = { ok: false, error: "Код — 7 символов A-Z/0-9" };
       } else {
-        const codeRow = await (prisma as any).wbCode.findUnique({
+        const codeRow = await prisma.wbCode.findUnique({
           where: { code: rawCode },
           select: {
             denomination: true, isTest: true,
@@ -882,11 +883,11 @@ export async function POST(req: NextRequest) {
         if (!codeRow) out.code = { ok: false, error: "Код не найден" };
         else if (codeRow.isTest) out.code = { ok: false, error: "Тестовый код" };
         else {
-          const orderOnCode = await (prisma as any).wbOrder.findFirst({
+          const orderOnCode = await prisma.wbOrder.findFirst({
             where: { wbCode: rawCode },
             select: MATCH_SELECT,
           });
-          const holdOnCode = await (prisma as any).orderHold.findUnique({
+          const holdOnCode = await prisma.orderHold.findUnique({
             where: { wbCode: rawCode }, select: { reason: true, releasedAt: true },
           });
           if (orderOnCode) {
@@ -913,7 +914,7 @@ export async function POST(req: NextRequest) {
       const amount = Number(body.amount) || out.code?.denomination || 0;
       const expected = amount > 0 ? Math.ceil(amount / 0.7) : null;
       const info = await getGpInfoCached(gpId, { fresh: true });
-      const candidates = await (prisma as any).wbOrder.findMany({
+      const candidates = await prisma.wbOrder.findMany({
         where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
         orderBy: { createdAt: "desc" }, take: 5,
         select: MATCH_SELECT,
@@ -945,7 +946,7 @@ export async function POST(req: NextRequest) {
        `WbOrder.wbCode`), а код надо было сначала где-то найти глазами. */
     const wbOrderIdRaw = String(body.wbOrderId ?? "").replace(/\D/g, "");
     if (wbOrderIdRaw.length >= 5) {
-      const mp = await (prisma as any).wbMarketplaceOrder.findUnique({
+      const mp = await prisma.wbMarketplaceOrder.findUnique({
         where: { wbOrderId: wbOrderIdRaw },
         select: {
           id: true, wbOrderId: true, buyerName: true, denominationSnapshot: true,
@@ -959,7 +960,7 @@ export async function POST(req: NextRequest) {
       } else {
         const gateCode = mp.wbCode?.code ?? null;
         const onCode = gateCode
-          ? await (prisma as any).wbOrder.findUnique({ where: { wbCode: gateCode }, select: MATCH_SELECT })
+          ? await prisma.wbOrder.findUnique({ where: { wbCode: gateCode }, select: MATCH_SELECT })
           : null;
         out.wbOrder = {
           wbOrderId: mp.wbOrderId,
@@ -983,7 +984,7 @@ export async function POST(req: NextRequest) {
        «тот самый» нельзя. Отдаём список, выбор делает человек. */
     const nickRaw = String(body.robloxUsername ?? "").trim().replace(/^@/, "");
     if (nickRaw.length >= 3) {
-      const byNick = await (prisma as any).wbOrder.findMany({
+      const byNick = await prisma.wbOrder.findMany({
         where: {
           isTest: false,
           robloxUsername: { equals: nickRaw, mode: "insensitive" },
@@ -1026,7 +1027,7 @@ export async function POST(req: NextRequest) {
     if (wbOrderIdRaw) {
       if (isDirect)
         return NextResponse.json({ error: "Прямой заказ не связан с заказом WB" }, { status: 400 });
-      marketplace = await (prisma as any).wbMarketplaceOrder.findUnique({
+      marketplace = await prisma.wbMarketplaceOrder.findUnique({
         where: { wbOrderId: wbOrderIdRaw },
         select: {
           id: true, wbOrderId: true, denominationSnapshot: true, cancelledAt: true,
@@ -1052,7 +1053,7 @@ export async function POST(req: NextRequest) {
       const codeToUse = rawCode ?? marketplace.wbCode.code;
       if (!/^[A-Z0-9]{7}$/.test(codeToUse))
         return NextResponse.json({ error: "Код — 7 символов A-Z/0-9" }, { status: 400 });
-      codeRow = await (prisma as any).wbCode.findUnique({
+      codeRow = await prisma.wbCode.findUnique({
         where: { code: codeToUse },
         select: { id: true, denomination: true, isTest: true, usedAt: true, status: true },
       });
@@ -1063,7 +1064,7 @@ export async function POST(req: NextRequest) {
          «заказ заморожен». */
       if (isRevokedCode(codeRow))
         return NextResponse.json({ error: `Код ${codeToUse} аннулирован: заказ на WB отменён и деньги вернулись покупателю` }, { status: 409 });
-      const orderOnCode = await (prisma as any).wbOrder.findFirst({
+      const orderOnCode = await prisma.wbOrder.findFirst({
         where: { wbCode: codeToUse }, select: { status: true },
       });
       if (orderOnCode)
@@ -1073,7 +1074,7 @@ export async function POST(req: NextRequest) {
          нельзя. Крон-свип пометил бы созданный заказ через минуту, но создать
          его молча и увидеть заморозку постфактум — не то же самое, что не
          создать. Отказываем сразу. */
-      const holdOnCode = await (prisma as any).orderHold.findUnique({
+      const holdOnCode = await prisma.orderHold.findUnique({
         where: { wbCode: codeToUse },
         select: { reason: true, releasedAt: true },
       });
@@ -1090,7 +1091,7 @@ export async function POST(req: NextRequest) {
     // 3) Клиент (опционален): без клиента — служебный юзер (как в Авито).
     let client: any = null;
     if (clientUserId) {
-      client = await (prisma as any).user.findUnique({
+      client = await prisma.user.findUnique({
         where: { id: clientUserId },
         select: { id: true, tgId: true, vkId: true, name: true, username: true },
       });
@@ -1116,7 +1117,7 @@ export async function POST(req: NextRequest) {
     if (!amount || !Number.isFinite(amount) || amount < 1)
       return NextResponse.json({ error: "Не удалось определить сумму заказа" }, { status: 400 });
     if (gpId && body.force !== true) {
-      const candidates = await (prisma as any).wbOrder.findMany({
+      const candidates = await prisma.wbOrder.findMany({
         where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
         orderBy: { createdAt: "desc" }, take: 5,
         select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true },
@@ -1137,7 +1138,7 @@ export async function POST(req: NextRequest) {
     const manualMark = `[MANUAL${isDirect ? " DIRECT" : ""} ${stamp} от ${actor.displayName}]`;
     const platform = client?.vkId && !client?.tgId ? "VK" : "TG";
 
-    const created = await (prisma as any).$transaction(async (tx: any) => {
+    const created = await prisma.$transaction(async (tx: any) => {
       const order = await tx.wbOrder.create({
         data: {
           amount,
@@ -1229,13 +1230,13 @@ export async function POST(req: NextRequest) {
     if (vkId && vkId.length < 3)
       return NextResponse.json({ error: "VK ID — минимум 3 цифры" }, { status: 400 });
 
-    const found = await (prisma as any).user.findFirst({
+    const found = await prisma.user.findFirst({
       where: { OR: [...(tgId ? [{ tgId }] : []), ...(vkId ? [{ vkId }] : [])] },
       select: { id: true, tgId: true, vkId: true, name: true, username: true, robloxUsername: true },
     });
     if (found) return NextResponse.json({ ok: true, user: found, existed: true });
 
-    const created = await (prisma as any).user.create({
+    const created = await prisma.user.create({
       data: {
         tgId, vkId, username,
         name: name ?? `Клиент ${tgId ?? vkId}`,
@@ -1264,7 +1265,7 @@ export async function POST(req: NextRequest) {
       orClauses.push({ vkId: idDigits });
     }
 
-    const users = await (prisma as any).user.findMany({
+    const users = await prisma.user.findMany({
       where: { OR: orClauses },
       select: { id: true, tgId: true, vkId: true, username: true, name: true, robloxUsername: true },
       take: 10,
@@ -1278,7 +1279,7 @@ export async function POST(req: NextRequest) {
   if (action === "attachable-orders") {
     const q = String(body.query ?? "").trim();
     const qClean = q.replace(/^@/, "");
-    const searchWhere = q.length >= 2
+    const searchWhere: Prisma.WbOrderWhereInput = q.length >= 2
       ? {
           OR: [
             { wbCode:         { contains: q.toUpperCase() } },
@@ -1291,7 +1292,7 @@ export async function POST(req: NextRequest) {
         }
       : {};
 
-    const orders = await (prisma as any).wbOrder.findMany({
+    const orders = await prisma.wbOrder.findMany({
       where: {
         isTest: false,
         status: { in: ["AWAITING_GAMEPASS", "REJECTED", "ERROR"] },
@@ -1316,7 +1317,7 @@ export async function POST(req: NextRequest) {
     const ids: string[] = Array.isArray(body.orderIds) ? body.orderIds.slice(0, 30).map(String) : [];
     if (ids.length === 0) return NextResponse.json({ results: {} });
 
-    const checkOrders: any[] = await (prisma as any).wbOrder.findMany({
+    const checkOrders: any[] = await prisma.wbOrder.findMany({
       where: { id: { in: ids } },
       select: {
         id: true, amount: true, gamepassUrl: true, wbCode: true,
@@ -1329,7 +1330,7 @@ export async function POST(req: NextRequest) {
 
     const gpIds = [...new Set(checkOrders.map((o) => gpIdOf(o.gamepassUrl)).filter(Boolean))] as string[];
     const completed: any[] = gpIds.length > 0
-      ? await (prisma as any).wbOrder.findMany({
+      ? await prisma.wbOrder.findMany({
           where: {
             isTest: false,
             status: "COMPLETED",
@@ -1403,7 +1404,7 @@ export async function POST(req: NextRequest) {
   if (action === "hold" || action === "unhold") {
     let wbCode = normalizeHoldCode(body.wbCode);
     if (!wbCode && orderId) {
-      const target = await (prisma as any).wbOrder.findUnique({
+      const target = await prisma.wbOrder.findUnique({
         where: { id: orderId }, select: { wbCode: true },
       });
       if (!target) return NextResponse.json({ error: "Order not found" }, { status: 404 });
@@ -1429,7 +1430,7 @@ export async function POST(req: NextRequest) {
     const res = await ackFlags(prisma, { orderId, actor: actor.displayName, kind });
     if (!res.ok) return NextResponse.json({ error: res.error }, { status: 404 });
     cachedCounts = null;
-    const fresh = await (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { flags: true, flaggedAt: true } });
+    const fresh = await prisma.wbOrder.findUnique({ where: { id: orderId }, select: { flags: true, flaggedAt: true } });
     return NextResponse.json({ ok: true, acked: res.acked, flags: fresh?.flags ?? null, flaggedAt: fresh?.flaggedAt ?? null });
   }
 
@@ -1438,9 +1439,9 @@ export async function POST(req: NextRequest) {
     const wbCode = normalizeHoldCode(body.wbCode);
     if (!wbCode) return NextResponse.json({ error: "Нужен код" }, { status: 400 });
     const [hold, existing, code] = await Promise.all([
-      (prisma as any).orderHold.findUnique({ where: { wbCode } }),
-      (prisma as any).wbOrder.findUnique({ where: { wbCode }, select: { id: true } }),
-      (prisma as any).wbCode.findUnique({ where: { code: wbCode }, select: { denomination: true, status: true } }),
+      prisma.orderHold.findUnique({ where: { wbCode } }),
+      prisma.wbOrder.findUnique({ where: { wbCode }, select: { id: true } }),
+      prisma.wbCode.findUnique({ where: { code: wbCode }, select: { denomination: true, status: true } }),
     ]);
     return NextResponse.json({
       wbCode,
@@ -1456,7 +1457,7 @@ export async function POST(req: NextRequest) {
   if (!orderId)
     return NextResponse.json({ error: "orderId required" }, { status: 400 });
 
-  const order = await (prisma as any).wbOrder.findUnique({
+  const order = await prisma.wbOrder.findUnique({
     where: { id: orderId },
     include: {
       user: { select: { id: true, tgId: true, vkId: true, username: true } },
@@ -1479,10 +1480,10 @@ export async function POST(req: NextRequest) {
   if (action === "add-note") {
     const text = typeof body.text === "string" ? body.text.replace(/\s+/g, " ").trim().slice(0, 500) : "";
     if (!text) return NextResponse.json({ error: "Пустая заметка" }, { status: 400 });
-    const row = await (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true } });
+    const row = await prisma.wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true } });
     if (!row) return NextResponse.json({ error: "Order not found" }, { status: 404 });
     const note = prependNote(row.adminNote, humanNoteLine(text, actor.displayName));
-    await (prisma as any).wbOrder.update({ where: { id: orderId }, data: { adminNote: note } });
+    await prisma.wbOrder.update({ where: { id: orderId }, data: { adminNote: note } });
     return NextResponse.json({ ok: true, note });
   }
 
@@ -1502,14 +1503,14 @@ export async function POST(req: NextRequest) {
         .map((line: string) => line.trim())
         .filter((line: string) => line.startsWith("["));
       const merged = [...tagged, ...(note ? [note] : [])].join("\n").slice(0, 2000);
-      await (prisma as any).wbOrder.update({
+      await prisma.wbOrder.update({
         where: { id: orderId },
         data:  { adminNote: merged || null },
       });
       return NextResponse.json({ ok: true, note: merged || null });
     }
 
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data:  { adminNote: note || null },
     });
@@ -1517,7 +1518,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "toggle-favorite") {
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data:  { isFavorite: !order.isFavorite },
     });
@@ -1545,7 +1546,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Заказ в статусе ${order.status} не стоит в очереди — поднимать нечего` }, { status: 400 });
 
     const on = body.priority !== false;
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data: on
         ? { priorityAt: new Date(), priorityBy: actor.displayName }
@@ -1558,7 +1559,7 @@ export async function POST(req: NextRequest) {
   if (action === "set-error") {
     if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Cannot set error on this order" }, { status: 400 });
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data:  { status: "ERROR" },
     });
@@ -1579,7 +1580,7 @@ export async function POST(req: NextRequest) {
     if (!recovery.ok) {
       return NextResponse.json({ error: recovery.error }, { status: recovery.status });
     }
-    const restored = await (prisma as any).wbOrder.updateMany({
+    const restored = await prisma.wbOrder.updateMany({
       where: { id: orderId, status: "ERROR" },
       data: recovery.data,
     });
@@ -1660,7 +1661,7 @@ export async function POST(req: NextRequest) {
     // «Избранное» — не статус, а флаг: заказ остаётся в своём статусе.
     if (target === "FAVORITES") {
       const stamp = new Date().toISOString().slice(0, 10);
-      await (prisma as any).wbOrder.update({
+      await prisma.wbOrder.update({
         where: { id: orderId },
         data:  {
           isFavorite: true,
@@ -1710,7 +1711,7 @@ export async function POST(req: NextRequest) {
     // Перенос в «Готово» — тихая переклассификация (без уведомления клиенту,
     // в отличие от кнопки «Выкуплено»); курс фиксируем как при обычном выкупе.
     if (target === "DONE") {
-      const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+      const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
       data.purchaseRate = settings?.purchaseRate ?? null;
       data.completedAt = new Date(); // Ф6.3: базис таймера разблокировки робуксов
       Object.assign(data, buildOrderProfitSnapshot(order, settings ?? {}, Math.ceil(order.amount / 0.7)) ?? {});
@@ -1724,7 +1725,7 @@ export async function POST(req: NextRequest) {
       data.pendingAt = new Date();
     }
 
-    await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+    await prisma.wbOrder.update({ where: { id: orderId }, data });
     cachedCounts = null;
     return NextResponse.json({ ok: true });
   }
@@ -1737,7 +1738,7 @@ export async function POST(req: NextRequest) {
     // нажатия, либо выкуп в обход заморозки. Сначала сними заморозку.
     const completeHeld = await assertOrderBuyable(prisma, orderId);
     if (completeHeld.held) return NextResponse.json({ error: completeHeld.message }, { status: 409 });
-    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const currentRate = settings?.purchaseRate ?? null;
     // У разбитого заказа себестоимость — сумма списаний по частям. Считать её
     // от номинала заказа значило бы записать в прибыль выдуманное число: три
@@ -1746,8 +1747,8 @@ export async function POST(req: NextRequest) {
       ? splitParts.reduce((sum, p) => sum + (Number(p.chargedPrice) || Math.ceil(p.amount / 0.7)), 0)
       : Math.ceil(order.amount / 0.7);
     const money = buildOrderProfitSnapshot(order, settings ?? {}, purchaseRobux);
-    await (prisma as any).$transaction([
-      (prisma as any).wbOrder.update({
+    await prisma.$transaction([
+      prisma.wbOrder.update({
         where: { id: orderId },
         // ⚡ живёт, пока заказ в очереди: закрытый заказ «первым» не бывает.
         data:  { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, completedAt: new Date(), priorityAt: null, priorityBy: null, ...(money ?? {}) },
@@ -1756,7 +1757,7 @@ export async function POST(req: NextRequest) {
       // выполнен, пока в нём висят невыкупленные куски — иначе карточка
       // COMPLETED показывала бы «1/3» и вводила в заблуждение.
       ...(splitParts.length > 0
-        ? [(prisma as any).wbOrderGamepass.updateMany({
+        ? [prisma.wbOrderGamepass.updateMany({
             where: { orderId, purchasedAt: null },
             data: { purchasedAt: new Date() },
           })]
@@ -1853,7 +1854,7 @@ export async function POST(req: NextRequest) {
       // Цену списания при ручной покупке никто не сообщает — записываем
       // ожидаемую по номиналу части и помечаем в заметке, что она расчётная.
       const assumed = Math.ceil(part.amount / 0.7);
-      await (prisma as any).wbOrderGamepass.update({
+      await prisma.wbOrderGamepass.update({
         where: { id: part.id },
         data: { purchasedAt: new Date(), chargedPrice: part.chargedPrice ?? assumed },
       });
@@ -1862,7 +1863,7 @@ export async function POST(req: NextRequest) {
         `[РАЗБИВКА-РУЧНАЯ ${stamp}] часть ${part.position + 1}: GP ${part.gamepassId} отмечена выкупленной (${assumed} R$ расчётно)`,
       );
     } else {
-      await (prisma as any).wbOrderGamepass.update({
+      await prisma.wbOrderGamepass.update({
         where: { id: part.id },
         data: { purchasedAt: null, chargedPrice: null },
       });
@@ -1872,7 +1873,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const fresh: StoredPart[] = await (prisma as any).wbOrderGamepass.findMany({
+    const fresh: StoredPart[] = await prisma.wbOrderGamepass.findMany({
       where: { orderId },
       orderBy: { position: "asc" },
     });
@@ -1880,7 +1881,7 @@ export async function POST(req: NextRequest) {
     // `gamepassUrl` заказа всегда смотрит на текущую часть — от этого зависят
     // очередь, живая проверка цены и скрипт покупки.
     if (nextPart) {
-      await (prisma as any).wbOrder.update({
+      await prisma.wbOrder.update({
         where: { id: orderId },
         data: { gamepassUrl: `https://www.roblox.com/game-pass/${nextPart.gamepassId}` },
       });
@@ -1901,7 +1902,7 @@ export async function POST(req: NextRequest) {
     if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Cannot reject this order" }, { status: 400 });
     const rejectionReason = String(reason ?? "не указана");
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data:  { status: "REJECTED", buyoutErrorCode: null, rejectionReason, priorityAt: null, priorityBy: null },
     });
@@ -1954,7 +1955,7 @@ export async function POST(req: NextRequest) {
       gpId = gpMatch[1];
     }
 
-    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
     if (!cookie) return NextResponse.json({ error: "Cookie не задан. Добавь его в TWA → Аккаунт → 🔑" }, { status: 400 });
 
@@ -1980,7 +1981,7 @@ export async function POST(req: NextRequest) {
       if (!replacement) {
         const wasRegional = order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE;
         const line = `[РЕГ-ЦЕНА ${stamp}] GP ${gpId}: донор ${original.price} R$, база ${original.basePriceInRobux} R$; полная замена по нику не найдена`;
-        await (prisma as any).wbOrder.update({
+        await prisma.wbOrder.update({
           where: { id: orderId },
           data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
         });
@@ -2003,12 +2004,12 @@ export async function POST(req: NextRequest) {
       // У разбитого заказа заменяется КОНКРЕТНАЯ часть; `gamepassUrl` заказа
       // просто следует за текущей частью, как и везде в этом коде.
       if (activePart) {
-        await (prisma as any).wbOrderGamepass.update({
+        await prisma.wbOrderGamepass.update({
           where: { id: activePart.id },
           data: { gamepassId: gpId, gamepassUrl: `https://www.roblox.com/game-pass/${gpId}` },
         });
       }
-      await (prisma as any).wbOrder.update({
+      await prisma.wbOrder.update({
         where: { id: orderId },
         data: {
           gamepassUrl: `https://www.roblox.com/game-pass/${gpId}`,
@@ -2034,7 +2035,7 @@ export async function POST(req: NextRequest) {
     const creatorId = info.sellerId;
     const creatorName: string | null = info.sellerName;
     if (!unsafeBuyerPrice && order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE) {
-      await (prisma as any).wbOrder.update({ where: { id: orderId }, data: { buyoutErrorCode: null } });
+      await prisma.wbOrder.update({ where: { id: orderId }, data: { buyoutErrorCode: null } });
     }
 
     // ЦЕНА-СТОП (PLAN-gp-price-guard Ш1, инцидент 12.07): выкуп возможен только
@@ -2073,11 +2074,11 @@ export async function POST(req: NextRequest) {
       // закрытия заказа: упасть между покупкой и записью можно, и тогда
       // повторное нажатие обязано увидеть, что эта часть уже оплачена.
       if (activePart) {
-        await (prisma as any).wbOrderGamepass.update({
+        await prisma.wbOrderGamepass.update({
           where: { id: activePart.id },
           data: { gamepassId: gpId, chargedPrice, purchasedAt: new Date() },
         });
-        const fresh: StoredPart[] = await (prisma as any).wbOrderGamepass.findMany({
+        const fresh: StoredPart[] = await prisma.wbOrderGamepass.findMany({
           where: { orderId },
           orderBy: { position: "asc" },
         });
@@ -2091,7 +2092,7 @@ export async function POST(req: NextRequest) {
         if (!splitIsComplete(fresh)) {
           // Заказ остаётся в очереди: покупатель не получил всё оплаченное,
           // и уведомлять его об исполнении рано.
-          await (prisma as any).wbOrder.update({
+          await prisma.wbOrder.update({
             where: { id: orderId },
             data: {
               gamepassUrl: nextPart ? `https://www.roblox.com/game-pass/${nextPart.gamepassId}` : order.gamepassUrl,
@@ -2127,11 +2128,11 @@ export async function POST(req: NextRequest) {
       // Себестоимость заказа — сумма всех списаний, а не последнее из них.
       const totalCharged = activePart
         ? splitChargedTotal(
-            await (prisma as any).wbOrderGamepass.findMany({ where: { orderId }, select: { chargedPrice: true, purchasedAt: true } }),
+            await prisma.wbOrderGamepass.findMany({ where: { orderId }, select: { chargedPrice: true, purchasedAt: true } }),
           )
         : chargedPrice;
       const money = buildOrderProfitSnapshot(order, settings ?? {}, totalCharged);
-      await (prisma as any).wbOrder.updateMany({
+      await prisma.wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), priorityAt: null, priorityBy: null, ...(money ?? {}) },
       });
@@ -2161,7 +2162,7 @@ export async function POST(req: NextRequest) {
 
     const infrastructureFailure = isBrowserInfrastructureFailure(purchaseResult.reason ?? purchaseResult.msg);
     if (!infrastructureFailure) {
-      await (prisma as any).wbOrder.updateMany({
+      await prisma.wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
         data: {
           status: "ERROR",
@@ -2240,7 +2241,7 @@ export async function POST(req: NextRequest) {
         // Дедуп как в create-manual: ГП уже в другом активном заказе → 409,
         // force обходит (осознанное решение менеджера).
         if (gpId && body.force !== true) {
-          const candidates = await (prisma as any).wbOrder.findMany({
+          const candidates = await prisma.wbOrder.findMany({
             where: { isTest: false, id: { not: orderId }, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
             orderBy: { createdAt: "desc" }, take: 5,
             select: { wbCode: true, status: true, gamepassUrl: true },
@@ -2309,7 +2310,7 @@ export async function POST(req: NextRequest) {
     if (Object.keys(data).length === 0)
       return NextResponse.json({ error: "Нет изменений" }, { status: 400 });
 
-    await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+    await prisma.wbOrder.update({ where: { id: orderId }, data });
     const stamp = new Date().toISOString().slice(0, 10);
     await appendAdminNote(orderId, `[EDIT ${stamp} от ${actor.displayName}] ${changes.join(", ")}`);
 
@@ -2352,10 +2353,10 @@ export async function POST(req: NextRequest) {
     if (!["WB", "DIRECT", "MANUAL"].includes(src))
       return NextResponse.json({ error: "Invalid source" }, { status: 400 });
     if (unpaidDirect && !isDirectSource(src)) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data: {
-        orderSource: src,
+        orderSource: src as OrderSource,
         ...directPatchForSource(order, src, {
           now: new Date(), actor: actor.displayName, directSaleKopecks: directPrice(order.amount) * 100,
         }),
@@ -2374,7 +2375,7 @@ export async function POST(req: NextRequest) {
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
     const gpId = gpMatch[1];
 
-    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const donorCookie = settings?.robloxCookie as string | null | undefined;
 
     let info: ResolvedGamepass;
@@ -2481,7 +2482,7 @@ export async function POST(req: NextRequest) {
     const auditNote = `[GP-ATTACH ${now}] ${gamepassUrl} (вручную из TWA)`;
     const existingNote = order.adminNote ? order.adminNote + "\n" : "";
 
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: orderId },
       data: {
         gamepassUrl,
@@ -2635,7 +2636,7 @@ export async function POST(req: NextRequest) {
       const human = keyCreateVerdict(outcome.error);
       // След нужен и у неудачи: следующий админ должен видеть, что ключ уже
       // пробовали и чем это кончилось, а не пробовать второй раз.
-      await (prisma as any).wbOrder.update({
+      await prisma.wbOrder.update({
         where: { id: orderId },
         data: {
           adminNote: appendOrderAudit(
@@ -2654,7 +2655,7 @@ export async function POST(req: NextRequest) {
        API ответил «создал» — это ещё не значит, что пасс стоит в продаже с
        нужной ценой. Выкуп такой пасс не возьмёт, и узнать об этом надо здесь,
        а не из жалобы покупателя через сутки. */
-    const keySettings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const keySettings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const keyCookie = keySettings?.robloxCookie;
     const checks: { gamepassId: string; price: number; live: { price: number | null; isForSale: boolean } | null }[] = [];
     for (const pass of outcome.created) {
@@ -2713,9 +2714,9 @@ export async function POST(req: NextRequest) {
     };
 
     if (complete && outcome.created.length > 1) {
-      await (prisma as any).$transaction([
-        (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
-        (prisma as any).wbOrderGamepass.createMany({
+      await prisma.$transaction([
+        prisma.wbOrderGamepass.deleteMany({ where: { orderId } }),
+        prisma.wbOrderGamepass.createMany({
           data: outcome.created.map((pass, index) => ({
             orderId,
             gamepassId: String(pass.gamePassId),
@@ -2724,10 +2725,10 @@ export async function POST(req: NextRequest) {
             position: index,
           })),
         }),
-        (prisma as any).wbOrder.update({ where: { id: orderId }, data }),
+        prisma.wbOrder.update({ where: { id: orderId }, data }),
       ]);
     } else {
-      await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+      await prisma.wbOrder.update({ where: { id: orderId }, data });
     }
     cachedCounts = null;
 
@@ -2765,7 +2766,7 @@ export async function POST(req: NextRequest) {
     const userId = order.user?.id;
     if (!userId) return NextResponse.json({ error: "У заказа нет покупателя" }, { status: 404 });
     const [user, orders, totals] = await Promise.all([
-      (prisma as any).user.findUnique({
+      prisma.user.findUnique({
         where: { id: userId },
         select: {
           id: true, tgId: true, vkId: true, name: true, username: true, robloxUsername: true,
@@ -2773,7 +2774,7 @@ export async function POST(req: NextRequest) {
           reviewBonusGrantedAt: true, createdAt: true,
         },
       }),
-      (prisma as any).wbOrder.findMany({
+      prisma.wbOrder.findMany({
         where: { userId, isTest: false },
         orderBy: { createdAt: "desc" },
         take: 30,
@@ -2783,7 +2784,7 @@ export async function POST(req: NextRequest) {
           rejectionReason: true,
         },
       }),
-      (prisma as any).wbOrder.groupBy({
+      prisma.wbOrder.groupBy({
         by: ["status"],
         where: { userId, isTest: false },
         _count: { _all: true },
@@ -2810,7 +2811,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "order-events") {
-    const events = await (prisma as any).orderEvent.findMany({
+    const events = await prisma.orderEvent.findMany({
       where: { orderId },
       orderBy: { createdAt: "desc" },
       take: 40,
@@ -2837,7 +2838,7 @@ export async function POST(req: NextRequest) {
   // Читается при разборе спора («я такой ник не указывал»), поэтому грузится
   // по запросу, а не в общий список — там это лишний вес на каждой карточке.
   if (action === "order-audit") {
-    const events = await (prisma as any).orderEvent.findMany({
+    const events = await prisma.orderEvent.findMany({
       // + где бот покупателя не понял и что у него просили (20.10.2026):
       // спор «я присылал ссылку» разбирается по этим же строкам.
       where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED", "AUDIT_GAMEPASS_AUTOCREATED", BUYER_STEP_EVENT.SENT, BUYER_STEP_EVENT.DEAD_END, PLACE_HELP_EVENT] } },
@@ -2866,7 +2867,7 @@ export async function POST(req: NextRequest) {
     if (!found || found.status !== "ok")
       return NextResponse.json({ ok: true, nick, passes: [], reason: found?.status ?? "unreachable" });
 
-    const usedByOthers = await (prisma as any).wbOrder.findMany({
+    const usedByOthers = await prisma.wbOrder.findMany({
       where: {
         id: { not: orderId },
         isTest: false,
@@ -2925,7 +2926,7 @@ export async function POST(req: NextRequest) {
     // Повторы одного пасса законны и проверяются на общих основаниях: цена у
     // него одна, значит и номинал у всех его частей одинаковый —
     // `buildSplitParts` это уже сверил.
-    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
     const checked: { gamepassId: string; amount: number; name: string; price: number | null }[] = [];
     /** Части, про которые Roblox не ответил вообще ни по одному источнику. */
@@ -2966,7 +2967,7 @@ export async function POST(req: NextRequest) {
 
     // Чужой заказ на том же пассе — это гонка за один и тот же геймпасс:
     // кто выкупит первым, второй получит AlreadyOwned и списание впустую.
-    const foreign = await (prisma as any).wbOrder.findFirst({
+    const foreign = await prisma.wbOrder.findFirst({
       where: {
         id: { not: orderId },
         isTest: false,
@@ -2999,9 +3000,9 @@ export async function POST(req: NextRequest) {
         ? ` · БЕЗ ПРОВЕРКИ ${unverified.join(", ")} (${unverifiedReason}) — цену и продавца сверит выкуп`
         : "");
 
-    await (prisma as any).$transaction([
-      (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
-      (prisma as any).wbOrderGamepass.createMany({
+    await prisma.$transaction([
+      prisma.wbOrderGamepass.deleteMany({ where: { orderId } }),
+      prisma.wbOrderGamepass.createMany({
         data: parts.map((p) => ({
           orderId,
           gamepassId: p.gamepassId,
@@ -3013,7 +3014,7 @@ export async function POST(req: NextRequest) {
       // Легаси-поле продолжает указывать на ТЕКУЩУЮ часть. Так весь остальной
       // код — очередь, поиск, уведомления, скрипт покупки — работает без правок
       // и видит ровно тот пасс, который покупается прямо сейчас.
-      (prisma as any).wbOrder.update({
+      prisma.wbOrder.update({
         where: { id: orderId },
         data: {
           gamepassUrl: parts[0].gamepassUrl,
@@ -3052,9 +3053,9 @@ export async function POST(req: NextRequest) {
       ? `[РАЗБИВКА-СНЯТА ${stamp}] было куплено ${describeSplitProgress(splitParts)} на ${splitChargedTotal(splitParts)} R$ — сверь вручную`
       : `[РАЗБИВКА-СНЯТА ${stamp}] ничего не куплено`;
 
-    await (prisma as any).$transaction([
-      (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
-      (prisma as any).wbOrder.update({
+    await prisma.$transaction([
+      prisma.wbOrderGamepass.deleteMany({ where: { orderId } }),
+      prisma.wbOrder.update({
         where: { id: orderId },
         data: { adminNote: ((order.adminNote ? order.adminNote + "\n" : "") + line).slice(0, 2000) },
       }),
@@ -3071,7 +3072,7 @@ export async function POST(req: NextRequest) {
     if (!REBINDABLE.includes(order.status))
       return NextResponse.json({ error: `Нельзя перепривязать заказ в статусе ${order.status}` }, { status: 400 });
 
-    const targetUser = await (prisma as any).user.findUnique({
+    const targetUser = await prisma.user.findUnique({
       where: { id: targetUserId },
       select: { id: true, tgId: true, vkId: true, username: true, name: true },
     });
@@ -3088,8 +3089,8 @@ export async function POST(req: NextRequest) {
 
     const existingNote = order.adminNote ? order.adminNote + "\n" : "";
 
-    await (prisma as any).$transaction([
-      (prisma as any).wbOrder.update({
+    await prisma.$transaction([
+      prisma.wbOrder.update({
         where: { id: orderId },
         data: {
           userId: targetUser.id,
@@ -3097,7 +3098,7 @@ export async function POST(req: NextRequest) {
           adminNote: (existingNote + auditNote).slice(0, 2000),
         },
       }),
-      (prisma as any).wbCode.updateMany({
+      prisma.wbCode.updateMany({
         where: { code: order.wbCode },
         data: { userId: targetUser.id },
       }),
@@ -3237,7 +3238,7 @@ export async function POST(req: NextRequest) {
 
     const notified = await notifyGpWatchPing(order.user, order.id, nick, match.name, match.price).catch(() => null);
     if (notified) {
-      await (prisma as any).wbOrder.update({
+      await prisma.wbOrder.update({
         where: { id: orderId },
         data: { gpWatchNotifiedPassId: String(match.gamepassId), gpWatchLastCheckAt: new Date() },
       });

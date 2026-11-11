@@ -234,15 +234,15 @@ export async function notifyOrderCompleted(
   isDirectOrder: boolean
 ): Promise<CompletedNoticeResult> {
   const [completedCount, order, dbUser] = await Promise.all([
-    (prisma as any).wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
-    (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
-    (prisma as any).user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
+    prisma.wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
+    prisma.wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
   ]);
 
   // Код этого заказа существует как WbCode и отзыв по нему ещё не оплачен
   // (отсекает AV-/DIR-/MN- псевдокоды — отзыв на WB там невозможен).
   const codeRow = order?.wbCode
-    ? await (prisma as any).wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
+    ? await prisma.wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
     : null;
 
   // Скидка 60 ₽ на вторую прямую покупку — общая политика с ботами

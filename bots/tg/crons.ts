@@ -36,7 +36,7 @@ const REMINDER_SCHEDULE: Array<{ level: number; dayThreshold: number }> = [
 async function processReviewReminders(bot: Telegraf): Promise<void> {
   const now = Date.now();
 
-  const users = await (db as any).user.findMany({
+  const users = await db.user.findMany({
     where: { reviewBonusGrantedAt: { not: null } },
     select: {
       id:                  true,
@@ -55,7 +55,7 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
 
     // ── Expire after 30 days ──────────────────────────────────────────────
     if (daysSince >= EXPIRY_DAYS) {
-      await (db as any).user.update({
+      await db.user.update({
         where: { id: user.id },
         data: {
           balance:              { decrement: Math.min(BONUS_AMOUNT, user.balance) },
@@ -105,7 +105,7 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
         `Он автоматически добавится к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся и к покупке на WB не применяется.`;
     }
 
-    await (db as any).user.update({
+    await db.user.update({
       where: { id: user.id },
       data:  { reviewReminderLevel: newLevel },
     });
@@ -143,8 +143,7 @@ const CRITICAL_THRESHOLD = 3;
 const lastAlertLevel = new Map<number, "low" | "critical" | null>();
 
 async function checkWbCodeStock(): Promise<void> {
-  const groups: { denomination: number; _count: { _all: number } }[] =
-    await (db as any).wbCode.groupBy({
+  const groups = await db.wbCode.groupBy({
       by: ["denomination"],
       where: { status: "AVAILABLE", isTest: false },
       _count: { _all: true },
@@ -156,7 +155,7 @@ async function checkWbCodeStock(): Promise<void> {
   }
 
   // Also check denominations that have 0 available (not in groupBy result)
-  const allDenoms: { denomination: number }[] = await (db as any).wbCode.findMany({
+  const allDenoms: { denomination: number }[] = await db.wbCode.findMany({
     distinct: ["denomination"],
     where: { isTest: false },
     select: { denomination: true },
@@ -296,7 +295,7 @@ function buildReminderMsgPlain(level: number, guideUrl: string): string {
 async function processAwaitingReminders(bot: Telegraf): Promise<void> {
   const now = Date.now();
 
-  const orders = await (db as any).wbOrder.findMany({
+  const orders = await db.wbOrder.findMany({
     where: {
       status: "AWAITING_GAMEPASS",
       remindersSent: { lt: AWAITING_SCHEDULE.length },
@@ -326,7 +325,7 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
     // Клейм уровня атомарно И со статус-гардом: пока цикл шёл (последовательные
     // await), заказ мог уехать в PENDING через one-tap сайта — «создай геймпасс»
     // после оформленного заказа выглядит как бред бота (кейс 3K1X0AB 06.07).
-    const claimed = await (db as any).wbOrder.updateMany({
+    const claimed = await db.wbOrder.updateMany({
       where: { id: order.id, status: "AWAITING_GAMEPASS", remindersSent: order.remindersSent },
       data: { remindersSent: newLevel },
     });
@@ -387,7 +386,7 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
     }
 
     if (!delivered) {
-      await (db as any).wbOrder.updateMany({
+      await db.wbOrder.updateMany({
         where: { id: order.id, remindersSent: newLevel },
         data: { remindersSent: order.remindersSent },
       }).catch(() => {});
@@ -417,18 +416,18 @@ interface SweptBatchItem { orderId: string; nick: string; wbCode: string; gross:
 
 async function sweepStalePurchaseBatches(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_BATCH_MIN * 60_000);
-  const stale = await (db as any).purchaseBatch.findMany({
+  const stale = await db.purchaseBatch.findMany({
     where: { finishedAt: null, startedAt: { lt: cutoff } },
     take: 10,
   });
 
   for (const batch of stale) {
-    const items: SweptBatchItem[] = Array.isArray(batch.items) ? batch.items : [];
+    const items = (Array.isArray(batch.items) ? batch.items : []) as unknown as SweptBatchItem[];
     const okCount = items.filter((i) => i.ok).length;
     const failCount = items.length - okCount;
     const totalGross = items.filter((i) => i.ok).reduce((s, i) => s + (Number(i.gross) || 0), 0);
 
-    await (db as any).purchaseBatch.update({
+    await db.purchaseBatch.update({
       where: { id: batch.id },
       data: { finishedAt: new Date(), okCount, failCount, totalGross },
     });
@@ -468,7 +467,7 @@ async function sweepStalePurchaseBatches(): Promise<void> {
  * эталон это номинал ЧАСТИ, а не заказа.
  */
 async function watchQueuedGamepassPrices(): Promise<void> {
-  const orders = await (db as any).wbOrder.findMany({
+  const orders = await db.wbOrder.findMany({
     where: {
       isTest: false,
       status: { in: ["PENDING", "IN_PROGRESS"] },
@@ -507,7 +506,7 @@ async function watchQueuedGamepassPrices(): Promise<void> {
         : `[ЦЕНА-ИЗМЕНИЛАСЬ ${stamp}] пасс ${target.gamepassId}${scope}: ${pass.price} R$ вместо ${expected} R$ — выкупать нельзя`;
 
       note = (note ? `${note}\n${line}` : line).slice(-2000);
-      await (db as any).wbOrder.update({
+      await db.wbOrder.update({
         where: { id: order.id },
         data: { adminNote: note },
       }).catch(() => {});

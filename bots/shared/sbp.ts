@@ -22,7 +22,7 @@ let cached: Buffer | null = null;
 export async function getSbpQrBuffer(): Promise<Buffer | null> {
   if (cached) return cached;
   try {
-    const rows = (await (db as any).$queryRaw`
+    const rows = (await db.$queryRaw`
       SELECT "sbpQrBase64" FROM "GlobalSettings" WHERE id = 'global'
     `) as Array<{ sbpQrBase64: string | null }>;
     const b64 = rows?.[0]?.sbpQrBase64;

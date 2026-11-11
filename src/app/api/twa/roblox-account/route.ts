@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+  const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
   const cookie = settings?.robloxCookie;
   const cookieUpdatedAt = settings?.robloxCookieUpdatedAt ?? null;
 
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
 
     if (browser.ok && browser.session) {
       const accountName = browser.session.accountName;
-      await (prisma as any).globalSettings.upsert({
+      await prisma.globalSettings.upsert({
         where: { id: "global" },
         create: { id: "global", usdToRub: 90, robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
         update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.action === "refresh-balance") {
-    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const settings = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
     if (!cookie)
       return NextResponse.json({ error: "Cookie не задан" }, { status: 400 });

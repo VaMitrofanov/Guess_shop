@@ -102,12 +102,12 @@ vk.updates.on("group_join" as any, async (ctx: any) => {
    VK_DIALOG_LABELS=off. */
 if (process.env.VK_DIALOG_LABELS !== "off") {
   const labels = new VkDialogLabelSync(
-    { call: (method, params) => (vk.api as any).call(method, params) },
+    { call: (method, params) => vk.api.call(method, params) },
     groupId,
   );
   const tick = async () => {
     try {
-      const { dialogs, bound, unbound } = await labels.run((vkIds) => loadVkLabelSnapshots(db as any, vkIds));
+      const { dialogs, bound, unbound } = await labels.run((vkIds) => loadVkLabelSnapshots(db, vkIds));
       if (bound || unbound) console.log(`[vk-labels] диалогов ${dialogs}: +${bound} / −${unbound}`);
     } catch (err) {
       console.error("[vk-labels] tick:", err);

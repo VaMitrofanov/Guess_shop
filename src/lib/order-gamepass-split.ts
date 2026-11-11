@@ -291,7 +291,7 @@ export function splitIsComplete(parts: readonly StoredPart[]): boolean {
  * Сколько робуксов реально списано по всем купленным частям — база для
  * снимка себестоимости. У обычного заказа это одно списание, здесь — сумма.
  */
-export function splitChargedTotal(parts: readonly StoredPart[]): number {
+export function splitChargedTotal(parts: readonly Pick<StoredPart, "chargedPrice">[]): number {
   return parts.reduce((sum, p) => sum + (Number(p.chargedPrice) || 0), 0);
 }
 

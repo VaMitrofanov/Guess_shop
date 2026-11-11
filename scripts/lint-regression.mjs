@@ -110,8 +110,14 @@ import { ESLint } from "eslint";
 // строка в строку, кроме этих двух. Остальной сдвиг отпечатка — смещение строк
 // в `bots/shared/notify.ts`, `bridge.ts` и `wb-delivery-sync.ts`, куда легли
 // дедуп живой карточки и `tgDelete`.
-const BASELINE_WARNING_COUNT = 1084;
-const BASELINE_SHA256 = "2bdbbdbe009a6a094c946730699ba71458908bd22d5810b56ae0186f027b81e4";
+//
+// 2026-11-11 (1084 → 688): уборка кода (волны 1–3 ревью). Удалено ≈ 15 000 строк мёртвого
+// кода (TG-хаб, донор, Авито, Guide-сборка) и сняты 492 приведения `(db|prisma as any)` —
+// база в ботах и API теперь типизирована. Сверено полным lint-diff против начала сессии
+// (d9e6821, было 1447): новых предупреждений от изменений кода нет; дельта в правилах
+// react-hooks/* — это новые проверки eslint-config-next 16.4.6 на старом коде, а не новый код.
+const BASELINE_WARNING_COUNT = 688;
+const BASELINE_SHA256 = "ac0941d395aa2d28992ae0e55372e41f28fc64f9f7f4a2dbb5793f06350f56c4";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

@@ -59,14 +59,14 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
   if (gpWatchTickRunning.v) return;
   gpWatchTickRunning.v = true;
   try {
-    const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
+    const settings = await db.globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
     if (!settings?.gpWatchEnabled) return;
     const mode: string = settings.gpWatchNotify ?? "both";
     const pingCustomer = mode !== "admin";
     const alertAdmin   = mode !== "customer";
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const candidates = await (db as any).wbOrder.findMany({
+    const candidates = await db.wbOrder.findMany({
       where: {
         status: "AWAITING_GAMEPASS",
         isTest: false,
@@ -90,11 +90,11 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
       if (now - lastCheck < minGap) continue;
       checked++;
 
-      await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchLastCheckAt: new Date() } });
+      await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchLastCheckAt: new Date() } });
 
       const want = expectedPrice(order.amount);
       let outcome;
-      try { outcome = await searchGamepassesByNick(order.probableNick, want); }
+      try { outcome = await searchGamepassesByNick(order.probableNick!, want); }
       catch { continue; }
       if (outcome.status !== "ok" || outcome.matches.length === 0) continue;
 
@@ -103,7 +103,7 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
 
       // Claim the dedup slot before sending (no double-ping if we crash mid-send),
       // but ROLL BACK on a confirmed delivery failure so the next tick retries.
-      await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: String(pass.gamepassId) } });
+      await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: String(pass.gamepassId) } });
 
       // Исход пинга: доставлен / клиенту писать нельзя вообще / временный сбой.
       // Временный сбой — единственный повод повторить на следующем тике, и
@@ -114,7 +114,7 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
       if (pingCustomer) {
         const tgMsg =
           `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
-          `Ник: <b>${escapeHtml(order.probableNick)}</b>\n` +
+          `Ник: <b>${escapeHtml(order.probableNick!)}</b>\n` +
           `Геймпасс: <b>${escapeHtml(pass.name)}</b> · <b>${pass.robux} R$</b>\n\n` +
           `Это твой геймпасс? Подтверди — и мы сразу заберём его в выкуп 💛`;
         const kb = {
@@ -151,7 +151,7 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
         if (delivered === null) {
           // Временный сбой — освобождаем дедуп, следующий тик попробует снова.
           // Админов не будим: они узнают исход, когда он станет известен.
-          await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: null } });
+          await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: null } });
           continue;
         }
       }
@@ -163,7 +163,7 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
                                         `клиент оповещён (${String(delivered).toUpperCase()}), ждём ✅/❌`;
         await alertAdmins(
           `👁 <b>GP-watch: нашёл геймпасс по вероятному нику</b>\n` +
-          `Заказ <code>${order.wbCode}</code> · ник <b>${escapeHtml(order.probableNick)}</b>\n` +
+          `Заказ <code>${order.wbCode}</code> · ник <b>${escapeHtml(order.probableNick!)}</b>\n` +
           `«${escapeHtml(pass.name)}» · <b>${pass.robux} R$</b> (ожидалось ${want})\n` +
           `${pingLine}\n` +
           `📊 TWA: поиск <code>${order.wbCode}</code>`

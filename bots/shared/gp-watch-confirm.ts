@@ -44,7 +44,7 @@ export async function confirmGpWatch(orderId: string, actor: Actor): Promise<GpW
     const pass = outcome.matches[0];
 
     // Atomic promotion — guards against the manager attaching a gamepass first.
-    const claim = await (db as any).wbOrder.updateMany({
+    const claim = await db.wbOrder.updateMany({
       where: { id: order.id, status: "AWAITING_GAMEPASS" },
       data: {
         status: "PENDING",
@@ -88,7 +88,7 @@ export async function declineGpWatch(
     if (order.status !== "AWAITING_GAMEPASS") return null;
     const stamp = new Date().toISOString().slice(0, 10);
     const prefix = order.adminNote ? `${order.adminNote}\n` : "";
-    await (db as any).wbOrder.update({
+    await db.wbOrder.update({
       where: { id: orderId },
       data: {
         probableNick: null,

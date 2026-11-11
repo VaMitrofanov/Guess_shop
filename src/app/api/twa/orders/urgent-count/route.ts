@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   }
   // «Выкупить» + «Починить» по общим правилам (order-queue.ts). Свой SQL до
   // 20.10 считал и замороженные: значок 43 при очереди 25.
-  const rows: { count: number }[] = await (prisma as any).$queryRawUnsafe(
+  const rows: { count: number }[] = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*)::int AS count FROM "WbOrder" WHERE "isTest" = false AND ${URGENT_SQL}`,
   );
   const count = Number(rows[0]?.count ?? 0);

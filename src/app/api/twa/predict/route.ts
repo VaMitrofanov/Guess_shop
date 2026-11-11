@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const [dailyRows, funnelRows, periodRows] = await Promise.all([
-    (prisma as any).$queryRawUnsafe(`
+    prisma.$queryRawUnsafe(`
       SELECT DATE("createdAt" AT TIME ZONE 'Europe/Moscow') AS day,
              COUNT(*)::int AS orders,
              COALESCE(SUM(amount), 0)::int AS total_amount
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       GROUP BY day ORDER BY day
     `) as Promise<any[]>,
 
-    (prisma as any).$queryRawUnsafe(`
+    prisma.$queryRawUnsafe(`
       SELECT DATE_TRUNC('week', "createdAt" AT TIME ZONE 'Europe/Moscow')::date AS week,
              COUNT(*) FILTER (WHERE "robloxUsername" IS NOT NULL OR "probableNick" IS NOT NULL)::int AS nicks,
              COUNT(*) FILTER (WHERE "gamepassUrl" IS NOT NULL)::int AS gamepasses
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
       GROUP BY week ORDER BY week
     `) as Promise<any[]>,
 
-    (prisma as any).$queryRawUnsafe(`
+    prisma.$queryRawUnsafe(`
       SELECT
         COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '7 days')::int AS orders_7d,
         COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL '30 days')::int AS orders_30d,

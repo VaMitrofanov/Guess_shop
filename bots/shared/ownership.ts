@@ -27,7 +27,7 @@ async function resolveActorUserId(actor: Actor): Promise<string | null> {
   const where = actor.platform === "TG"
     ? { tgId: actor.externalId }
     : { vkId: actor.externalId };
-  const user = await (db as any).user.findUnique({ where, select: { id: true } }).catch(() => null);
+  const user = await db.user.findUnique({ where, select: { id: true } }).catch(() => null);
   return user?.id ?? null;
 }
 
@@ -45,7 +45,7 @@ export async function assertOwnsOrder<T>(
   orderId: string,
   select: Record<string, boolean>,
 ): Promise<OwnershipResult<T & { userId: string }>> {
-  const order = await (db as any).wbOrder.findUnique({
+  const order = await db.wbOrder.findUnique({
     where: { id: orderId },
     select: { ...select, userId: true },
   }).catch(() => null);
@@ -68,7 +68,7 @@ export async function assertOwnsIntent<T>(
   intentId: string,
   select: Record<string, boolean>,
 ): Promise<OwnershipResult<T & { userId: string }>> {
-  const intent = await (db as any).directIntent.findUnique({
+  const intent = await db.directIntent.findUnique({
     where: { id: intentId },
     select: { ...select, userId: true },
   }).catch(() => null);

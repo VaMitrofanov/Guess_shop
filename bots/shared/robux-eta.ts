@@ -12,6 +12,7 @@
  * Next-роутов — `src/lib/twa-notify.ts` (bots/ и src/ друг друга не импортируют).
  */
 
+import type { WbOrderStatus } from "@prisma/client";
 /** Старше этого вопрос уже не про Pending: карточку не показываем. */
 const ROBUX_ETA_LOOKBACK_DAYS = 30;
 /** Сколько заказов перечисляем в одном ответе. */
@@ -326,7 +327,7 @@ export function isRepeatEtaQuestion(key: string, now: number = Date.now()): bool
 
 /** Статусы, при которых у человека есть живой (ещё не выкупленный) заказ: тогда
  *  «где робуксы» — вопрос про этот заказ, и отвечают на него штатные ветки. */
-export const ACTIVE_ORDER_STATUSES = ["PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"];
+export const ACTIVE_ORDER_STATUSES: WbOrderStatus[] = ["PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"];
 
 /** Минимальный клиент БД для выборки (Prisma `wbOrder`). */
 export interface RobuxEtaDb {

@@ -142,7 +142,7 @@ async function fetchVdsina(): Promise<ServerProvider | null> {
 
 async function fetchNeonStats(): Promise<NeonStats | null> {
   try {
-    const result: any[] = await (prisma as any).$queryRaw`
+    const result: any[] = await prisma.$queryRaw`
       SELECT
         pg_database_size(current_database()) AS size_bytes,
         (SELECT count(*) FROM "WbOrder" WHERE "isTest" = false) AS order_count,
@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
     fetchHetzner(),
     fetchVdsina(),
     fetchNeonStats(),
-    (prisma as any).wbOrder.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
+    prisma.wbOrder.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
   ]);
 
   const lastOrderAgo = lastOrder

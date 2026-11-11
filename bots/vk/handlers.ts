@@ -165,6 +165,7 @@ import {
   BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel, orderCodePinText,
 } from "../shared/buyer-contact";
 import { vkCommunityDialogUrl, vkDialogLink } from "../shared/vk-links";
+import type { WbOrderStatus } from "@prisma/client";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -213,9 +214,9 @@ async function supportOrderHint(vkUserId: number): Promise<{ wbCode?: string; de
   let denom = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
   if (!wbCode) {
     try {
-      const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      const u = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
       if (u) {
-        const o = await (db as any).wbOrder.findFirst({
+        const o = await db.wbOrder.findFirst({
           where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
         });
         if (o) { wbCode = o.wbCode; denom = o.amount; }
@@ -300,7 +301,7 @@ async function deliverSupportIntake(
   if (photoUrl && isPendingScreenshotContext(intake?.contextKey)) {
     try {
       const order = hint.wbCode
-        ? await (db as any).wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
+        ? await db.wbOrder.findFirst({ where: { wbCode: hint.wbCode }, select: { amount: true, robloxUsername: true } })
         : null;
       ocr = await checkPendingScreenshot(photoUrl, order?.amount ?? hint.denom, order?.robloxUsername);
       said = `${said}\n\n${ocr.note}`;
@@ -477,7 +478,7 @@ async function replyVkPaymentFailure(ctx: MessageContext, intentId: string, erro
 }
 
 async function startVkBotPayment(ctx: MessageContext, vkUserId: number, intentId: string, method: BotPaymentMethod) {
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { email: true } });
+  const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { email: true } });
   const knownEmail = user?.email ?? vkReceiptEmails.get(vkUserId);
   if (knownEmail) {
     await completeVkBotPayment(ctx, vkUserId, intentId, method, knownEmail);
@@ -594,7 +595,7 @@ type RestoreOutcome = "none" | "restored" | "handled";
 
 async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<RestoreOutcome> {
   try {
-    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) return "none";
 
     // Look for AWAITING_GAMEPASS or REJECTED WB orders — mirrors TG DB recovery.
@@ -602,7 +603,7 @@ async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<
     // Limit to 30 days to avoid restoring stale orders from months ago where
     // the gamepass no longer exists.
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const recoverable = await (db as any).wbOrder.findFirst({
+    const recoverable = await db.wbOrder.findFirst({
       where:   {
         userId: user.id,
         status: { in: ["AWAITING_GAMEPASS", "REJECTED"] },
@@ -627,7 +628,7 @@ async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<
     // lookup above finds nothing. Run handleRefActivation now to catch the user up:
     // they get the full welcome with the gamepass-instruction link, and the manager
     // gets the provisional-order admin card they would have missed.
-    const orphanCandidates = await (db as any).wbCode.findMany({
+    const orphanCandidates = await db.wbCode.findMany({
       where: {
         userId:    user.id,
         status:    "CLAIMED",
@@ -638,7 +639,7 @@ async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<
       take: 5,
     });
     for (const code of orphanCandidates) {
-      const order = await (db as any).wbOrder.findUnique({ where: { wbCode: code.code } });
+      const order = await db.wbOrder.findUnique({ where: { wbCode: code.code } });
       if (!order) {
         if (ctx) {
           await handleRefActivation(ctx, vkUserId, code.code);
@@ -784,11 +785,11 @@ async function extractPhotoUrl(ctx: MessageContext): Promise<string | undefined>
  */
 async function hasPendingProofPhoto(vkUserId: number): Promise<boolean> {
   try {
-    const user = await (db as any).user.findUnique({
+    const user = await db.user.findUnique({
       where: { vkId: String(vkUserId) }, select: { id: true, reviewBonusGrantedAt: true },
     });
     if (!user) return false;
-    const pendingPay = await (db as any).wbOrder.findFirst({
+    const pendingPay = await db.wbOrder.findFirst({
       where: { userId: user.id, status: "PAYMENT_PENDING", isDirectOrder: true }, select: { id: true },
     });
     if (pendingPay) return true;
@@ -918,12 +919,12 @@ async function sendPostSubscribeContinuation(ctx: MessageContext, vkUserId: numb
     if (!st || st.type !== "AWAITING_LINK") return false;
   }
   const passPrice = Math.ceil(st.denomination / 0.7);
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true, robloxUsername: true },
   }).catch(() => null);
   const order = user
-    ? await (db as any).wbOrder.findFirst({
+    ? await db.wbOrder.findFirst({
         where: { userId: user.id, wbCode: st.wbCode },
         select: { probableNick: true, robloxUsername: true },
       }).catch(() => null)
@@ -1086,7 +1087,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (typeof msgPayload?.command === "string" && msgPayload.command.startsWith("xlink:")) {
     const parsed = parseXlinkPayload(msgPayload.command);
     if (!parsed) return;
-    const presser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    const presser = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
     if (!presser) {
       await ctx.reply("Не нашёл твой профиль — напиши нам: https://t.me/RobloxBank_PA");
       return;
@@ -1158,7 +1159,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     }
     if (!held || Date.now() - held.at > PHOTO_KIND_TTL_MS) {
-      const hu = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, balance: true, reviewBonusGrantedAt: true } }).catch(() => null);
+      const hu = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, balance: true, reviewBonusGrantedAt: true } }).catch(() => null);
       const he = hu ? await resolveReviewEligibility(hu) : null;
       if (he?.kind === "eligible") setState(vkUserId, { type: "AWAITING_REVIEW", orderId: he.orderId });
       await ctx.reply("📸 Пришли скриншот отзыва ещё раз — фотографией, не файлом.");
@@ -1211,16 +1212,16 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     // Ф6.2: when_rbx персонализируется датой разблокировки последнего заказа.
     let whenRbxExtra = "";
     try {
-      const faqUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      const faqUser = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
       const lastDone = faqUser
-        ? await (db as any).wbOrder.findFirst({
+        ? await db.wbOrder.findFirst({
             where: { userId: faqUser.id, status: "COMPLETED", completedAt: { not: null } },
             orderBy: { completedAt: "desc" },
             select: { amount: true, completedAt: true },
           })
         : null;
       if (lastDone) {
-        whenRbxExtra = `\n📌 Твой заказ на ${lastDone.amount} R$ выкуплен ${fmtDateRu(new Date(lastDone.completedAt))} — робуксы в Pending у Roblox.`;
+        whenRbxExtra = `\n📌 Твой заказ на ${lastDone.amount} R$ выкуплен ${fmtDateRu(new Date(lastDone.completedAt!))} — робуксы в Pending у Roblox.`;
       }
     } catch { /* персонализация — не повод ронять FAQ */ }
 
@@ -1246,7 +1247,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   // ── 📸 review_hint — клиент тапнул «Отзыв → бонус к покупке» на COMPLETED ──
   if (msgPayload?.command === "review_hint") {
-    const rhUser = await (db as any).user.findUnique({
+    const rhUser = await db.user.findUnique({
       where: { vkId: String(vkUserId) },
       select: { id: true, balance: true, reviewBonusGrantedAt: true },
     }).catch(() => null);
@@ -1318,9 +1319,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // "resubmit" button from /status REJECTED keyboard
   if (msgPayload?.command === "resubmit" && msgPayload?.code) {
     const resubCode = String(msgPayload.code).toUpperCase();
-    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     if (user) {
-      const order = await (db as any).wbOrder.findFirst({ where: { wbCode: resubCode, userId: user.id } });
+      const order = await db.wbOrder.findFirst({ where: { wbCode: resubCode, userId: user.id } });
       if (order && (order.status === "REJECTED" || order.status === "AWAITING_GAMEPASS")) {
         setState(vkUserId, { type: "AWAITING_LINK", wbCode: resubCode, denomination: order.amount });
         const passPrice = Math.ceil(order.amount / 0.7);
@@ -1551,7 +1552,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const startGuideUrl = isDirect
         ? `https://robloxbank.ru/guide?source=direct`
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
-      const awUserData = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { robloxUsername: true } });
+      const awUserData = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { robloxUsername: true } });
       const awNick = awUserData?.robloxUsername;
       const awNickLine = awNick ? `\n🎮 Ник: ${awNick}` : "";
       const awKb = Keyboard.builder()
@@ -1593,7 +1594,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`;
       // One-tap: gamepass already picked on the website → offer confirm.
       if (await vkOfferPreselectedGamepass(ctx, restoredState.wbCode, passPrice, restoredGuideUrl)) return;
-      const resUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { robloxUsername: true } });
+      const resUser = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { robloxUsername: true } });
       const resNick = resUser?.robloxUsername;
       const resNickLine = resNick ? `\n🎮 Ник: ${resNick}` : "";
       const resKb = Keyboard.builder()
@@ -1682,7 +1683,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
   // «📋 Все паки» — полный каталог (PLAN +5.C)
   if (msgPayload?.command === "direct_catalog") {
-    const cu = await (db as any).user.findUnique({
+    const cu = await db.user.findUnique({
       where: { vkId: String(vkUserId) },
       select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
     }).catch(() => null);
@@ -1844,7 +1845,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
     const intent = owned.entity;
     if (intent.status !== "PENDING") { await ctx.reply("Заявка уже обработана."); return; }
-    await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+    await db.directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
     const kb = Keyboard.builder();
     kb.textButton({ label: "💎 Заказать снова", payload: { command: "start_direct" }, color: "positive" });
     await ctx.reply({ message: "❌ Заявка отменена.", keyboard: kb.inline() });
@@ -1860,7 +1861,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
   if (msgPayload?.command === "user_cancel_direct" && msgPayload?.orderId) {
     const ucdOrderId = String(msgPayload.orderId);
-    const ucdOrder = await (db as any).wbOrder.findUnique({
+    const ucdOrder = await db.wbOrder.findUnique({
       where: { id: ucdOrderId },
       include: { user: { select: { id: true, vkId: true, balance: true } } },
     });
@@ -1876,11 +1877,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const updateData: any = {};
     const baseAmount = ucdOrder.amount;
     // Restore bonus if any was applied (amount > pack denomination)
-    const dirCodeRec = await (db as any).wbCode.findFirst({ where: { code: ucdOrder.wbCode } });
+    const dirCodeRec = await db.wbCode.findFirst({ where: { code: ucdOrder.wbCode } });
     const bonusApplied = dirCodeRec ? baseAmount - dirCodeRec.denomination : 0;
     if (bonusApplied > 0) updateData.balance = (ucdOrder.user.balance ?? 0) + bonusApplied;
 
-    await (db as any).$transaction(async (tx: any) => {
+    await db.$transaction(async (tx: any) => {
       await tx.wbOrder.update({
         where: { id: ucdOrderId },
         data: { status: "REJECTED", rejectionReason: "Отменён покупателем" },
@@ -1957,7 +1958,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
   if (msgPayload?.command === "orders_list") {
-    const listUser = await (db as any).user.findUnique({
+    const listUser = await db.user.findUnique({
       where: { vkId: String(vkUserId) },
       select: { id: true },
     });
@@ -2123,18 +2124,18 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await ctx.reply(`❌ Пользователь ${nick} не найден на Roblox. Проверь написание.`);
       return;
     }
-    await (db as any).user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
+    await db.user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
     await ctx.reply(`✅ Ник сохранён: ${nick}`);
     return;
   }
 
   // ── Direct order payment screenshot (BEFORE review routing) ───────────────
   if (messageHasPhoto(ctx) || state?.type === "AWAITING_DIRECT_PAYMENT") {
-    const photoUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    const photoUser = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     if (photoUser) {
       const payOrder = state?.type === "AWAITING_DIRECT_PAYMENT"
-        ? await (db as any).wbOrder.findUnique({ where: { id: state.orderId } })
-        : await (db as any).wbOrder.findFirst({
+        ? await db.wbOrder.findUnique({ where: { id: state.orderId } })
+        : await db.wbOrder.findFirst({
             where: {
               userId: photoUser.id,
               status: "PAYMENT_PENDING",
@@ -2206,7 +2207,7 @@ async function sweepStaleVkOrderState(
 ): Promise<"valid" | "cleared" | "replied"> {
   let order: any = null;
   try {
-    order = await (db as any).wbOrder.findFirst({
+    order = await db.wbOrder.findFirst({
       where: { wbCode },
       select: { status: true, wbCode: true },
     });
@@ -2220,7 +2221,7 @@ async function sweepStaleVkOrderState(
 
   // Валидный существующий WB-код не глотаем — пусть активируется штатно.
   if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
-    const codeExists = await (db as any).wbCode.findFirst({
+    const codeExists = await db.wbCode.findFirst({
       where: { code: { equals: text.toUpperCase(), mode: "insensitive" } },
       select: { id: true },
     }).catch(() => null);
@@ -2277,7 +2278,7 @@ async function vkOfferPreselectedGamepass(
 ): Promise<boolean> {
   try {
     if (!code) return false;
-    const wbCode = await (db as any).wbCode.findFirst({
+    const wbCode = await db.wbCode.findFirst({
       where: { code: { equals: code, mode: "insensitive" } },
       select: { selectedGamepassId: true },
     });
@@ -2285,7 +2286,7 @@ async function vkOfferPreselectedGamepass(
     if (!/^\d{3,15}$/.test(gpId)) return false;
 
     // Case 1 — order already placed from the site.
-    const order = await (db as any).wbOrder.findFirst({
+    const order = await db.wbOrder.findFirst({
       where: { wbCode: { equals: code, mode: "insensitive" } },
       select: { id: true, status: true },
     });
@@ -2414,7 +2415,7 @@ async function settleForeignCodeClaimVk(
   claimantName: string,
 ): Promise<"proceed" | "handled"> {
   const vkId = String(vkUserId);
-  const claimant = await (db as any).user.findUnique({ where: { vkId }, select: { id: true, name: true } });
+  const claimant = await db.user.findUnique({ where: { vkId }, select: { id: true, name: true } });
   const verdict = await resolveCodeClaim(db as any, {
     code,
     claimantUserId: claimant?.id ?? null,
@@ -2437,7 +2438,7 @@ async function settleForeignCodeClaimVk(
   }
 
   if (verdict.kind === "ask_owner") {
-    const claimantUser = claimant ?? await (db as any).user.create({ data: { vkId, name: claimantName || null } });
+    const claimantUser = claimant ?? await db.user.create({ data: { vkId, name: claimantName || null } });
     await askCodeOwnerFromVk(verdict.owner, code, claimantUser.id, claimantLabel).catch((error) =>
       console.warn("[VK] xlink: владельцу не ушло:", error?.message ?? error));
     await ctx.reply(stripHtml(xlinkWaitingText()));
@@ -2498,7 +2499,7 @@ async function handleRefActivation(
   const code = isGuideMode ? rawCode.substring(2) : rawCode;
 
   // Case-insensitive code lookup
-  const wbCode = await (db as any).wbCode.findFirst({
+  const wbCode = await db.wbCode.findFirst({
     where: { code: { equals: code, mode: "insensitive" } },
   });
   if (!wbCode) {
@@ -2518,7 +2519,7 @@ async function handleRefActivation(
     // materialised it from the website one-tap), greet with the order status
     // instead of the "уже активирован" dead-end.
     const greetOwnerIfPlaced = async (ownerId: string): Promise<boolean> => {
-      const placedOrder = await (db as any).wbOrder.findFirst({
+      const placedOrder = await db.wbOrder.findFirst({
         where: { userId: ownerId, wbCode: { equals: code, mode: "insensitive" } },
         orderBy: { createdAt: "desc" },
         select: { id: true, status: true },
@@ -2541,7 +2542,7 @@ async function handleRefActivation(
       return true;
     };
 
-    const owner = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    const owner = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
     let justLinked = false;
     if (owner && owner.id === wbCode.userId) {
       if (await greetOwnerIfPlaced(owner.id)) return;
@@ -2550,7 +2551,7 @@ async function handleRefActivation(
       const claimantName = await vkGetName(vkUserId);
       if (await settleForeignCodeClaimVk(ctx, vkUserId, wbCode.code, wbCode.denomination, claimantName) === "handled") return;
       justLinked = true;
-      const linked = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      const linked = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
       if (linked && await greetOwnerIfPlaced(linked.id)) return;
     }
     // Зеркало TG: после «нашёл твой заказ» фраза «код уже активирован» читается
@@ -2575,16 +2576,16 @@ async function handleRefActivation(
   const fullName = await vkGetName(vkUserId);
 
   // Lazy registration — always persist the real name
-  let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  let user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
   /** Покупателя завели прямо сейчас — строка «новый клиент» в карточке DBS. */
   let userIsNew = false;
   if (!user) {
     userIsNew = true;
-    user = await (db as any).user.create({
+    user = await db.user.create({
       data: { vkId: String(vkUserId), name: fullName },
     });
   } else if (!user.name || user.name.startsWith("VK #")) {
-    user = await (db as any).user.update({
+    user = await db.user.update({
       where: { vkId: String(vkUserId) },
       data:  { name: fullName },
     });
@@ -2593,7 +2594,7 @@ async function handleRefActivation(
   // Код числится за другим профилем — Б1 решает, тупик это или вторая площадка.
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
     if (await settleForeignCodeClaimVk(ctx, vkUserId, wbCode.code, wbCode.denomination, fullName) === "handled") return;
-    user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) return;
   }
 
@@ -2613,7 +2614,7 @@ async function handleRefActivation(
   /** Заказ существовал и висел на служебном аккаунте — мы его перевесили. */
   let adoptedExistingOrder = false;
   try {
-    await (db as any).$transaction(async (tx: any) => {
+    await db.$transaction(async (tx: any) => {
       const existingOrder = await tx.wbOrder.findUnique({
         where: { wbCode: wbCode.code },
         include: { user: { select: { tgId: true } } },
@@ -2995,7 +2996,7 @@ async function handleGamepassLink(
 
   const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
     await showResult("Ошибка сессии. Напиши нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
     clearState(vkUserId);
@@ -3018,7 +3019,7 @@ async function handleGamepassLink(
   let duplicateSubmission = false;
   let replacedGamepassUrl: string | null = null;
   try {
-    const txResult = await (db as any).$transaction(async (tx: any) => {
+    const txResult = await db.$transaction(async (tx: any) => {
       const claimed = await tx.wbCode.updateMany({
         where: {
           code: { equals: wbCode, mode: "insensitive" },
@@ -3167,7 +3168,7 @@ async function handleGamepassLink(
   }
 
   if (validatedCreator) {
-    try { await (db as any).user.update({ where: { vkId: String(vkUserId) }, data: { robloxUsername: validatedCreator } }); } catch {}
+    try { await db.user.update({ where: { vkId: String(vkUserId) }, data: { robloxUsername: validatedCreator } }); } catch {}
   }
 
   // Аудит присланного геймпасса — зеркало TG, см. `bots/shared/order-audit.ts`.
@@ -3222,7 +3223,7 @@ async function handleGamepassLink(
   const vkName = user.name ?? await vkGetName(vkUserId);
 
   // Пасс создан нашим ботом по ключу покупателя? Спрашиваем события заказа.
-  const autoCreatedCount = await (db as any).orderEvent.count({
+  const autoCreatedCount = await db.orderEvent.count({
     where: { orderId: order.id, type: ORDER_AUDIT_TYPE.GAMEPASS_AUTOCREATED },
   }).catch(() => 0);
 
@@ -3230,7 +3231,7 @@ async function handleGamepassLink(
   // is only ever written by /api/wb-code/select-gamepass. Non-fatal extra read.
   let viaWebOneTap = false;
   try {
-    const codeRow = await (db as any).wbCode.findFirst({
+    const codeRow = await db.wbCode.findFirst({
       where: { code: { equals: wbCode, mode: "insensitive" } },
       select: { selectedGamepassId: true },
     });
@@ -3326,7 +3327,7 @@ async function handleSendGpLink(ctx: MessageContext, vkUserId: number): Promise<
 
 /** "🔎 Найти по моему нику" tap — set state and ask for the nick. */
 async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true },
   });
@@ -3363,7 +3364,7 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
 }
 
 async function handleFindGpSaved(ctx: MessageContext, vkUserId: number): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true, robloxUsername: true },
   });
@@ -3397,7 +3398,7 @@ async function handleFindGpSaved(ctx: MessageContext, vkUserId: number): Promise
  * нет — фолбэк на обычный ввод.
  */
 async function handleFindGpRecheck(ctx: MessageContext, vkUserId: number): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true, robloxUsername: true },
   });
@@ -3435,7 +3436,7 @@ async function handleFindGpRecheck(ctx: MessageContext, vkUserId: number): Promi
  * orders are excluded — only WB orders re-route through the nick search.
  */
 async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true },
   });
@@ -3713,7 +3714,7 @@ async function handleQuestConfirm(ctx: MessageContext, vkUserId: number): Promis
 
 /** Id нашего пользователя по VK-аккаунту — нужен, чтобы взять ЕГО ключ. */
 async function vkDbUserId(vkUserId: number): Promise<string | null> {
-  const user = await (db as any).user
+  const user = await db.user
     .findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } })
     .catch(() => null);
   return user?.id ?? null;
@@ -4117,7 +4118,7 @@ async function handleGpPick(
     await ctx.reply("⚠️ Не удалось распознать геймпасс.");
     return;
   }
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true },
   });
@@ -4149,12 +4150,12 @@ async function handleGpPick(
 /** Покупатель выбрал, с каким из своих заказов работает. Выбор ложится в стейт,
  * и дальше ник и геймпасс уходят именно в него. */
 async function handleOrderPick(ctx: MessageContext, vkUserId: number, code: string): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true },
   });
   const order = user
-    ? await (db as any).wbOrder.findFirst({
+    ? await db.wbOrder.findFirst({
         where: { userId: user.id, wbCode: code, status: { in: VK_ACTIVE_STATUSES } },
       })
     : null;
@@ -4203,7 +4204,7 @@ async function corridorHoldShown(
   opts?: { force?: boolean },
 ): Promise<boolean> {
   if (opts?.force || corridorOverride.taken(vkUserId)) return false;
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+  const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
   if (!user?.id) return false;
   const held = await findUnfinishedCorridorOrder(db as unknown as CorridorGuardClient, user.id);
   if (!held) return false;
@@ -4234,7 +4235,7 @@ async function handleStartDirect(
     }
   }
 
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true, robloxUsername: true },
   });
@@ -4247,7 +4248,7 @@ async function handleStartDirect(
 
   let lastOrderAmount: number | undefined;
   if (user?.id) {
-    const lastOrder = await (db as any).wbOrder.findFirst({
+    const lastOrder = await db.wbOrder.findFirst({
       where: { userId: user.id, status: "COMPLETED", isDirectOrder: true },
       orderBy: { createdAt: "desc" },
       select: { amount: true },
@@ -4289,7 +4290,7 @@ async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, te
 }
 
 async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amount: number): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) },
     select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
   });
@@ -4366,7 +4367,7 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number, skipBo
 }
 
 async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: { amount: number; totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number; hasBonusStep: boolean }): Promise<void> {
-  const user = await (db as any).user.findUnique({
+  const user = await db.user.findUnique({
     where: { vkId: String(vkUserId) }, select: { robloxUsername: true },
   });
   const savedNick = user?.robloxUsername;
@@ -4642,7 +4643,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
 
   if (result.status !== "user_not_found") {
     // Nick confirmed by Roblox (userId resolved) — only now persist it.
-    await (db as any).user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
+    await db.user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
   }
 
   if (result.status === "user_not_found") {
@@ -4829,7 +4830,7 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
   }
   heldGameKeys.drop(vkUserId);
 
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+  const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
   await rememberRobloxApiKey(db as any, {
     key,
     robloxUsername: st.robloxUsername,
@@ -4934,14 +4935,14 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   clearState(vkUserId);
   const recipient = accepted.recipient ?? state.robloxUsername;
 
-  let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  let user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
     const name = await vkGetName(vkUserId);
-    user = await (db as any).user.create({ data: { vkId: String(vkUserId), name } });
+    user = await db.user.create({ data: { vkId: String(vkUserId), name } });
   }
 
   // Guard: one active intent at a time
-  const existingIntent = await (db as any).directIntent.findFirst({
+  const existingIntent = await db.directIntent.findFirst({
     where: { userId: user.id, status: "PENDING" },
   });
   if (existingIntent) {
@@ -4951,7 +4952,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     });
     return;
   }
-  const existingOrder = await (db as any).wbOrder.findFirst({
+  const existingOrder = await db.wbOrder.findFirst({
     where: { userId: user.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
   });
   if (existingOrder) {
@@ -4964,7 +4965,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
 
   let intent: any;
   try {
-    intent = await (db as any).directIntent.create({
+    intent = await db.directIntent.create({
       data: {
         userId:        user.id,
         amount:        state.amount,
@@ -5102,7 +5103,7 @@ async function handleReviewScreenshot(
     return;
   }
 
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
     console.log(`[VK] handleReviewScreenshot: user not found for vkId=${vkUserId} — notifying admins`);
     await ctx.reply(
@@ -5186,20 +5187,20 @@ async function handleReviewScreenshot(
 // C — Idle: status check or help
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VK_ACTIVE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+const VK_ACTIVE_STATUSES: WbOrderStatus[] = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
 
 async function findRelevantOrder(userId: string): Promise<any | null> {
-  const active = await (db as any).wbOrder.findFirst({
+  const active = await db.wbOrder.findFirst({
     where: { userId, status: { in: VK_ACTIVE_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
   if (active) return active;
-  const completed = await (db as any).wbOrder.findFirst({
+  const completed = await db.wbOrder.findFirst({
     where: { userId, status: "COMPLETED" },
     orderBy: { createdAt: "desc" },
   });
   if (completed) return completed;
-  return (db as any).wbOrder.findFirst({
+  return db.wbOrder.findFirst({
     where: { userId },
     orderBy: { createdAt: "desc" },
   });
@@ -5216,7 +5217,7 @@ const VK_STATUS_LABEL: Record<string, string> = {
 };
 
 // Statuses where the user may still re-pick their nick / gamepass (not yet bought).
-const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
+const VK_CHANGEABLE_ORDER_STATUSES: WbOrderStatus[] = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
 /** Зеркало TG. Клавиатура VK жёстче (≤10 кнопок, ≤6 рядов), поэтому список
  * короче: четыре заказа + «Моё меню» укладываются с запасом. */
@@ -5225,7 +5226,7 @@ const VK_ORDER_PICKER_LIMIT = 4;
 /** Все живые заказы покупателя, свежие сверху. Одна покупка WB может содержать
  * несколько наших карточек — по карточке на получателя. */
 async function findActiveOrders(userId: string): Promise<any[]> {
-  return (db as any).wbOrder.findMany({
+  return db.wbOrder.findMany({
     where: { userId, status: { in: VK_ACTIVE_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
@@ -5248,7 +5249,7 @@ async function resolveWorkingOrder(
   userId: string,
   opts: { wbOnly?: boolean } = {},
 ): Promise<{ order: any } | { choose: any[] } | null> {
-  const orders = await (db as any).wbOrder.findMany({
+  const orders = await db.wbOrder.findMany({
     where: {
       userId,
       status: { in: VK_CHANGEABLE_ORDER_STATUSES },
@@ -5314,9 +5315,9 @@ const vkRobuxEtaDb = db as unknown as RobuxEtaDb;
 /** Живой невыкупленный заказ человека (свежий) — или `null`. */
 async function vkActiveOrderId(vkUserId: number): Promise<string | null> {
   try {
-    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
     if (!user) return null;
-    const order = await (db as any).wbOrder.findFirst({
+    const order = await db.wbOrder.findFirst({
       where: { userId: user.id, status: { in: ACTIVE_ORDER_STATUSES } },
       orderBy: { createdAt: "desc" },
       select: { id: true },
@@ -5334,7 +5335,7 @@ async function vkHasActiveOrder(vkUserId: number): Promise<boolean> {
 /** Заказ для самопроверки «Робуксов нет»: сумма, аккаунт, код. */
 async function selfCheckContextVk(vkUserId: number): Promise<SelfCheckContext & { wbCode?: string | null }> {
   try {
-    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
     if (!user) return {};
     const orders = await loadRobuxEtaOrders(vkRobuxEtaDb, user.id);
     const target = orders ? selfCheckTarget(orders) : null;
@@ -5349,7 +5350,7 @@ async function selfCheckContextVk(vkUserId: number): Promise<SelfCheckContext & 
  * `false` — таймер не к месту, сообщение идёт дальше штатно.
  */
 async function replyVkRobuxEta(ctx: MessageContext, vkUserId: number, opts: { forceFull?: boolean } = {}): Promise<boolean> {
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } }).catch(() => null);
+  const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } }).catch(() => null);
   if (!user) return false;
   const orders = await loadRobuxEtaOrders(vkRobuxEtaDb, user.id).catch(() => null);
   if (!orders) return false;
@@ -5382,15 +5383,15 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
   let lastCompleted: any = null;
   let status = { isReturning: false, orderCount: 0 };
   try {
-    user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     status = await getCustomerStatus(String(vkUserId), "VK");
     if (user) {
-      activeOrders = await (db as any).wbOrder.findMany({
+      activeOrders = await db.wbOrder.findMany({
         where: { userId: user.id, status: { in: VK_ACTIVE_STATUSES } },
         orderBy: { createdAt: "desc" },
         take: 5,
       });
-      lastCompleted = await (db as any).wbOrder.findFirst({
+      lastCompleted = await db.wbOrder.findFirst({
         where: { userId: user.id, status: "COMPLETED" },
         orderBy: { completedAt: "desc" },
       });
@@ -5542,7 +5543,7 @@ async function handleIdleMessage(
   const trimmedIdle = text.trim();
   const looksLikeWbCode = /^[A-Za-z0-9]{7}$/.test(trimmedIdle) && /[A-Za-z]/.test(trimmedIdle);
   if (looksLikeWbCode) {
-    const preGateCode = await (db as any).wbCode.findFirst({
+    const preGateCode = await db.wbCode.findFirst({
       where: { code: { equals: trimmedIdle.toUpperCase(), mode: "insensitive" } },
       select: { id: true },
     }).catch(() => null);
@@ -5624,9 +5625,9 @@ async function handleIdleMessage(
   // the client with a «рады видеть снова, покупай напрямую» upsell instead.
   let hasLiveOrder = false;
   try {
-    const liveU = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    const liveU = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
     if (liveU) {
-      const liveOrder = await (db as any).wbOrder.findFirst({
+      const liveOrder = await db.wbOrder.findFirst({
         where: { userId: liveU.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS"] } },
         select: { id: true },
       });
@@ -5636,7 +5637,7 @@ async function handleIdleMessage(
 
   // "статус" keyword (also triggered via payload routing in handleMessage) → show last order in rich format
   if (lower.includes("статус") || lower.includes("заявк") || lower.includes("заказ") || hasLiveOrder) {
-    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
       await ctx.reply(
         "У тебя пока нет заявок.\n\n" +
@@ -5683,7 +5684,7 @@ async function handleIdleMessage(
     let reviewClaimed = true;
     if (order.status === "COMPLETED") {
       try {
-        const wbCodeRec = await (db as any).wbCode.findFirst({ where: { code: order.wbCode } });
+        const wbCodeRec = await db.wbCode.findFirst({ where: { code: order.wbCode } });
         reviewClaimed = wbCodeRec?.reviewBonusClaimed ?? true;
       } catch {}
     }

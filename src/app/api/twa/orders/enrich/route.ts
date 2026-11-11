@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   /* 🧭 События пути покупателя (28.10.2026) — параллельно с заказами, тем же
      заходом в базу: лента TWA грузится облегчённой, путь приезжает здесь. */
   const [orders, journeyRows] = await Promise.all([
-    (prisma as any).wbOrder.findMany({
+    prisma.wbOrder.findMany({
       where: { id: { in: ids } },
       select: {
         id: true, userId: true, status: true, isDirectOrder: true,

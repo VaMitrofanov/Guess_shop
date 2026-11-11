@@ -44,7 +44,7 @@ describe("прямой заказ: источник и признак меняю
     const edits = src.match(/data\.orderSource = src;[\s\S]{0,600}/g) ?? [];
     expect(edits.length).toBeGreaterThan(0);
     for (const block of edits) expect(block).toContain("directPatchForSource");
-    expect(src).toMatch(/orderSource: src,\s*\.\.\.directPatchForSource/);
+    expect(src).toMatch(/orderSource: src(?: as OrderSource)?,\s*\.\.\.directPatchForSource/);
   });
 });
 

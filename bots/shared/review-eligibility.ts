@@ -10,12 +10,14 @@
  * already_granted (бонус уже на балансе — подсказываем, как потратить),
  * active_order (заказ ещё в работе — скрин после выкупа), none.
  */
+
+import type { WbOrderStatus } from "@prisma/client";
 import { db } from "./db";
 
 export const REVIEW_BONUS_AMOUNT = 100;
 export const REVIEW_BONUS_EXPIRY_DAYS = 30;
 
-const ACTIVE_ORDER_STATUSES = [
+const ACTIVE_ORDER_STATUSES: WbOrderStatus[] = [
   "AWAITING_PAYMENT",
   "PAYMENT_PENDING",
   "AWAITING_GAMEPASS",
@@ -34,7 +36,7 @@ export async function resolveReviewEligibility(user: {
   balance?: number | null;
   reviewBonusGrantedAt?: Date | string | null;
 }): Promise<ReviewEligibility> {
-  const codes = await (db as any).wbCode.findMany({
+  const codes = await db.wbCode.findMany({
     where: { userId: user.id },
     select: { code: true },
   });
@@ -45,7 +47,7 @@ export async function resolveReviewEligibility(user: {
     ],
   };
 
-  const completed = await (db as any).wbOrder.findMany({
+  const completed = await db.wbOrder.findMany({
     where: { ...orderWhere, status: "COMPLETED" },
     orderBy: { updatedAt: "desc" },
     select: { id: true, wbCode: true },
@@ -59,7 +61,7 @@ export async function resolveReviewEligibility(user: {
       // DIR-заказы без WbCode-ряда — гейт по user.reviewBonusGrantedAt.
       if (!grantedAt) return { kind: "eligible", orderId: order.id as string };
     } else {
-      const linked = await (db as any).wbCode.findFirst({
+      const linked = await db.wbCode.findFirst({
         where: { code: order.wbCode, reviewBonusClaimed: false },
         select: { code: true },
       });
@@ -78,7 +80,7 @@ export async function resolveReviewEligibility(user: {
     };
   }
 
-  const active = await (db as any).wbOrder.findFirst({
+  const active = await db.wbOrder.findFirst({
     where: { ...orderWhere, status: { in: ACTIVE_ORDER_STATUSES } },
     orderBy: { createdAt: "desc" },
     select: { status: true, wbCode: true },

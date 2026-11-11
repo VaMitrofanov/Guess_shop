@@ -7,7 +7,7 @@ import { TEST_CODES, testPassPrice, resetTestCodes } from "@/lib/test-codes";
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rows = await (prisma as any).wbCode.findMany({
+  const rows = await prisma.wbCode.findMany({
     where:  { code: { in: TEST_CODES.map((c) => c.code) } },
     select: { code: true, status: true, isUsed: true, reservedUntil: true },
   });

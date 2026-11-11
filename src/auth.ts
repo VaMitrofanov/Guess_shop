@@ -245,7 +245,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           let wbCodeClaimedByOther = false;
           if (wbCode && wbCode.length === 7) {
             try {
-              wbCodeRecord = await (prisma as any).wbCode.findUnique({ where: { code: wbCode } });
+              wbCodeRecord = await prisma.wbCode.findUnique({ where: { code: wbCode } });
               if (wbCodeRecord && isRevokedCode(wbCodeRecord)) {
                 /* Заказ на WB отменён, деньги вернулись — код не открывает
                    ничего. Привязать его к человеку значило бы завести заказ,
@@ -259,7 +259,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 } else if (wbCodeRecord.userId) {
                   wbCodeClaimedByOther = true;
                 } else {
-                  await (prisma as any).wbCode.update({
+                  await prisma.wbCode.update({
                     where: { code: wbCode, status: { not: "CLAIMED" } },
                     data: { userId: user.id, status: "CLAIMED", isUsed: false },
                   });
@@ -271,7 +271,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                  гонка могла быть выиграна и нами самими. Спрашиваем базу, кто
                  победил, и решаем по владельцу, а не по факту исключения. */
               if (linkErr?.code === "P2025") {
-                const winner = await (prisma as any).wbCode
+                const winner = await prisma.wbCode
                   .findUnique({ where: { code: wbCode }, select: { userId: true } })
                   .catch(() => null);
                 wbCodeClaimedByOther = Boolean(winner?.userId && winner.userId !== user.id);

@@ -56,19 +56,19 @@ export async function computeEnrichment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [clusterOrders, codeRecords, firstOrderRows]: [any[], any[], any[]] = await Promise.all([
     clusterOrClauses.length > 0
-      ? (prisma as any).wbOrder.findMany({
+      ? prisma.wbOrder.findMany({
           where: { OR: clusterOrClauses },
           select: { createdAt: true, robloxUsername: true, user: { select: { tgId: true, vkId: true } } },
         })
       : Promise.resolve([]),
     completedWbOrders.length > 0
-      ? (prisma as any).wbCode.findMany({
+      ? prisma.wbCode.findMany({
           where: { code: { in: wbCodeValues } },
           select: { code: true, reviewBonusClaimed: true },
         })
       : Promise.resolve([]),
     completedWbOrders.length > 0
-      ? (prisma as any).wbOrder.groupBy({
+      ? prisma.wbOrder.groupBy({
           by: ["userId"],
           where: { userId: { in: uniqueUserIds }, status: "COMPLETED", isDirectOrder: false },
           _min: { createdAt: true },

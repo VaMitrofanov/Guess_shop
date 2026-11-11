@@ -32,7 +32,7 @@ export async function noteProbableNickByCode(wbCode: string, rawNick: string, so
   });
 
   try {
-    const order = await (prisma as any).wbOrder.findFirst({
+    const order = await prisma.wbOrder.findFirst({
       where: { wbCode: { equals: code, mode: "insensitive" }, status: { not: "COMPLETED" } },
       select: { id: true, robloxUsername: true, adminNote: true },
     });
@@ -43,7 +43,7 @@ export async function noteProbableNickByCode(wbCode: string, rawNick: string, so
 
     const stamp = new Date().toISOString().slice(0, 10);
     const prefix = order.adminNote ? `${order.adminNote}\n` : "";
-    await (prisma as any).wbOrder.update({
+    await prisma.wbOrder.update({
       where: { id: order.id },
       data: {
         adminNote: `${prefix}[НИК? ${stamp}] ${nick} (${source})`.slice(0, 2000),

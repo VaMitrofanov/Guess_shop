@@ -147,14 +147,14 @@ export async function GET(req: NextRequest) {
   // Лёгкий режим ?events=1 — только история сливов (для «Истории покупок»),
   // без походов в Roblox.
   if (new URL(req.url).searchParams.get("events")) {
-    const events = await (prisma as any).drainEvent.findMany({
+    const events = await prisma.drainEvent.findMany({
       orderBy: { createdAt: "desc" },
       take: 200,
     }).catch(() => []);
     return NextResponse.json({ events });
   }
 
-  const s = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+  const s = await prisma.globalSettings.findUnique({ where: { id: "global" } });
 
   const drainCookie = s?.drainCookie as string | undefined;
   const donorCookie = s?.robloxCookie as string | undefined;
@@ -226,7 +226,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Cookie невалиден или истёк" }, { status: 400 });
 
     const accountName = user.name ?? user.displayName ?? "Unknown";
-    await (prisma as any).globalSettings.upsert({
+    await prisma.globalSettings.upsert({
       where: { id: "global" },
       create: { id: "global", usdToRub: 90, drainCookie: raw, drainCookieUpdatedAt: new Date(), drainAccountName: accountName },
       update: { drainCookie: raw, drainCookieUpdatedAt: new Date(), drainAccountName: accountName },
@@ -246,7 +246,7 @@ export async function POST(req: NextRequest) {
     if (!info?.ProductId)
       return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
 
-    await (prisma as any).globalSettings.upsert({
+    await prisma.globalSettings.upsert({
       where: { id: "global" },
       create: { id: "global", usdToRub: 90, drainGamepassId: gpId },
       update: { drainGamepassId: gpId },
@@ -265,7 +265,7 @@ export async function POST(req: NextRequest) {
 
   // ── Execute the drain ──────────────────────────────────────────────────────
   if (body.action === "drain") {
-    const s = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const s = await prisma.globalSettings.findUnique({ where: { id: "global" } });
     const donorCookie = s?.robloxCookie as string | undefined;
     const drainCookie = s?.drainCookie as string | undefined;
     const gpId = s?.drainGamepassId as string | undefined;
@@ -327,7 +327,7 @@ export async function POST(req: NextRequest) {
 
     if (purchase.success) {
       // Учёт в истории (PLAN +5.G.2): раньше успешный слив нигде не записывался.
-      await (prisma as any).drainEvent.create({
+      await prisma.drainEvent.create({
         data: {
           donorName: s?.robloxAccountName ?? null,
           drainName: s?.drainAccountName ?? null,
@@ -338,7 +338,7 @@ export async function POST(req: NextRequest) {
       }).catch((e: any) => console.warn("[drain] DrainEvent write failed:", e?.message ?? e));
       // П7: слив состоялся — сброс дедупа алерта «💧 пора сливать» у автовыкупа,
       // чтобы после пополнения донора цикл начался чисто.
-      await (prisma as any).globalSettings.update({
+      await prisma.globalSettings.update({
         where: { id: "global" }, data: { autoBuyoutBelowSince: null },
       }).catch((e: any) => console.warn("[drain] belowSince reset failed:", e?.message ?? e));
       return NextResponse.json({

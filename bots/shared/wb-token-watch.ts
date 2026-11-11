@@ -87,7 +87,7 @@ export async function runWbTokenWatch(send: (html: string) => Promise<void>, now
     ["WB_API_TOKEN", process.env.WB_API_TOKEN],
     ["WB_CHAT_TOKEN", process.env.WB_CHAT_TOKEN],
   ];
-  const cursor = await (db as any).wbSyncCursor.findUnique({ where: { stream: STREAM } }).catch(() => null);
+  const cursor = await db.wbSyncCursor.findUnique({ where: { stream: STREAM } }).catch(() => null);
   const meta: Record<string, { level?: number | null; exp?: string | null; sentAt?: string | null }> =
     (cursor?.metadata as any) ?? {};
   let changed = false;
@@ -111,7 +111,7 @@ export async function runWbTokenWatch(send: (html: string) => Promise<void>, now
   }
 
   if (!changed) return;
-  await (db as any).wbSyncCursor.upsert({
+  await db.wbSyncCursor.upsert({
     where: { stream: STREAM },
     create: { stream: STREAM, metadata: meta, lastAttemptAt: now, lastSuccessAt: now },
     update: { metadata: meta, lastAttemptAt: now, lastSuccessAt: now },

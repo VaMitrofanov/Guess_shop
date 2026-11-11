@@ -28,7 +28,7 @@ import { intentPartsRows } from "../../../../../bots/shared/gamepass-acceptance"
  */
 
 async function expireStale(): Promise<void> {
-  await (prisma as any).directIntent.updateMany({
+  await prisma.directIntent.updateMany({
     where: { status: "PENDING", createdAt: { lt: new Date(Date.now() - INTENT_TTL_MS) } },
     data: { status: "EXPIRED" },
   }).catch(() => {});
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await expireStale();
-  const intents = await (prisma as any).directIntent.findMany({
+  const intents = await prisma.directIntent.findMany({
     where: { status: "PENDING" },
     orderBy: { createdAt: "asc" },
     include: { user: { select: { id: true, tgId: true, vkId: true, name: true, username: true } } },
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   // «Повторный клиент» — как в TG-карточке заявки: число прошлых заказов юзера.
   const userIds = [...new Set(intents.map((i: any) => i.userId as string))];
   const prevRows = userIds.length > 0
-    ? await (prisma as any).wbOrder.groupBy({
+    ? await prisma.wbOrder.groupBy({
         by: ["userId"],
         where: { userId: { in: userIds }, isTest: false, status: { notIn: ["AWAITING_GAMEPASS"] } },
         _count: { _all: true },
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
   if (!action || !intentId)
     return NextResponse.json({ error: "action и intentId обязательны" }, { status: 400 });
 
-  const intent = await (prisma as any).directIntent.findUnique({
+  const intent = await prisma.directIntent.findUnique({
     where: { id: intentId },
     include: { user: true },
   });
@@ -95,12 +95,12 @@ export async function POST(req: NextRequest) {
   if (intent.status !== "PENDING")
     return NextResponse.json({ error: "Заявка уже обработана" }, { status: 409 });
   if (Date.now() - new Date(intent.createdAt).getTime() > INTENT_TTL_MS) {
-    await (prisma as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
+    await prisma.directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
     return NextResponse.json({ error: "Заявка просрочена (>24ч)" }, { status: 410 });
   }
 
   if (action === "reject") {
-    await (prisma as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+    await prisma.directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
     const notified = await notifyIntentRejected(intent.user);
     return NextResponse.json({ ok: true, notified });
   }
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
   const dirCode = generateDirectCode();
   let newOrder: any;
   try {
-    newOrder = await (prisma as any).$transaction(async (tx: any) => {
+    newOrder = await prisma.$transaction(async (tx: any) => {
       const consumed = await tx.directIntent.updateMany({
         where: { id: intentId, status: "PENDING" },
         data: { status: "CONSUMED" },

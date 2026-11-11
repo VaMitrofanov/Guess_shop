@@ -38,7 +38,7 @@ export {
  */
 export async function orderCode(orderId: string): Promise<string | null> {
   try {
-    const o = await (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true } });
+    const o = await db.wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true } });
     return o?.wbCode ?? null;
   } catch {
     return null;
@@ -247,7 +247,7 @@ const NO_BRIEF: SupportOrderBrief = { lines: [], code: null, denomination: null 
 async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBrief> {
   try {
     let order: any = p.wbCode
-      ? await (db as any).wbOrder.findUnique({ where: { wbCode: p.wbCode }, select: SUPPORT_ORDER_SELECT })
+      ? await db.wbOrder.findUnique({ where: { wbCode: p.wbCode }, select: SUPPORT_ORDER_SELECT })
       : null;
 
     // Бот шлёт код не всегда (общий вопрос, обращение из меню) — тогда берём
@@ -255,9 +255,9 @@ async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBr
     if (!order) {
       const userWhere = p.tgId ? { tgId: String(p.tgId) } : p.vkId ? { vkId: String(p.vkId) } : null;
       if (!userWhere) return NO_BRIEF;
-      const user = await (db as any).user.findUnique({ where: userWhere, select: { id: true } });
+      const user = await db.user.findUnique({ where: userWhere, select: { id: true } });
       if (!user) return NO_BRIEF;
-      order = await (db as any).wbOrder.findFirst({
+      order = await db.wbOrder.findFirst({
         where: { userId: user.id, isTest: false },
         orderBy: { updatedAt: "desc" },
         select: SUPPORT_ORDER_SELECT,
@@ -265,7 +265,7 @@ async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBr
     }
     if (!order) return NO_BRIEF;
 
-    const ordersTotal: number = await (db as any).wbOrder
+    const ordersTotal: number = await db.wbOrder
       .count({ where: { userId: order.userId, isTest: false } })
       .catch(() => 0);
 
@@ -1137,14 +1137,14 @@ async function broadcastPhotoCard(
  * и повтор уже выкупленного пасса. Никогда не бросает — карточка важнее строки.
  */
 async function paymentCardPassLine(orderId: string): Promise<{ text: string; alarm: boolean } | null> {
-  const order = await (db as any).wbOrder.findUnique({
+  const order = await db.wbOrder.findUnique({
     where: { id: orderId },
     select: { amount: true, gamepassId: true, robloxUsername: true },
   });
   if (!order?.gamepassId) return null;
   const expected = Math.ceil(order.amount / 0.7);
 
-  const reused = await (db as any).wbOrder.findFirst({
+  const reused = await db.wbOrder.findFirst({
     where: { gamepassId: String(order.gamepassId), status: "COMPLETED", isTest: false, id: { not: orderId } },
     select: { wbCode: true },
   }).catch(() => null);
@@ -1232,12 +1232,12 @@ export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload
 async function stampUndeliveredReview(payload: ReviewCardPayload): Promise<void> {
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
   const line = `[ОТЗЫВ-НЕ-ДОШЁЛ ${stamp}] ${payload.userDisplay} прислал скрин, карточка админам не ушла. Фото: ${payload.photoSource}`;
-  const order = await (db as any).wbOrder.findUnique({
+  const order = await db.wbOrder.findUnique({
     where: { id: payload.orderId },
     select: { adminNote: true },
   });
   if (!order) return;
-  await (db as any).wbOrder.update({
+  await db.wbOrder.update({
     where: { id: payload.orderId },
     data: { adminNote: ((order.adminNote ? order.adminNote + "\n" : "") + line).slice(0, 2000) },
   });
