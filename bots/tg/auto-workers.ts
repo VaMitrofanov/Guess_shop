@@ -242,8 +242,8 @@ export function startAutoWorkers(bot: Telegraf): void {
       running = true;
       runPaDeskSweep(mode)
         .then((r) => {
-          if (r && (r.renamed || r.foldersUpdated)) {
-            console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated} ${JSON.stringify(r.folders)}`);
+          if (r && (r.renamed || r.foldersUpdated || r.archived)) {
+            console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
           }
         })
         .catch((e) => console.error("[pa-desk] tick:", e instanceof Error ? e.message : e))

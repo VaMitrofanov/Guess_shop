@@ -26,6 +26,8 @@ const NEW_WINDOW_DAYS = 7;
 const RENAME_CAP = 20;
 /** Чатов в одной папке у Telegram Premium — до 200; держим запас. */
 const FOLDER_CAP = 150;
+/** Сколько старых чатов убираем в архив за проход. */
+const ARCHIVE_CAP = 100;
 
 type Mode = "off" | "dry" | "on";
 
@@ -59,14 +61,21 @@ export interface PaDeskResult {
   renamed: number;
   folders: Record<DeskFolder, number>;
   foldersUpdated: number;
+  archived: number;
 }
 
 export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskResult | null> {
   if (mode === "off") return null;
   const tg = await getClient();
   const now = Date.now() / 1000;
-  const dialogs = (await tg.getDialogs({ limit: 500 })).filter((d: Dialog) =>
+  const all = await tg.getDialogs({ limit: 1000 });
+  const dialogs = all.filter((d: Dialog) =>
     d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && d.date && now - d.date < WINDOW_DAYS * 86_400);
+  // Порядок: личные чаты без сообщений больше 30 дней — в Архив. Новое сообщение
+  // вернёт чат из архива само (если он не заглушён). Закреп и непрочитанное не трогаем.
+  const stale = all.filter((d: Dialog) =>
+    d.isUser && !d.archived && !d.pinned && !d.unreadCount && d.entity instanceof Api.User && !d.entity.self
+    && d.date && now - d.date >= WINDOW_DAYS * 86_400).slice(0, ARCHIVE_CAP);
 
   const ids = dialogs.map((d) => String((d.entity as Api.User).id));
   const users = await db.user.findMany({ where: { tgId: { in: ids } }, select: { id: true, tgId: true, name: true } });
@@ -84,7 +93,7 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     ordersBy.set(o.userId, list);
   }
 
-  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0 }, foldersUpdated: 0 };
+  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0 }, foldersUpdated: 0, archived: 0 };
   const members: Record<DeskFolder, Dialog[]> = { NEW: [], QUEUE: [], PROBLEM: [], DONE: [] };
 
   for (const d of dialogs) {
@@ -158,6 +167,22 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
       await sleep(1000);
     } catch (error) {
       console.warn(`[pa-desk] папка «${titleOf(key)}» не обновилась: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  if (stale.length > 0) {
+    result.archived = stale.length;
+    if (mode === "dry") {
+      console.log(`[pa-desk] (dry) в архив: ${stale.length} старых чатов`);
+    } else {
+      try {
+        const peers = await Promise.all(stale.map((d) => tg.getInputEntity(d.entity as Api.User)));
+        await tg.invoke(new Api.folders.EditPeerFolders({
+          folderPeers: peers.map((peer) => new Api.InputFolderPeer({ peer, folderId: 1 })),
+        }));
+      } catch (error) {
+        result.archived = 0;
+        console.warn(`[pa-desk] архив не обновился: ${error instanceof Error ? error.message : error}`);
+      }
     }
   }
   return result;

@@ -39,6 +39,7 @@ import {
   setupBotProfile,
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
+import { registerPaBusiness } from "./pa-business";
 import { startReviewReminderCron } from "./crons";
 import { notifyBotError } from "../shared/admin";
 import { syncTelegramActor } from "../shared/user-profile-sync";
@@ -71,6 +72,8 @@ bot.catch((err: any, ctx: any) => {
 // Register all handlers (order matters: admin hubs → commands → callbacks → text → photo)
 // Admin hubs must be registered FIRST so their text interceptors (search, codes, rate)
 // fire before the generic text handler in handlers.ts.
+// Сообщения аккаунта поддержки (Telegram Business) — до всех веток бота и мимо них.
+registerPaBusiness(bot);
 registerAdminHubs(bot);
 registerStart(bot);
 registerStatus(bot);
@@ -104,7 +107,11 @@ if (disablePolling) {
   );
 } else {
   bot.launch({
-    allowedUpdates: ["message", "callback_query", "my_chat_member", "chat_member"],
+    allowedUpdates: [
+      "message", "callback_query", "my_chat_member", "chat_member",
+      // Аккаунт поддержки @RobloxBank_PA через Telegram Business (12.11.2026).
+      "business_connection", "business_message",
+    ] as never,
   }).catch((err: Error) => {
     console.error("[TG] Failed to start:", err);
     process.exit(1);
