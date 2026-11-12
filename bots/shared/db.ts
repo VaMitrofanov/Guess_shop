@@ -19,16 +19,7 @@
 import { Prisma, PrismaClient, UserIdentityProvider } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-
-function verifiedDatabaseUrl(raw: string) {
-  try {
-    const url = new URL(raw);
-    if (url.searchParams.get("sslmode") === "require") url.searchParams.set("sslmode", "verify-full");
-    return url.toString();
-  } catch {
-    return raw;
-  }
-}
+import { dbConnectionConfig } from "./db-ssl";
 
 function createBotClient(): PrismaClient {
   if (!process.env.DATABASE_URL) {
@@ -36,7 +27,8 @@ function createBotClient(): PrismaClient {
   }
 
   const pool = new Pool({
-    connectionString: verifiedDatabaseUrl(process.env.DATABASE_URL),
+    // TLS: Neon — verify-full по системным корням; свой Postgres — по DATABASE_CA (db-ssl.ts).
+    ...dbConnectionConfig(process.env.DATABASE_URL),
     // Keep the pool small — bots are long-lived and Neon free tier has low connection limits.
     max: 3,
     // Held for 5 min, not 30 s: on the RF host the TLS+SCRAM handshake to Neon costs

@@ -808,3 +808,4 @@ npm run dev:reset-test # сбросить тестовый код в AVAILABLE
 (см. [deploy.md](deploy.md)).
 
 - [ai-assistant-plan.md](ai-assistant-plan.md) — ИИ-ассистент команды (Claude Haiku 5.5): поддержка @RobloxBank_PA, беседа админов, сводки; что сделано и что дальше.
+- [infra-move-frankfurt.md](infra-move-frankfurt.md) — план переезда базы и TG-бота во Франкфурт (замеры, шаги; ждёт команды).

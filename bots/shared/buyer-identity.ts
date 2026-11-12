@@ -348,14 +348,18 @@ export async function recentBadReviewsWithBuyers(db: Db, limit = 10) {
 }
 
 /** Текст профиля для команды `/who` (обычный текст). */
+type ProfileOrder = { code: string; robux: number; status: string };
+type ProfileFootprint = { kind: string; code: string | null; stars: number | null; starsBefore: number | null; text: string | undefined; at: Date };
+type ProfileClaim = { code: string | undefined; reason: string | undefined; refunded: boolean };
+
 export function profileText(p: NonNullable<Awaited<ReturnType<typeof buyerProfile>>>): string {
   const lines = [
     `👤 ${p.name ?? "без имени"} · ${p.contact}`,
     p.robloxNicks.length ? `🎮 Ник Roblox: ${p.robloxNicks.join(", ")}` : null,
     p.wbBuyerNames.length ? `🛍 Имя на WB: ${p.wbBuyerNames.join(", ")}` : null,
-    `📦 Заказы (${p.orders.length}): ${p.orders.slice(0, 6).map((o) => `${o.code} ${o.robux} R$ ${o.status === "COMPLETED" ? "✅" : o.status === "заморожен" ? "❄️" : "⏳"}`).join(" · ")}${p.orders.length > 6 ? " …" : ""}`,
-    ...p.wbFootprint.slice(0, 4).map((f) => `⚠️ ${f.kind === "BAD_REVIEW" ? `отзыв ★${f.stars}` : f.kind === "REVIEW_FIXED" ? `отзыв исправлен ★${f.starsBefore}→★${f.stars}` : f.kind} · ${f.code} · ${f.at.toISOString().slice(0, 10)}${f.text ? ` · «${f.text.slice(0, 80)}»` : ""}`),
-    ...p.wbClaims.slice(0, 2).map((c) => `↩ заявка на возврат · ${c.code}${c.refunded ? " · деньги вернули" : ""}${c.reason ? ` · «${c.reason.slice(0, 80)}»` : ""}`),
+    `📦 Заказы (${p.orders.length}): ${p.orders.slice(0, 6).map((o: ProfileOrder) => `${o.code} ${o.robux} R$ ${o.status === "COMPLETED" ? "✅" : o.status === "заморожен" ? "❄️" : "⏳"}`).join(" · ")}${p.orders.length > 6 ? " …" : ""}`,
+    ...p.wbFootprint.slice(0, 4).map((f: ProfileFootprint) => `⚠️ ${f.kind === "BAD_REVIEW" ? `отзыв ★${f.stars}` : f.kind === "REVIEW_FIXED" ? `отзыв исправлен ★${f.starsBefore}→★${f.stars}` : f.kind} · ${f.code} · ${f.at.toISOString().slice(0, 10)}${f.text ? ` · «${f.text.slice(0, 80)}»` : ""}`),
+    ...p.wbClaims.slice(0, 2).map((c: ProfileClaim) => `↩ заявка на возврат · ${c.code}${c.refunded ? " · деньги вернули" : ""}${c.reason ? ` · «${c.reason.slice(0, 80)}»` : ""}`),
   ];
   return lines.filter(Boolean).join("\n");
 }

@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { dbConnectionConfig } from "../../bots/shared/db-ssl";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -16,20 +17,17 @@ function poolSize() {
 
 const databasePoolMax = poolSize();
 
-function buildPoolerUrl(raw: string): string {
-  try {
-    const u = new URL(raw);
-    if (!u.hostname.includes("-pooler.")) {
-      u.hostname = u.hostname.replace(/^(ep-[^.]+)(\.)/,  "$1-pooler$2");
-    }
-    u.searchParams.delete("channel_binding");
-    if (u.searchParams.get("sslmode") === "require") u.searchParams.set("sslmode", "verify-full");
-    return u.toString();
-  } catch { return raw; }
+/** Neon: ходим через его пулер (`ep-…-pooler`). Свой Postgres — без изменений. */
+function usePooler(u: URL) {
+  if (!u.hostname.includes("-pooler.")) {
+    u.hostname = u.hostname.replace(/^(ep-[^.]+)(\.)/, "$1-pooler$2");
+  }
+  u.searchParams.delete("channel_binding");
 }
 
 const pool = new Pool({
-  connectionString: buildPoolerUrl(process.env.DATABASE_URL ?? ""),
+  // TLS: Neon — verify-full по системным корням; свой Postgres — по DATABASE_CA (db-ssl.ts).
+  ...dbConnectionConfig(process.env.DATABASE_URL ?? "", process.env, usePooler),
   max: databasePoolMax,
   // 17.10 incident: the RF -> Neon (Singapore) transit degrades in episodes. A TCP
   // handshake survives it, the TLS+SCRAM handshake does not — it went from ~1.5s to
