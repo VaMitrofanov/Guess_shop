@@ -269,7 +269,7 @@ export async function buyerProfile(db: Db, userId: string) {
  */
 export async function whoIs(db: Db, query: string) {
   const q = query.trim().replace(/^@/, "");
-  if (q.length < 2) return { found: [] };
+  if (q.length < 2) return { notes: [] as string[], found: [], more: 0 };
   const userIds = new Set<string>();
   const notes: string[] = [];
   const upper = q.toUpperCase();
@@ -313,4 +313,49 @@ export async function whoIs(db: Db, query: string) {
     if (p) found.push(p);
   }
   return { notes, found, more: Math.max(0, userIds.size - 3) };
+}
+
+/**
+ * Последние плохие отзывы WB и кто за ними у нас — без ИИ (команда `/reviews`).
+ * Один отзыв — одна строка-блок: звёзды, имя на WB, код заказа, наш клиент.
+ */
+export async function recentBadReviewsWithBuyers(db: Db, limit = 10) {
+  const events = await db.riskEvent.findMany({
+    where: { kind: "BAD_REVIEW" },
+    orderBy: { occurredAt: "desc" },
+    take: limit * 3,
+    select: { wbCode: true, wbOrderId: true, buyerName: true, stars: true, text: true, occurredAt: true, resolvedAt: true, feedbackId: true },
+  });
+  const seen = new Set<string>();
+  const out: Array<{
+    stars: number | null; at: Date; text: string | null; wbName: string | null; code: string | null; wbOrderId: string | null;
+    open: boolean; who: string[];
+  }> = [];
+  for (const e of events) {
+    const key = e.feedbackId ?? `${e.wbCode}:${e.occurredAt.toISOString()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const mo = e.wbCode
+      ? await db.wbMarketplaceOrder.findFirst({ where: { wbCode: { code: e.wbCode } }, select: { id: true } })
+      : null;
+    out.push({
+      stars: e.stars, at: e.occurredAt, text: e.text, wbName: e.buyerName, code: e.wbCode, wbOrderId: e.wbOrderId,
+      open: !e.resolvedAt, who: mo ? await identityLinesFor(db, mo.id) : ["🆕 Заказа у нас нет"],
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Текст профиля для команды `/who` (обычный текст). */
+export function profileText(p: NonNullable<Awaited<ReturnType<typeof buyerProfile>>>): string {
+  const lines = [
+    `👤 ${p.name ?? "без имени"} · ${p.contact}`,
+    p.robloxNicks.length ? `🎮 Ник Roblox: ${p.robloxNicks.join(", ")}` : null,
+    p.wbBuyerNames.length ? `🛍 Имя на WB: ${p.wbBuyerNames.join(", ")}` : null,
+    `📦 Заказы (${p.orders.length}): ${p.orders.slice(0, 6).map((o) => `${o.code} ${o.robux} R$ ${o.status === "COMPLETED" ? "✅" : o.status === "заморожен" ? "❄️" : "⏳"}`).join(" · ")}${p.orders.length > 6 ? " …" : ""}`,
+    ...p.wbFootprint.slice(0, 4).map((f) => `⚠️ ${f.kind === "BAD_REVIEW" ? `отзыв ★${f.stars}` : f.kind === "REVIEW_FIXED" ? `отзыв исправлен ★${f.starsBefore}→★${f.stars}` : f.kind} · ${f.code} · ${f.at.toISOString().slice(0, 10)}${f.text ? ` · «${f.text.slice(0, 80)}»` : ""}`),
+    ...p.wbClaims.slice(0, 2).map((c) => `↩ заявка на возврат · ${c.code}${c.refunded ? " · деньги вернули" : ""}${c.reason ? ` · «${c.reason.slice(0, 80)}»` : ""}`),
+  ];
+  return lines.filter(Boolean).join("\n");
 }

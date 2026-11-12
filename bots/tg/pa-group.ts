@@ -20,7 +20,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { flagsOf } from "../shared/order-flags";
-import { whoIs } from "../shared/buyer-identity";
+import { profileText, recentBadReviewsWithBuyers, whoIs } from "../shared/buyer-identity";
 import { PA_AI_MODEL, plain } from "../shared/pa-ai-support";
 import { card, loadSettings, saveSettings, type PaTopic } from "./pa-ai";
 
@@ -321,6 +321,33 @@ export function registerPaGroup(bot: Telegraf): void {
     await ctx.reply(`✅ Готово. Темы: ${TOPICS.map((t) => t.name).join(", ")}. Режим ИИ-поддержки: ${s.mode}.`);
   });
 
+  // Без ИИ: работают всегда, где бы ни жил сервер.
+  bot.command("reviews", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const n = Math.min(20, Math.max(1, Number((ctx.message?.text ?? "").split(/\s+/)[1]) || 8));
+    const list = await recentBadReviewsWithBuyers(db, n);
+    if (list.length === 0) return void ctx.reply("Плохих отзывов не найдено.");
+    const blocks = list.map((r) => [
+      `${"★".repeat(r.stars ?? 0)}${"☆".repeat(5 - (r.stars ?? 0))} ${r.at.toISOString().slice(0, 10)} · на WB: ${r.wbName ?? "?"}${r.open ? "" : " · разобран"}`,
+      `📦 ${r.code ?? "—"}${r.wbOrderId ? ` · WB #${r.wbOrderId}` : ""}`,
+      ...r.who,
+      r.text ? `💬 «${r.text.slice(0, 160)}»` : null,
+    ].filter(Boolean).join("\n"));
+    for (let i = 0; i < blocks.length; i += 5) {
+      await ctx.reply(`Плохие отзывы WB и кто это у нас:\n\n${blocks.slice(i, i + 5).join("\n\n")}`.slice(0, 4000), { link_preview_options: { is_disabled: true } });
+    }
+  });
+
+  bot.command("who", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const query = (ctx.message?.text ?? "").split(/\s+/).slice(1).join(" ").trim();
+    if (!query) return void ctx.reply("Кого искать? /who КОД | номер WB | ник Roblox | @username | имя");
+    const res = await whoIs(db, query);
+    if (res.found.length === 0 && res.notes.length === 0) return void ctx.reply(`По «${query}» никого не нашёл.`);
+    const text = [...res.notes, ...res.found.map(profileText), res.more ? `…и ещё ${res.more}` : null].filter(Boolean).join("\n\n");
+    await ctx.reply(text.slice(0, 4000), { link_preview_options: { is_disabled: true } });
+  });
+
   bot.command("digest", async (ctx) => {
     if (!isAdmin(ctx.from?.id) || !process.env.ANTHROPIC_API_KEY?.trim()) return;
     await ctx.sendChatAction("typing").catch(() => undefined);
@@ -352,7 +379,11 @@ export function registerPaGroup(bot: Telegraf): void {
       const answer = await askAssistant(question);
       await ctx.reply(answer.slice(0, 4000), { reply_parameters: { message_id: msg.message_id } });
     } catch (error) {
-      await ctx.reply(`Не получилось: ${error instanceof Error ? error.message.slice(0, 200) : "ошибка"}`, { reply_parameters: { message_id: msg.message_id } });
+      const text = error instanceof Error ? error.message : String(error);
+      const blocked = /403|forbidden|not allowed/i.test(text);
+      await ctx.reply(blocked
+        ? "ИИ недоступен: Anthropic не принимает запросы с нашего сервера (регион). Пока работают команды без ИИ: /who КОД|ник|имя, /reviews, /digest."
+        : `Не получилось: ${text.slice(0, 200)}`, { reply_parameters: { message_id: msg.message_id } });
     }
   });
 }
