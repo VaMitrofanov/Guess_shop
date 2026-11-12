@@ -20,6 +20,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { flagsOf } from "../shared/order-flags";
+import { whoIs } from "../shared/buyer-identity";
 import { PA_AI_MODEL, plain } from "../shared/pa-ai-support";
 import { card, loadSettings, saveSettings, type PaTopic } from "./pa-ai";
 
@@ -163,6 +164,7 @@ async function openRisks() {
 }
 
 const TOOLS: Anthropic.Tool[] = [
+  { name: "who_is", description: "КТО ЭТО: единый профиль покупателя по чему угодно — код заказа, номер заказа WB, ник Roblox, @username Telegram, имя на WB или в боте. Возвращает его Telegram/ВК, все заказы (WB и прямые), имена на WB, ники Roblox, отзывы/заявки/жалобы на WB. Связь WB↔наш клиент помечена: точно / вероятно / тёзки.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false }, strict: true },
   { name: "order_info", description: "Всё о заказе по коду (7 символов, например ZT8BW8D, или DIR-...): статус, ник, пасс, заморозка, пометки, данные Wildberries, события рисков.", input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"], additionalProperties: false }, strict: true },
   { name: "find_orders", description: "Поиск заказов по нику Roblox, имени покупателя, @username Telegram, части кода или номеру заказа WB. До 10 свежих.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false }, strict: true },
   { name: "queue_overview", description: "Что сейчас в работе: заказы по статусам, сколько заморожено, кто ждёт пасс 2–30 дней (самые свежие коды) и сколько висит дольше 30 дней, самый старый в очереди на выкуп.", input_schema: { type: "object", properties: {}, required: [], additionalProperties: false }, strict: true },
@@ -172,6 +174,7 @@ const TOOLS: Anthropic.Tool[] = [
 
 async function runTool(name: string, input: Record<string, unknown>) {
   switch (name) {
+    case "who_is": return whoIs(db, String(input.query ?? ""));
     case "order_info": return orderInfo(String(input.code ?? ""));
     case "find_orders": return findOrders(String(input.query ?? ""));
     case "queue_overview": return queueOverview();

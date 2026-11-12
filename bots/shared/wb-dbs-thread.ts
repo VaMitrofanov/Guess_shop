@@ -13,6 +13,7 @@ import {
   type DbsRef,
 } from "./wb-delivery-admin-notify";
 import { mskTime } from "./notify-format";
+import { identityLinesFor } from "./buyer-identity";
 
 /**
  * Живая карточка DBS-заказа и нить вокруг неё.
@@ -189,7 +190,11 @@ export async function refreshDbsCard(db: Db, orderId: string) {
     activationCode: order.wbCode?.code ?? null,
     ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null, buyout),
     buyer: cardBuyerOf(order.events),
-    related: await relatedOrderLines(db, order).catch(() => []),
+    // Кто это у нас в TG/VK (12.11.2026): единый профиль покупателя WB ↔ боты.
+    related: [
+      ...(await relatedOrderLines(db, order).catch(() => [])),
+      ...(await identityLinesFor(db, order.id)),
+    ],
     timeline: [
       ...order.events
         .map((event) => ({ at: event.createdAt, label: cardStepLabel(event) }))

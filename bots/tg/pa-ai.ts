@@ -204,7 +204,18 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
         },
       })
     : [];
-  const context = customerContext({ name: user?.name ?? m.fromName, known: Boolean(user), orders });
+  const wbNotes = orders.length
+    ? (await db.riskEvent.findMany({
+        where: { wbCode: { in: orders.map((o) => o.wbCode) }, kind: { in: ["BAD_REVIEW", "REVIEW_FIXED", "REVIEW_DELETED", "CLAIM_OPENED", "REFUND_OPEN", "REFUND_AFTER_DELIVERY"] } },
+        orderBy: { occurredAt: "desc" }, take: 5,
+        select: { kind: true, wbCode: true, stars: true, starsBefore: true, text: true, occurredAt: true },
+      }).catch(() => [])).map((r) => {
+        const what = r.kind === "BAD_REVIEW" ? `отзыв ★${r.stars}` : r.kind === "REVIEW_FIXED" ? `отзыв исправлен ★${r.starsBefore}→★${r.stars}`
+          : r.kind === "REVIEW_DELETED" ? `плохой отзыв ★${r.stars} удалён` : r.kind === "CLAIM_OPENED" ? "заявка на возврат" : "WB вернул деньги";
+        return `${what} по заказу ${r.wbCode} (${r.occurredAt.toISOString().slice(0, 10)})${r.text ? `: «${r.text.slice(0, 120)}»` : ""}`;
+      })
+    : [];
+  const context = customerContext({ name: user?.name ?? m.fromName, known: Boolean(user), orders, wbNotes });
   const image = m.photoFileId ? await loadPhoto(bot, m.photoFileId) : undefined;
   const raw = await decide(m.chatId, context, image);
   if (raw === "out_of_money") {

@@ -72,13 +72,14 @@ function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
 // (`pushDbsCard`), которая переписывает саму себя. Отдельным сообщением уходит
 // только то, что требует человека — редактирование в Telegram не даёт звука.
 
-export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string) {
+/** `who` — кто это у нас (`buyer-identity.ts`), обычный текст. */
+export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: string[] = []) {
   const preview = textPreview.length > 120 ? textPreview.slice(0, 117) + "…" : textPreview;
   broadcast({
     marker: "action",
     zone: "DBS",
     title: "сообщение покупателя",
-    lines: [refLine(ref), `<i>${escapeHtml(preview)}</i>`],
+    lines: [refLine(ref), ...who.map((line) => escapeHtml(line)), `<i>${escapeHtml(preview)}</i>`],
     next: "ответить из консоли DBS или из кабинета WB",
   }, ref);
 }
@@ -205,6 +206,8 @@ export function notifyBuyoutGateBadReview(input: {
   reviewedAt: Date | null;
   /** Гейт уже отпускал этот заказ по исправленному отзыву, а покупатель вернул плохую оценку. */
   refrozen?: boolean;
+  /** Кто это у нас в TG/VK (`buyer-identity.ts`). */
+  who?: string[];
 }): void {
   const ref: DbsRef = {
     wbOrderId: input.wbOrderId ?? "",
@@ -224,6 +227,7 @@ export function notifyBuyoutGateBadReview(input: {
     title: input.refrozen ? "отзыв снова плохой — заказ заморожен" : "плохой отзыв до выкупа",
     lines: [
       refLine(ref),
+      ...(input.who ?? []).map((line) => escapeHtml(line)),
       `${starsLine(input.stars)}${when ? ` · ${when}` : ""}`,
       text ? `💬 <i>${escapeHtml(text)}</i>` : null,
       claimHoldLine(outcome),

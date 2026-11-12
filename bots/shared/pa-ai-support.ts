@@ -137,6 +137,8 @@ export function customerContext(input: {
   name: string | null;
   known: boolean;
   orders: PaAiOrder[];
+  /** След на WB по его заказам: отзывы, заявки на возврат (`buyer-identity`). */
+  wbNotes?: string[];
   now?: Date;
 }): string {
   const now = input.now ?? new Date();
@@ -153,6 +155,10 @@ export function customerContext(input: {
       o.gamepassUrl ? "пасс прислан" : "пасса нет",
       o.isDirectOrder ? "прямой заказ" : "заказ с Wildberries",
     ].filter(Boolean).join("; "));
+  }
+  if (input.wbNotes?.length) {
+    lines.push("На Wildberries (по его заказам; не пересказывай дословно, учитывай тон — если был плохой отзыв или заявка на возврат, будь особенно внимателен и при любой проблеме — escalate):");
+    for (const n of input.wbNotes.slice(0, 5)) lines.push(`• ${n}`);
   }
   return lines.join("\n");
 }

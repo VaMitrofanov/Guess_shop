@@ -112,6 +112,7 @@ import { revokeGateCode } from "./wb-code-revocation";
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { resolveWbOrderChat } from "./wb-order-chat";
+import { identityLinesFor } from "./buyer-identity";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
 import {
   detectWbOperatorCommand,
@@ -1599,7 +1600,7 @@ async function answerRobuxQuestionInChat(
     await audit(db, order.id, "ROBUX_ETA_ANSWERED", key, { repeat: !!answeredBefore });
   }
   // Барьер: первый вопрос закрывает автоответ; повторный — раз на окно оператору.
-  if (answeredBefore) notifyDbsBuyerMessage(ref, rawText);
+  if (answeredBefore) notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id));
 }
 
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
@@ -1704,7 +1705,7 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     if (isNewEvent && isBuyerSender(event.sender) && order && rawText
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.cancelledAt
       && (!order.completedAt || !(await buyoutFinished(db, order.wbCodeId)))) {
-      notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText);
+      notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText, await identityLinesFor(db, order.id));
     }
 
     if (order && order.chatState === "WAITING_BUYER_CHAT") {
@@ -2264,8 +2265,10 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     // Висяк — рутина, о нём говорит вкладка «Заморожены». Плохой отзыв —
     // человек, которого надо увидеть сразу.
     if (d.rule !== "bad_review" || !d.review) continue;
+    const meta = dbsByCode.get(d.wbCode);
     notifyBuyoutGateBadReview({
       ...refFor(d.wbCode),
+      who: meta ? await identityLinesFor(db, meta.id) : [],
       stars: Number(d.review.productValuation ?? 0),
       text: reviewText(d.review),
       reviewedAt: d.review.createdDate ? new Date(d.review.createdDate) : null,
