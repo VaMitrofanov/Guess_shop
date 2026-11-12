@@ -17,7 +17,7 @@ const MARKETPLACE_BASE = "https://marketplace-api.wildberries.ru";
 const CHAT_BASE = "https://buyer-chat-api.wildberries.ru";
 const RETURNS_BASE = "https://returns-api.wildberries.ru";
 
-type WbScope = "marketplace" | "chat";
+type WbScope = "marketplace" | "chat" | "statistics";
 
 function cleanToken(value: string | undefined): string {
   return (value ?? "").trim().replace(/^['"`]|['"`]$/g, "").trim();
@@ -26,7 +26,9 @@ function cleanToken(value: string | undefined): string {
 function tokenFor(scope: WbScope): string {
   const scoped = scope === "marketplace"
     ? process.env.WB_MARKETPLACE_TOKEN
-    : process.env.WB_CHAT_TOKEN;
+    : scope === "statistics"
+      ? process.env.WB_STATISTICS_TOKEN
+      : process.env.WB_CHAT_TOKEN;
   const token = cleanToken(scoped) || cleanToken(process.env.WB_API_TOKEN);
   if (!token) throw new WbDeliveryApiError(scope, 503, "TOKEN_MISSING", false);
   return token;
@@ -95,6 +97,36 @@ export function wbDeliveryApiReadiness() {
     scopedMarketplace: Boolean(cleanToken(process.env.WB_MARKETPLACE_TOKEN)),
     scopedChat: Boolean(cleanToken(process.env.WB_CHAT_TOKEN)),
   };
+}
+
+/** Строка продаж статистики WB: продажа (`S…`), возврат (`R…`), сторно (`A…`/`B…`), доплата (`D…`). */
+const WbSaleRowSchema = z.object({
+  date: z.string().optional(),
+  lastChangeDate: z.string().optional(),
+  srid: z.string().optional(),
+  saleID: z.string().optional(),
+  nmId: z.number().optional(),
+  priceWithDisc: z.number().optional(),
+  forPay: z.number().optional(),
+  regionName: z.string().optional(),
+  /** «Склад продавца» — наш DBS; «Склад WB» — физические карты с полки WB. */
+  warehouseType: z.string().optional(),
+}).passthrough();
+export type WbSaleRow = z.infer<typeof WbSaleRowSchema>;
+
+/**
+ * Продажи и возвраты кабинета с `dateFrom` (по `lastChangeDate`). Это деньги,
+ * а не статусы: DBS-статус старого заказа WB перестаёт обновлять через неделю,
+ * а возврат в статистике появляется всегда. Лимит WB — запрос в минуту.
+ */
+export async function fetchWbSales(dateFrom: Date): Promise<WbSaleRow[]> {
+  const from = dateFrom.toISOString().slice(0, 19);
+  return requestJson(
+    "statistics",
+    `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(from)}`,
+    z.array(WbSaleRowSchema),
+    { signal: AbortSignal.timeout(90_000) },
+  );
 }
 
 /** Отзыв WB в сыром виде — берём только то, что нужно гейту выкупа. */

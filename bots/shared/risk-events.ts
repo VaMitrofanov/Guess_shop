@@ -25,7 +25,9 @@ import { normalizeName, type FixedReview, type WbFeedback } from "./buyout-gate"
 export type RiskKind =
   | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
   /** С 01.11.2026 — из обращений покупателя (buyer-contact-sweep). */
-  | "BUYER_CANCEL" | "BUYER_HELP";
+  | "BUYER_CANCEL" | "BUYER_HELP"
+  /** С 12.11.2026 — сверка денег WB с выдачей (`wb-sales-reconcile.ts`). */
+  | "SALE_UNMATCHED" | "SALE_NO_CODE" | "REFUND_OPEN" | "REFUND_AFTER_DELIVERY";
 type RiskAction = "frozen" | "released" | "none";
 
 export const RISK_AUTO_ACTOR = "авто";
@@ -198,7 +200,8 @@ export async function autoResolveRiskEvents(
   let total = 0;
   if (input.closedCodes.length > 0) {
     const res = await db.riskEvent.updateMany({
-      where: { resolvedAt: null, wbCode: { in: input.closedCodes } },
+      // Возврат после выкупа как раз про закрытый заказ — его разбирает человек.
+      where: { resolvedAt: null, wbCode: { in: input.closedCodes }, kind: { not: "REFUND_AFTER_DELIVERY" } },
       data: { resolvedAt: now, resolvedBy: `${RISK_AUTO_ACTOR}: заказ закрыт` },
     });
     total += Number(res?.count ?? 0);

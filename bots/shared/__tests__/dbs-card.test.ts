@@ -101,4 +101,15 @@ describe("renderDbsCard", () => {
   it("одинаковое состояние даёт одинаковый текст — на этом и стоит дедуп", () => {
     expect(renderDbsCard(state)).toBe(renderDbsCard({ ...state }));
   });
+
+  /** 12.11.2026: корзина и вероятный тот же покупатель видны в самой карточке. */
+  it("shows related orders under the header", () => {
+    const text = renderDbsCard({
+      ...state,
+      related: ["🧺 заказ 1 из 2 одной покупки · ещё: ULZ849W 500 R$", "👥 возможно, тот же покупатель: JTU8NN3"],
+    });
+    expect(text).toContain("🧺 заказ 1 из 2 одной покупки · ещё: ULZ849W 500 R$");
+    expect(text).toContain("👥 возможно, тот же покупатель: JTU8NN3");
+    expect(text.indexOf("🧺")).toBeLessThan(text.indexOf("├"));
+  });
 });

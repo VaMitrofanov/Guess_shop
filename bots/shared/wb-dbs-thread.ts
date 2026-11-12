@@ -189,6 +189,7 @@ export async function refreshDbsCard(db: Db, orderId: string) {
     activationCode: order.wbCode?.code ?? null,
     ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null, buyout),
     buyer: cardBuyerOf(order.events),
+    related: await relatedOrderLines(db, order).catch(() => []),
     timeline: [
       ...order.events
         .map((event) => ({ at: event.createdAt, label: cardStepLabel(event) }))
@@ -222,6 +223,51 @@ export async function refreshDbsCard(db: Db, orderId: string) {
     where: { id: orderId },
     data: { adminCardMessages: updated, adminCardHash: hash },
   }).catch(() => {});
+}
+
+/** Окно, в котором отдельная покупка с тем же именем — вероятно тот же человек. */
+const SAME_BUYER_WINDOW_MS = 2 * 60 * 60_000;
+
+/** Строки «связанные заказы» для живой карточки (см. `DbsCardState.related`). */
+async function relatedOrderLines(
+  db: Db,
+  order: { id: string; wbOrderId: string; orderUid: string | null; buyerName: string | null; isTest: boolean; wbCreatedAt: Date | null; firstSeenAt: Date },
+): Promise<string[]> {
+  const label = (o: { wbOrderId: string; denominationSnapshot: number | null; wbCode: { code: string } | null }) =>
+    [o.wbCode?.code ?? `WB ${o.wbOrderId}`, o.denominationSnapshot ? `${o.denominationSnapshot} R$` : null].filter(Boolean).join(" ");
+  const lines: string[] = [];
+  const select = { id: true, wbOrderId: true, denominationSnapshot: true, wbCode: { select: { code: true } } } as const;
+  if (order.orderUid) {
+    const basket = await db.wbMarketplaceOrder.findMany({
+      where: { orderUid: order.orderUid, isTest: order.isTest },
+      select,
+    });
+    if (basket.length > 1) {
+      const sorted = [...basket].sort((a, b) => a.wbOrderId.length - b.wbOrderId.length || a.wbOrderId.localeCompare(b.wbOrderId));
+      const index = sorted.findIndex((o) => o.id === order.id) + 1;
+      const others = sorted.filter((o) => o.id !== order.id).map(label);
+      lines.push(`🧺 заказ ${index} из ${sorted.length} одной покупки · ещё: ${others.join(", ")}`);
+    }
+  }
+  const at = order.wbCreatedAt ?? order.firstSeenAt;
+  if (order.buyerName) {
+    const near = await db.wbMarketplaceOrder.findMany({
+      where: {
+        isTest: order.isTest,
+        id: { not: order.id },
+        buyerName: { equals: order.buyerName, mode: "insensitive" },
+        denominationSnapshot: { not: null },
+        ...(order.orderUid ? { NOT: { orderUid: order.orderUid } } : {}),
+        wbCreatedAt: { gte: new Date(at.getTime() - SAME_BUYER_WINDOW_MS), lte: new Date(at.getTime() + SAME_BUYER_WINDOW_MS) },
+      },
+      select,
+      take: 3,
+    });
+    if (near.length) {
+      lines.push(`👥 возможно, тот же покупатель (то же имя, отдельная покупка рядом по времени): ${near.map(label).join(", ")}`);
+    }
+  }
+  return lines;
 }
 
 /**

@@ -381,6 +381,52 @@ const WB_DELIVERY_SEARCH_TAKE = 30;
 
 /** Вторая половина жизни заказа — выкуп — живёт в `WbOrder`, и связь идёт через
  *  код гейта. Достраиваем её одним запросом на всю пачку. */
+/**
+ * Чат покупки вместо своего (12.11.2026). WB бывает заводит ОДИН чат на всю
+ * корзину: у второго заказа своего чата нет, и консоль говорила «покупатель ещё
+ * не открыл чат», хотя он открыт и ждёт. Подставляем самый свежий чат соседа
+ * по `orderUid` — тот же человек; запись зеркала идёт в этот чат с id нашего
+ * заказа. Зеркало воркера — `bots/shared/wb-order-chat.ts`.
+ */
+async function withBasketChats<T extends {
+  id: string;
+  orderUid: string | null;
+  isTest: boolean;
+  chats: Array<{ replySignEncrypted: string | null }>;
+}>(orders: T[], opts: { events?: boolean } = {}): Promise<T[]> {
+  const orphanUids = [...new Set(orders
+    .filter((o) => o.orderUid && !o.chats.some((c) => c.replySignEncrypted))
+    .map((o) => o.orderUid as string))];
+  if (orphanUids.length === 0) return orders;
+  const chats = await db.wbBuyerChat.findMany({
+    where: { replySignEncrypted: { not: null }, marketplaceOrder: { is: { orderUid: { in: orphanUids } } } },
+    orderBy: { lastEventAt: { sort: "desc", nulls: "last" } },
+    include: {
+      marketplaceOrder: { select: { orderUid: true, isTest: true } },
+      ...(opts.events ? { events: { orderBy: { sentAt: "desc" as const }, take: 80 } } : {}),
+    },
+  }).catch(() => []);
+  const byUid = new Map<string, (typeof chats)[number]>();
+  for (const chat of chats) {
+    const uid = chat.marketplaceOrder?.orderUid;
+    if (uid && !byUid.has(uid)) byUid.set(uid, chat);
+  }
+  return orders.map((order) => {
+    if (!order.orderUid || order.chats.some((c) => c.replySignEncrypted)) return order;
+    const chat = byUid.get(order.orderUid);
+    if (!chat || chat.marketplaceOrder?.isTest !== order.isTest) return order;
+    const { marketplaceOrder: _owner, ...rest } = chat;
+    void _owner;
+    return { ...order, chats: [rest as unknown as T["chats"][number]] };
+  });
+}
+
+/** Чат пришёл из соседнего заказа той же покупки (см. `withBasketChats`). */
+function chatIsShared(order: { id: string; chats: Array<{ marketplaceOrderId?: string | null }> }): boolean {
+  const owner = order.chats[0]?.marketplaceOrderId;
+  return Boolean(owner && owner !== order.id);
+}
+
 async function withFulfillment<T extends { wbCode: { code: string } | null }>(orders: T[]) {
   const codes = orders.flatMap((order) => order.wbCode?.code ? [order.wbCode.code] : []);
   const fulfillmentRows = codes.length
@@ -456,7 +502,7 @@ export async function searchWbDeliveryOrders(rawQuery: string): Promise<WbDelive
     take: WB_DELIVERY_SEARCH_TAKE,
     include: { ...listOrderInclude },
   });
-  return (await withFulfillment(orders)).map((order) => toDto(order));
+  return (await withFulfillment(await withBasketChats(orders))).map((order) => toDto(order));
 }
 
 async function loadOrders() {
@@ -487,7 +533,7 @@ async function loadOrders() {
       ...listOrderInclude,
     },
   });
-  return withFulfillment(orders);
+  return withFulfillment(await withBasketChats(orders));
 }
 
 export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {
@@ -766,13 +812,14 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
 }
 
 export async function loadWbDeliveryOrder(orderId: string): Promise<WbDeliveryOrderDto | null> {
-  const order = await db.wbMarketplaceOrder.findUnique({
+  const own = await db.wbMarketplaceOrder.findUnique({
     where: { id: orderId },
     include: {
       ...detailOrderInclude,
     },
   });
-  if (!order) return null;
+  if (!own) return null;
+  const [order] = await withBasketChats([own], { events: true });
   const fulfillment = order.wbCode?.code
     ? await db.wbOrder.findUnique({
       where: { wbCode: order.wbCode.code },
@@ -810,7 +857,7 @@ async function getOrder(orderId: string | undefined) {
     },
   });
   if (!order) throw new WbDeliveryWorkflowError("Заказ не найден", 404, "ORDER_NOT_FOUND");
-  return order;
+  return (await withBasketChats([order]))[0];
 }
 
 /** Зеркало `loadOrderSibling` воркера: в одной покупке WB бывает несколько наших
@@ -1383,7 +1430,9 @@ export async function performWbDeliveryAction(
     await audit(order.id, "GATE_SEND_STARTED", actor, { isTest: order.isTest });
     await sendText(
       order,
-      wbGateMessage(order.wbCode.code, order.denominationSnapshot, GUIDE_ORIGIN, await orderSiblingFor(order)),
+      wbGateMessage(order.wbCode.code, order.denominationSnapshot, GUIDE_ORIGIN, await orderSiblingFor(order), {
+        sharedChat: chatIsShared(order),
+      }),
       actor,
       "gate",
     );

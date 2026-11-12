@@ -23,6 +23,8 @@ import { searchGamepassesByNick } from "../shared/gamepass-search";
 import { runWbTokenWatch } from "../shared/wb-token-watch";
 import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
 import { syncOrderPins } from "../shared/order-pin";
+import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
+import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -201,6 +203,19 @@ export function startAutoWorkers(bot: Telegraf): void {
     .catch((e) => console.error("[buyer-contacts] tick:", e));
   setTimeout(buyerSweep, 150_000);
   setInterval(buyerSweep, 3 * 60 * 1000);
+
+  // Сверка денег WB с выдачей (12.11.2026): продажи/возвраты статистики против
+  // наших заказов. Сама ходит в WB раз в 3 часа; тик чаще — чтобы рестарт не
+  // откладывал проход. Находки — в «Риски» и одним пушем.
+  const reconcile = () => runWbSalesReconcile(db)
+    .then((r) => {
+      if (r.skipped) return;
+      console.log(`[wb-reconcile] продаж ${r.sales}, новых расхождений ${r.fresh.length}, открыто ${JSON.stringify(r.open)}`);
+      notifyWbReconcile(r.fresh.map((f) => reconcileNoticeLine(f, escapeHtml)), r.fresh.length);
+    })
+    .catch((e) => console.error("[wb-reconcile] tick:", e instanceof Error ? e.message : e));
+  setTimeout(reconcile, 240_000);
+  setInterval(reconcile, 15 * 60 * 1000);
 
   // Живой закреп заказа: «ждём пасс → в очереди → выкуплен» правится на месте.
   // Сообщение удалено / бот заблокирован — стадию двигаем, чтобы не биться вечно.

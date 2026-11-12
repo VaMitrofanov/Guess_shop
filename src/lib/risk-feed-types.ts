@@ -4,7 +4,9 @@ export type RiskState = "open" | "all";
 export type RiskKind =
   | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
   /** Из обращений покупателя (01.11.2026, `bots/shared/buyer-contact-sweep.ts`). */
-  | "BUYER_CANCEL" | "BUYER_HELP";
+  | "BUYER_CANCEL" | "BUYER_HELP"
+  /** Сверка денег WB с выдачей (12.11.2026, `bots/shared/wb-sales-reconcile.ts`). */
+  | "SALE_UNMATCHED" | "SALE_NO_CODE" | "REFUND_OPEN" | "REFUND_AFTER_DELIVERY";
 
 export interface RiskFeedItem {
   id: string;
@@ -59,7 +61,11 @@ export interface BuyerDossier {
  * виден в «Первым делом», а сами записи BUYER_* остаются в базе как метка
  * «это сообщение уже обработано» для `buyer-contact-sweep`.
  */
-export const RISK_FEED_KINDS: readonly RiskKind[] = ["BAD_REVIEW", "REVIEW_FIXED", "CLAIM_OPENED", "CLAIM_RESOLVED"];
+export const RISK_FEED_KINDS: readonly RiskKind[] = [
+  "BAD_REVIEW", "REVIEW_FIXED", "CLAIM_OPENED", "CLAIM_RESOLVED",
+  // 12.11.2026: деньги WB против выдачи — тоже то, что сделал WB/покупатель.
+  "SALE_UNMATCHED", "SALE_NO_CODE", "REFUND_OPEN", "REFUND_AFTER_DELIVERY",
+];
 export const RISK_FEED_KINDS_SQL = RISK_FEED_KINDS.map((k) => `'${k}'`).join(", ");
 
 export const RISK_KIND_META: Record<RiskKind, { label: string; tone: "red" | "green" | "amber" | "muted" }> = {
@@ -69,6 +75,10 @@ export const RISK_KIND_META: Record<RiskKind, { label: string; tone: "red" | "gr
   CLAIM_RESOLVED: { label: "Заявка решена", tone: "muted" },
   BUYER_CANCEL:   { label: "Просит отмену", tone: "red" },
   BUYER_HELP:     { label: "Нужен человек", tone: "amber" },
+  SALE_UNMATCHED: { label: "Продажа без заказа", tone: "red" },
+  SALE_NO_CODE:   { label: "Оплачен, код не выдан", tone: "red" },
+  REFUND_OPEN:    { label: "Возврат денег, не выкупать", tone: "amber" },
+  REFUND_AFTER_DELIVERY: { label: "Возврат после выкупа", tone: "red" },
 };
 
 export const ORDER_STATUS_RU: Record<string, string> = {
@@ -85,6 +95,7 @@ export const ORDER_STATUS_RU: Record<string, string> = {
 /** Что автоматика сделала с заказом — подпись в ленте. */
 export function riskActionText(action: string | null | undefined, kind?: string | null): string | null {
   if (kind === "BUYER_CANCEL") return action === "frozen" ? "заморожен: просьба об отмене" : null;
+  if (kind === "REFUND_OPEN" && action === "frozen") return "заморожен: деньги вернулись";
   if (action === "frozen") return "заморожен гейтом";
   if (action === "released") return "разморожен гейтом";
   return null;

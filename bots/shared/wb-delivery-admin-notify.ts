@@ -83,6 +83,18 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string) {
   }, ref);
 }
 
+/** Новые находки сверки денег WB с выдачей — одним сообщением на проход. */
+export function notifyWbReconcile(lines: string[], total: number) {
+  if (lines.length === 0) return;
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: `сверка WB: ${total} ${total === 1 ? "расхождение" : "расхождений"}`,
+    lines: [...lines.slice(0, 10), total > 10 ? `…и ещё ${total - 10} — в «Рисках»` : null],
+    next: "разобрать в разделе «Риски»",
+  });
+}
+
 /** Доставка закрыта, а код активации так и не выпущен: покупатель заплатил и
  * ничего не получил. Чаще всего — нет чата WB, куда отправить ссылку. */
 export function notifyDbsGateNotIssued(ref: DbsRef) {
@@ -765,6 +777,12 @@ export type DbsCardState = {
     channel: string;
     isNew: boolean;
   } | null;
+  /**
+   * Связанные заказы (12.11.2026): та же покупка WB (`orderUid`) и — подсказкой
+   * — отдельная покупка с тем же именем в пределах двух часов. WB не даёт id
+   * покупателя, поэтому второе — догадка, а не факт (тёзки бывают).
+   */
+  related?: string[];
 };
 
 export function renderDbsCard(state: DbsCardState): string {
@@ -792,6 +810,7 @@ export function renderDbsCard(state: DbsCardState): string {
             state.buyer.isNew ? "новый клиент" : null,
           ].filter(Boolean).join(" · ")
         : null,
+      ...(state.related ?? []).map((line) => escapeHtml(line)),
     ],
     next: state.next,
   });
