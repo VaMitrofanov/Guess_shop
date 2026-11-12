@@ -26,6 +26,7 @@ import { syncOrderPins } from "../shared/order-pin";
 import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
+import { paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -230,6 +231,27 @@ export function startAutoWorkers(bot: Telegraf): void {
   };
   setTimeout(questions, 300_000);
   setInterval(questions, 10 * 60 * 1000);
+
+  // Разметка чатов поддержки @RobloxBank_PA (12.11.2026): метки в именах контактов
+  // и папки по заказам. Никому не пишет. Env: PA_API_ID/PA_API_HASH/PA_SESSION, PA_DESK=off|dry.
+  const mode = paDeskMode();
+  if (mode !== "off") {
+    let running = false;
+    const desk = () => {
+      if (running) return;
+      running = true;
+      runPaDeskSweep(mode)
+        .then((r) => {
+          if (r && (r.renamed || r.foldersUpdated)) {
+            console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated} ${JSON.stringify(r.folders)}`);
+          }
+        })
+        .catch((e) => console.error("[pa-desk] tick:", e instanceof Error ? e.message : e))
+        .finally(() => { running = false; });
+    };
+    setTimeout(desk, 120_000);
+    setInterval(desk, 5 * 60 * 1000);
+  }
 
   // Живой закреп заказа: «ждём пасс → в очереди → выкуплен» правится на месте.
   // Сообщение удалено / бот заблокирован — стадию двигаем, чтобы не биться вечно.
