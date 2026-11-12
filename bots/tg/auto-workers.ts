@@ -25,6 +25,7 @@ import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
 import { syncOrderPins } from "../shared/order-pin";
 import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
+import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -216,6 +217,19 @@ export function startAutoWorkers(bot: Telegraf): void {
     .catch((e) => console.error("[wb-reconcile] tick:", e instanceof Error ? e.message : e));
   setTimeout(reconcile, 240_000);
   setInterval(reconcile, 15 * 60 * 1000);
+
+  // Вопросы к карточкам WB (12.11.2026): типовые — ответ шаблоном, код в вопросе —
+  // отклонить, жалоба — шаблон + «Риски» + пуш. Выключатель WB_QUESTIONS_AUTOREPLY=off.
+  const questions = () => {
+    if (!questionsAutoreplyEnabled()) return;
+    runWbQuestionsSweep(db)
+      .then((r) => {
+        if (r.seen) console.log(`[wb-questions] вопросов ${r.seen}: ответ ${r.answered}, скрыто ${r.rejected}, жалоб ${r.complaints}, без шаблона ${r.unknown}, не ушло ${r.failed}`);
+      })
+      .catch((e) => console.error("[wb-questions] tick:", e instanceof Error ? e.message : e));
+  };
+  setTimeout(questions, 300_000);
+  setInterval(questions, 10 * 60 * 1000);
 
   // Живой закреп заказа: «ждём пасс → в очереди → выкуплен» правится на месте.
   // Сообщение удалено / бот заблокирован — стадию двигаем, чтобы не биться вечно.

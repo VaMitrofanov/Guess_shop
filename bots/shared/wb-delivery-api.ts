@@ -379,3 +379,39 @@ export function assertBulkOrderSucceeded(response: WbBulkMutationResponse, order
     throw new WbDeliveryApiError("marketplace", 409, String(providerCode), false);
   }
 }
+
+/** Вопрос покупателя к карточке (feedbacks-api). */
+const WbQuestionSchema = z.object({
+  id: z.string(),
+  text: z.string().optional().default(""),
+  createdDate: z.string().optional(),
+  userName: z.string().optional(),
+  productDetails: z.object({
+    nmId: z.number().optional(),
+    productName: z.string().optional(),
+  }).partial().optional(),
+}).passthrough();
+export type WbQuestion = z.infer<typeof WbQuestionSchema>;
+
+/** Неотвеченные вопросы, свежие первыми. */
+export async function fetchUnansweredQuestions(take = 100): Promise<WbQuestion[]> {
+  const res = await requestJson(
+    "marketplace",
+    `https://feedbacks-api.wildberries.ru/api/v1/questions?isAnswered=false&take=${take}&skip=0&order=dateDesc`,
+    z.object({ data: z.object({ questions: z.array(WbQuestionSchema).optional().default([]) }).partial().optional() }).passthrough(),
+  );
+  return res.data?.questions ?? [];
+}
+
+/**
+ * Ответить на вопрос (`state: "wbRu"` — ответ виден на карточке) или отклонить
+ * его (`state: "none"` — вопрос не публикуется, текст видит только спросивший).
+ */
+export async function replyToQuestion(id: string, text: string, mode: "answer" | "reject"): Promise<void> {
+  await requestJson(
+    "marketplace",
+    "https://feedbacks-api.wildberries.ru/api/v1/questions",
+    z.unknown(),
+    { ...jsonBody({ id, answer: { text }, state: mode === "answer" ? "wbRu" : "none" }), method: "PATCH" },
+  );
+}

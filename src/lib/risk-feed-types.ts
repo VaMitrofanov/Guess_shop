@@ -8,7 +8,9 @@ export type RiskKind =
   /** Из обращений покупателя (01.11.2026, `bots/shared/buyer-contact-sweep.ts`). */
   | "BUYER_CANCEL" | "BUYER_HELP"
   /** Сверка денег WB с выдачей (12.11.2026, `bots/shared/wb-sales-reconcile.ts`). */
-  | "SALE_UNMATCHED" | "SALE_NO_CODE" | "REFUND_OPEN" | "REFUND_AFTER_DELIVERY";
+  | "SALE_UNMATCHED" | "SALE_NO_CODE" | "REFUND_OPEN" | "REFUND_AFTER_DELIVERY"
+  /** Вопрос к карточке WB: жалоба или непонятное (12.11.2026, `wb-questions-sweep.ts`). */
+  | "BUYER_QUESTION";
 
 export interface RiskFeedItem {
   id: string;
@@ -67,6 +69,8 @@ export const RISK_FEED_KINDS: readonly RiskKind[] = [
   "BAD_REVIEW", "REVIEW_FIXED", "REVIEW_DELETED", "CLAIM_OPENED", "CLAIM_RESOLVED",
   // 12.11.2026: деньги WB против выдачи — тоже то, что сделал WB/покупатель.
   "SALE_UNMATCHED", "SALE_NO_CODE", "REFUND_OPEN", "REFUND_AFTER_DELIVERY",
+  // 12.11.2026: жалоба или непонятный вопрос в «Вопросах» карточки.
+  "BUYER_QUESTION",
 ];
 export const RISK_FEED_KINDS_SQL = RISK_FEED_KINDS.map((k) => `'${k}'`).join(", ");
 
@@ -82,6 +86,7 @@ export const RISK_KIND_META: Record<RiskKind, { label: string; tone: "red" | "gr
   SALE_NO_CODE:   { label: "Оплачен, код не выдан", tone: "red" },
   REFUND_OPEN:    { label: "Возврат денег, не выкупать", tone: "amber" },
   REFUND_AFTER_DELIVERY: { label: "Возврат после выкупа", tone: "red" },
+  BUYER_QUESTION: { label: "Вопрос на WB", tone: "amber" },
 };
 
 export const ORDER_STATUS_RU: Record<string, string> = {
@@ -99,6 +104,7 @@ export const ORDER_STATUS_RU: Record<string, string> = {
 export function riskActionText(action: string | null | undefined, kind?: string | null): string | null {
   if (kind === "BUYER_CANCEL") return action === "frozen" ? "заморожен: просьба об отмене" : null;
   if (kind === "REFUND_OPEN" && action === "frozen") return "заморожен: деньги вернулись";
+  if (kind === "BUYER_QUESTION") return action === "answered" ? "ответили шаблоном: «напишите в чат заказа»" : "без ответа — ответить в кабинете WB";
   if (kind === "REVIEW_DELETED") return action === "released" ? "разморожен гейтом, пометка 🗑 осталась" : "пометка 🗑 на заказе";
   if (action === "frozen") return "заморожен гейтом";
   if (action === "released") return "разморожен гейтом";

@@ -891,3 +891,44 @@ export async function pushDbsCard(
   }));
   return next;
 }
+
+/**
+ * Вопрос к карточке WB, который требует человека (12.11.2026): жалоба или
+ * возврат (бот уже ответил «напишите в чат заказа»), непонятный вопрос (бот
+ * молчит) или код получения, присланный в вопрос (вопрос скрыт). Имя на WB не
+ * уникально — «похоже на» лишь подсказка.
+ */
+export function notifyWbQuestion(input: {
+  kind: "complaint" | "unknown" | "code";
+  productName: string | null;
+  buyerName: string | null;
+  text: string;
+  answered: boolean;
+  code?: string | null;
+  candidates: Array<{ code: string | null; wbOrderId: string; amount: number | null; status: string }>;
+}): void {
+  const title = input.kind === "code"
+    ? "код получения прислали в вопрос"
+    : input.kind === "complaint"
+      ? `жалоба в вопросах WB${input.answered ? " — ответили шаблоном" : " — ответ не ушёл, повторим"}`
+      : "вопрос на WB без шаблона";
+  const quote = clipReview(input.text);
+  broadcast({
+    marker: input.kind === "unknown" ? "action" : "urgent",
+    zone: "DBS",
+    title,
+    lines: [
+      `🛒 ${escapeHtml(input.productName ?? "карточка WB")}${input.buyerName ? ` · ${escapeHtml(input.buyerName)}` : ""}`,
+      quote ? `💬 <i>${escapeHtml(quote)}</i>` : null,
+      input.kind === "code" && input.code ? `🔑 Код получения: <code>${escapeHtml(input.code)}</code> — вопрос скрыт, покупателю сказали писать в чат заказа` : null,
+      ...input.candidates.slice(0, 3).map((c) =>
+        `👥 похоже: ${c.code ? `<code>${escapeHtml(c.code)}</code> · ` : ""}WB #${escapeHtml(c.wbOrderId)}${c.amount ? ` · ${c.amount} R$` : ""} · ${escapeHtml(c.status)}`),
+      input.candidates.length === 0 && input.buyerName ? "👥 заказа с таким именем на этой карточке не нашли" : null,
+    ],
+    next: input.kind === "code"
+      ? "если заказ ждёт код — ввести его в консоли DBS"
+      : input.kind === "complaint"
+        ? "найти заказ и написать покупателю в чат заказа"
+        : "ответить на вопрос в кабинете WB",
+  });
+}

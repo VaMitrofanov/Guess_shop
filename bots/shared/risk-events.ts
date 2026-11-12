@@ -30,8 +30,12 @@ export type RiskKind =
   /** С 01.11.2026 — из обращений покупателя (buyer-contact-sweep). */
   | "BUYER_CANCEL" | "BUYER_HELP"
   /** С 12.11.2026 — сверка денег WB с выдачей (`wb-sales-reconcile.ts`). */
-  | "SALE_UNMATCHED" | "SALE_NO_CODE" | "REFUND_OPEN" | "REFUND_AFTER_DELIVERY";
-type RiskAction = "frozen" | "released" | "none";
+  | "SALE_UNMATCHED" | "SALE_NO_CODE" | "REFUND_OPEN" | "REFUND_AFTER_DELIVERY"
+  /** С 12.11.2026 — вопрос к карточке, на который шаблоном не ответить до конца
+   *  (жалоба, возврат, непонятное) — `wb-questions-sweep.ts`. */
+  | "BUYER_QUESTION";
+/** `answered` — бот ответил на вопрос WB шаблоном (12.11.2026). */
+type RiskAction = "frozen" | "released" | "none" | "answered";
 
 export const RISK_AUTO_ACTOR = "авто";
 
