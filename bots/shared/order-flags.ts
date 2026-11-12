@@ -20,7 +20,10 @@
  * из `bots/shared` (так же, как `order-hold.ts`).
  */
 
-export type OrderFlagKind = "CLAIM" | "STALE" | "PARTIAL_REFUND" | "CANCEL_ASK";
+export type OrderFlagKind = "CLAIM" | "STALE" | "PARTIAL_REFUND" | "CANCEL_ASK"
+  /** 12.11.2026: был плохой отзыв, покупатель (или WB) его удалил — гейт
+   *  снял заморозку, а память о ★1 осталась пометкой. */
+  | "REVIEW_DELETED";
 
 export interface OrderFlag {
   kind: OrderFlagKind;
@@ -39,6 +42,7 @@ export const FLAG_META: Record<OrderFlagKind, { icon: string; label: string; ton
   STALE: { icon: "⏳", label: "Висит", tone: "yellow" },
   PARTIAL_REFUND: { icon: "💸", label: "Частичный возврат", tone: "orange" },
   CANCEL_ASK: { icon: "✋", label: "Просит отмену", tone: "orange" },
+  REVIEW_DELETED: { icon: "🗑", label: "Был плохой отзыв, удалён", tone: "yellow" },
 };
 
 const KINDS = new Set<string>(Object.keys(FLAG_META));

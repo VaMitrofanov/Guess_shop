@@ -297,6 +297,49 @@ export function notifyBuyoutGateReviewFixed(input: {
   }, ref);
 }
 
+/**
+ * Плохой отзыв удалён (12.11.2026). `released` — гейт снял свой замок сам;
+ * иначе заказ заморожен руками или заявкой, и снимать замок решает человек.
+ */
+export function notifyBuyoutGateReviewDeleted(input: {
+  wbOrderId: string | null;
+  code: string;
+  denomination: number | null;
+  buyerName: string | null;
+  cardMessages?: Record<string, number> | null;
+  internalStatus: string | null;
+  stars: number | null;
+  text: string | null;
+  reviewedAt: Date | null;
+  released: boolean;
+}): void {
+  const ref: DbsRef = {
+    wbOrderId: input.wbOrderId ?? "",
+    code: input.code,
+    denomination: input.denomination,
+    buyerName: input.buyerName,
+    cardMessages: input.cardMessages ?? null,
+  };
+  const when = reviewWhen(input.reviewedAt);
+  const text = clipReview(input.text);
+  broadcast({
+    marker: input.released ? "progress" : "action",
+    zone: "DBS",
+    title: input.released ? "плохой отзыв удалён — заказ разморожен" : "плохой отзыв удалён — заказ всё ещё заморожен",
+    lines: [
+      refLine(ref),
+      `🗑 ${input.stars ? starsLine(input.stars) : "отзыв"}${when ? ` · ${when}` : ""} — у WB его больше нет`,
+      text ? `💬 <i>${escapeHtml(text)}</i>` : null,
+      input.released
+        ? "🔓 Заморозку гейта снял сам гейт, на заказе пометка «🗑 Был плохой отзыв, удалён»"
+        : "❄️ Заморозку ставил не гейт — снимать или нет, решает человек",
+    ],
+    next: input.released
+      ? "выкупать можно; перед выкупом бот покажет пометку"
+      : "проверить карточку и решить, размораживать ли",
+  }, ref);
+}
+
 /** Чем кончилась отмена для НАШЕЙ стороны заказа.
  *
  * `already_delivered` появился 12.09.2026: до него исход считался только когда

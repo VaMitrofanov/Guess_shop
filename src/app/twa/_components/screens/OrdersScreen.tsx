@@ -2783,6 +2783,9 @@ function OrderCard({
         {order.risk?.review?.kind === "BAD_REVIEW" && (
           <span className="twa-oc-prio" style={{ color: C.red, background: `${C.red}1f` }} title="Плохой отзыв на WB">★{order.risk.review.stars ?? "?"}</span>
         )}
+        {order.risk?.review?.kind === "REVIEW_DELETED" && (
+          <span className="twa-oc-prio" style={{ color: C.orange, background: `${C.orange}1f` }} title="Был плохой отзыв, покупатель его удалил">🗑★{order.risk.review.stars ?? "?"}</span>
+        )}
         {order.risk?.review?.kind === "REVIEW_FIXED" && (
           <span className="twa-oc-prio" style={{ color: C.green, background: `${C.green}1f` }} title="Отзыв исправлен">★{order.risk.review.starsBefore ?? "?"}→{order.risk.review.stars ?? "?"}</span>
         )}

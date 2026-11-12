@@ -28,6 +28,8 @@ import {
   sendBuyerChatMessage,
   WbDeliveryApiError,
   fetchGateFeedbacks,
+  fetchFeedbackById,
+  FEEDBACK_LOOKUP_CAP,
 } from "./wb-delivery-api";
 import {
   deliveryWindow,
@@ -86,17 +88,19 @@ import {
   notifyWbClaimResolved,
   notifyBuyoutGateBadReview,
   notifyBuyoutGateReviewFixed,
+  notifyBuyoutGateReviewDeleted,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
 import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
-import { GATE_ACTOR, isGateReviewHold, matchBadReview, matchFixedReview, runBuyoutGate, type GateOrder, type WbFeedback } from "./buyout-gate";
+import { GATE_ACTOR, isGateReviewHold, matchBadReview, matchFixedReview, runBuyoutGate, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
 import {
   autoResolveRiskEvents,
   badReviewEvent,
   claimEvents,
   recordRiskEvents,
   reviewBelongsInFeed,
+  reviewDeletedEvent,
   reviewFixedEvent,
   reviewText,
   type RiskEventInput,
@@ -2208,6 +2212,13 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
 
   // Отзывы — один раз на прогон: ими пользуются и гейт, и лента.
   const loaded = await fetchGateFeedbacks().catch(() => ({ feedbacks: [] as WbFeedback[], complete: false }));
+  // Удалённые плохие отзывы — только по полной выдаче (иначе «пропал» = «не пришла страница»).
+  const deletedReviews = loaded.complete
+    ? await findDeletedBadReviews(db, loaded.feedbacks, allCodes, reviewHoldCodes).catch((error) => {
+        console.error(`[WbDbsSync] проверка удалённых отзывов не прошла: ${safeErrorCode(error)}`);
+        return new Map<string, DeletedReview>();
+      })
+    : new Map<string, DeletedReview>();
 
   const res = await runBuyoutGate({
     loadBuyableOrders: async () => gateOrders,
@@ -2234,6 +2245,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     release: async (wbCode) => {
       await releaseByCode(db, { wbCode, actor: GATE_ACTOR });
     },
+    deletedReviews,
   });
   out.gateFrozen += res.frozen.length;
   const refFor = (code: string) => {
@@ -2271,6 +2283,21 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     });
   }
 
+  await applyDeletedReviews(db, {
+    now,
+    deletedReviews,
+    releasedCodes: new Set(res.releasedDeleted.map((r) => r.wbCode)),
+    blocked,
+    reviewHoldCodes,
+    dbsByCode,
+    internalByCode,
+    toGateOrder,
+    feedbacks: loaded.feedbacks,
+    refFor,
+  }).catch((error) => {
+    console.error(`[WbDbsSync] удалённые отзывы не разобраны: ${safeErrorCode(error)}`);
+  });
+
   await syncRiskFeed(db, {
     now,
     dbsByCode,
@@ -2279,12 +2306,142 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     feedbacks: loaded.feedbacks,
     feedbacksComplete: loaded.complete,
     frozenByReview: new Set([
-      ...[...reviewHoldCodes].filter((c) => !res.released.some((r) => r.wbCode === c)),
+      ...[...reviewHoldCodes].filter((c) => !res.released.some((r) => r.wbCode === c)
+        && !res.releasedDeleted.some((r) => r.wbCode === c)),
       ...res.frozen.filter((d) => d.rule === "bad_review").map((d) => d.wbCode),
     ]),
     released: new Set(res.released.map((r) => r.wbCode)),
   }).catch((error) => {
     console.error(`[WbDbsSync] лента рисков не обновилась: ${safeErrorCode(error)}`);
+  });
+}
+
+/**
+ * Плохие отзывы, которых у WB больше нет (12.11.2026).
+ *
+ * Кандидаты — записи «Риски» о плохом отзыве (открытые и все — под замком
+ * гейта), чей отзыв пропал из полной выдачи. Пропажа сама по себе ничего не
+ * доказывает, поэтому каждый отзыв переспрашиваем по номеру: удалённым
+ * считаем только ответ 404. Уже разобранные удаления (`REVIEW_DELETED`) не
+ * переспрашиваем.
+ */
+async function findDeletedBadReviews(
+  db: Db,
+  feedbacks: WbFeedback[],
+  codes: string[],
+  holdCodes: Set<string>,
+): Promise<Map<string, DeletedReview>> {
+  const out = new Map<string, DeletedReview>();
+  if (codes.length === 0) return out;
+  const visible = new Set(feedbacks.map((f) => f.id).filter(Boolean) as string[]);
+  const [events, done] = await Promise.all([
+    db.riskEvent.findMany({
+      where: {
+        kind: "BAD_REVIEW",
+        feedbackId: { not: null },
+        wbCode: { in: codes },
+        OR: [{ resolvedAt: null }, { wbCode: { in: [...holdCodes] } }],
+      },
+      select: { wbCode: true, feedbackId: true, stars: true, text: true, occurredAt: true },
+      orderBy: { occurredAt: "desc" },
+      take: 500,
+    }),
+    db.riskEvent.findMany({
+      where: { kind: "REVIEW_DELETED", feedbackId: { not: null }, wbCode: { in: codes } },
+      select: { feedbackId: true },
+      take: 1000,
+    }),
+  ]);
+  const alreadyDeleted = new Set(done.map((d) => d.feedbackId as string));
+  const answers = new Map<string, boolean>();
+  for (const e of events) {
+    const id = e.feedbackId as string;
+    if (!e.wbCode || out.has(e.wbCode) || visible.has(id) || alreadyDeleted.has(id)) continue;
+    let gone = answers.get(id);
+    if (gone === undefined) {
+      if (answers.size >= FEEDBACK_LOOKUP_CAP) break;
+      const res = await fetchFeedbackById(id);
+      gone = res?.status === "gone";
+      answers.set(id, gone);
+    }
+    if (gone) out.set(e.wbCode, { feedbackId: id, stars: e.stars ?? null, text: e.text ?? null, reviewedAt: e.occurredAt ?? null });
+  }
+  return out;
+}
+
+/**
+ * Удалённый плохой отзыв → пометка «🗑 Был плохой отзыв, удалён» на заказе,
+ * запись в «Риски» и пуш, если заказ был заморожен. Замок гейта к этому моменту
+ * уже снят (`runBuyoutGate`); чужой замок (руками, заявкой) не трогаем — его
+ * снимает человек, событие тогда остаётся открытым.
+ */
+async function applyDeletedReviews(db: Db, input: {
+  now: Date;
+  deletedReviews: Map<string, DeletedReview>;
+  releasedCodes: Set<string>;
+  blocked: Set<string>;
+  reviewHoldCodes: Set<string>;
+  dbsByCode: Map<string, {
+    id: string; nmId: number; buyerName: string | null; createdAt: Date; wbOrderId: string;
+    denominationSnapshot: number | null; cancelledAt: Date | null; isTest: boolean;
+    claimOpenedAt: Date | null; claimReason: string | null; claimResolvedAt: Date | null;
+  }>;
+  internalByCode: Map<string, { status: string }>;
+  toGateOrder: (code: string) => GateOrder;
+  feedbacks: WbFeedback[];
+  refFor: (code: string) => {
+    wbOrderId: string | null; code: string; denomination: number | null; buyerName: string | null;
+    cardMessages: Record<string, number> | null; internalStatus: string | null;
+  };
+}) {
+  if (input.deletedReviews.size === 0) return;
+  const events: RiskEventInput[] = [];
+  for (const [code, deleted] of input.deletedReviews) {
+    const meta = input.dbsByCode.get(code);
+    if (!meta || meta.isTest) continue;
+    const status = input.internalByCode.get(code)?.status ?? null;
+    const closed = Boolean(meta.cancelledAt) || status === "COMPLETED" || status === "REJECTED";
+    // Второй плохой отзыв того же покупателя всё ещё стоит — замок гейта законен.
+    const stillBad = Boolean(matchBadReview(input.toGateOrder(code), input.feedbacks));
+    const released = input.releasedCodes.has(code);
+    const heldByOther = input.blocked.has(code) && !input.reviewHoldCodes.has(code);
+    const needsHuman = heldByOther && !stillBad && !closed;
+    const day = deleted.reviewedAt ? deleted.reviewedAt.toISOString().slice(0, 10).split("-").reverse().slice(0, 2).join(".") : null;
+    if (!stillBad && !closed && status) {
+      const detail = `${deleted.stars ? `★${deleted.stars}` : "отзыв"}${day ? ` от ${day}` : ""}${deleted.text ? `: «${deleted.text}»` : ""}`;
+      await setFlag(db, { wbCode: code, kind: "REVIEW_DELETED", detail, at: input.now }).catch(() => null);
+    }
+    events.push(reviewDeletedEvent({
+      marketplaceId: meta.id,
+      wbCode: code,
+      wbOrderId: meta.wbOrderId,
+      buyerName: meta.buyerName,
+      nmId: meta.nmId ?? null,
+      amount: meta.denominationSnapshot ?? null,
+      createdAt: meta.createdAt,
+      closed,
+      claimOpenedAt: meta.claimOpenedAt,
+      claimReason: meta.claimReason,
+      claimResolvedAt: meta.claimResolvedAt,
+      refunded: Boolean(meta.cancelledAt && meta.claimOpenedAt),
+    }, deleted, released ? "released" : "none", needsHuman, input.now));
+    console.log(`[WbDbsSync] плохой отзыв удалён: ${code}${released ? " — гейт разморозил" : needsHuman ? " — замок не гейта, решает человек" : ""}`);
+    if (released || needsHuman) {
+      notifyBuyoutGateReviewDeleted({
+        ...input.refFor(code),
+        stars: deleted.stars,
+        text: deleted.text,
+        reviewedAt: deleted.reviewedAt,
+        released,
+      });
+    }
+  }
+  await recordRiskEvents(db, events);
+  await autoResolveRiskEvents(db, {
+    closedCodes: [],
+    fixedCodes: [],
+    deletedFeedbackIds: [...input.deletedReviews.values()].map((d) => d.feedbackId),
+    now: input.now,
   });
 }
 

@@ -54,7 +54,7 @@ export async function riskInfoForCodes(db: Db, codes: string[]): Promise<Map<str
       LEFT JOIN LATERAL (
         SELECT e.kind, e.stars, e."starsBefore", e.text, e."occurredAt", e.action
         FROM "RiskEvent" e
-        WHERE e."wbCode" = c.code AND e.kind IN ('BAD_REVIEW', 'REVIEW_FIXED')
+        WHERE e."wbCode" = c.code AND e.kind IN ('BAD_REVIEW', 'REVIEW_FIXED', 'REVIEW_DELETED')
         ORDER BY e."occurredAt" DESC
         LIMIT 1
       ) r ON true`,
@@ -73,7 +73,7 @@ export async function riskInfoForCodes(db: Db, codes: string[]): Promise<Map<str
       buyerKey: key,
       wbOrderId: row.wbOrderId,
       flag: flag ? { note: flag.note, by: flag.createdBy, at: flag.createdAt.toISOString() } : null,
-      review: row.kind === "BAD_REVIEW" || row.kind === "REVIEW_FIXED"
+      review: row.kind === "BAD_REVIEW" || row.kind === "REVIEW_FIXED" || row.kind === "REVIEW_DELETED"
         ? {
             kind: row.kind,
             stars: row.stars,

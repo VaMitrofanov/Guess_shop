@@ -4,6 +4,7 @@
    Что считается событием:
    • BAD_REVIEW     — актуальная версия отзыва покупателя ★1–3;
    • REVIEW_FIXED   — отзыв был ★1–3, стал ★4–5;
+   • REVIEW_DELETED — отзыва ★1–3 у WB больше нет (удалён; 12.11.2026);
    • CLAIM_OPENED   — покупатель открыл заявку на возврат;
    • CLAIM_RESOLVED — WB решил заявку.
 
@@ -24,6 +25,8 @@ import { normalizeName, type FixedReview, type WbFeedback } from "./buyout-gate"
 
 export type RiskKind =
   | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
+  /** С 12.11.2026 — плохой отзыв удалён (404 на запрос по номеру). */
+  | "REVIEW_DELETED"
   /** С 01.11.2026 — из обращений покупателя (buyer-contact-sweep). */
   | "BUYER_CANCEL" | "BUYER_HELP"
   /** С 12.11.2026 — сверка денег WB с выдачей (`wb-sales-reconcile.ts`). */
@@ -136,6 +139,35 @@ export function reviewFixedEvent(order: RiskOrder, fixed: FixedReview, action: R
   };
 }
 
+/**
+ * Плохой отзыв удалён. Событие открыто, только если решать есть что: заказ
+ * ещё не выкуплен и заморожен не гейтом (руками или заявкой) — тогда человек
+ * решает, снимать ли замок. Если гейт снял свой замок сам или заказ закрыт —
+ * событие сразу разобрано, а история ★1 видна в досье.
+ */
+export function reviewDeletedEvent(
+  order: RiskOrder,
+  deleted: { feedbackId: string; stars: number | null; text: string | null },
+  action: RiskAction,
+  needsHuman: boolean,
+  now: Date,
+): RiskEventInput {
+  return {
+    kind: "REVIEW_DELETED",
+    dedupeKey: `deleted:${order.marketplaceId}:${deleted.feedbackId}`,
+    ...base(order),
+    stars: deleted.stars,
+    starsBefore: deleted.stars,
+    text: deleted.text,
+    feedbackId: deleted.feedbackId,
+    action,
+    occurredAt: now,
+    ...(needsHuman && !order.closed
+      ? {}
+      : { resolvedAt: now, resolvedBy: `${RISK_AUTO_ACTOR}: отзыв удалён` }),
+  };
+}
+
 export function claimEvents(order: RiskOrder, now: Date): RiskEventInput[] {
   const out: RiskEventInput[] = [];
   if (order.claimOpenedAt) {
@@ -194,7 +226,7 @@ export async function recordRiskEvents(db: Db, events: RiskEventInput[]): Promis
  */
 export async function autoResolveRiskEvents(
   db: Db,
-  input: { closedCodes: string[]; fixedCodes: string[]; now?: Date },
+  input: { closedCodes: string[]; fixedCodes: string[]; deletedFeedbackIds?: string[]; now?: Date },
 ): Promise<number> {
   const now = input.now ?? new Date();
   let total = 0;
@@ -210,6 +242,13 @@ export async function autoResolveRiskEvents(
     const res = await db.riskEvent.updateMany({
       where: { resolvedAt: null, kind: "BAD_REVIEW", wbCode: { in: input.fixedCodes } },
       data: { resolvedAt: now, resolvedBy: `${RISK_AUTO_ACTOR}: отзыв исправлен` },
+    });
+    total += Number(res?.count ?? 0);
+  }
+  if (input.deletedFeedbackIds && input.deletedFeedbackIds.length > 0) {
+    const res = await db.riskEvent.updateMany({
+      where: { resolvedAt: null, kind: "BAD_REVIEW", feedbackId: { in: input.deletedFeedbackIds } },
+      data: { resolvedAt: now, resolvedBy: `${RISK_AUTO_ACTOR}: отзыв удалён` },
     });
     total += Number(res?.count ?? 0);
   }

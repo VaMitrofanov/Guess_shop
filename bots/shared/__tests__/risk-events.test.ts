@@ -6,6 +6,7 @@ import {
   buyerKeyOf,
   claimEvents,
   reviewBelongsInFeed,
+  reviewDeletedEvent,
   reviewFixedEvent,
   reviewText,
   type RiskOrder,
@@ -69,5 +70,25 @@ describe("risk-events", () => {
   it("текст отзыва склеивает достоинства и недостатки", () => {
     expect(reviewText({ text: "", pros: "быстро", cons: "дорого" })).toBe("+ быстро\n− дорого");
     expect(reviewText({})).toBeNull();
+  });
+});
+
+describe("удалённый отзыв (12.11.2026)", () => {
+  const gone = { feedbackId: "DEL", stars: 1, text: "игнорят" };
+
+  it("гейт сам разморозил — событие сразу разобрано, ★ сохранены", () => {
+    const e = reviewDeletedEvent(order(), gone, "released", false, NOW);
+    expect(e).toMatchObject({ kind: "REVIEW_DELETED", stars: 1, feedbackId: "DEL", action: "released", dedupeKey: "deleted:mp1:DEL" });
+    expect(e.resolvedAt).toEqual(NOW);
+  });
+
+  it("замок ставил человек — событие открыто, решает человек", () => {
+    const e = reviewDeletedEvent(order(), gone, "none", true, NOW);
+    expect(e.resolvedAt).toBeUndefined();
+  });
+
+  it("заказ закрыт — решать нечего", () => {
+    const e = reviewDeletedEvent(order({ closed: true }), gone, "none", true, NOW);
+    expect(e.resolvedAt).toEqual(NOW);
   });
 });

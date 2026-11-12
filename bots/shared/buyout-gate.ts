@@ -228,6 +228,9 @@ interface BuyoutGateDeps {
   freeze: (wbCode: string, reason: string, decision?: GateDecision) => Promise<boolean | void>;
   /** Снять заморозку гейта (тот же `releaseByCode`, что у кнопки). */
   release?: (wbCode: string) => Promise<void>;
+  /** Плохие отзывы, которых у WB больше нет (по коду заказа) — подтверждены
+   *  ответом 404 на запрос по номеру. Повод снять замок, но не стереть историю. */
+  deletedReviews?: Map<string, DeletedReview>;
   now?: number;
   /** Флаг: гейт можно выключить, не трогая остальную синхронизацию. */
   enabled?: boolean;
@@ -237,16 +240,43 @@ interface GateRelease extends FixedReview {
   wbCode: string;
 }
 
+/** Плохой отзыв, который WB больше не отдаёт (12.11.2026): удалён покупателем
+ *  или снят WB. Берётся из записи «Риски» — сам отзыв уже не получить. */
+export interface DeletedReview {
+  feedbackId: string;
+  stars: number | null;
+  text: string | null;
+  reviewedAt: Date | null;
+}
+
 interface BuyoutGateResult {
   checked: number;
   frozen: GateDecision[];
   released: GateRelease[];
+  /** Сняты замки, чей плохой отзыв удалён (12.11.2026). */
+  releasedDeleted: Array<{ wbCode: string; deleted: DeletedReview }>;
   skippedByCap: number;
 }
 
 /**
+ * Плохой отзыв этого заказа удалён, и других плохих у покупателя не осталось.
+ *
+ * Разморозка по удалению — только при чистой выдаче: тёзка-двойник или второй
+ * отзыв того же человека, всё ещё ★1, держат замок.
+ */
+export function matchDeletedReview(
+  order: GateOrder,
+  feedbacks: WbFeedback[],
+  deleted: Map<string, DeletedReview> | undefined,
+): DeletedReview | null {
+  const hit = deleted?.get(order.wbCode);
+  if (!hit) return null;
+  return matchBadReview(order, feedbacks) ? null : hit;
+}
+
+/**
  * Один прогон гейта: пометить заморозкой заказы, которые нельзя выкупать без
- * вмешательства, и снять свои же замки с тех, кто исправил отзыв.
+ * вмешательства, и снять свои же замки с тех, кто исправил или удалил отзыв.
  *
  * Идемпотентен по построению — `loadBuyableOrders` отдаёт только заказы без
  * активной заморозки и без снятой руками (снятая человеком возвращалась бы на
@@ -256,7 +286,7 @@ interface BuyoutGateResult {
  */
 export async function runBuyoutGate(deps: BuyoutGateDeps): Promise<BuyoutGateResult> {
   const now = deps.now ?? Date.now();
-  const result: BuyoutGateResult = { checked: 0, frozen: [], released: [], skippedByCap: 0 };
+  const result: BuyoutGateResult = { checked: 0, frozen: [], released: [], releasedDeleted: [], skippedByCap: 0 };
   if (deps.enabled === false) return result;
 
   const orders = await deps.loadBuyableOrders();
@@ -283,9 +313,15 @@ export async function runBuyoutGate(deps: BuyoutGateDeps): Promise<BuyoutGateRes
   if (complete && deps.release) {
     for (const order of holds) {
       const fixed = matchFixedReview(order, feedbacks);
-      if (!fixed) continue;
+      if (fixed) {
+        await deps.release(order.wbCode);
+        result.released.push({ wbCode: order.wbCode, ...fixed });
+        continue;
+      }
+      const deleted = matchDeletedReview(order, feedbacks, deps.deletedReviews);
+      if (!deleted) continue;
       await deps.release(order.wbCode);
-      result.released.push({ wbCode: order.wbCode, ...fixed });
+      result.releasedDeleted.push({ wbCode: order.wbCode, deleted });
     }
   }
   return result;

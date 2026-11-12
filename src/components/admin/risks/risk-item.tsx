@@ -37,7 +37,8 @@ export function RiskItem({
   const href = orderHref(item);
   const stars = item.kind === "REVIEW_FIXED"
     ? `${starsText(item.starsBefore)} → ${starsText(item.stars)}`
-    : item.kind === "BAD_REVIEW" ? starsText(item.stars) : null;
+    : item.kind === "BAD_REVIEW" ? starsText(item.stars)
+      : item.kind === "REVIEW_DELETED" ? `${starsText(item.stars)} 🗑` : null;
   return (
     <article className={`${css.item} ${resolved && showActions ? css.itemResolved : ""}`}>
       <span className={`${css.stripe} ${css[meta.tone]}`} aria-hidden="true" />

@@ -3,6 +3,8 @@
 export type RiskState = "open" | "all";
 export type RiskKind =
   | "BAD_REVIEW" | "REVIEW_FIXED" | "CLAIM_OPENED" | "CLAIM_RESOLVED"
+  /** Плохой отзыв удалён покупателем или WB (12.11.2026). */
+  | "REVIEW_DELETED"
   /** Из обращений покупателя (01.11.2026, `bots/shared/buyer-contact-sweep.ts`). */
   | "BUYER_CANCEL" | "BUYER_HELP"
   /** Сверка денег WB с выдачей (12.11.2026, `bots/shared/wb-sales-reconcile.ts`). */
@@ -62,7 +64,7 @@ export interface BuyerDossier {
  * «это сообщение уже обработано» для `buyer-contact-sweep`.
  */
 export const RISK_FEED_KINDS: readonly RiskKind[] = [
-  "BAD_REVIEW", "REVIEW_FIXED", "CLAIM_OPENED", "CLAIM_RESOLVED",
+  "BAD_REVIEW", "REVIEW_FIXED", "REVIEW_DELETED", "CLAIM_OPENED", "CLAIM_RESOLVED",
   // 12.11.2026: деньги WB против выдачи — тоже то, что сделал WB/покупатель.
   "SALE_UNMATCHED", "SALE_NO_CODE", "REFUND_OPEN", "REFUND_AFTER_DELIVERY",
 ];
@@ -71,6 +73,7 @@ export const RISK_FEED_KINDS_SQL = RISK_FEED_KINDS.map((k) => `'${k}'`).join(", 
 export const RISK_KIND_META: Record<RiskKind, { label: string; tone: "red" | "green" | "amber" | "muted" }> = {
   BAD_REVIEW:     { label: "Плохой отзыв", tone: "red" },
   REVIEW_FIXED:   { label: "Отзыв исправлен", tone: "green" },
+  REVIEW_DELETED: { label: "Плохой отзыв удалён", tone: "amber" },
   CLAIM_OPENED:   { label: "Заявка на возврат", tone: "amber" },
   CLAIM_RESOLVED: { label: "Заявка решена", tone: "muted" },
   BUYER_CANCEL:   { label: "Просит отмену", tone: "red" },
@@ -96,6 +99,7 @@ export const ORDER_STATUS_RU: Record<string, string> = {
 export function riskActionText(action: string | null | undefined, kind?: string | null): string | null {
   if (kind === "BUYER_CANCEL") return action === "frozen" ? "заморожен: просьба об отмене" : null;
   if (kind === "REFUND_OPEN" && action === "frozen") return "заморожен: деньги вернулись";
+  if (kind === "REVIEW_DELETED") return action === "released" ? "разморожен гейтом, пометка 🗑 осталась" : "пометка 🗑 на заказе";
   if (action === "frozen") return "заморожен гейтом";
   if (action === "released") return "разморожен гейтом";
   return null;

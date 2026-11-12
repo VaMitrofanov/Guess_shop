@@ -72,9 +72,11 @@ a.orderRow:hover { border-color: rgba(255,255,255,.2); }
 .plaque { display: grid; gap: 6px; padding: 12px 14px; border-radius: 14px; border: 1px solid; }
 .plaqueBad { background: rgba(255,107,107,.08); border-color: rgba(255,107,107,.32); }
 .plaqueFixed { background: rgba(79,209,139,.08); border-color: rgba(79,209,139,.32); }
+.plaqueDeleted { background: rgba(244,181,69,.08); border-color: rgba(244,181,69,.32); }
 .plaqueTitle { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 750; letter-spacing: .03em; }
 .plaqueBad .plaqueTitle { color: #ff6b6b; }
 .plaqueFixed .plaqueTitle { color: #4fd18b; }
+.plaqueDeleted .plaqueTitle { color: #f4b545; }
 .buyerChip { display: inline-flex; gap: 8px; align-items: center; width: fit-content; padding: 6px 11px; border-radius: 10px; border: 1px solid var(--admin-line); background: rgba(255,255,255,.04); color: var(--admin-text); font-size: 14px; text-decoration: none; }
 .buyerChip:hover { border-color: rgba(255,255,255,.22); }
 .buyerChipFlag { border-color: rgba(244,181,69,.4); background: rgba(244,181,69,.08); }

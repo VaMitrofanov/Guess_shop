@@ -7,7 +7,8 @@ export interface OrderRisk {
   flag: { note: string | null; by: string; at: string } | null;
   /** Последнее событие по отзыву этого заказа. */
   review: {
-    kind: "BAD_REVIEW" | "REVIEW_FIXED";
+    /** REVIEW_DELETED — плохой отзыв удалён (12.11.2026): ★ те, что были. */
+    kind: "BAD_REVIEW" | "REVIEW_FIXED" | "REVIEW_DELETED";
     stars: number | null;
     starsBefore: number | null;
     text: string | null;

@@ -11,8 +11,10 @@ import {
   isStaleForBuyout,
   isGateReviewHold,
   matchBadReview,
+  matchDeletedReview,
   matchFixedReview,
   runBuyoutGate,
+  type DeletedReview,
   type GateOrder,
   type WbFeedback,
 } from "../buyout-gate";
@@ -228,3 +230,56 @@ describe("исправленный отзыв", () => {
   });
 });
 
+
+/* 12.11.2026: плохой отзыв удалён (WB отвечает 404 на запрос по номеру).
+   Замок гейта снимается, если других плохих отзывов у покупателя нет. */
+describe("удалённый отзыв", () => {
+  const gone: DeletedReview = { feedbackId: "DEL", stars: 1, text: "робуксы не пришли", reviewedAt: daysAgo(2) };
+  const deleted = (code = "AAAAAAA") => new Map([[code, gone]]);
+
+  const run = (holds: GateOrder[], feedbacks: WbFeedback[], map: Map<string, DeletedReview>, complete = true) => {
+    const released: string[] = [];
+    return runBuyoutGate({
+      loadBuyableOrders: async () => [],
+      loadReviewHolds: async () => holds,
+      loadFeedbacks: async () => ({ feedbacks, complete }),
+      freeze: async () => {},
+      release: async (code) => { released.push(code); },
+      deletedReviews: map,
+      now: NOW,
+    }).then((res) => ({ res, released }));
+  };
+
+  it("отзыв удалён, других плохих нет — удалённый найден", () => {
+    expect(matchDeletedReview(order(), [], deleted())).toEqual(gone);
+  });
+
+  it("второй плохой отзыв того же покупателя держит замок", () => {
+    expect(matchDeletedReview(order(), [feedback({ id: "STILL" })], deleted())).toBeNull();
+  });
+
+  it("чужой заказ не трогаем", () => {
+    expect(matchDeletedReview(order({ wbCode: "BBBBBBB" }), [], deleted())).toBeNull();
+  });
+
+  it("свип снимает свой замок и сообщает об удалении", async () => {
+    const { res, released } = await run([order()], [], deleted());
+    expect(released).toEqual(["AAAAAAA"]);
+    expect(res.releasedDeleted).toEqual([{ wbCode: "AAAAAAA", deleted: gone }]);
+    expect(res.released).toEqual([]);
+  });
+
+  it("неполная выдача — не снимаем", async () => {
+    const { released } = await run([order()], [], deleted(), false);
+    expect(released).toEqual([]);
+  });
+
+  it("исправление важнее удаления: одна разморозка, как исправленный", async () => {
+    const one = feedback({ id: "OLD", childFeedbackId: "NEW" });
+    const five = feedback({ id: "NEW", productValuation: 5, parentFeedbackId: "OLD" });
+    const { res, released } = await run([order()], [one, five], deleted());
+    expect(released).toEqual(["AAAAAAA"]);
+    expect(res.released).toHaveLength(1);
+    expect(res.releasedDeleted).toEqual([]);
+  });
+});

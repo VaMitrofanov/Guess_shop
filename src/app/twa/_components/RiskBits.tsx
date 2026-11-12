@@ -32,7 +32,8 @@ export function fmtRiskDate(iso: string): string {
 /** ★1 «текст» — или ★1 → ★5, если отзыв исправлен. */
 export function ReviewPlaque({ review }: { review: NonNullable<OrderRisk["review"]> }) {
   const fixed = review.kind === "REVIEW_FIXED";
-  const tone = fixed ? C.green : C.red;
+  const deleted = review.kind === "REVIEW_DELETED";
+  const tone = fixed ? C.green : deleted ? C.orange : C.red;
   const action = riskActionText(review.action, review.kind);
   return (
     <div style={{
@@ -41,11 +42,11 @@ export function ReviewPlaque({ review }: { review: NonNullable<OrderRisk["review
     }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
         <strong style={{ fontSize: 14, fontWeight: 700, color: tone, letterSpacing: ".01em" }}>
-          {fixed ? "ОТЗЫВ ИСПРАВЛЕН" : "ПЛОХОЙ ОТЗЫВ НА WB"}
+          {fixed ? "ОТЗЫВ ИСПРАВЛЕН" : deleted ? "🗑 БЫЛ ПЛОХОЙ ОТЗЫВ, УДАЛЁН" : "ПЛОХОЙ ОТЗЫВ НА WB"}
         </strong>
         <span style={{ fontSize: 14, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>{fmtRiskDate(review.at)}</span>
       </div>
-      <span style={{ fontSize: 16, letterSpacing: 1, color: C.yellow }}>
+      <span style={{ fontSize: 16, letterSpacing: 1, color: C.yellow, textDecoration: deleted ? "line-through" : undefined }}>
         {fixed ? <>{starsText(review.starsBefore)} <span style={{ color: C.textTertiary }}>→</span> {starsText(review.stars)}</> : starsText(review.stars)}
       </span>
       {review.text && (
@@ -111,7 +112,8 @@ export function RiskItemCard({
   const action = riskActionText(item.action, item.kind);
   const stars = item.kind === "REVIEW_FIXED"
     ? `${starsText(item.starsBefore)} → ${starsText(item.stars)}`
-    : item.kind === "BAD_REVIEW" ? starsText(item.stars) : null;
+    : item.kind === "BAD_REVIEW" ? starsText(item.stars)
+      : item.kind === "REVIEW_DELETED" ? `${starsText(item.stars)} 🗑` : null;
   return (
     <div style={{
       display: "grid", gridTemplateColumns: "4px 1fr", gap: 12,

@@ -181,7 +181,51 @@ export async function fetchGateFeedbacks(): Promise<{
       else noId.push(f);
     }
   }
+  /* Новая версия правленого отзыва в списки попадает не сразу (12.11.2026):
+     у WB она лежит со `state: "none"`, а в выдаче видна только старая ★1 со
+     ссылкой `childFeedbackId`. Так ★1 → ★5 Виктора гейт и не увидел. Добираем
+     такие версии поштучно — по номеру отзыва. */
+  if (complete) {
+    const missing = [...byId.values()]
+      .map((f) => f.childFeedbackId)
+      .filter((id): id is string => Boolean(id) && !byId.has(id as string))
+      .slice(0, FEEDBACK_LOOKUP_CAP);
+    for (const id of missing) {
+      const res = await fetchFeedbackById(id);
+      if (res?.status === "found" && res.feedback.id) byId.set(res.feedback.id, res.feedback);
+    }
+  }
   return { feedbacks: [...byId.values(), ...noId], complete };
+}
+
+/** Сколько отзывов за прогон гейта спрашиваем поштучно (лимит WB — 3 запроса в секунду). */
+export const FEEDBACK_LOOKUP_CAP = 20;
+
+/**
+ * Один отзыв по номеру.
+ *
+ * `gone` — WB ответил 404 «Невозможно получить отзыв по id»: отзыва больше
+ * нет (покупатель удалил или WB снял). Проверено 12.11.2026: существующий
+ * отзыв, даже не попавший в списки, отдаётся с 200. `null` — ответ не
+ * получен (сеть, лимит): ни о чём не говорит, решать по нему нельзя.
+ */
+export async function fetchFeedbackById(id: string): Promise<
+  | { status: "found"; feedback: z.infer<typeof FeedbackSchema> }
+  | { status: "gone" }
+  | null
+> {
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  try {
+    const res = await requestJson(
+      "marketplace",
+      `https://feedbacks-api.wildberries.ru/api/v1/feedback?id=${encodeURIComponent(id)}`,
+      z.object({ data: FeedbackSchema.nullable().optional() }).passthrough(),
+    );
+    return res.data ? { status: "found", feedback: res.data } : null;
+  } catch (error) {
+    if (error instanceof WbDeliveryApiError && error.status === 404) return { status: "gone" };
+    return null;
+  }
 }
 
 export async function fetchNewDbsOrders() {
