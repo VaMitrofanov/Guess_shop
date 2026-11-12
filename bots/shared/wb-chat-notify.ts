@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { sendBuyerChatMessage } from "./wb-delivery-api";
 import { decryptWbSecret, wbDeliveryCryptoReady } from "./wb-delivery-crypto";
+import { resolveWbOrderChat } from "./wb-order-chat";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Чат Wildberries как запасной канал до покупателя DBS.
@@ -18,7 +19,7 @@ import { decryptWbSecret, wbDeliveryCryptoReady } from "./wb-delivery-crypto";
    Не подмена ботов, а последний рубеж, когда бот уже промолчал.
    ───────────────────────────────────────────────────────────────────────── */
 
-type Db = Pick<PrismaClient, "wbMarketplaceOrder">;
+type Db = Pick<PrismaClient, "wbMarketplaceOrder" | "wbBuyerChat">;
 
 export type WbChatNoticeResult =
   | { sent: true }
@@ -43,9 +44,12 @@ export async function notifyBuyerViaWbChat(
     where: { wbCode: { code: wbCode }, isTest: false },
     orderBy: { firstSeenAt: "desc" },
     select: {
+      id: true,
+      orderUid: true,
+      isTest: true,
       cancelledAt: true,
       claimOpenedAt: true,
-      chats: { select: { replySignEncrypted: true }, take: 1 },
+      chats: { select: { chatId: true, replySignEncrypted: true }, orderBy: { lastEventAt: "desc" }, take: 1 },
     },
   }).catch(() => null);
 
@@ -56,7 +60,8 @@ export async function notifyBuyerViaWbChat(
      значит спорить, а не помогать. На «заказ выкуплен» это не распространяется:
      там мы сообщаем свершившийся факт, и он как раз закрывает спор. */
   if (options.skipIfClaimOpen && order.claimOpenedAt) return { sent: false, reason: "claim_open" };
-  const replySign = order.chats?.[0]?.replySignEncrypted;
+  // Своего чата у заказа корзины может не быть — тогда пишем в чат покупки.
+  const replySign = (await resolveWbOrderChat(db, order))?.replySignEncrypted;
   if (!replySign) return { sent: false, reason: "no_chat" };
 
   try {

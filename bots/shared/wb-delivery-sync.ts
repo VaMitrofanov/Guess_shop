@@ -80,6 +80,7 @@ import {
   notifyDbsOrderCancelled,
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
+  notifyDbsGateNotIssued,
   notifyDbsGateUndelivered,
   notifyWbBuyerClaim,
   notifyWbClaimResolved,
@@ -106,6 +107,7 @@ import { revokeGateCode } from "./wb-code-revocation";
 // а воркер тянет `wb-delivery-api` с `zod`, которого в образе VK-бота нет.
 import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
+import { resolveWbOrderChat } from "./wb-order-chat";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
 import {
   detectWbOperatorCommand,
@@ -949,13 +951,76 @@ async function dispatchGatesForClosedOrders(db: Db) {
       denominationSnapshot: { not: null },
       completedAt: { gte: new Date(Date.now() - CLOSED_GATE_WINDOW_MS) },
     },
-    select: { id: true, wbOrderId: true },
+    select: { id: true, wbOrderId: true, completedAt: true },
     orderBy: { completedAt: "asc" },
     take: 25,
   });
   for (const order of closed) {
     await tryAutoGate(db, order.id, order.wbOrderId);
+    await alertGateNotIssued(db, order);
   }
+  await dispatchBasketOrphans(db);
+}
+
+/** Сколько назад ищем осиротевшие заказы корзин. Хватает на все три известных
+ * (самый старый — 20.10.2026), а один и тот же заказ дважды не выдаётся. */
+const BASKET_ORPHAN_WINDOW_MS = 45 * 24 * 60 * 60_000;
+
+/**
+ * Заказ корзины, закрытый без кода, потому что у него не было своего чата WB.
+ *
+ * Суточное окно `dispatchGatesForClosedOrders` бережёт старые заказы от
+ * внезапной выдачи. Сирота корзины — другое дело: соседу код выдали, а этому
+ * покупателю — нет, хотя он заплатил за оба (6078220950, 6107415702 —
+ * октябрь 2026). Выдаём только если у соседа по покупке код уже есть: значит,
+ * покупатель на связи в этом чате и ждёт.
+ */
+async function dispatchBasketOrphans(db: Db) {
+  const orphans = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      cancelledAt: null,
+      cancelRequestedAt: null,
+      claimOpenedAt: null,
+      wbCodeId: null,
+      gateState: "NOT_ISSUED",
+      denominationSnapshot: { not: null },
+      orderUid: { not: null },
+      completedAt: {
+        gte: new Date(Date.now() - BASKET_ORPHAN_WINDOW_MS),
+        lt: new Date(Date.now() - CLOSED_GATE_WINDOW_MS),
+      },
+    },
+    select: { id: true, wbOrderId: true, orderUid: true },
+    take: 10,
+  });
+  for (const order of orphans) {
+    const servedSibling = await db.wbMarketplaceOrder.count({
+      where: { orderUid: order.orderUid, id: { not: order.id }, wbCodeId: { not: null } },
+    });
+    if (servedSibling === 0) continue;
+    await tryAutoGate(db, order.id, order.wbOrderId);
+  }
+}
+
+/** Сколько закрытый заказ может стоять без кода, прежде чем звать человека. */
+const GATE_NOT_ISSUED_ALERT_MS = 15 * 60_000;
+
+/**
+ * Доставка закрыта, деньги у нас, а кода у покупателя нет — и выдача сама не
+ * справилась. До 12.11.2026 такой заказ молчал: три покупательницы корзин
+ * (6078220950, 6107415702, 6254423598) остались без второго заказа, и никто из
+ * админов об этом не узнал. Один громкий сигнал на заказ.
+ */
+async function alertGateNotIssued(db: Db, order: { id: string; wbOrderId: string; completedAt: Date | null }) {
+  if (!order.completedAt || Date.now() - order.completedAt.getTime() < GATE_NOT_ISSUED_ALERT_MS) return;
+  const fresh = await db.wbMarketplaceOrder.findUnique({ where: { id: order.id }, select: { wbCodeId: true } });
+  if (!fresh || fresh.wbCodeId) return;
+  const key = `gate-not-issued:${order.id}`;
+  const already = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: key }, select: { id: true } });
+  if (already) return;
+  await audit(db, order.id, "GATE_NOT_ISSUED", key, {});
+  notifyDbsGateNotIssued(await dbsRef(db, order.id, order.wbOrderId));
 }
 
 /** Эху гейта даётся три минуты: лента событий догоняет отправку за 3–10 с. */
@@ -1013,9 +1078,15 @@ async function verifyGateDelivery(db: Db) {
     const age = now - since.getTime();
     if (age < GATE_ECHO_GRACE_MS || age > GATE_ECHO_WINDOW_MS) continue;
 
+    // Гейт, ушедший в общий чат покупки, WB привязывает к заказу-хозяину
+    // чата — эхо ищем и по самому чату.
+    const chat = await resolveWbOrderChat(db, order);
     const echo = await db.wbBuyerChatEvent.findFirst({
       where: {
-        marketplaceOrderId: order.id,
+        OR: [
+          { marketplaceOrderId: order.id },
+          ...(chat?.shared ? [{ chatId: chat.chatId }] : []),
+        ],
         sender: "seller",
         wbEventId: { not: { startsWith: "local:outbound:" } },
         textRedacted: { startsWith: WB_GATE_MESSAGE_LEAD },
@@ -1027,7 +1098,6 @@ async function verifyGateDelivery(db: Db) {
 
     const resendKey = `gate-resend:${order.id}`;
     const resent = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: resendKey }, select: { id: true } });
-    const chat = order.chats?.[0];
     const code = order.wbCode?.code;
 
     if (!resent && chat?.replySignEncrypted && code) {
@@ -1038,6 +1108,7 @@ async function verifyGateDelivery(db: Db) {
           decryptWbSecret(chat.replySignEncrypted, "reply-sign"),
           wbGateMessage(code, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order), {
             codeFromSibling: await hasSiblingCode(db, order.id),
+            sharedChat: chat.shared,
           }),
         );
         await db.wbMarketplaceOrder.update({
@@ -1180,6 +1251,9 @@ async function loadOrderSibling(
   }
 }
 
+/** Закрытая доставка без ссылки дольше часа — это уже наша задержка. */
+const GATE_LATE_APOLOGY_MS = 60 * 60_000;
+
 async function tryAutoGate(
   db: Db,
   orderId: string,
@@ -1205,8 +1279,10 @@ async function tryAutoGate(
   if (order.wbCode) return;
   if (!order.denominationSnapshot) return;
 
-  const chat = order.chats?.[0];
-  if (!chat?.replySignEncrypted) return;
+  // Своего чата у заказа корзины может не быть: WB бывает заводит один чат на
+  // всю покупку. Тогда ссылка идёт в чат соседа (12.11.2026, 6254423598).
+  const chat = await resolveWbOrderChat(db, order);
+  if (!chat) return;
 
   let activationCode: string | null = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -1239,6 +1315,8 @@ async function tryAutoGate(
         replySign,
         wbGateMessage(activationCode, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order), {
           codeFromSibling: await hasSiblingCode(db, orderId),
+          sharedChat: chat.shared,
+          late: Boolean(order.completedAt && Date.now() - order.completedAt.getTime() > GATE_LATE_APOLOGY_MS),
         }),
       );
     }
@@ -1249,6 +1327,7 @@ async function tryAutoGate(
     await audit(db, orderId, "AUTO_GATE_ISSUED_AND_SENT", `auto-gate:${orderId}:${activationCode}`, {
       activationCode,
       isTest: order.isTest,
+      ...(chat.shared ? { viaSiblingChat: chat.chatId } : {}),
     });
     await refreshDbsCard(db, orderId).catch(() => {});
   } catch (e) {
@@ -2420,6 +2499,7 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
       id: true,
       wbOrderId: true,
       orderUid: true,
+      isTest: true,
       gateSentAt: true,
       gateReminderLevel: true,
       denominationSnapshot: true,
@@ -2455,8 +2535,8 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
     const age = Date.now() - order.gateSentAt.getTime();
     const due = GATE_REMINDERS.filter((r) => age >= r.afterMs && r.level > order.gateReminderLevel).at(-1);
     if (!due) continue;
-    const chat = order.chats?.[0];
-    if (!chat?.replySignEncrypted) continue;
+    const chat = await resolveWbOrderChat(db, order);
+    if (!chat) continue;
 
     // Claim the level before sending: a duplicate nudge is worse than a missing
     // one, and the same CAS rule already guards the auto-reply.

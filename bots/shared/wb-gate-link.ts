@@ -129,14 +129,25 @@ export function wbGateMessage(
   denomination: number | null,
   origin?: string,
   sibling?: WbOrderSibling | null,
-  opts: { codeFromSibling?: boolean } = {},
+  opts: { codeFromSibling?: boolean; sharedChat?: boolean; late?: boolean } = {},
 ): string {
   const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
+  const multi = Boolean(sibling && sibling.total > 1);
   return [
     `${WB_GATE_MESSAGE_LEAD} Заказ подтверждён, ${amount} готовы к зачислению.`,
-    ...(opts.codeFromSibling && sibling && sibling.total > 1
-      ? ["Код доставки мы получили в соседнем чате вашей покупки — сюда его присылать не нужно."]
+    // Ссылка опоздала по нашей вине (12.11.2026: заказы корзин ждали её до
+    // трёх недель) — человек должен услышать это первым, а не догадываться.
+    ...(opts.late
+      ? ["Простите за задержку: ссылка на этот заказ не пришла сразу из-за нашей ошибки. Заказ оплачен и ждёт вас."]
       : []),
+    // Чат один на всю покупку (12.11.2026): без этой строки вторая ссылка
+    // в том же чате выглядит как повтор первой.
+    ...(opts.sharedChat && multi
+      ? ["У Wildberries один чат на всю вашу покупку, поэтому ссылки на все заказы приходят сюда."
+        + " Это не повтор — у этого заказа свой код."]
+      : opts.codeFromSibling && multi
+        ? ["Код доставки мы получили в соседнем чате вашей покупки — сюда его присылать не нужно."]
+        : []),
     ...wbOrderCodeLines(code),
     ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",

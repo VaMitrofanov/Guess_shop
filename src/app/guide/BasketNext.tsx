@@ -49,7 +49,7 @@ export default function BasketNext({ code, nick }: { code: string; nick: string 
               <small>
                 {item.self || item.state === "done"
                   ? <>на <b>{item.self ? ownNick ?? item.nick ?? "ваш аккаунт" : item.nick ?? "аккаунт указан"}</b></>
-                  : item.state === "todo" ? "ждёт выбора аккаунта" : "ссылка придёт в чат этого заказа на WB"}
+                  : item.state === "todo" ? "ждёт выбора аккаунта" : "ссылка придёт в чат вашей покупки на WB"}
               </small>
             </span>
           </div>
@@ -72,7 +72,7 @@ export default function BasketNext({ code, nick }: { code: string; nick: string 
       ) : waiting ? (
         <p className="wbi-basket-wait">
           Заказ {waiting.index} из {waiting.total} ещё оформляется на Wildberries — ссылка на него придёт
-          в чат этого заказа. Получить его можно на этот же аккаунт или на другой.
+          в чат вашей покупки на WB. Получить его можно на этот же аккаунт или на другой.
         </p>
       ) : null}
     </section>

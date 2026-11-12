@@ -83,6 +83,21 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string) {
   }, ref);
 }
 
+/** Доставка закрыта, а код активации так и не выпущен: покупатель заплатил и
+ * ничего не получил. Чаще всего — нет чата WB, куда отправить ссылку. */
+export function notifyDbsGateNotIssued(ref: DbsRef) {
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: "заказ закрыт, а код не выдан",
+    lines: [
+      refLine(ref),
+      "WB закрыл доставку, деньги у нас, но ссылку с кодом бот отправить не смог — нет чата покупателя",
+    ],
+    next: "выдать код из консоли DBS и отправить ссылку в чат покупки из кабинета WB",
+  }, ref);
+}
+
 /** Гейт ушёл дважды, а в чате WB его так и нет: покупатель без кода. */
 export function notifyDbsGateUndelivered(ref: DbsRef, code: string | null) {
   broadcast({

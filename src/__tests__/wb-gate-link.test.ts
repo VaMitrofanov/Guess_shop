@@ -138,6 +138,24 @@ describe("WB gate link handed to the buyer", () => {
     expect(own).not.toMatch(/telegram|телеграм|вконтакте|\bvk\b/i);
   });
 
+  /** 12.11.2026: WB завёл один чат на всю покупку — ссылка второго заказа
+   * идёт туда же и обязана объяснить, что это не повтор. */
+  it("explains a shared basket chat instead of the sibling-chat line", () => {
+    const shared = wbGateMessage("QUN5YFZ", 500, undefined, { index: 1, total: 2 }, { codeFromSibling: true, sharedChat: true });
+    expect(shared.startsWith("Спасибо, код доставки получен!")).toBe(true);
+    expect(shared).toMatch(/один чат на всю вашу покупку/);
+    expect(shared).toMatch(/Это заказ 1 из 2/);
+    expect(shared).not.toMatch(/соседнем чате/);
+    expect(wbGateMessage("QUN5YFZ", 500, undefined, null, { sharedChat: true })).not.toMatch(/один чат/);
+  });
+
+  it("apologises only when the link is late, and still leads with the echo marker", () => {
+    const late = wbGateMessage("QUN5YFZ", 500, undefined, { index: 1, total: 2 }, { sharedChat: true, late: true });
+    expect(late.startsWith("Спасибо, код доставки получен!")).toBe(true);
+    expect(late).toMatch(/Простите за задержку/);
+    expect(wbGateMessage("QUN5YFZ", 500)).not.toMatch(/Простите/);
+  });
+
   it("says nothing about siblings when the buyer has a single order", () => {
     for (const sibling of [undefined, null, { index: 1, total: 1 }]) {
       expect(wbGateMessage("QUN5YFZ", 500, undefined, sibling)).not.toMatch(/из \d+ в вашей покупке/);

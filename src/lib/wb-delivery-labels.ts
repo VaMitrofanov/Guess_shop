@@ -141,6 +141,7 @@ const AUDIT_LABEL: Record<string, string> = {
   GATE_SERVED_EXTERNALLY: "Отмечен как выданный вне системы",
   AUTO_GATE_ISSUED_AND_SENT: "Авто-гейт выпущен и отправлен",
   AUTO_GATE_SEND_FAILED: "Авто-гейт не отправлен",
+  GATE_NOT_ISSUED: "Доставка закрыта, а код не выдан",
   WB_CONFIRM_SUCCEEDED: "Сборка подтверждена",
   WB_DELIVER_SUCCEEDED: "Передан в доставку",
   WB_RECEIVE_SUCCEEDED: "Доставка закрыта на WB",
