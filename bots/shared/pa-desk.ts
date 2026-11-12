@@ -13,7 +13,7 @@
    контакты и раскладывает чаты по папкам.
    ───────────────────────────────────────────────────────────────────────── */
 
-export type DeskFolder = "NEW" | "QUEUE" | "PROBLEM" | "DONE";
+export type DeskFolder = "NEW" | "QUEUE" | "PROBLEM" | "DONE" | "REVIEW";
 
 /** Папки аккаунта: id фиксированы, чтобы обновлять свои, а не плодить новые.
  *  Название папки у Telegram — не длиннее 12 символов. */
@@ -22,7 +22,15 @@ export const DESK_FOLDERS: Record<DeskFolder, { id: number; title: string; emoti
   QUEUE: { id: 202, title: "К выкупу", emoticon: "⏳" },
   PROBLEM: { id: 203, title: "Проблемы", emoticon: "⚠️" },
   DONE: { id: 204, title: "Готово", emoticon: "✅" },
+  // 13.11.2026: оставил на WB отзыв ★1–3 (последняя версия) — дополнительная папка,
+  // чат при этом остаётся и в своей папке по заказу.
+  REVIEW: { id: 205, title: "Отзыв ★1–3", emoticon: "😡" },
 };
+
+/** Хвост метки для покупателя с плохим отзывом на WB. */
+export function badReviewMark(stars: number | null | undefined): string {
+  return stars != null ? ` · ★${stars} отзыв` : "";
+}
 
 export interface DeskOrder {
   wbCode: string;

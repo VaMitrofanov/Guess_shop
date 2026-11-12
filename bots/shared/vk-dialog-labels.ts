@@ -28,7 +28,7 @@ import { classifyBuyerMessage } from "./buyer-contact";
 import { isRobuxSupportContext } from "./support-metric";
 
 type VkLabelKey =
-  | "human" | "held" | "queue" | "pass" | "stale" | "pay" | "bought" | "ready"
+  | "human" | "badReview" | "held" | "queue" | "pass" | "stale" | "pay" | "bought" | "ready"
   | "regular" | "once" | "abandoned" | "fresh";
 
 /** Разрешённые цвета `groups.tagAdd` (из ответа API). */
@@ -40,6 +40,8 @@ export const VK_TAG_COLORS = [
 /** Порядок = порядок важности в списке диалогов. */
 export const VK_LABELS: Record<VkLabelKey, { name: string; color: (typeof VK_TAG_COLORS)[number]; hint: string }> = {
   human: { name: "Нужен человек", color: "e64646", hint: "описал проблему, которую бот не решит; менеджер ещё не ответил (до 7 дней)" },
+  // 13.11.2026: человек оставил на WB отзыв ★1–3 (последняя версия). Снимается, когда исправил/удалил.
+  badReview: { name: "Плохой отзыв WB", color: "ff5c5c", hint: "оставил на Wildberries отзыв ★1–3 — общаться аккуратно" },
   held: { name: "Заморожен", color: "63b9ba", hint: "заказ заморожен — не выкупать" },
   queue: { name: "В очереди выкупа", color: "792ec0", hint: "пасс есть, заказ ждёт выкупа" },
   pass: { name: "Ждём геймпасс", color: "ffc107", hint: "код активирован, пасса ещё нет (до 3 суток)" },
@@ -110,6 +112,8 @@ export interface VkLabelSnapshot {
   completedCount?: number;
   /** Был ли хоть один заказ, заявка или активированный код. */
   everOrdered?: boolean;
+  /** Худшая оценка среди его актуальных плохих отзывов на WB (`null` — нет). */
+  badReviewStars?: number | null;
 }
 
 /* ── «Нужен человек» ───────────────────────────────────────────────────── */
@@ -166,6 +170,7 @@ export function desiredVkLabels(snap: VkLabelSnapshot, now: Date): Set<VkLabelKe
   const age = (d: Date | null) => (d ? t - d.getTime() : Infinity);
 
   if (snap.humanSince && age(snap.humanSince) <= HUMAN_WINDOW_MS && !snap.managerReplied) out.add("human");
+  if (snap.badReviewStars != null) out.add("badReview");
 
   let lastDone: Date | null = null;
   for (const o of snap.orders) {
@@ -455,6 +460,17 @@ export class VkDialogLabelSync {
  * заказ в очереди старше 45 дней оставался без метки), прочие — за 45 дней;
  * выкупы за всё время — для меток истории.
  */
+/**
+ * Худшая оценка среди АКТУАЛЬНЫХ плохих отзывов покупателя: по каждому его
+ * коду берём последнее событие отзыва (плохой / исправлен / удалён) и
+ * оставляем только те, где последнее — «плохой». Общая для ВК и @RobloxBank_PA.
+ */
+export const BAD_REVIEW_STARS_SQL = `(select min(t.stars) from (
+         select distinct on (r."wbCode") r.kind, r.stars from "RiskEvent" r
+         join "WbOrder" c on c."wbCode" = r."wbCode" and c."userId" = u.id
+         where r.kind in ('BAD_REVIEW','REVIEW_FIXED','REVIEW_DELETED')
+         order by r."wbCode", r."occurredAt" desc) t where t.kind = 'BAD_REVIEW')::int`;
+
 const VK_LABEL_SNAPSHOT_SQL = `
 select u."vkId" as "vkId",
        coalesce(json_agg(json_build_object(
@@ -469,7 +485,8 @@ select u."vkId" as "vkId",
          where c."userId" = u.id and c."isTest" = false and c.status = 'COMPLETED')::int as "completedCount",
        (exists (select 1 from "WbOrder" c where c."userId" = u.id and c."isTest" = false)
         or exists (select 1 from "DirectIntent" i where i."userId" = u.id)
-        or exists (select 1 from "WbCode" k where k."userId" = u.id)) as "everOrdered"
+        or exists (select 1 from "WbCode" k where k."userId" = u.id)) as "everOrdered",
+       ${BAD_REVIEW_STARS_SQL} as "badReviewStars"
 from "User" u
 left join "WbOrder" w on w."userId" = u.id and w."isTest" = false
       and (w.status in ('AWAITING_GAMEPASS','PENDING','IN_PROGRESS','ERROR')
@@ -500,6 +517,7 @@ type OrderRow = Omit<VkLabelOrder, "createdAt" | "updatedAt" | "completedAt"> & 
 };
 type SnapshotRow = {
   vkId: string; orders: OrderRow[]; pendingIntentAt: Date | null; completedCount: number; everOrdered: boolean;
+  badReviewStars: number | null;
 };
 type SupportRow = Omit<VkSupportRequest, "ocrPending"> & { vkId: string | null; ocrPending: unknown };
 
@@ -519,6 +537,7 @@ export async function loadVkLabelSnapshots(db: RawDb, vkIds: readonly string[]):
       humanSince: null,
       completedCount: Number(r.completedCount ?? 0),
       everOrdered: Boolean(r.everOrdered),
+      badReviewStars: r.badReviewStars == null ? null : Number(r.badReviewStars),
       // json_build_object отдаёт timestamp без зоны — это UTC (так пишет Prisma).
       orders: (r.orders ?? []).map((o) => ({
         status: o.status,

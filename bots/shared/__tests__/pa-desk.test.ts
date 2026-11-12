@@ -1,7 +1,7 @@
 /**
  * Разметка чатов поддержки @RobloxBank_PA (12.11.2026).
  */
-import { deskDecision, isDeskLabel, nextContactName, type DeskOrder } from "../pa-desk";
+import { badReviewMark, deskDecision, isDeskLabel, nextContactName, type DeskOrder } from "../pa-desk";
 
 const o = (over: Partial<DeskOrder> = {}): DeskOrder => ({
   wbCode: "ZT8BW8D", amount: 500, status: "COMPLETED", createdAt: new Date("2026-11-10T10:00:00Z"),
@@ -63,6 +63,13 @@ describe("имя контакта", () => {
   it("без изменений и без заказов — ничего не делаем", () => {
     expect(nextContactName({ isContact: true, currentName: "Анна · ZT8BW8D · 500 · выкуплен", fallbackName: "x", tag: "ZT8BW8D · 500 · выкуплен" })).toBeNull();
     expect(nextContactName({ isContact: false, currentName: "Анна", fallbackName: "Анна", tag: null })).toBeNull();
+  });
+
+  it("плохой отзыв — хвост метки, и метка остаётся нашей", () => {
+    const tag = `ZT8BW8D · 500 · выкуплен${badReviewMark(1)}`;
+    expect(tag).toBe("ZT8BW8D · 500 · выкуплен · ★1 отзыв");
+    expect(isDeskLabel(`Анна · ${tag}`)).toBe(true);
+    expect(badReviewMark(null)).toBe("");
   });
 
   it("длинное имя не выходит за 64 символа", () => {

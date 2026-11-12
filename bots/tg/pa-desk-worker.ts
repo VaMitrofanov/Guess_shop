@@ -18,7 +18,8 @@ import { StringSession } from "telegram/sessions";
 import type { Dialog } from "telegram/tl/custom/dialog";
 import { db } from "../shared/db";
 import { openFlags } from "../shared/order-flags";
-import { DESK_FOLDERS, deskDecision, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
+import { DESK_FOLDERS, badReviewMark, deskDecision, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
+import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
 
 const WINDOW_DAYS = 30;
 /** «Новые» — только те, кто писал за неделю: старый незнакомец уже не новый. */
@@ -93,8 +94,18 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     ordersBy.set(o.userId, list);
   }
 
-  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0 }, foldersUpdated: 0, archived: 0 };
-  const members: Record<DeskFolder, Dialog[]> = { NEW: [], QUEUE: [], PROBLEM: [], DONE: [] };
+  // Плохой отзыв на WB (актуальная версия) — то же правило, что у метки ВК.
+  const badStars = new Map<string, number>();
+  if (users.length) {
+    const rows = (await db.$queryRawUnsafe(
+      `select u.id as "userId", ${BAD_REVIEW_STARS_SQL} as "stars" from "User" u where u.id = any($1::text[])`,
+      users.map((u) => u.id),
+    ).catch(() => [])) as Array<{ userId: string; stars: number | null }>;
+    for (const r of rows) if (r.stars != null) badStars.set(r.userId, Number(r.stars));
+  }
+
+  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0, REVIEW: 0 }, foldersUpdated: 0, archived: 0 };
+  const members: Record<DeskFolder, Dialog[]> = { NEW: [], QUEUE: [], PROBLEM: [], DONE: [], REVIEW: [] };
 
   for (const d of dialogs) {
     const u = d.entity as Api.User;
@@ -103,6 +114,11 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     if (list.length) result.linked++;
     const decision = deskDecision(list);
     if (decision.folder !== "NEW" || now - (d.date ?? 0) < NEW_WINDOW_DAYS * 86_400) members[decision.folder].push(d);
+    const stars = buyer ? badStars.get(buyer.id) : undefined;
+    if (stars != null) {
+      members.REVIEW.push(d);
+      if (decision.tag) decision.tag += badReviewMark(stars);
+    }
 
     const current = [u.firstName, u.lastName].filter(Boolean).join(" ") || null;
     const next = nextContactName({
