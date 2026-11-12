@@ -27,6 +27,7 @@ import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-rec
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
 import { paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
+import { startPaDigest } from "./pa-group";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -231,6 +232,9 @@ export function startAutoWorkers(bot: Telegraf): void {
   };
   setTimeout(questions, 300_000);
   setInterval(questions, 10 * 60 * 1000);
+
+  // Утренняя сводка в беседу админов (09:00 МСК), Claude Haiku 5.5.
+  startPaDigest(bot);
 
   // Разметка чатов поддержки @RobloxBank_PA (12.11.2026): метки в именах контактов
   // и папки по заказам. Никому не пишет. Env: PA_API_ID/PA_API_HASH/PA_SESSION, PA_DESK=off|dry.

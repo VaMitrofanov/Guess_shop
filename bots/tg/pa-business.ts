@@ -17,6 +17,7 @@ import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
 import { paOrderReply } from "../shared/pa-business-reply";
 import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "./pa-ai";
+import { registerPaGroup } from "./pa-group";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -46,6 +47,8 @@ export function paBusinessReplyEnabled(env: NodeJS.ProcessEnv = process.env): bo
 export function registerPaBusiness(bot: Telegraf): void {
   // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
   registerPaAiAdmin(bot);
+  // Беседа админов: защита от ответов в группе, ассистент, темы, сводка.
+  registerPaGroup(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (method: string, payload: Record<string, unknown>) => (bot.telegram as any).callApi(method, payload);
 
@@ -104,6 +107,9 @@ export function registerPaBusiness(bot: Telegraf): void {
       const handled = await handleWithAi(bot, {
         connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
         fromId, fromName: name, username: msg.from?.username ?? null, text, hasMedia,
+        photoFileId: Array.isArray(msg.photo) && msg.photo.length
+          ? (msg.photo[msg.photo.length - 1] as { file_id?: string }).file_id ?? null
+          : null,
       }).catch((error) => {
         console.warn(`[pa-ai] обработка упала: ${error instanceof Error ? error.message : error}`);
         return false;

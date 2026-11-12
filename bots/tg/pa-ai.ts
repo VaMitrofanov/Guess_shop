@@ -39,7 +39,10 @@ const history = new Map<number, Turn[]>();
 const handedOffAt = new Map<number, number>();
 const drafts = new Map<string, { connId: string; chatId: number; text: string; at: number }>();
 let calls = { day: "", n: 0 };
-let settings: { chatId: number | null; mode: PaAiMode; loadedAt: number } = { chatId: null, mode: "dry", loadedAt: 0 };
+/** Темы беседы админов (форум): куда что слать. */
+export type PaTopic = "support" | "test" | "digest" | "assistant";
+export type PaSettings = { chatId: number | null; mode: PaAiMode; topics: Partial<Record<PaTopic, number>>; digestDay?: string; loadedAt: number };
+let settings: PaSettings = { chatId: null, mode: "dry", topics: {}, loadedAt: 0 };
 let outOfMoneyNotified = 0;
 
 export function rememberTurn(chatId: number, role: Turn["role"], text: string) {
@@ -56,28 +59,34 @@ export function operatorReplied(chatId: number) {
   handedOffAt.delete(chatId);
 }
 
-async function loadSettings(force = false) {
+export async function loadSettings(force = false): Promise<PaSettings> {
   if (!force && Date.now() - settings.loadedAt < 60_000) return settings;
   const row = await db.wbSyncCursor.findUnique({ where: { stream: STREAM } }).catch(() => null);
-  const meta = (row?.metadata ?? {}) as { mode?: PaAiMode };
+  const meta = (row?.metadata ?? {}) as { mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string };
   settings = {
     chatId: row?.cursor ? Number(row.cursor) : null,
     mode: meta.mode === "on" || meta.mode === "off" ? meta.mode : "dry",
+    topics: meta.topics ?? {},
+    digestDay: meta.digestDay,
     loadedAt: Date.now(),
   };
   return settings;
 }
 
-async function saveSettings(patch: { chatId?: number; mode?: PaAiMode }) {
+export async function saveSettings(patch: { chatId?: number; mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string }) {
   const cur = await loadSettings(true);
   const chatId = patch.chatId ?? cur.chatId;
-  const mode = patch.mode ?? cur.mode;
+  const next = {
+    mode: patch.mode ?? cur.mode,
+    topics: patch.topics ?? (patch.chatId && patch.chatId !== cur.chatId ? {} : cur.topics),
+    digestDay: patch.digestDay ?? cur.digestDay,
+  };
   await db.wbSyncCursor.upsert({
     where: { stream: STREAM },
-    create: { stream: STREAM, cursor: chatId ? String(chatId) : null, metadata: { mode } },
-    update: { cursor: chatId ? String(chatId) : null, metadata: { mode } },
+    create: { stream: STREAM, cursor: chatId ? String(chatId) : null, metadata: next },
+    update: { cursor: chatId ? String(chatId) : null, metadata: next },
   });
-  settings = { chatId, mode, loadedAt: Date.now() };
+  settings = { chatId, ...next, loadedAt: Date.now() };
 }
 
 export async function paAiMode(): Promise<PaAiMode> {
@@ -88,7 +97,7 @@ export async function paAiMode(): Promise<PaAiMode> {
 let client: Anthropic | null = null;
 const anthropic = () => (client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), maxRetries: 1, timeout: 45_000 }));
 
-async function decide(chatId: number, context: string): Promise<PaAiDecision | "out_of_money" | null> {
+async function decide(chatId: number, context: string, image?: { data: string; mediaType: "image/jpeg" | "image/png" | "image/webp" }): Promise<PaAiDecision | "out_of_money" | null> {
   const day = new Date().toISOString().slice(0, 10);
   if (calls.day !== day) calls = { day, n: 0 };
   if (calls.n >= DAILY_CAP) return null;
@@ -102,6 +111,15 @@ async function decide(chatId: number, context: string): Promise<PaAiDecision | "
     }) as Anthropic.MessageParam),
   ];
   if (messages[messages.length - 1].role !== "user") return null;
+  // Скриншот покупателя — к последнему сообщению: Haiku читает картинки
+  // (Pending 0 или 500, «Managed pricing» включён, цена не та…).
+  if (image) {
+    const last = messages[messages.length - 1];
+    last.content = [
+      { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+      { type: "text", text: typeof last.content === "string" ? last.content : "[скриншот]" },
+    ];
+  }
   try {
     const res = await anthropic().messages.parse({
       model: PA_AI_MODEL,
@@ -134,6 +152,22 @@ export interface PaIncoming {
   username: string | null;
   text: string;
   hasMedia: boolean;
+  /** file_id самой крупной версии фото, если покупатель прислал фото. */
+  photoFileId?: string | null;
+}
+
+/** Скачать фото покупателя для модели. Ошибка — без картинки, не падаем. */
+async function loadPhoto(bot: Telegraf, fileId: string) {
+  try {
+    const link = await bot.telegram.getFileLink(fileId);
+    const res = await fetch(link.toString(), { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return undefined;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 4_500_000) return undefined;
+    return { data: buf.toString("base64"), mediaType: "image/jpeg" as const };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -147,7 +181,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   const api = (method: string, payload: Record<string, unknown>) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (bot.telegram as any).callApi(method, payload);
-  const text = m.text || (m.hasMedia ? "[прислал фото/файл без текста]" : "");
+  const text = m.text || (m.photoFileId ? "[прислал скриншот]" : m.hasMedia ? "[прислал файл без текста]" : "");
   if (!text) return true;
   rememberTurn(m.chatId, "user", text);
 
@@ -171,7 +205,8 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
       })
     : [];
   const context = customerContext({ name: user?.name ?? m.fromName, known: Boolean(user), orders });
-  const raw = await decide(m.chatId, context);
+  const image = m.photoFileId ? await loadPhoto(bot, m.photoFileId) : undefined;
+  const raw = await decide(m.chatId, context, image);
   if (raw === "out_of_money") {
     if (Date.now() - outOfMoneyNotified > 6 * 3600_000) {
       outOfMoneyNotified = Date.now();
@@ -190,7 +225,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
 
   if (d.action === "reply") {
     if (mode === "dry") {
-      await card(bot, `🧪 <b>Тест: бот ответил бы сам</b> · ${CATEGORY_RU[d.category]}\n${who}\n${orderLine}\n\n${quote}\n\n🤖 ${escapeHtml(d.reply)}`);
+      await card(bot, `🧪 <b>Тест: бот ответил бы сам</b> · ${CATEGORY_RU[d.category]}\n${who}\n${orderLine}\n\n${quote}\n\n🤖 ${escapeHtml(d.reply)}`, undefined, "test");
       return true;
     }
     await api("sendMessage", { business_connection_id: m.connId, chat_id: m.chatId, text: d.reply });
@@ -220,7 +255,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
         { text: "✋ Сам отвечу", callback_data: `paai:own:${id}` },
       ]]
     : undefined;
-  await card(bot, body, buttons);
+  await card(bot, body, buttons, mode === "dry" ? "test" : "support");
   if (mode === "on") {
     handedOffAt.set(m.chatId, Date.now());
     await api("sendMessage", { business_connection_id: m.connId, chat_id: m.chatId, text: HANDOFF_TEXT });
@@ -229,11 +264,25 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   return true;
 }
 
-/** Карточка в беседу админов (или, если её не назначили, — каждому админу). */
-async function card(bot: Telegraf, html: string, inline?: Array<Array<{ text: string; callback_data: string }>>) {
-  const { chatId } = await loadSettings();
-  const targets = chatId ? [chatId] : ADMIN_IDS.map(Number);
-  const extra = { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true }, ...(inline ? { reply_markup: { inline_keyboard: inline } } : {}) };
+/**
+ * Карточка в беседу админов — в нужную тему, если беседа с темами (или, если
+ * беседу не назначили, — каждому админу в личку).
+ */
+export async function card(
+  bot: Telegraf,
+  html: string,
+  inline?: Array<Array<{ text: string; callback_data: string }>>,
+  topic: PaTopic = "support",
+) {
+  const s = await loadSettings();
+  const targets = s.chatId ? [s.chatId] : ADMIN_IDS.map(Number);
+  const thread = s.chatId ? s.topics[topic] : undefined;
+  const extra = {
+    parse_mode: "HTML" as const,
+    link_preview_options: { is_disabled: true },
+    ...(thread ? { message_thread_id: thread } : {}),
+    ...(inline ? { reply_markup: { inline_keyboard: inline } } : {}),
+  };
   await Promise.allSettled(targets.map((t) => bot.telegram.sendMessage(t, html.slice(0, 4000), extra)));
 }
 

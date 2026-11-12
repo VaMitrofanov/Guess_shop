@@ -806,3 +806,5 @@ npm run dev:reset-test # сбросить тестовый код в AVAILABLE
 
 `.env.local` должен содержать переменные из `.env.example` + переменные ботов
 (см. [deploy.md](deploy.md)).
+
+- [ai-assistant-plan.md](ai-assistant-plan.md) — ИИ-ассистент команды (Claude Haiku 5.5): поддержка @RobloxBank_PA, беседа админов, сводки; что сделано и что дальше.
