@@ -23,6 +23,7 @@ describe("guardDecision", () => {
     expect(guardDecision(reply({ reply: "Не переживайте, вернём деньги" }), "где заказ").action).toBe("escalate");
     expect(guardDecision(reply({ reply: "Смотрите https://example.com" }), "где заказ").action).toBe("escalate");
     expect(guardDecision(reply({ reply: "Пишите в https://t.me/RobloxBankBot" }), "где заказ").action).toBe("reply");
+    expect(guardDecision(reply({ reply: "Откройте https://create.roblox.com/dashboard/creations" }), "где пасс").action).toBe("reply");
   });
 
   it("смена ника — всегда человеку (случай из живого прогона)", () => {
