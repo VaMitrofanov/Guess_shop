@@ -11,7 +11,7 @@ import {
   WbClaimsResponseSchema,
   type WbBulkMutationResponse,
 } from "./wb-delivery-contract";
-import { wbChatSafeText } from "./wb-gate-link";
+import { WB_CHAT_MESSAGE_MAX, wbChatSafeText } from "./wb-gate-link";
 
 const MARKETPLACE_BASE = "https://marketplace-api.wildberries.ru";
 const CHAT_BASE = "https://buyer-chat-api.wildberries.ru";
@@ -256,7 +256,10 @@ export async function sendBuyerChatMessage(replySign: string, message: string): 
   form.set("replySign", replySign);
   // Единственная дверь в чат WB: здесь текст приводится к виду, который WB
   // доставит без `&#34;`/`&amp;` (см. `wbChatSafeText`).
-  form.set("message", wbChatSafeText(message));
+  const text = wbChatSafeText(message);
+  // WB режет длинное сообщение безликим 400 — называем причину сами.
+  if (text.length > WB_CHAT_MESSAGE_MAX) throw new WbDeliveryApiError("chat", 400, "MESSAGE_TOO_LONG", false);
+  form.set("message", text);
   const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/message`, WbSendMessageResponseSchema, { method: "POST", body: form });
   if (response.errors?.length) {
     console.warn(`[wb-chat] WB отклонил сообщение: ${JSON.stringify(response.errors).slice(0, 200)}`);

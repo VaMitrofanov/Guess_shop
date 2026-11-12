@@ -10,6 +10,7 @@ import {
   wbGuideFallbackUrl,
   wbSiblingOwnCodeMessage,
   wbSiblingPosition,
+  WB_CHAT_MESSAGE_MAX,
 } from "../../bots/shared/wb-gate-link";
 import { redactWbChatText } from "../../bots/shared/wb-delivery-crypto";
 
@@ -143,7 +144,7 @@ describe("WB gate link handed to the buyer", () => {
   it("explains a shared basket chat instead of the sibling-chat line", () => {
     const shared = wbGateMessage("QUN5YFZ", 500, undefined, { index: 1, total: 2 }, { codeFromSibling: true, sharedChat: true });
     expect(shared.startsWith("Спасибо, код доставки получен!")).toBe(true);
-    expect(shared).toMatch(/один чат на всю вашу покупку/);
+    expect(shared).toMatch(/один чат на всю покупку/);
     expect(shared).toMatch(/Это заказ 1 из 2/);
     expect(shared).not.toMatch(/соседнем чате/);
     expect(wbGateMessage("QUN5YFZ", 500, undefined, null, { sharedChat: true })).not.toMatch(/один чат/);
@@ -154,6 +155,21 @@ describe("WB gate link handed to the buyer", () => {
     expect(late.startsWith("Спасибо, код доставки получен!")).toBe(true);
     expect(late).toMatch(/Простите за задержку/);
     expect(wbGateMessage("QUN5YFZ", 500)).not.toMatch(/Простите/);
+  });
+
+  /** 12.11.2026: 1018 символов → WB 400, три выдачи не ушли. */
+  it("never exceeds the WB chat message limit, whatever the combination", () => {
+    const origin = "https://robloxbank.ru";
+    for (const opts of [{}, { codeFromSibling: true }, { sharedChat: true }, { sharedChat: true, late: true, codeFromSibling: true }, { late: true }]) {
+      for (const sibling of [null, { index: 1, total: 2 }, { index: 10, total: 12 }]) {
+        const text = wbChatSafeText(wbGateMessage("QUN5YFZ", 12000, origin, sibling, opts));
+        expect(text.length).toBeLessThanOrEqual(WB_CHAT_MESSAGE_MAX);
+      }
+    }
+    for (const level of [1, 2, 3]) {
+      const text = wbChatSafeText(wbGateReminderMessage("QUN5YFZ", 12000, level, origin, { index: 10, total: 12 }));
+      expect(text.length).toBeLessThanOrEqual(WB_CHAT_MESSAGE_MAX);
+    }
   });
 
   it("says nothing about siblings when the buyer has a single order", () => {

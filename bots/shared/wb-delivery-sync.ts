@@ -1053,7 +1053,13 @@ async function verifyGateDelivery(db: Db) {
       isTest: false,
       cancelledAt: null,
       gateState: { in: ["SENT", "ISSUED"] },
-      completedAt: { gte: new Date(now - CLOSED_GATE_WINDOW_MS) },
+      // Сирота корзины старше суток (12.11.2026) тоже должен получить повтор:
+      // её первая отправка упала, а окно по закрытию давно прошло.
+      OR: [
+        { completedAt: { gte: new Date(now - CLOSED_GATE_WINDOW_MS) } },
+        { gateSentAt: { gte: new Date(now - GATE_ECHO_WINDOW_MS) } },
+        { gateState: "ISSUED", updatedAt: { gte: new Date(now - GATE_ECHO_WINDOW_MS) } },
+      ],
       wbCode: { is: { status: "AVAILABLE" } },
     },
     include: {
@@ -1109,6 +1115,7 @@ async function verifyGateDelivery(db: Db) {
           wbGateMessage(code, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order), {
             codeFromSibling: await hasSiblingCode(db, order.id),
             sharedChat: chat.shared,
+            late: Boolean(order.completedAt && Date.now() - order.completedAt.getTime() > GATE_LATE_APOLOGY_MS),
           }),
         );
         await db.wbMarketplaceOrder.update({
