@@ -16,6 +16,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
 import { paOrderReply } from "../shared/pa-business-reply";
+import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "./pa-ai";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -28,9 +29,13 @@ interface BusinessMessage {
   business_connection_id: string;
   message_id: number;
   chat: { id: number };
-  from?: { id: number; is_bot?: boolean };
+  from?: { id: number; is_bot?: boolean; first_name?: string; last_name?: string; username?: string };
   text?: string;
   caption?: string;
+  photo?: unknown[];
+  document?: unknown;
+  video?: unknown;
+  voice?: unknown;
   sender_business_bot?: { id: number };
 }
 
@@ -39,6 +44,8 @@ export function paBusinessReplyEnabled(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 export function registerPaBusiness(bot: Telegraf): void {
+  // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
+  registerPaAiAdmin(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (method: string, payload: Record<string, unknown>) => (bot.telegram as any).callApi(method, payload);
 
@@ -76,14 +83,32 @@ export function registerPaBusiness(bot: Telegraf): void {
       const fromId = msg.from?.id ?? 0;
       // Пишет сам аккаунт (оператор) или бот от его имени — это не вопрос.
       if (msg.sender_business_bot || (owner && fromId === owner)) {
-        if (!msg.sender_business_bot) operatorAt.set(msg.chat.id, Date.now());
+        if (!msg.sender_business_bot) {
+          operatorAt.set(msg.chat.id, Date.now());
+          operatorReplied(msg.chat.id);
+          rememberTurn(msg.chat.id, "assistant", (msg.text ?? msg.caption ?? "").trim());
+        }
         return;
       }
       if (!paBusinessReplyEnabled()) return;
       const text = (msg.text ?? msg.caption ?? "").trim();
-      if (!text) return;
+      const hasMedia = Boolean(msg.photo || msg.document || msg.video || msg.voice);
       const lastOperator = operatorAt.get(msg.chat.id) ?? 0;
-      if (Date.now() - lastOperator < OPERATOR_QUIET_MS) return;
+      if (Date.now() - lastOperator < OPERATOR_QUIET_MS) {
+        rememberTurn(msg.chat.id, "user", text || "[фото/файл]");
+        return;
+      }
+
+      // ИИ-поддержка (Claude Haiku 5.5) — если включена; иначе шаблон ниже.
+      const name = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "Покупатель";
+      const handled = await handleWithAi(bot, {
+        connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
+        fromId, fromName: name, username: msg.from?.username ?? null, text, hasMedia,
+      }).catch((error) => {
+        console.warn(`[pa-ai] обработка упала: ${error instanceof Error ? error.message : error}`);
+        return false;
+      });
+      if (handled || !text) return;
 
       const user = await db.user.findUnique({ where: { tgId: String(fromId) }, select: { id: true } });
       if (!user) return;
