@@ -6,6 +6,7 @@ import {
   type AdminNotice,
 } from "./notify-format";
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
+import { adminTargets, adminTargetsForNotice, replyToRootFor } from "./admin-route";
 
 const ADMIN_IDS: string[] = [...new Set(
   (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
@@ -53,17 +54,16 @@ function refLine(ref: DbsRef, extra?: Array<string | null | undefined | false>):
 }
 
 function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
-  if (!ADMIN_IDS.length) return;
   const text = formatAdminNotice(notice);
   // Провал доставки обязан быть слышен: раньше ответ Telegram не читался, и
   // потерянное уведомление не оставляло следа (разбор 27.09).
-  void Promise.allSettled(ADMIN_IDS.map(async (id) => {
-    const reply = await tgSend(id, text, { parse_mode: "HTML", ...threadTo(ref, id) });
+  void adminTargetsForNotice(notice).then((targets) => Promise.allSettled(targets.map(async (t) => {
+    const reply = await tgSend(t.chatId, text, { parse_mode: "HTML", ...replyToRootFor(ref?.cardMessages, t), ...t.extra });
     if (reply?.ok !== true) {
-      console.warn(`[dbs-notify] «${notice.title}» не доставлено chat_id=${id}: ${JSON.stringify(reply).slice(0, 200)}`);
+      console.warn(`[dbs-notify] «${notice.title}» не доставлено chat_id=${t.chatId}: ${JSON.stringify(reply).slice(0, 200)}`);
     }
   }).map((p) => p.catch((err) =>
-    console.warn(`[dbs-notify] «${notice.title}» упало: ${err instanceof Error ? err.message : err}`))));
+    console.warn(`[dbs-notify] «${notice.title}» упало: ${err instanceof Error ? err.message : err}`)))));
 }
 
 // Отдельных сообщений на «заказ принят», «ушёл автозапрос», «доставка закрыта»
@@ -880,18 +880,19 @@ export async function pushDbsCard(
   state: DbsCardState,
   existing: Record<string, number> | null,
 ): Promise<Record<string, number>> {
-  if (!ADMIN_IDS.length) return existing ?? {};
+  const targets = await adminTargets("feed", { loud: false });
+  if (!targets.length) return existing ?? {};
   const text = renderDbsCard(state);
   const next: Record<string, number> = { ...(existing ?? {}) };
-  await Promise.allSettled(ADMIN_IDS.map(async (id) => {
-    const known = next[id];
+  await Promise.allSettled(targets.map(async (t) => {
+    const known = next[t.key];
     if (known) {
-      if (await tgEdit(id, known, text, { parse_mode: "HTML" })) return;
-      await tgDelete(id, known);
-      delete next[id];
+      if (await tgEdit(t.chatId, known, text, { parse_mode: "HTML" })) return;
+      await tgDelete(t.chatId, known);
+      delete next[t.key];
     }
-    const messageId = tgMessageId(await tgSend(id, text, { parse_mode: "HTML" }));
-    if (messageId !== null) next[id] = messageId;
+    const messageId = tgMessageId(await tgSend(t.chatId, text, { parse_mode: "HTML", ...t.extra }));
+    if (messageId !== null) next[t.key] = messageId;
   }));
   return next;
 }

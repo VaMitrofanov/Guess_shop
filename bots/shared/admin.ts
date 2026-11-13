@@ -19,6 +19,7 @@ import { twaLaunchUrl } from "./twa-link";
 import { formatAdminNotice, mskTime, orderRef, orderStatusWord } from "./notify-format";
 import { getGamepassDetails } from "./roblox";
 import { vkDialogLink } from "./vk-links";
+import { adminTargets, adminTargetsForNotice, groupSafeMarkup, replyToRootFor, type AdminTopic } from "./admin-route";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -336,8 +337,9 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
   // Обращение по заказу встаёт в ту же ветку, что и карточки этого заказа:
   // «клиент пишет» и «вот его заказ» — одно дело, а не два.
   const roots = await orderThreadRoots(db, code);
-  await Promise.allSettled(ADMIN_IDS.map((id) =>
-    tgSend(id, text, { reply_markup: reply_markup(id), ...replyToRoot(roots, id) })));
+  const targets = await adminTargetsForNotice({ marker: frozen ? "urgent" : "action", zone: "ПОДДЕРЖКА" });
+  await Promise.allSettled(targets.map((t) =>
+    tgSend(t.chatId, text, { reply_markup: groupSafeMarkup(reply_markup(t.chatId), t), ...replyToRootFor(roots, t), ...t.extra })));
 }
 
 /** Public support contact. Used as the final URL the bot hands the user after
@@ -410,7 +412,8 @@ export async function notifyUserHurdle(p: SupportAlertPayload): Promise<void> {
       ? "не обещать выкуп — заказ заморожен"
       : "ничего, если сам справится; кнопка поддержки у него уже есть",
   });
-  await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
+  const targets = await adminTargetsForNotice({ marker: held ? "urgent" : "waiting", zone: "ПОДДЕРЖКА" });
+  await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, t.extra)));
 }
 
 /**
@@ -505,7 +508,8 @@ export async function notifyBotError(p: {
       ],
       next: "юзер получил «Произошла ошибка» — написать ему и проверить ветку",
     });
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+    const targets = await adminTargets("system", { loud: true });
+    await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, t.extra)));
   } catch (alertErr) {
     console.error("[admin] notifyBotError failed:", alertErr);
   }
@@ -547,8 +551,9 @@ export async function notifyAdminsRetailBuyout(input: RetailBuyoutAdminAlert): P
     next: null,
   });
   const roots = await orderThreadRoots(db, input.wbCode);
-  await Promise.allSettled(ADMIN_IDS.map((id) =>
-    tgSend(id, text, { parse_mode: "HTML", ...replyToRoot(roots, id) })));
+  const targets = await adminTargets("direct", { loud: false });
+  await Promise.allSettled(targets.map((t) =>
+    tgSend(t.chatId, text, { parse_mode: "HTML", ...replyToRootFor(roots, t), ...t.extra })));
 }
 
 // ── Unified user-handle formatting ─────────────────────────────────────────────
@@ -991,12 +996,14 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // Ответ на живую карточку DBS: Telegram рисует цитату сверху, и карточка
   // выкупа читается как продолжение того же заказа, а не как новое дело.
   // `allow_sending_without_reply` — карточку могли удалить или переслать заново.
+  const targets = await adminTargets(orderSource === "DIRECT" ? "direct" : "buyout", { loud: true });
   await Promise.allSettled(
-    ADMIN_IDS.map((id) => {
-      const rootId = wbRef.cardMessages?.[id] ?? threadRoots?.[id];
-      return tgSend(id, text, {
-        reply_markup: reply_markup(id),
+    targets.map((t) => {
+      const rootId = wbRef.cardMessages?.[t.key] ?? threadRoots?.[t.key];
+      return tgSend(t.chatId, text, {
+        reply_markup: groupSafeMarkup(reply_markup(t.chatId), t),
         ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),
+        ...t.extra,
       });
     })
   );
@@ -1069,8 +1076,9 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
     ],
   };
 
+  const targets = await adminTargets("direct", { loud: true });
   await Promise.allSettled(
-    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup }))
+    targets.map((t) => tgSend(t.chatId, text, { reply_markup, ...t.extra }))
   );
 }
 
@@ -1096,13 +1104,17 @@ async function broadcastPhotoCard(
   /** Корень ветки заказа: скрин оплаты и скрин отзыва — тоже шаги ОДНОГО
    *  заказа, а не отдельные дела с собственной перепиской. */
   roots?: Record<string, number> | null,
+  /** Тема беседы (14.11.2026): оплата — прямые заказы, отзыв — отзывы. */
+  topic: AdminTopic = "action",
 ): Promise<number> {
   // Качаем здесь, рядом с источником: Telegram за рубежом не может забрать фото
   // с CDN VK (разбор 27.09, `telegram-photo.ts`). Не вышло — шлём ссылку.
   const bytes = await downloadPhoto(photo);
+  const targets = await adminTargets(topic, { loud: true });
   const results = await Promise.all(
-    ADMIN_IDS.map(async (id) => {
-      const thread = replyToRoot(roots, id);
+    targets.map(async (t) => {
+      const id = t.chatId;
+      const thread = { ...replyToRootFor(roots, t), ...t.extra };
       if (await tgSendPhoto(id, bytes ?? photo, caption, { reply_markup, ...thread })) return true;
       try {
         // URL экранируем: в ссылках VK CDN есть `&`, и на нём Telegram роняет
@@ -1120,8 +1132,8 @@ async function broadcastPhotoCard(
     }),
   );
   const delivered = results.filter(Boolean).length;
-  if (delivered < ADMIN_IDS.length) {
-    console.warn(`[admin] карточка «${what}» дошла до ${delivered}/${ADMIN_IDS.length} админов`);
+  if (delivered < targets.length) {
+    console.warn(`[admin] карточка «${what}» дошла до ${delivered}/${targets.length} получателей`);
   }
   return delivered;
 }
@@ -1202,6 +1214,7 @@ export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload
   const delivered = await broadcastPhotoCard(
     payload.photoFileId, caption, reply_markup, "скрин оплаты",
     await orderThreadRoots(db, code),
+    "direct",
   );
   if (delivered === 0) {
     throw new Error(`payment card undelivered: 0/${ADMIN_IDS.length} admins`);
@@ -1263,6 +1276,7 @@ export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<v
   const delivered = await broadcastPhotoCard(
     payload.photoSource, caption, reply_markup, "скрин отзыва",
     await orderThreadRoots(db, code),
+    "reviews",
   );
   if (delivered === 0) {
     // Последний рубеж: Telegram может быть недоступен целиком, и тогда любое

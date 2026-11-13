@@ -23,6 +23,70 @@ import { flagsOf } from "../shared/order-flags";
 import { profileText, recentBadReviewsWithBuyers, whoIs } from "../shared/buyer-identity";
 import { PA_AI_MODEL, plain } from "../shared/pa-ai-support";
 import { card, loadSettings, saveSettings, type PaTopic } from "./pa-ai";
+import { ADMIN_NOTIFY_STREAM, ADMIN_TOPICS, ADMIN_TOPIC_KEYS, loadAdminRoute, resetAdminRouteCache } from "../shared/admin-route";
+import { pendingPaymentDetails, pendingRejectionReason, pendingReviewRejectReason } from "./session";
+
+/* ── Беседа уведомлений (14.11.2026) ────────────────────────────────────────
+   Отдельная от этой: здесь разговоры админов и ИИ-воркера, там — только
+   уведомления по темам (bots/shared/admin-route.ts). Назначается командой
+   /notify_setup в новой беседе-форуме; недостающие темы бот создаёт сам. */
+
+async function saveNotifyRoute(patch: { chatId?: number; topics?: Record<string, number> }): Promise<void> {
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: ADMIN_NOTIFY_STREAM } }).catch(() => null);
+  const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+  const chatChanged = patch.chatId !== undefined && String(patch.chatId) !== row?.cursor;
+  const metadata = { ...meta, topics: patch.topics ?? (chatChanged ? {} : (meta.topics ?? {})) };
+  const cursor = patch.chatId !== undefined ? String(patch.chatId) : row?.cursor ?? null;
+  await db.wbSyncCursor.upsert({
+    where: { stream: ADMIN_NOTIFY_STREAM },
+    create: { stream: ADMIN_NOTIFY_STREAM, cursor, metadata: metadata as never },
+    update: { cursor, metadata: metadata as never },
+  });
+  resetAdminRouteCache();
+}
+
+/** Создать недостающие темы беседы уведомлений — в порядке ADMIN_TOPICS. */
+export async function ensureNotifyTopics(telegram: Telegraf["telegram"]): Promise<string[]> {
+  const cfg = await loadAdminRoute(true);
+  if (!cfg.chatId) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chat = await telegram.getChat(cfg.chatId).catch(() => null) as any;
+  if (!chat?.is_forum) return [];
+  const topics: Record<string, number> = { ...(cfg.topics as Record<string, number>) };
+  const created: string[] = [];
+  for (const key of ADMIN_TOPIC_KEYS) {
+    if (topics[key]) continue;
+    const t = ADMIN_TOPICS[key];
+    try {
+      const made = await telegram.createForumTopic(cfg.chatId, t.title, { icon_color: t.color as never });
+      topics[key] = made.message_thread_id;
+      created.push(t.title);
+      const hello = await telegram.sendMessage(cfg.chatId, t.hello, { message_thread_id: made.message_thread_id });
+      await telegram.pinChatMessage(cfg.chatId, hello.message_id, { disable_notification: true }).catch(() => undefined);
+    } catch (error) {
+      console.warn(`[notify] тема «${t.title}» не создалась:`, error instanceof Error ? error.message : error);
+    }
+  }
+  if (created.length) {
+    await saveNotifyRoute({ topics });
+    console.log(`[notify] созданы темы: ${created.join(", ")}`);
+  }
+  return created;
+}
+
+/** Ждёт ли бот от этого админа текст после нажатия кнопки (причина отказа и т.п.). */
+const awaitsAdminText = (id: number): boolean =>
+  pendingRejectionReason.has(id) || pendingReviewRejectReason.has(id) || pendingPaymentDetails.has(id);
+
+/** Ответы бота остаются в теме, где нажали кнопку или написали. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function keepInThread(ctx: any, thread: number | undefined): void {
+  if (!thread) return;
+  for (const m of ["reply", "replyWithHTML", "replyWithPhoto", "replyWithDocument"]) {
+    const orig = ctx[m]?.bind(ctx);
+    if (orig) ctx[m] = (a: unknown, extra: Record<string, unknown> = {}) => orig(a, { message_thread_id: thread, ...extra });
+  }
+}
 
 const isAdmin = (id: number | undefined) => id !== undefined && ADMIN_IDS.map(String).includes(String(id));
 const MSK = 3 * 3600_000;
@@ -294,6 +358,30 @@ const TOPICS: Array<{ key: PaTopic; name: string; color: number; hello: string }
 ];
 
 export function registerPaGroup(bot: Telegraf): void {
+  setTimeout(() => { void ensureNotifyTopics(bot.telegram).catch(() => undefined); }, 15_000);
+
+  bot.command("notify_setup", async (ctx) => {
+    if (!isAdmin(ctx.from?.id) || !ctx.chat || ctx.chat.type === "private") return;
+    const s = await loadSettings();
+    if (s.chatId === ctx.chat.id) {
+      await ctx.reply("Это беседа админов и ИИ-воркера — для уведомлений нужна отдельная беседа. Создайте новую, включите «Темы», добавьте меня админом и напишите /notify_setup там.");
+      return;
+    }
+    await saveNotifyRoute({ chatId: ctx.chat.id });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chat = await ctx.telegram.getChat(ctx.chat.id).catch(() => null) as any;
+    if (!chat?.is_forum) {
+      await ctx.reply("Беседа назначена для уведомлений ✅\n\nВключите «Темы» (настройки беседы → Topics) и снова напишите /notify_setup — бот создаст темы. Пока тем нет, уведомления идут в личку, как раньше.");
+      return;
+    }
+    const created = await ensureNotifyTopics(ctx.telegram);
+    await ctx.telegram.setChatDescription(ctx.chat.id, "Уведомления RobloxBank по темам. 📌 Особые заказы · 🛒 Прямые заказы · 🔥 Нужно действие · 💸 К выкупу · ⭐ Отзывы и вопросы · 📦 Лента (тихо) · 🚨 Система.").catch(() => undefined);
+    await ctx.reply(
+      `✅ Уведомления теперь приходят сюда.${created.length ? `\nСоздал темы: ${created.join(", ")}.` : ""}\n\n` +
+      "Закрепите «📌 Особые заказы» и «🛒 Прямые заказы» (долгое нажатие на тему → «Закрепить»), чтобы они всегда были сверху. Звук «📦 Лента заказов» можно выключить.",
+    );
+  });
+
   bot.command("support_setup", async (ctx) => {
     if (!isAdmin(ctx.from?.id) || !ctx.chat || ctx.chat.type === "private") return;
     await saveSettings({ chatId: ctx.chat.id });
@@ -362,6 +450,24 @@ export function registerPaGroup(bot: Telegraf): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const u = ctx.update as any;
     if (u.chat_member || u.my_chat_member) return next();
+    // 14.11.2026: беседа уведомлений. Кнопки карточек («Выкупить», «ВЫКУПЛЕНО»,
+    // «Реквизиты») работают отсюда; если после кнопки бот ждёт от админа текст
+    // (причину, реквизиты), этот текст тоже пропускаем. Только админы и только
+    // наша беседа; ответы бота остаются в той же теме.
+    if (isAdmin(ctx.from?.id)) {
+      const route = await loadAdminRoute();
+      if (route.chatId && String(ctx.chat!.id) === route.chatId) {
+        if (u.callback_query) {
+          keepInThread(ctx, u.callback_query.message?.message_thread_id);
+          return next();
+        }
+        if (u.message?.text && awaitsAdminText(ctx.from!.id)) {
+          keepInThread(ctx, u.message.message_thread_id);
+          return next();
+        }
+        return;
+      }
+    }
     const msg = u.message;
     if (!msg?.text || !isAdmin(ctx.from?.id) || !process.env.ANTHROPIC_API_KEY?.trim()) return;
     const s = await loadSettings();

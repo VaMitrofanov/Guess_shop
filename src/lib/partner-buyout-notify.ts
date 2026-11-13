@@ -1,4 +1,5 @@
-import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import { formatAdminNotice } from "../../bots/shared/notify-format";
 
 /**
@@ -135,7 +136,9 @@ export async function notifyPartnerBuyout(
   input: PartnerBuyoutCardInput,
 ): Promise<{ admins: number; sent: number }> {
   const token = process.env.TG_TOKEN;
-  const adminIds = telegramAdminRecipients();
+  // Выкуп партнёра — отчёт о сделанном: тихо в «💸 К выкупу».
+  const targets = await adminTargets("buyout", { loud: false });
+  const adminIds = targets.map((t) => t.chatId);
 
   if (!token || adminIds.length === 0) {
     console.warn("[partner-buyout-notify] TG_TOKEN or admin IDs missing — buyout card not sent");
@@ -145,7 +148,7 @@ export async function notifyPartnerBuyout(
 
   const text = buildPartnerBuyoutCard(input);
   const results = await Promise.allSettled(
-    adminIds.map((id) => sendTelegramMessage(token, id, text)),
+    targets.map((t) => sendTelegramMessage(token, t.chatId, text, t.extra)),
   );
   const sent = results.filter((r) => r.status === "fulfilled" && r.value === true).length;
   return { admins: adminIds.length, sent };

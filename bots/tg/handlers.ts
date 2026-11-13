@@ -67,6 +67,7 @@ import {
   recordAutocreateTrace,
 } from "../shared/gamepass-autocreate";
 import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
+import { adminTargets, adminTargetsForNotice, groupSafeMarkup, replyToRootFor } from "../shared/admin-route";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
@@ -524,10 +525,11 @@ async function deliverSupportIntakeTg(
   // Скриншот — отдельным сообщением тем же админам: половина обращений «не
   // вижу геймпасс» объясняется картинкой, а не словами.
   if (photoFileId) {
-    for (const adminId of ADMIN_IDS) {
+    for (const t of await adminTargets("action", { loud: false })) {
       try {
-        await bot.telegram.sendPhoto(adminId, photoFileId, {
+        await bot.telegram.sendPhoto(t.chatId, photoFileId, {
           caption: `🖼 Скриншот к обращению ${display}${ocr ? `\n${ocr.note}` : ""}`,
+          ...t.extra,
         });
       } catch {}
     }
@@ -1083,7 +1085,8 @@ export function registerStart(bot: Telegraf): void {
         next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
       });
       const roots = await orderThreadRoots(db, code);
-      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, notice, replyToRoot(roots, id))));
+      const targets = await adminTargetsForNotice({ marker: "done", zone: "DBS" });
+      await Promise.allSettled(targets.map((t) => tgSend(t.chatId, notice, { ...replyToRootFor(roots, t), ...t.extra })));
     }
 
     // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг
@@ -1123,13 +1126,14 @@ export function registerStart(bot: Telegraf): void {
         // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка выкупа
         // придёт ответом на неё, а не вторым отдельным делом об одном коде.
         const roots: Record<string, number> = {};
-        for (const adminId of ADMIN_IDS) {
+        for (const t of await adminTargetsForNotice({ marker: "waiting", zone: "WB" })) {
           try {
-            const sent = await bot.telegram.sendMessage(adminId, notifyText, {
+            const sent = await bot.telegram.sendMessage(t.chatId, notifyText, {
               parse_mode: "HTML",
               link_preview_options: { is_disabled: true },
+              ...t.extra,
             });
-            if (sent?.message_id) roots[adminId] = sent.message_id;
+            if (sent?.message_id) roots[t.key] = sent.message_id;
           } catch { /* non-fatal */ }
         }
 
@@ -3523,7 +3527,8 @@ async function sendPlaceHelpTg(
   void recordPlaceHelp(db as unknown as PlaceHelpClient, shown);
   if (shouldNotifyPlaceHelp(`tg:${tgIdNum}`)) {
     const card = placeHelpAdminText(shown);
-    void Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, card)));
+    void adminTargets("action", { loud: true }).then((targets) =>
+      Promise.allSettled(targets.map((t) => tgSend(t.chatId, card, t.extra))));
   }
   // Пометки нарисованы на кадрах. Альбом не ушёл — шаги текстом всё равно ниже.
   try {
@@ -3833,8 +3838,8 @@ async function processGamepassSubmission(
           `🔑 Код ВБ: <code>${state.wbCode}</code>\n` +
           `🔗 Pass ID: <code>${passId}</code>\n` +
           `❌ Причина: ${reason}`;
-        for (const adminId of ADMIN_IDS) {
-          try { await bot.telegram.sendMessage(adminId, alertText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }); } catch {}
+        for (const t of await adminTargets("feed", { loud: false })) {
+          try { await bot.telegram.sendMessage(t.chatId, alertText, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...t.extra }); } catch {}
         }
       };
 
@@ -3943,8 +3948,8 @@ async function processGamepassSubmission(
         `⚠️ <b>РУЧНАЯ ПРОВЕРКА</b>\n` +
         `Roblox API недоступен — геймпасс принят без автоматической проверки цены.\n` +
         `Pass ID: <code>${passId}</code> · Ожидаемая цена: ${expectedPrice} R$`;
-      for (const adminId of ADMIN_IDS) {
-        try { await bot.telegram.sendMessage(adminId, alertText, { parse_mode: "HTML" }); } catch {}
+      for (const t of await adminTargets("action", { loud: true })) {
+        try { await bot.telegram.sendMessage(t.chatId, alertText, { parse_mode: "HTML", ...t.extra }); } catch {}
       }
     }
     // ── End Roblox validation ─────────────────────────────────────────────
@@ -4260,11 +4265,12 @@ async function processGamepassSubmission(
       });
       if (fullOrder) {
         const { text: cardText, buildReplyMarkup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted, replacedGamepassUrl ?? undefined, opts.viaManualLink);
-        for (const adminId of ADMIN_IDS) {
+        for (const t of await adminTargets((fullOrder as { isDirectOrder?: boolean }).isDirectOrder ? "direct" : "buyout", { loud: true })) {
           try {
-            await bot.telegram.sendMessage(adminId, cardText, {
+            await bot.telegram.sendMessage(t.chatId, cardText, {
+              ...t.extra,
               parse_mode: "HTML",
-              reply_markup: buildReplyMarkup(adminId),
+              reply_markup: groupSafeMarkup(buildReplyMarkup(t.chatId), t) as never,
               link_preview_options: { is_disabled: true },
             });
           } catch { }
@@ -4512,10 +4518,10 @@ async function settleForeignCodeClaim(
   const claimantLabel = tgClaimantLabel(ctx, tgId);
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
     // Красный по одному коду — не чаще раза в час: тупик человек жмёт повторно.
-    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
+    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : adminTargets(kind === "conflict" ? "action" : "feed", { loud: kind === "conflict" }).then((targets) => Promise.allSettled(targets.map((t) => tgSend(t.chatId, xlinkAdminNotice({
       kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
       claimantLabel: escapeHtml(claimantLabel), platform: "TG", reason,
-    })))).catch(() => undefined);
+    }), t.extra)))).catch(() => undefined);
 
   if (verdict.kind === "conflict") {
     await ctx.reply(xlinkConflictText(), {
@@ -5117,15 +5123,15 @@ async function submitReviewPhotoTg(bot: Telegraf, ctx: any, user: any, orderId: 
     } catch (err) {
       console.error("[TG] sendAdminReviewCard failed:", err);
       // Fallback: send plain alert + photo directly to each admin
-      for (const adminId of ADMIN_IDS) {
+      for (const t of await adminTargets("reviews", { loud: true })) {
         try {
-          await bot.telegram.sendMessage(adminId,
+          await bot.telegram.sendMessage(t.chatId,
             `⚠️ <b>Ошибка доставки карточки отзыва — требуется ручная проверка</b>\n\n` +
             `👤 Юзер: ${userDisplay(ctx.from)}\n` +
             `📦 Заказ: <code>${orderId}</code>`,
-            { parse_mode: "HTML" }
+            { parse_mode: "HTML", ...t.extra }
           );
-          await bot.telegram.sendPhoto(adminId, fileId);
+          await bot.telegram.sendPhoto(t.chatId, fileId, t.extra);
         } catch {}
       }
     }
@@ -6799,12 +6805,13 @@ export function registerCallbacks(bot: Telegraf): void {
       const passLine = flow.parts && flow.parts.length > 1
         ? `🧩 Набор: <b>${flow.parts.map((p) => p.amount).join(" + ")} R$</b> (${flow.parts.map((p) => `${p.price} R$`).join(", ")}) — каждая часть сверена`
         : `🎫 Пасс: <b>${flow.gamepassRobux ?? "?"} R$</b>` + (gpOk ? ` (норма)` : ` ⚠️ <b>ожидалось ${flow.passPrice} R$</b>`);
-      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
-        id,
+      await Promise.allSettled((await adminTargets("direct", { loud: true })).map((t) => tgSend(
+        t.chatId,
         `🔷 <b>Новая заявка · клиент выбирает оплату</b>\n` +
         `Канал: TG · Ник: <b>${escapeHtml(recipient)}</b> · ${flow.totalAmount} R$ · ${fmtRub(flow.rublePrice!)}\n` +
         passLine +
         (accepted.ownerSwitchedFrom ? `\n⚠️ Назван ${escapeHtml(accepted.ownerSwitchedFrom)}, пасс принадлежит ${escapeHtml(recipient)} — робуксы владельцу пасса` : ""),
+        t.extra,
       )));
 
       const receiptLine = dirUser.email
@@ -6852,7 +6859,7 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       } catch { }
       await Promise.allSettled(
-        ADMIN_IDS.map(id => tgSend(id, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем.`))
+        (await adminTargets("direct", { loud: false })).map((t) => tgSend(t.chatId, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем.`, t.extra))
       );
       await ctx.answerCbQuery("Заявка отменена").catch(() => {});
       pendingDirectPaymentEmail.delete(ctx.from.id);
@@ -6930,7 +6937,7 @@ export function registerCallbacks(bot: Telegraf): void {
         (refund.reverted
           ? `\n♻️ Возвращено: ${refund.bonusRobux} R$ бонуса, ${refund.discountKopecks / 100} ₽ скидки`
           : "");
-      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
+      await Promise.allSettled((await adminTargets("direct", { loud: false })).map((t) => tgSend(t.chatId, adminText, t.extra)));
       return;
     }
 

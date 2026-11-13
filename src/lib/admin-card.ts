@@ -1,6 +1,7 @@
 import { formatOrderAge } from "@/lib/order-age";
 import { prisma } from "@/lib/prisma";
-import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import { resolveWbOrderRef } from "../../bots/shared/wb-order-source";
 import { orderCardRoots } from "../../bots/shared/order-thread";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
@@ -135,14 +136,15 @@ export function buildWebOrderCardText(
 
 export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
   const token = process.env.TG_TOKEN;
-  const adminIds = telegramAdminRecipients();
+  const wbRef = await resolveWbOrderRef(prisma, order.wbCode);
+  // Карточка с сайта — только у заказов WB (прямых здесь нет): «💸 К выкупу».
+  const targets = await adminTargets("buyout", { loud: true });
 
-  if (!token || adminIds.length === 0) {
+  if (!token || targets.length === 0) {
     console.warn("[admin-card] TG_TOKEN or admin IDs missing — web order card not sent");
     return;
   }
 
-  const wbRef = await resolveWbOrderRef(prisma, order.wbCode);
   // У DBS-заказа корень ветки — живая карточка; у обычного WB-заказа её нет, и
   // корнем становится карточка активации кода («⌛ Ожидаем ссылку»).
   const threadRoots = wbRef.cardMessages ? null : await orderCardRoots(prisma, order.wbCode);
@@ -160,11 +162,12 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
   };
 
   // Ответ на корень ветки — карточка выкупа встаёт в ту же нить заказа.
-  await Promise.allSettled(adminIds.map((id) => {
-    const rootId = wbRef.cardMessages?.[id] ?? threadRoots?.[id];
-    return sendTelegramMessage(token, id, text, {
-      reply_markup,
+  await Promise.allSettled(targets.map((t) => {
+    const rootId = wbRef.cardMessages?.[t.key] ?? threadRoots?.[t.key];
+    return sendTelegramMessage(token, t.chatId, text, {
+      reply_markup: groupSafeMarkup(reply_markup, t),
       ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),
+      ...t.extra,
     });
   }));
 

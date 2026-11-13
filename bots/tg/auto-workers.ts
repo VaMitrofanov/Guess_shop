@@ -26,6 +26,7 @@ import { syncOrderPins } from "../shared/order-pin";
 import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
+import { adminTargets, type AdminTopic } from "../shared/admin-route";
 import { paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
 import { startPaDigest } from "./pa-group";
 
@@ -34,8 +35,9 @@ const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jitter = (min: number, max: number) => min + Math.floor(Math.random() * (max - min));
 
-async function alertAdmins(html: string): Promise<void> {
-  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, html, { parse_mode: "HTML" })));
+async function alertAdmins(html: string, topic: AdminTopic = "action"): Promise<void> {
+  const targets = await adminTargets(topic, { loud: topic === "action" });
+  await Promise.allSettled(targets.map((t) => tgSend(t.chatId, html, { parse_mode: "HTML", ...t.extra })));
 }
 
 
@@ -172,7 +174,8 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
           `Заказ <code>${order.wbCode}</code> · ник <b>${escapeHtml(order.probableNick!)}</b>\n` +
           `«${escapeHtml(pass.name)}» · <b>${pass.robux} R$</b> (ожидалось ${want})\n` +
           `${pingLine}\n` +
-          `📊 TWA: поиск <code>${order.wbCode}</code>`
+          `📊 TWA: поиск <code>${order.wbCode}</code>`,
+          delivered === "skip" || delivered === "unreachable" ? "action" : "feed",
         );
       }
       await sleep(jitter(1500, 4000));

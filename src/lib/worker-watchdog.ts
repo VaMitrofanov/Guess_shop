@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 
 export const PAYMENT_OUTBOX_SERVICE_KEY = "tg-payment-outbox";
 const PAYMENT_OUTBOX_BACKLOG_KEY = "payment-outbox-backlog";
@@ -17,12 +18,12 @@ export function heartbeatHealth(lastSeenAt: Date | null, now = new Date()): Hear
 
 async function fanout(text: string) {
   const token = process.env.TG_TOKEN?.trim();
-  const recipients = telegramAdminRecipients();
+  const recipients = await adminTargets("system", { loud: true });
   if (!token || recipients.length === 0) {
     console.error("[WorkerWatchdog] TG_TOKEN or ADMIN_IDS/TG_CHAT_ID is not configured");
     return false;
   }
-  const results = await Promise.all(recipients.map((id) => sendTelegramMessage(token, id, text)));
+  const results = await Promise.all(recipients.map((t) => sendTelegramMessage(token, t.chatId, text, t.extra)));
   return results.some(Boolean);
 }
 

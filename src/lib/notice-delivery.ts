@@ -5,6 +5,7 @@ import { completedNoticeAuditLine, rescueCompletedNotice } from "../../bots/shar
 import { appendOrderAudit } from "@/lib/order-recovery";
 import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import type { CompletedNoticeResult } from "@/lib/twa-notify";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -84,7 +85,8 @@ export async function recordCompletedNotice(input: {
   if (input.result.delivered && input.result.bonusDelivered) return;
 
   const token = process.env.TG_TOKEN;
-  const recipients = adminIds();
+  // Покупатель не знает о выкупе — нужен человек: «🔥 Нужно действие».
+  const recipients = await adminTargets("action", { loud: true });
   if (!token || recipients.length === 0) return;
 
   const failedAll = !input.result.delivered;
@@ -112,6 +114,6 @@ export async function recordCompletedNotice(input: {
   });
 
   await Promise.allSettled(
-    recipients.map((id) => sendTelegramMessage(token, id, text)),
+    recipients.map((t) => sendTelegramMessage(token, t.chatId, text, t.extra)),
   );
 }

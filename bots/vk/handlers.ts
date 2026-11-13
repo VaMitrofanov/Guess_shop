@@ -64,6 +64,7 @@ import {
   recordAutocreateTrace,
 } from "../shared/gamepass-autocreate";
 import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shared/gamepass-create-messages";
+import { adminTargets, adminTargetsForNotice, replyToRootFor } from "../shared/admin-route";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
@@ -1851,7 +1852,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     kb.textButton({ label: "💎 Заказать снова", payload: { command: "start_direct" }, color: "positive" });
     await ctx.reply({ message: "❌ Заявка отменена.", keyboard: kb.inline() });
     await Promise.allSettled(
-      ADMIN_IDS.map(id => tgSend(id, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем (VK).`))
+      (await adminTargets("direct", { loud: false })).map((t) => tgSend(t.chatId, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем (VK).`, t.extra))
     );
     return;
   }
@@ -1903,7 +1904,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       `❌ <b>Заказ <code>${ucdOrder.wbCode}</code> отменён покупателем</b>\n` +
       `👤 ${vkDialogLink(vkUserId, escapeHtml(fullName))} (VK)\n` +
       `💎 ${baseAmount} R$`;
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
+    await Promise.allSettled((await adminTargets("direct", { loud: false })).map((t) => tgSend(t.chatId, adminText, t.extra)));
     return;
   }
 
@@ -2427,10 +2428,10 @@ async function settleForeignCodeClaimVk(
   const claimantLabel = claimantName || `vk:${vkId}`;
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
     // Красный по одному коду — не чаще раза в час: тупик человек жмёт повторно.
-    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, xlinkAdminNotice({
+    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : adminTargets(kind === "conflict" ? "action" : "feed", { loud: kind === "conflict" }).then((targets) => Promise.allSettled(targets.map((t) => tgSend(t.chatId, xlinkAdminNotice({
       kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
       claimantLabel: escapeHtml(claimantLabel), platform: "VK", reason,
-    })))).catch(() => undefined);
+    }), t.extra)))).catch(() => undefined);
 
   if (verdict.kind === "conflict") {
     await ctx.reply(stripHtml(xlinkConflictText()) + "\nhttps://t.me/RobloxBank_PA");
@@ -2677,7 +2678,8 @@ async function handleRefActivation(
       next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
     });
     const roots = await orderThreadRoots(db, wbCode.code);
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, notice, replyToRoot(roots, id))));
+    const targets = await adminTargetsForNotice({ marker: "done", zone: "DBS" });
+    await Promise.allSettled(targets.map((t) => tgSend(t.chatId, notice, { ...replyToRootFor(roots, t), ...t.extra })));
   }
 
   // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг воронки,
@@ -2714,18 +2716,15 @@ async function handleRefActivation(
         next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
       });
 
-      const chatIds = [
-        ...ADMIN_IDS,
-        ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
-      ];
+      const targets = await adminTargetsForNotice({ marker: "waiting", zone: "WB" });
       // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка выкупа
       // придёт ответом на неё, а не вторым отдельным делом об одном коде.
-      const sent = await Promise.allSettled(chatIds.map((id) => tgSend(id, notifyText)));
+      const sent = await Promise.allSettled(targets.map((t) => tgSend(t.chatId, notifyText, t.extra)));
       if (provisionalOrderId) {
         await recordOrderCardRoot(db, provisionalOrderId, Object.fromEntries(
-          chatIds.map((id, index) => {
+          targets.map((t, index) => {
             const result = sent[index];
-            return [id, result.status === "fulfilled" ? tgMessageId(result.value) : null];
+            return [t.key, result.status === "fulfilled" ? tgMessageId(result.value) : null];
           }),
         ));
       }
@@ -3875,7 +3874,8 @@ async function sendPlaceHelpVk(
   void recordPlaceHelp(db as unknown as PlaceHelpClient, shown);
   if (shouldNotifyPlaceHelp(`vk:${vkUserId}`)) {
     const card = placeHelpAdminText(shown);
-    void Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, card)));
+    void adminTargets("action", { loud: true }).then((targets) =>
+      Promise.allSettled(targets.map((t) => tgSend(t.chatId, card, t.extra))));
   }
   // VK не берёт фото по ссылке: качаем свой же кадр и загружаем. Не вышло —
   // шаги текстом с кнопками уходят всё равно.
@@ -4996,14 +4996,15 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   // Цена пасса в карточке заявки обязательна — см. тот же комментарий в TG.
   const gpExpected = expectedGamepassPrice(state.totalAmount);
   const gpOk = Math.abs((state.gamepassRobux ?? gpExpected) - gpExpected) <= 2;
-  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
-    id,
+  await Promise.allSettled((await adminTargets("direct", { loud: true })).map((t) => tgSend(
+    t.chatId,
     `🔷 <b>Новая заявка · клиент выбирает оплату</b>\n` +
     `Канал: VK · Ник: <b>${escapeHtml(recipient)}</b> · ${state.totalAmount} R$ · ${fmtRub(state.rublePrice)}\n` +
     (state.parts && state.parts.length > 1
       ? `🧩 Набор: <b>${state.parts.map((p) => p.amount).join(" + ")} R$</b> (${state.parts.map((p) => `${p.price} R$`).join(", ")}) — каждая часть сверена`
       : `🎫 Пасс: <b>${state.gamepassRobux ?? "?"} R$</b>` + (gpOk ? ` (норма)` : ` ⚠️ <b>ожидалось ${gpExpected} R$</b>`)) +
     (accepted.ownerSwitchedFrom ? `\n⚠️ Назван ${escapeHtml(accepted.ownerSwitchedFrom)}, пасс принадлежит ${escapeHtml(recipient)} — робуксы владельцу пасса` : ""),
+    t.extra,
   )));
 
   const receiptLine = user.email
@@ -5077,12 +5078,13 @@ async function handleReviewScreenshot(
         "Менеджер проверит вручную — это займёт немного времени. 🙌"
       );
       try {
-        for (const adminId of ADMIN_IDS) {
+        for (const t of await adminTargets("reviews", { loud: true })) {
           await tgSend(
-            adminId,
+            t.chatId,
             `⚠️ <b>VK отзыв: не удалось извлечь фото — нужна ручная проверка</b>\n` +
             `VK ID: <code>${vkUserId}</code> (${vkDialogLink(vkUserId, "диалог")})\n\n` +
-            `Пользователь прислал скрин отзыва, авто-извлечение URL не сработало. Проверь диалог и начисли бонус вручную.`
+            `Пользователь прислал скрин отзыва, авто-извлечение URL не сработало. Проверь диалог и начисли бонус вручную.`,
+            t.extra,
           );
         }
       } catch (err) {
@@ -5119,12 +5121,13 @@ async function handleReviewScreenshot(
       "укажи свой VK ID, и мы разберёмся вручную."
     );
     try {
-      for (const adminId of ADMIN_IDS) {
+      for (const t of await adminTargets("reviews", { loud: true })) {
         await tgSend(
-          adminId,
+          t.chatId,
           `⚠️ <b>Скриншот ВБ отзыва — пользователь не найден в БД</b>\n` +
           `VK ID: <code>${vkUserId}</code> (${vkDialogLink(vkUserId, "диалог")})\n\n` +
-          `Пользователь отправил скрин, но записи в базе нет. Нужна ручная проверка.`
+          `Пользователь отправил скрин, но записи в базе нет. Нужна ручная проверка.`,
+          t.extra,
         );
       }
     } catch (err) {
@@ -5177,13 +5180,14 @@ async function handleReviewScreenshot(
   } catch (err) {
     console.error("[VK] sendAdminReviewCard failed:", err);
     // Fallback: plain alert so admins can approve manually
-    for (const adminId of ADMIN_IDS) {
+    for (const t of await adminTargets("reviews", { loud: true })) {
       try {
-        await tgSend(adminId,
+        await tgSend(t.chatId,
           `⚠️ <b>Ошибка доставки карточки отзыва — требуется ручная проверка</b>\n\n` +
           `👤 Юзер: ${vkUserDisplay(reviewerName, vkUserId)}\n` +
           `📦 Заказ: <code>${orderId}</code>\n` +
-          `🖼 Фото: ${url}`
+          `🖼 Фото: ${url}`,
+          t.extra,
         );
       } catch {}
     }

@@ -8,6 +8,7 @@
 import { ADMIN_IDS } from "../../shared/admin";
 import { db } from "../../shared/db";
 import { tgSend } from "../../shared/notify";
+import { adminTargets } from "../../shared/admin-route";
 
 // ── Service config from env ──────────────────────────────────────────────────
 
@@ -259,7 +260,8 @@ async function runServerCheck(): Promise<void> {
 
   if (alerts.length > 0) {
     const text = `🚨 <b>СЕРВЕРНЫЙ АЛЕРТ</b>\n━━━━━━━━━━━━━━━━\n` + alerts.join("\n");
-    await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
+    const targets = await adminTargets("system", { loud: true });
+    await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, t.extra)));
   }
 }
 

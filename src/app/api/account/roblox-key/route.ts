@@ -12,6 +12,7 @@ import { createTargetsFor } from "@/lib/gamepass-plan";
 import { continueHref } from "@/lib/active-order";
 import { noteProbableNickByCode } from "@/lib/capture-nick";
 import { sendTelegramMessageId } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../../../../bots/shared/admin-route";
 import { formatAdminNotice } from "../../../../../bots/shared/notify-format";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
 import { vkDialogLink } from "../../../../../bots/shared/vk-links";
@@ -287,7 +288,10 @@ async function notifyAdmins(opts: {
         : "его следующий заказ можно закрыть без ожидания — геймпасс создастся сам",
     });
 
-    await Promise.allSettled(chatIds.map((chatId) => sendTelegramMessageId(token, chatId, text)));
+    // Ключ не сработал на живом заказе — нужен человек; иначе — тихо в «📦 Ленту».
+    const needsHands = Boolean(opts.applied && opts.applied.created.length === 0);
+    const targets = await adminTargets(needsHands ? "action" : "feed", { loud: needsHands });
+    await Promise.allSettled(targets.map((t) => sendTelegramMessageId(token, t.chatId, text, t.extra)));
   } catch (err) {
     console.warn("[account-key] уведомление не ушло:", err instanceof Error ? err.message : err);
   }

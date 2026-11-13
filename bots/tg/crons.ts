@@ -21,6 +21,7 @@ import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { priceWatchFlagged, priceWatchTargets, type PriceWatchPart } from "../shared/queued-price-watch";
 import { notifyBuyerViaWbChat, wbChatGamepassNudgeMessage } from "../shared/wb-chat-notify";
 import { vkDialogLink } from "../shared/vk-links";
+import { adminTargets } from "../shared/admin-route";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -195,7 +196,8 @@ async function checkWbCodeStock(): Promise<void> {
     alerts.join("\n") +
     `\n\n<i>Пополни запас в админке (Коды → загрузить CSV).</i>`;
 
-  await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, msg)));
+  const targets = await adminTargets("system", { loud: true });
+  await Promise.allSettled(targets.map((t) => tgSend(t.chatId, msg, t.extra)));
 }
 
 /* ── AWAITING_GAMEPASS reminders ──────────────────────────────────────────────
@@ -445,7 +447,8 @@ async function sweepStalePurchaseBatches(): Promise<void> {
       `Списано: <b>${totalGross.toLocaleString("ru-RU")} R$</b> (грязных)\n\n` +
       (lines.length > 0 ? lines.join("\n") + more : "<i>покупки записаться не успели</i>");
 
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, msg)));
+    const targets = await adminTargets("buyout", { loud: false });
+    await Promise.allSettled(targets.map((t) => tgSend(t.chatId, msg, t.extra)));
     console.log(`[BatchSweeper] финализирован осиротевший батч ${batch.id}: ok=${okCount} fail=${failCount}`);
   }
 }
@@ -527,7 +530,8 @@ async function watchQueuedGamepassPrices(): Promise<void> {
         ],
         next: "не выкупать — написать покупателю или отклонить заказ",
       });
-      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+      const targets = await adminTargets("action", { loud: true });
+      await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, t.extra)));
     }
   }
 }

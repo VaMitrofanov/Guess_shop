@@ -1,4 +1,5 @@
-import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
 
 /**
@@ -89,13 +90,14 @@ export async function notifyAdminsKeyCreated(
   input: KeyCreatedAdminInput,
 ): Promise<{ admins: number; sent: number }> {
   const token = process.env.TG_TOKEN;
-  const recipients = telegramAdminRecipients();
+  // Пасс создан по ключу — автоматика сделала своё: тихо в «📦 Ленту».
+  const recipients = await adminTargets("feed", { loud: false });
   if (!token || recipients.length === 0) {
     console.warn("[key-admin-notify] нет TG_TOKEN или ADMIN_IDS — карточка не ушла");
     return { admins: recipients.length, sent: 0 };
   }
   const text = buildKeyCreatedAdminCard(input);
-  const results = await Promise.allSettled(recipients.map((id) => sendTelegramMessage(token, id, text)));
+  const results = await Promise.allSettled(recipients.map((t) => sendTelegramMessage(token, t.chatId, text, t.extra)));
   const sent = results.filter((r) => r.status === "fulfilled" && r.value === true).length;
   return { admins: recipients.length, sent };
 }

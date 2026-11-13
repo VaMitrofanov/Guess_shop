@@ -10,6 +10,10 @@ interface TelegramSendExtra {
   reply_to_message_id?: number;
   /** Обязателен рядом с `reply_to_message_id`: корень могли удалить. */
   allow_sending_without_reply?: boolean;
+  /** Тема беседы админов (14.11.2026, `bots/shared/admin-route.ts`). */
+  message_thread_id?: number;
+  /** Тихое уведомление: автоматика работает, человеку делать нечего. */
+  disable_notification?: boolean;
 }
 
 /**
@@ -51,6 +55,8 @@ async function sendTelegramRaw(
   const threading = {
     ...(extra?.reply_to_message_id ? { reply_to_message_id: extra.reply_to_message_id } : {}),
     ...(extra?.allow_sending_without_reply ? { allow_sending_without_reply: true } : {}),
+    ...(extra?.message_thread_id ? { message_thread_id: extra.message_thread_id } : {}),
+    ...(extra?.disable_notification ? { disable_notification: true } : {}),
   };
   const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
   const validatorKey = process.env.VALIDATOR_KEY?.trim();

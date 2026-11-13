@@ -4,6 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../bots/shared/admin-route";
 import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 import { verifyTelegramLogin } from "@/lib/telegram-login";
@@ -309,9 +310,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 ],
                 next: "проверить, кому код принадлежит, и при подтверждении заморозить его",
               });
-              if (tgToken) {
-                await Promise.allSettled(chatIds.map((chatId) =>
-                  sendTelegramMessage(tgToken, chatId, text)));
+              if (tgToken && chatIds.length > 0) {
+                await Promise.allSettled((await adminTargets("action", { loud: true })).map((t) =>
+                  sendTelegramMessage(tgToken, t.chatId, text, t.extra)));
               }
             } catch { /* уведомление не должно ломать вход */ }
           }
@@ -462,8 +463,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 });
               }
               if (msg) {
+                const feed = await adminTargets("feed", { loud: false });
                 const sentIds = await Promise.all(
-                  tgChatIds.map((chatId) => sendTelegramMessageId(tgToken, chatId, msg!, reply_markup ? { reply_markup } : undefined))
+                  feed.map((t) => sendTelegramMessageId(tgToken, t.chatId, msg!, { ...(reply_markup ? { reply_markup: groupSafeMarkup(reply_markup, t) } : {}), ...t.extra }))
                 );
                 // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка
                 // выкупа («⏳ В обработке» с кнопками) придёт ответом на неё, а не
@@ -473,7 +475,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   await recordOrderCardRoot(
                     prisma,
                     provisionalOrder.id,
-                    Object.fromEntries(tgChatIds.map((chatId, index) => [chatId, sentIds[index]])),
+                    Object.fromEntries(feed.map((t, index) => [t.key, sentIds[index]])),
                   );
                 }
               }

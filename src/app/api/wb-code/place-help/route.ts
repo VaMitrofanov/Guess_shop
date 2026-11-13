@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../../../../bots/shared/admin-route";
 import {
   placeHelpAdminText,
   recordPlaceHelp,
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
   if (shouldNotifyPlaceHelp(`site:${code ?? ip}`)) {
     const token = process.env.TG_TOKEN ?? "";
     const text = placeHelpAdminText(shown);
-    if (token) await Promise.allSettled(telegramAdminRecipients().map((id) => sendTelegramMessage(token, id, text)));
+    if (token) await Promise.allSettled((await adminTargets("action", { loud: true })).map((t) => sendTelegramMessage(token, t.chatId, text, t.extra)));
   }
   return NextResponse.json({ ok: true });
 }

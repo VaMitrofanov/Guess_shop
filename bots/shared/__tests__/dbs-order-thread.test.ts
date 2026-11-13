@@ -47,6 +47,9 @@ const ref = {
   cardMessages: { "85137352": 2902, "7788": 4501 },
 };
 
+/** Рассылка ждёт выбора темы беседы (14.11.2026, admin-route) — даём ей отработать. */
+const flush = () => new Promise((r) => setImmediate(r));
+
 /** Первый аргумент — chatId, второй — текст, третий — опции. */
 function sent(index = 0) {
   const [chatId, text, extra] = tgSend.mock.calls[index] as [string, string, Record<string, unknown>];
@@ -54,8 +57,9 @@ function sent(index = 0) {
 }
 
 describe("единая шапка", () => {
-  it("несёт и номер WB, и код гейта, и сумму, и покупателя", () => {
+  it("несёт и номер WB, и код гейта, и сумму, и покупателя", async () => {
     notify.notifyDbsBuyerMessage(ref, "Здравствуйте");
+    await flush();
     const { text } = sent();
     expect(text).toContain("WB #5638591741");
     expect(text).toContain("ZZF7T5B");
@@ -84,15 +88,17 @@ describe("единая шапка", () => {
 });
 
 describe("ветка", () => {
-  it("сообщение уходит ответом на карточку — своим id у каждого админа", () => {
+  it("сообщение уходит ответом на карточку — своим id у каждого админа", async () => {
     notify.notifyDbsCodeRejected(ref, true);
+    await flush();
     expect(tgSend).toHaveBeenCalledTimes(2);
     expect(sent(0).extra).toMatchObject({ reply_to_message_id: 2902, allow_sending_without_reply: true });
     expect(sent(1).extra).toMatchObject({ reply_to_message_id: 4501 });
   });
 
-  it("без карточки уведомление всё равно уходит — просто вне ветки", () => {
+  it("без карточки уведомление всё равно уходит — просто вне ветки", async () => {
     notify.notifyDbsCodeRejected({ wbOrderId: "5638591741" }, true);
+    await flush();
     expect(tgSend).toHaveBeenCalledTimes(2);
     expect(sent(0).extra).not.toHaveProperty("reply_to_message_id");
   });
@@ -100,8 +106,9 @@ describe("ветка", () => {
   // Карточку могли удалить или переслать заново (pushDbsCard так и делает,
   // когда Telegram отказался редактировать). Ответ на исчезнувший корень
   // Telegram отвергает — и уведомление о деньгах потерялось бы из-за оформления.
-  it("к id карточки всегда идёт allow_sending_without_reply", () => {
+  it("к id карточки всегда идёт allow_sending_without_reply", async () => {
     notify.notifyDbsGateNotOpened(ref);
+    await flush();
     expect(sent(0).extra).toMatchObject({ allow_sending_without_reply: true });
   });
 });

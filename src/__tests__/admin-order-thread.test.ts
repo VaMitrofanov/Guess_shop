@@ -39,7 +39,7 @@ describe("Сообщения о заказе встают в его ветку",
 
   it("обращение в поддержку — ответом на карточку заказа", () => {
     expect(admin).toContain("const roots = await orderThreadRoots(db, code);");
-    expect(admin).toContain("tgSend(id, text, { reply_markup: reply_markup(id), ...replyToRoot(roots, id) })");
+    expect(admin).toContain("tgSend(t.chatId, text, { reply_markup: groupSafeMarkup(reply_markup(t.chatId), t), ...replyToRootFor(roots, t), ...t.extra })");
   });
 
   it("подтверждённый выкуп — туда же", () => {
@@ -49,14 +49,14 @@ describe("Сообщения о заказе встают в его ветку",
   it("скрины оплаты и отзыва — тоже шаги заказа, а не отдельная переписка", () => {
     expect(admin).toContain('"скрин оплаты",\n    await orderThreadRoots(db, code),');
     expect(admin).toContain('"скрин отзыва",\n    await orderThreadRoots(db, code),');
-    expect(admin).toContain("const thread = replyToRoot(roots, id);");
+    expect(admin).toContain("const thread = { ...replyToRootFor(roots, t), ...t.extra };");
   });
 
   it("«покупатель нашёлся сам» говорит на общем языке уведомлений", () => {
     for (const file of ["bots/tg/handlers.ts", "bots/vk/handlers.ts"]) {
       const source = read(file);
       expect(source).toContain('title: "покупатель нашёлся сам"');
-      expect(source).toContain("tgSend(id, notice, replyToRoot(roots, id))");
+      expect(source).toContain("tgSend(t.chatId, notice, { ...replyToRootFor(roots, t), ...t.extra })");
     }
   });
 });

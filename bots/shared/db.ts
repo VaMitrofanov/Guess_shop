@@ -18,6 +18,7 @@
 
 import { Prisma, PrismaClient, UserIdentityProvider } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { registerAdminRouteDb } from "./admin-route";
 import { Pool } from "pg";
 import { dbConnectionConfig } from "./db-ssl";
 
@@ -62,6 +63,9 @@ export const db: PrismaClient =
   (g.__botPrisma as PrismaClient | undefined) ?? createBotClient();
 
 g.__botPrisma = db;
+
+// Куда слать уведомления админам (беседа и её темы) читается из этой базы.
+registerAdminRouteDb(db);
 
 // Neon scale-to-zero keepalive: lightweight SELECT 1 every 4 min prevents the
 // compute from sleeping (5 min inactivity threshold). Costs ~0.25 CU continuous

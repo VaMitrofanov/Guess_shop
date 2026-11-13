@@ -11,6 +11,7 @@ import { ADMIN_IDS } from "./admin";
 import { tgSend, escapeHtml } from "./notify";
 import { searchGamepassesByNick } from "./gamepass-search";
 import { assertOwnsOrder, type Actor } from "./ownership";
+import { adminTargets } from "./admin-route";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 
@@ -56,11 +57,11 @@ export async function confirmGpWatch(orderId: string, actor: Actor): Promise<GpW
     });
     if (claim.count === 0) return { status: "already" };
 
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id,
+    await Promise.allSettled((await adminTargets("feed", { loud: false })).map((t) => tgSend(t.chatId,
       `👁 <b>GP-WATCH подтверждён</b> · <code>${order.wbCode}</code>\n` +
       `Ник: <b>${escapeHtml(probableNick)}</b> · геймпасс <b>${escapeHtml(pass.name)}</b> · ${pass.robux} R$\n` +
       `Заказ → PENDING (в очереди «К выкупу»).`,
-      { parse_mode: "HTML" })));
+      { parse_mode: "HTML", ...t.extra })));
 
     return { status: "ok", passName: pass.name, robux: pass.robux, nick: probableNick, wbCode: order.wbCode };
   } catch (err: any) {
@@ -99,11 +100,11 @@ export async function declineGpWatch(
       },
     });
     // П3: менеджер должен узнать об отказе сразу (симметрично алерту «нашёл ГП»).
-    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id,
+    await Promise.allSettled((await adminTargets("action", { loud: true })).map((t) => tgSend(t.chatId,
       `❌ <b>GP-watch: клиент отверг ник</b> · <code>${order.wbCode}</code>\n` +
       (order.probableNick ? `Предложенный ник: <b>${escapeHtml(order.probableNick)}</b>\n` : "") +
       `Бот попросил прислать правильный ник; заказ помечен бейджем в TWA («Ждут ссылку»).`,
-      { parse_mode: "HTML" })));
+      { parse_mode: "HTML", ...t.extra })));
     return { wbCode: order.wbCode, amount: order.amount };
   } catch (err: any) {
     console.error("[gp-watch] decline error:", err?.message ?? err);

@@ -1,4 +1,5 @@
-import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
+import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
 
 type RetailBuyoutSource = "twa-order" | "twa-account";
@@ -18,9 +19,6 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function adminIds(): string[] {
-  return telegramAdminRecipients();
-}
 
 export function buildRetailBuyoutAdminCard(input: RetailBuyoutAdminInput): string {
   const source = input.source === "twa-order" ? "TWA · заказ" : "TWA · поиск и выкуп";
@@ -56,7 +54,8 @@ export async function notifyRetailBuyoutAdmins(
   input: RetailBuyoutAdminInput,
 ): Promise<{ admins: number; sent: number }> {
   const token = process.env.TG_TOKEN;
-  const recipients = adminIds();
+  // Выкуп состоялся — делать нечего: тихо в «📦 Ленту».
+  const recipients = await adminTargets("feed", { loud: false });
   if (!token || recipients.length === 0) {
     console.warn("[buyout-admin-notify] TG_TOKEN or admin IDs missing — buyout card not sent");
     return { admins: recipients.length, sent: 0 };
@@ -64,7 +63,7 @@ export async function notifyRetailBuyoutAdmins(
 
   const text = buildRetailBuyoutAdminCard(input);
   const results = await Promise.allSettled(
-    recipients.map((id) => sendTelegramMessage(token, id, text)),
+    recipients.map((t) => sendTelegramMessage(token, t.chatId, text, t.extra)),
   );
   const sent = results.filter((result) => result.status === "fulfilled" && result.value === true).length;
   return { admins: recipients.length, sent };

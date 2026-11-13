@@ -16,6 +16,7 @@
 import { type Telegraf } from "telegraf";
 
 import { ADMIN_IDS } from "../../shared/admin";
+import { adminTargets } from "../../shared/admin-route";
 
 import {
   getStocksWithRunway,
@@ -72,10 +73,10 @@ export function startWbMonitor(bot: Telegraf, intervalMs = 15 * 60 * 1000): void
       const digestBatch = flushFbsDigest(newFbs);
       if (digestBatch > 0) {
         const orderWord = digestBatch === 1 ? "заказ" : digestBatch < 5 ? "заказа" : "заказов";
-        for (const adminId of ADMIN_IDS) {
-          await bot.telegram.sendMessage(adminId,
+        for (const t of await adminTargets("feed", { loud: false })) {
+          await bot.telegram.sendMessage(t.chatId,
             `🛒 <b>FBS: +${digestBatch} ${orderWord} за час</b>\nВсего в работе: <b>${fbsCount}</b>`,
-            { parse_mode: "HTML" }
+            { parse_mode: "HTML", ...t.extra }
           ).catch(() => {});
         }
       }
@@ -87,10 +88,10 @@ export function startWbMonitor(bot: Telegraf, intervalMs = 15 * 60 * 1000): void
           const s = stocks?.find(st => st.article === a);
           return `  • <code>${a}</code> — ${s?.quantity ?? "?"} шт (${s?.runwayDays ?? "?"}д)`;
         }).join("\n");
-        for (const adminId of ADMIN_IDS) {
-          await bot.telegram.sendMessage(adminId,
+        for (const t of await adminTargets("system", { loud: true })) {
+          await bot.telegram.sendMessage(t.chatId,
             `⚠️ <b>Low Stock Alert (${newLowStock.length} арт.)</b>\n${detail}\nПора заказывать поставку.`,
-            { parse_mode: "HTML" }
+            { parse_mode: "HTML", ...t.extra }
           ).catch(() => {});
         }
       }
@@ -123,10 +124,11 @@ export function startWbMonitor(bot: Telegraf, intervalMs = 15 * 60 * 1000): void
         const msg =
           `⭐ <b>${newReviews} новых ${reviewWord} на Wildberries</b>\n` +
           `━━━━━━━━━━━━━━━━\n\n${body}${more}`;
-        for (const adminId of ADMIN_IDS) {
-          await bot.telegram.sendMessage(adminId, msg, {
+        for (const t of await adminTargets("reviews", { loud: true })) {
+          await bot.telegram.sendMessage(t.chatId, msg, {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
+            ...t.extra,
           }).catch(() => {});
         }
       }
