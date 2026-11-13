@@ -151,7 +151,7 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
   const finished = created.length > 0 && targets.length === 0;
   const scanLines = [
     <>Проверяем ключ в Roblox</>,
-    <>Ищем игру аккаунта <b>{nick}</b></>,
+    <>Ищем игры аккаунта <b>{nick}</b>, скрытые тоже</>,
     <>Создаём {prices.length > 1 ? "пассы" : "пасс"} на {prices.join(" и ")} R$</>,
   ];
 
@@ -162,8 +162,14 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
       {!finished && (
       <p>
         Нужен один ключ из Roblox — это <b>минута</b>. Ты его выпускаешь, мы создаём геймпасс
-        нужной цены сами. <b>Пароль от Roblox не нужен</b> и никогда не понадобится: ключ умеет
-        ровно одно — создавать геймпассы на твоём аккаунте, и живёт час.
+        нужной цены сами. <b>Пароль от Roblox не нужен</b> и никогда не понадобится.
+      </p>
+      )}
+      {!finished && (
+      <p className="wbi-keyhint">
+        <b>Что такое ключ?</b> Это длинный код из Roblox, как пропуск только в одну комнату: с ним можно
+        увидеть список твоих игр и создать в них геймпасс. Зайти в аккаунт, потратить робуксы или
+        сменить пароль с ним <b>нельзя</b>. Игру мы найдём сами, даже скрытую.
       </p>
       )}
 
@@ -282,10 +288,10 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
             </div>
             )}
 
-            {/* 4. game-passes + read/write */}
+            {/* 4. game-passes + read/write, затем user.inventory-item:read */}
             {kstep === 3 && (
             <div className="wbi-keystep">
-              <b>Выбери game-passes и включи ему две операции</b>
+              <b>Права ключа: game-passes (две галочки) и список игр</b>
               <p className="wbi-t">
                 В поле <span className="wbi-pill">Select API System</span> напиши <b>pass</b> и выбери{" "}
                 <span className="wbi-pill">game-passes</span>. Соседний <b>legacy-game-passes</b> не
@@ -350,6 +356,29 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
                   Серый ползунок рядом трогать не нужно.
                 </figcaption>
               </figure>
+              {/* Второе право (13.11.2026): у ~40 % покупателей инвентарь закрыт, и
+                  по нику их игры не видны. С `user.inventory-item:read` ключ сам
+                  показывает все плейсы аккаунта, скрытые тоже — ссылку на игру
+                  просить не придётся. Кадров под этот шаг пока нет: тот же приём,
+                  что с game-passes, поэтому текстом. */}
+              <div className="wbi-ok" style={{ marginTop: 12 }}>
+                <b>Теперь второе право — чтобы мы сами нашли твою игру.</b>
+                <ol className="wbi-ol" style={{ marginTop: 8 }}>
+                  <li>
+                    Пролистай ниже блока <b>game-passes</b> и нажми{" "}
+                    <span className="wbi-pill">Add API System</span> — добавить ещё одну систему.
+                  </li>
+                  <li>В поле поиска напиши <b>inventory</b>.</li>
+                  <li>Выбери <span className="wbi-pill">user.inventory-item</span>.</li>
+                  <li>
+                    У него тоже появится пустая рамка со стрелочкой ▾ — нажми и отметь{" "}
+                    <span className="wbi-pill">user.inventory-item:read</span>.
+                  </li>
+                </ol>
+                <b>Проверь себя:</b> на экране два блока. В <b>game-passes</b> — две плашки (read и write), в{" "}
+                <b>user.inventory-item</b> — одна (read). Если второго блока нет, ключ всё равно сработает, но
+                скрытую игру придётся искать по ссылке.
+              </div>
             </div>
             )}
 
@@ -393,8 +422,8 @@ export default function KeyCreate({ targets, nick, code, initialPlatform = "mobi
                     : <span className="wbi-box g" style={{ left: "79%", top: "11.8%", width: "17%", height: "11%" }} />}
                 </span>
                 <figcaption>
-                  Жми <b>Copy Key To Clipboard</b> и сразу возвращайся сюда: ключ живёт час, а повторное{" "}
-                  <b>Save &amp; Generate Key</b> убивает уже скопированный.
+                  Жми <b>Copy Key To Clipboard</b> и возвращайся сюда. Не нажимай <b>Save &amp; Generate Key</b>{" "}
+                  второй раз — он выпускает новый ключ, и уже скопированный перестаёт работать.
                 </figcaption>
               </figure>
             </div>

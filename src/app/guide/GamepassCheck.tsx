@@ -668,6 +668,8 @@ export default function GamepassCheck({
                   setStage("fork");
                   requestAnimationFrame(() => stepsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
                 }}
+                keyEnabled={keyAutoEnabled}
+                onOpenKey={() => setStage("key")}
                 onChangeNick={() => { setPhase("entry"); setPlan(null); setAccount(null); setTouched(false); setKeyDone(false); }}
               />
             </div>
@@ -1002,7 +1004,7 @@ function emptyHead(visibility: GamesVisibility | null) {
 
 function ResultCard({
   plan, amount, account, gamesVisibility, ownerSwitched, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek,
-  storedKey, storedBusy, onStoredKey, onConfirm, onChangeNick, onOpenFork,
+  storedKey, storedBusy, onStoredKey, onConfirm, onChangeNick, onOpenFork, keyEnabled, onOpenKey,
 }: {
   plan: CheckPlan;
   amount: number;
@@ -1024,6 +1026,10 @@ function ResultCard({
   onChangeNick: () => void;
   /** Открыть экран выбора способа — единственная дверь из «чего не хватает». */
   onOpenFork: () => void;
+  /** Метод «по ключу» включён: он — основная кнопка (13.11.2026). */
+  keyEnabled: boolean;
+  /** Сразу в ветку ключа, минуя экран выбора. */
+  onOpenKey: () => void;
 }) {
   const covered = coveredRobux(plan);
   const done = plan.kind === "ready" || plan.kind === "assembled";
@@ -1105,7 +1111,9 @@ function ResultCard({
               <span className="wbi-tnote">Два геймпасса вместо одного дорогого: так заказ выкупается быстрее, а ты получаешь ровно ту же сумму.</span>
             </>
           )}
-          <span className="wbi-tnote">Цену скопируешь на следующем шаге — набирать руками не придётся.</span>
+          <span className="wbi-tnote">{keyEnabled
+            ? "Цену и продажу по ключу выставим сами — тебе ничего набирать не придётся."
+            : "Цену скопируешь на следующем шаге — набирать руками не придётся."}</span>
         </div>
       )}
 
@@ -1144,6 +1152,14 @@ function ResultCard({
                 </button>
                 <button className="wbi-ghostbtn" onClick={onOpenFork}>Другой способ</button>
               </>
+            ) : keyEnabled ? (
+              /* Ключ — основной путь (13.11.2026): по нему игру находим сами,
+                 даже скрытую, и пасс встаёт в продажу без ручных шагов. Экран
+                 выбора остался за «Другие способы». */
+              <>
+                <button className="wbi-bigbtn" onClick={onOpenKey}>🔑 Сделайте за меня →</button>
+                <button className="wbi-ghostbtn" onClick={onOpenFork}>Другие способы</button>
+              </>
             ) : (
               <button className="wbi-bigbtn" onClick={onOpenFork}>Выбрать, как это сделать →</button>
             )}
@@ -1151,7 +1167,9 @@ function ResultCard({
           <div className="wbi-note" style={{ marginTop: 10, textAlign: "center" }}>
             {storedKey
               ? "Ключ от твоего аккаунта у нас уже есть — идти в Roblox не нужно."
-              : "Три способа — выбери любой, результат одинаковый."}
+              : keyEnabled
+                ? "Пришлёшь один ключ из Roblox — найдём твою игру (даже скрытую), создадим пасс и поставим в продажу. Пароль не нужен · минута."
+                : "Два способа — выбери любой, результат одинаковый."}
           </div>
         </>
       )}

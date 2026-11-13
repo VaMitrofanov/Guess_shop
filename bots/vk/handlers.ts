@@ -3559,6 +3559,9 @@ async function showVkQuestPlan(
   edit?: (payload: { message: string; keyboard?: unknown }) => Promise<void>,
 ): Promise<CheckPlan> {
   const plan = planFromOwned(opts.denomination, opts.owned);
+  // Ключ уже привязан — первая кнопка результата создаёт пасс сразу (13.11.2026).
+  const keyUserId = gamepassAutocreateEnabled() && targetsToCreate(plan).length > 0 ? await vkDbUserId(vkUserId).catch(() => null) : null;
+  const storedKey = keyUserId ? await hasStoredKeyFor(db as any, keyUserId, opts.nick).catch(() => false) : false;
   setQuestPlan(vkUserId, {
     wbCode: opts.wbCode,
     denomination: opts.denomination,
@@ -3575,6 +3578,7 @@ async function showVkQuestPlan(
       keyEnabled: gamepassAutocreateEnabled(),
       wbCode: opts.wbCode,
       gamesVisibility: opts.gamesVisibility,
+      storedKey,
     }),
     "VK/quest-result",
     edit,

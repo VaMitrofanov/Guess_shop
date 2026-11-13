@@ -3190,6 +3190,9 @@ async function showQuestPlan(
   edit?: (text: string, extra: Record<string, unknown>) => Promise<void>,
 ): Promise<CheckPlan> {
   const plan = planFromOwned(opts.denomination, opts.owned);
+  // Ключ уже привязан — первая кнопка результата создаёт пасс сразу (13.11.2026).
+  const keyUserId = gamepassAutocreateEnabled() && targetsToCreate(plan).length > 0 ? await dbUserIdFor(ctx).catch(() => null) : null;
+  const storedKey = keyUserId ? await hasStoredKeyFor(db as any, keyUserId, opts.nick).catch(() => false) : false;
   questPlans.set(ctx.from.id, {
     wbCode: opts.wbCode,
     denomination: opts.denomination,
@@ -3206,6 +3209,7 @@ async function showQuestPlan(
       keyEnabled: gamepassAutocreateEnabled(),
       wbCode: opts.wbCode,
       gamesVisibility: opts.gamesVisibility,
+      storedKey,
     }),
     edit,
   );

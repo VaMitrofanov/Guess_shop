@@ -87,6 +87,73 @@ describe("resolveUniverseCandidatesDirect", () => {
   });
 });
 
+/** Ключ той же формы, что выдаёт Roblox: 48 символов секрета + base64 от JWT с ownerId. */
+function fakeKey(ownerId: string): string {
+  const jwt = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify({ ownerId, aud: "RobloxInternal" })).toString("base64url")}.sig`;
+  return "A".repeat(48) + Buffer.from(jwt).toString("base64");
+}
+
+/** Закрытый инвентарь по нику, а ключ видит плейсы владельца (или нет). */
+function keyWorld(byKey: "places" | "none" | "no_scope") {
+  const base = mockWorld({ inventory: "hidden" });
+  return jest.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/inventory-items")) {
+      if (byKey === "no_scope") return json({ code: "PERMISSION_DENIED" }, 403);
+      return json({
+        inventoryItems: byKey === "places"
+          ? [{ assetDetails: { assetId: "777", inventoryItemAssetType: "CREATED_PLACE" } }]
+          : [],
+        nextPageToken: "",
+      });
+    }
+    if (url.includes("/universes/v1/places/777/universe")) return json({ universeId: 5715080564 });
+    return base(input, init);
+  });
+}
+
+describe("ключ сам находит игру и сверяет владельца (13.11.2026)", () => {
+  it("владелец читается из строки ключа", async () => {
+    const { apiKeyOwnerId } = await load();
+    expect(apiKeyOwnerId(fakeKey("3828548511"))).toBe("3828548511");
+    expect(apiKeyOwnerId("k".repeat(40))).toBeNull();
+  });
+
+  it("закрытый инвентарь, но у ключа есть право на список игр — игра найдена", async () => {
+    global.fetch = keyWorld("places") as unknown as typeof fetch;
+    const { resolveUniverseCandidatesDirect } = await load();
+    expect(await resolveUniverseCandidatesDirect({ username: "hidden_inv_buyer", apiKey: fakeKey("42") }))
+      .toEqual({ candidates: ["5715080564"] });
+  });
+
+  it("ключ видит инвентарь, а плейсов нет — no_universe наверняка", async () => {
+    global.fetch = keyWorld("none") as unknown as typeof fetch;
+    const { resolveUniverseCandidatesDirect } = await load();
+    expect((await resolveUniverseCandidatesDirect({ username: "hidden_inv_buyer", apiKey: fakeKey("42") })).failure).toBe("no_universe");
+  });
+
+  it("у ключа нет права на список игр — по-старому games_hidden", async () => {
+    global.fetch = keyWorld("no_scope") as unknown as typeof fetch;
+    const { resolveUniverseCandidatesDirect } = await load();
+    expect((await resolveUniverseCandidatesDirect({ username: "hidden_inv_buyer", apiKey: fakeKey("42") })).failure).toBe("games_hidden");
+  });
+
+  it("ключ от другого аккаунта — key_other_account, пасс не создаётся", async () => {
+    let posts = 0;
+    global.fetch = mockWorld({ inventory: { placeId: 1, universeId: 2 } }, () => { posts += 1; return json({}); }) as unknown as typeof fetch;
+    const { createGamePassForUserDirect } = await load();
+    const res = await createGamePassForUserDirect({ apiKey: fakeKey("999"), priceInRobux: 715, username: "hidden_inv_buyer" });
+    expect(res).toMatchObject({ ok: false, error: "key_other_account" });
+    expect(posts).toBe(0);
+  });
+
+  it("ник не нужен: игра ищется по владельцу ключа", async () => {
+    global.fetch = keyWorld("places") as unknown as typeof fetch;
+    const { resolveUniverseCandidatesDirect } = await load();
+    expect(await resolveUniverseCandidatesDirect({ apiKey: fakeKey("42") })).toEqual({ candidates: ["5715080564"] });
+  });
+});
+
 describe("createGamePassForUserDirect", () => {
   it("отдаёт покупателю games_hidden вместо «не нашли твою игру»", async () => {
     global.fetch = mockWorld({ inventory: "hidden" }) as unknown as typeof fetch;

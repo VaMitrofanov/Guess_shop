@@ -177,8 +177,16 @@ describe("вердикты покупателю", () => {
     expect(v.retry).toBe(false);
   });
 
-  test("bad_key объясняет час жизни ключа", () => {
-    expect(keyCreateVerdict("bad_key").text).toContain("час");
+  // 13.09/13.11.2026: ключ НЕ протухает через час — его убивает повторный
+  // Save & Generate Key; «живёт час» вводило покупателя в заблуждение.
+  test("bad_key — про неполное копирование и перевыпуск, без «часа»", () => {
+    const text = keyCreateVerdict("bad_key").text;
+    expect(text).toContain("Save & Generate Key");
+    expect(text).not.toMatch(/час/);
+  });
+
+  test("ключ от другого аккаунта — свой вердикт с шагом к началу", () => {
+    expect(keyCreateVerdict("key_other_account")).toMatchObject({ title: "Ключ от другого аккаунта", step: 0 });
   });
 
   test("неизвестный код — не показываем код, зовём в бот", () => {

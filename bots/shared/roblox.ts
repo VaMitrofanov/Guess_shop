@@ -1511,13 +1511,81 @@ async function lookupRobloxUserId(username: string): Promise<number | "not_found
 }
 
 /**
+ * Владелец ключа — без похода в Roblox (13.11.2026).
+ *
+ * Строка Open Cloud ключа = 48 символов секрета + base64 от JWT, в теле JWT
+ * лежит `ownerId`. Подпись не проверяем: ключ всё равно проверит Roblox, а нам
+ * нужно только сверить владельца с ником заказа ДО создания пасса. Не разобрали —
+ * `null`, и всё идёт по-старому (решает Roblox: чужой опыт → `not_authorized`).
+ */
+export function apiKeyOwnerId(apiKey: string): string | null {
+  const key = apiKey.trim();
+  for (let i = key.indexOf("ZXlK"); i >= 0; i = key.indexOf("ZXlK", i + 1)) {
+    try {
+      const jwt = Buffer.from(key.slice(i), "base64").toString("utf8");
+      const payload = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString("utf8"));
+      const owner = String(payload?.ownerId ?? "");
+      if (/^\d{1,20}$/.test(owner)) return owner;
+    } catch { /* следующее вхождение */ }
+  }
+  return null;
+}
+
+/**
+ * Игры владельца ключа — закрытые тоже, при любых настройках приватности (13.11.2026).
+ *
+ * Публичный инвентарь закрыт у ~40 % покупателей, и по нику их игры не видны.
+ * Ключ с правом `user.inventory-item:read` видит инвентарь владельца целиком:
+ * `CREATED_PLACE` → плейс → его опыт. Права нет (403) — `no_scope`, вывод
+ * делает старая логика; ответ пустой — у аккаунта игр точно нет.
+ */
+async function listUniversesByKey(
+  apiKey: string,
+  ownerId: string,
+): Promise<{ universes: string[]; status: "ok" | "none" | "no_scope" | "error" }> {
+  const placeIds: string[] = [];
+  let token = "";
+  for (let page = 0; page < 3; page++) {
+    const url = `https://apis.roblox.com/cloud/v2/users/${ownerId}/inventory-items?maxPageSize=100`
+      + `&filter=${encodeURIComponent("inventoryItemAssetTypes=CREATED_PLACE")}`
+      + (token ? `&pageToken=${encodeURIComponent(token)}` : "");
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { "x-api-key": apiKey }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    } catch {
+      return { universes: [], status: "error" };
+    }
+    if (res.status === 401 || res.status === 403) return { universes: [], status: "no_scope" };
+    if (!res.ok) return { universes: [], status: "error" };
+    const body: any = await res.json().catch(() => null);
+    for (const item of body?.inventoryItems ?? []) {
+      const id = item?.assetDetails?.assetId;
+      if (item?.assetDetails?.inventoryItemAssetType === "CREATED_PLACE" && /^\d+$/.test(String(id))) placeIds.push(String(id));
+    }
+    token = body?.nextPageToken ?? "";
+    if (!token) break;
+  }
+  if (placeIds.length === 0) return { universes: [], status: "none" };
+  const universes: string[] = [];
+  for (const placeId of placeIds.slice(0, 30)) {
+    const res = await rGetJson(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`);
+    if (res?.ok && res.body?.universeId != null) universes.push(String(res.body.universeId));
+  }
+  return { universes: [...new Set(universes)], status: universes.length ? "ok" : "error" };
+}
+
+/**
  * Кандидаты-universe в порядке приоритета: явный universeId → placeId → игры
- * аккаунта по нику (публичные И закрытые, см. `roblox-owned-games.ts`).
+ * аккаунта по нику (публичные И закрытые, см. `roblox-owned-games.ts`) → игры
+ * по самому ключу (13.11.2026: видит и при закрытом инвентаре).
  * Явная ссылка на игру — ответ покупателя на `games_hidden`.
+ *
+ * С ключом сначала сверяем владельца: ключ от другого аккаунта, чем ник заказа, —
+ * `key_other_account`, пасс не создаём (иначе робуксы ушли бы не тому человеку).
  */
 export async function resolveUniverseCandidatesDirect(
-  params: Pick<CreateGamePassParams, "universeId" | "placeId" | "username">,
-): Promise<{ candidates: string[]; failure?: UniverseLookupFailure }> {
+  params: Pick<CreateGamePassParams, "universeId" | "placeId" | "username"> & { apiKey?: string },
+): Promise<{ candidates: string[]; failure?: UniverseLookupFailure | "key_other_account" }> {
   const cands: string[] = [];
   let explicitFailure: UniverseLookupFailure | undefined;
   if (params.universeId != null && /^\d{1,20}$/.test(String(params.universeId))) {
@@ -1531,11 +1599,15 @@ export async function resolveUniverseCandidatesDirect(
 
   let nickFailure: UniverseLookupFailure | undefined;
   const username = params.username?.trim();
+  const keyOwner = params.apiKey ? apiKeyOwnerId(params.apiKey) : null;
+  let ownerId: string | null = keyOwner;
   if (username) {
     const userId = await lookupRobloxUserId(username);
     if (userId === "not_found") nickFailure = "nick_not_found";
     else if (userId === "network") nickFailure = "network";
     else {
+      if (keyOwner && keyOwner !== String(userId)) return { candidates: [], failure: "key_other_account" };
+      ownerId = String(userId);
       const owned = await listOwnedUniverses(userId, rGetJson);
       cands.push(...owned.universes.map((u) => u.universeId));
       if (owned.universes.length === 0) {
@@ -1544,6 +1616,13 @@ export async function resolveUniverseCandidatesDirect(
           : "network";
       }
     }
+  }
+
+  // По нику игр не видно — спрашиваем сам ключ: он видит и закрытый инвентарь.
+  if (cands.length === 0 && params.apiKey && ownerId && nickFailure !== "nick_not_found") {
+    const byKey = await listUniversesByKey(params.apiKey, ownerId);
+    if (byKey.status === "ok") cands.push(...byKey.universes);
+    else if (byKey.status === "none") nickFailure = "no_universe";
   }
 
   const candidates = [...new Set(cands)];
@@ -1638,7 +1717,7 @@ async function createGamePassOnce(
       signal: controller.signal,
     });
     const text = await res.text().catch(() => "");
-    // 401 = ключа нет/протух. У Open Cloud ключ живёт час, а покупатель легко
+    // 401 = ключа нет/перевыпущен (через час ключ НЕ протухает, 13.09). Покупатель легко
     // копирует его не целиком — это самая частая «ошибка», и звучать она должна
     // не как «Roblox вернул ошибку», а как «пришли ключ заново».
     if (res.status === 401) {

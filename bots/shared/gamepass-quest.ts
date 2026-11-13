@@ -123,8 +123,10 @@ export function questResultScreen(opts: {
   wbCode: string;
   /** Видны ли игры аккаунта: пустой список при «hidden» — «не видим», а не «нет». */
   gamesVisibility?: GamesVisibility | null;
+  /** Ключ на этот ник уже привязан — тогда первая кнопка создаёт пасс сразу. */
+  storedKey?: boolean;
 }): QuestScreen {
-  const { amount, nick, plan, keyEnabled, wbCode, gamesVisibility } = opts;
+  const { amount, nick, plan, keyEnabled, wbCode, gamesVisibility, storedKey = false } = opts;
   const covered = coveredRobux(plan);
   const create = targetsToCreate(plan);
   const parts = plan.kind === "empty" ? [] : plan.parts;
@@ -192,13 +194,31 @@ export function questResultScreen(opts: {
         [{ id: QUEST.confirm, label: "✅ Подтвердить заказ", tone: "positive" }],
         [{ id: QUEST.nick, label: "✏️ Это не мои пассы", tone: "secondary" }],
       ]
-    : [
-        [{ id: QUEST.fork, label: "➡️ Выбрать, как это сделать", tone: "positive" }],
-        [{ id: QUEST.nick, label: "✏️ Другой ник", tone: "secondary" }],
-      ];
+    : keyEnabled
+      // Ключ — основной путь (13.11.2026): одна кнопка вместо экрана выбора.
+      // По ключу находим игру сами (и скрытую), создаём пасс нужной цены и
+      // ставим в продажу. Остальные способы — за «Другие способы».
+      ? [
+          [storedKey
+            ? { id: QUEST.keyStored, label: `✨ Создать за меня — ${create.length > 1 ? "оба пасса" : "пасс"}`, tone: "positive" }
+            : { id: QUEST.key, label: "🔑 Сделайте за меня", tone: "positive" }],
+          [{ id: QUEST.fork, label: "Другие способы", tone: "secondary" }],
+          [{ id: QUEST.nick, label: "✏️ Другой ник", tone: "secondary" }],
+        ]
+      : [
+          [{ id: QUEST.fork, label: "➡️ Выбрать, как это сделать", tone: "positive" }],
+          [{ id: QUEST.nick, label: "✏️ Другой ник", tone: "secondary" }],
+        ];
 
-  if (!ready) {
-    lines.push("", keyEnabled ? "Способа три — выбери любой, результат одинаковый." : "Способа два — выбери любой, результат одинаковый.");
+  if (!ready && keyEnabled) {
+    lines.push(
+      "",
+      storedKey
+        ? "✨ Ключ от твоего аккаунта уже у нас — жми первую кнопку, через минуту всё будет готово."
+        : "🔑 <b>Быстрее всего — сделаем за тебя.</b> Пришлёшь один ключ из Roblox — найдём твою игру (даже скрытую), создадим пасс нужной цены и поставим в продажу. Пароль не нужен · минута.",
+    );
+  } else if (!ready) {
+    lines.push("", "Способа два — выбери любой, результат одинаковый.");
     rows.splice(1, 0, [{ id: "url", label: "📖 Инструкция", url: guideUrlFor(wbCode, nick) }]);
   }
 
@@ -343,7 +363,9 @@ export function questKeyScreen(opts: {
     "🔑 СДЕЛАЕМ ЗА ТЕБЯ",
     "",
     "<b>Пришли ключ — остальное на нас</b>",
-    `Нужен один ключ из Roblox, это <b>минута</b>. <b>Пароль от Roblox не нужен</b> и никогда не понадобится: ключ умеет ровно одно — создавать геймпассы на твоём аккаунте.`,
+    `Нужен один ключ из Roblox, это <b>минута</b>. <b>Пароль от Roblox не нужен</b> и никогда не понадобится.`,
+    "",
+    "<b>Что такое ключ?</b> Длинный код из Roblox, как пропуск только в одну комнату: с ним можно увидеть список твоих игр и создать в них геймпасс. Зайти в аккаунт, потратить робуксы или сменить пароль с ним <b>нельзя</b>.",
     "",
     "<b>Как его выпустить:</b>",
     `1. ${platform === "pc" ? "Открой <b>Create</b> в верхнем меню roblox.com" : "Три полоски внизу справа → вниз до пункта <b>Create</b>"}`,
@@ -356,7 +378,11 @@ export function questKeyScreen(opts: {
     `5. ${platform === "pc"
       ? "Ниже появится блок <b>game-passes</b>, а <b>справа от названия</b> — пустая рамка со стрелочкой ▾"
       : "Ниже появится блок <b>game-passes</b>, а <b>под названием</b> (ниже ползунка) — пустая рамка со стрелочкой ▾"}. Нажми на неё и отметь <b>обе</b> строки: <code>game-pass:read</code> и <code>game-pass:write</code>. Готово выглядит так: в рамке лежат две плашки. Пустая рамка = прав нет, пасс не создастся`,
-    "6. <b>Save &amp; Generate Key</b> → галочка <b>I understand the security risks</b> → <b>Copy Key To Clipboard</b>",
+    // Второе право (13.11.2026): у ~40 % покупателей инвентарь закрыт, и по нику
+    // их игры не видны. С ним ключ сам находит игру, даже скрытую.
+    "6. <b>Второе право — чтобы мы сами нашли твою игру:</b> пролистай ниже блока <b>game-passes</b> → <b>Add API System</b> → напиши <code>inventory</code> → выбери <b>user.inventory-item</b> → в его пустой рамке ▾ отметь <code>user.inventory-item:read</code>",
+    "   ✅ <b>Проверь себя:</b> два блока. В <b>game-passes</b> две плашки (read и write), в <b>user.inventory-item</b> одна (read)",
+    "7. <b>Save &amp; Generate Key</b> → галочка <b>I understand the security risks</b> → <b>Copy Key To Clipboard</b>",
     "",
     `Пришли ключ следующим сообщением — создадим ${many ? `два пасса на <b>${prices.join(" и ")} R$</b>` : `пасс на <b>${prices[0] ?? 0} R$</b>`} и сразу поставим в продажу.`,
     "",
