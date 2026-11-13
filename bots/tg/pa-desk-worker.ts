@@ -29,6 +29,13 @@ const RENAME_CAP = 20;
 const FOLDER_CAP = 150;
 /** Сколько старых чатов убираем в архив за проход. */
 const ARCHIVE_CAP = 100;
+/**
+ * Цвет папки (0 красный, 1 оранжевый, 2 фиолетовый, 3 зелёный, 4 бирюзовый, 5 синий,
+ * 6 розовый). Без цвета Telegram НЕ показывает тег папки под чатом во «Все» (13.11.2026:
+ * тег был только у «Проблем», которой цвет поставили руками). Цвет, выбранный
+ * оператором в приложении, сохраняем.
+ */
+const FOLDER_COLOR: Record<DeskFolder, number> = { NEW: 5, QUEUE: 2, PROBLEM: 1, DONE: 3, REVIEW: 6 };
 
 type Mode = "off" | "dry" | "on";
 
@@ -157,7 +164,8 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     const have = list.find((f) => f instanceof Api.DialogFilter && f.id === id) as Api.DialogFilter | undefined;
     const haveIds = new Set((have?.includePeers ?? []).map((p) => ("userId" in p ? String(p.userId) : "")));
     const wantIds = new Set(want.map((d) => String((d.entity as Api.User).id)));
-    const same = have && haveIds.size === wantIds.size && [...wantIds].every((x) => haveIds.has(x));
+    const color = have?.color ?? FOLDER_COLOR[key];
+    const same = have && have.color != null && haveIds.size === wantIds.size && [...wantIds].every((x) => haveIds.has(x));
     if (same || (want.length === 0 && !have)) continue;
     result.foldersUpdated++;
     if (mode === "dry") {
@@ -175,6 +183,7 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
         filter: new Api.DialogFilter({
           id,
           title: new Api.TextWithEntities({ text: titleOf(key), entities: [] }),
+          color,
           pinnedPeers: [],
           includePeers,
           excludePeers: [],
