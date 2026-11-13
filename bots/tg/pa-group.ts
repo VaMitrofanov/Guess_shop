@@ -144,6 +144,24 @@ async function saveIdea(ctx: any, msg: any): Promise<void> {
   }).catch(() => undefined);
 }
 
+/**
+ * Подсказки команд в беседе админов (14.11.2026) — только то, что там работает.
+ * В беседе уведомлений подсказок нет: там не пишут.
+ */
+const ADMIN_GROUP_COMMANDS = [
+  { command: "who", description: "Досье: код, номер WB, ник Roblox, @username или имя" },
+  { command: "reviews", description: "Последние плохие отзывы WB с покупателями" },
+  { command: "support_mode", description: "Режим ИИ-поддержки: on, dry или off" },
+  { command: "digest", description: "Сводка сейчас (работает после переезда)" },
+];
+
+async function setGroupCommands(telegram: Telegraf["telegram"]): Promise<void> {
+  const s = await loadSettings(true);
+  if (!s.chatId) return;
+  await telegram.setMyCommands(ADMIN_GROUP_COMMANDS, { scope: { type: "chat", chat_id: s.chatId } })
+    .catch((e: unknown) => console.warn("[pa-group] команды беседы:", e instanceof Error ? e.message : e));
+}
+
 async function syncTopicLooks(telegram: Telegraf["telegram"]): Promise<void> {
   const fix = async (chatId: number | string, thread: number | undefined, name: string, emoji: string) => {
     if (!thread) return;
@@ -446,6 +464,7 @@ export function registerPaGroup(bot: Telegraf): void {
     void ensureNotifyTopics(bot.telegram)
       .then(() => ensurePaTopics(bot.telegram))
       .then(() => syncTopicLooks(bot.telegram))
+      .then(() => setGroupCommands(bot.telegram))
       .catch(() => undefined);
   }, 15_000);
 

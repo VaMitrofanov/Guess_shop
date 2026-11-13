@@ -1909,7 +1909,10 @@ export async function setupBotProfile(bot: Telegraf): Promise<void> {
   const results = await Promise.allSettled([
     bot.telegram.setMyShortDescription(shortDescription),
     bot.telegram.setMyDescription(description),
-    bot.telegram.setMyCommands(commands),
+    // Покупательские команды — только в личке (14.11.2026): общий список без
+    // scope Telegram показывал и в беседах админов, где они ничего не делают.
+    bot.telegram.deleteMyCommands().then(() =>
+      bot.telegram.setMyCommands(commands, { scope: { type: "all_private_chats" } })),
   ]);
   results.forEach((r, i) => {
     if (r.status === "rejected") {
