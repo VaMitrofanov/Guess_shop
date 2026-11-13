@@ -58,11 +58,11 @@ export async function ensureNotifyTopics(telegram: Telegraf["telegram"]): Promis
     if (topics[key]) continue;
     const t = ADMIN_TOPICS[key];
     try {
-      const made = await telegram.createForumTopic(cfg.chatId, t.title, { icon_color: t.color as never });
+      const icon = await topicIconId(telegram, t.icon);
+      const made = await telegram.createForumTopic(cfg.chatId, t.title, { icon_color: t.color as never, ...(icon ? { icon_custom_emoji_id: icon } : {}) });
       topics[key] = made.message_thread_id;
       created.push(t.title);
-      const hello = await telegram.sendMessage(cfg.chatId, t.hello, { message_thread_id: made.message_thread_id });
-      await telegram.pinChatMessage(cfg.chatId, hello.message_id, { disable_notification: true }).catch(() => undefined);
+      await telegram.sendMessage(cfg.chatId, t.hello, { message_thread_id: made.message_thread_id });
     } catch (error) {
       console.warn(`[notify] тема «${t.title}» не создалась:`, error instanceof Error ? error.message : error);
     }
@@ -72,6 +72,36 @@ export async function ensureNotifyTopics(telegram: Telegraf["telegram"]): Promis
     console.log(`[notify] созданы темы: ${created.join(", ")}`);
   }
   return created;
+}
+
+/** id иконки темы по эмодзи — только из набора Telegram (getForumTopicIconStickers). */
+let iconCache: Map<string, string> | null = null;
+async function topicIconId(telegram: Telegraf["telegram"], emoji: string): Promise<string | undefined> {
+  const norm = (e: string) => e.replace(/\uFE0F/g, "");
+  if (!iconCache) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list = await (telegram as any).callApi("getForumTopicIconStickers", {}).catch(() => []) as Array<{ emoji?: string; custom_emoji_id?: string }>;
+    iconCache = new Map(list.filter((s) => s.emoji && s.custom_emoji_id).map((s) => [norm(s.emoji!), s.custom_emoji_id!]));
+  }
+  return iconCache.get(norm(emoji));
+}
+
+/**
+ * Привести существующие темы обеих бесед к виду из кода: название без эмодзи
+ * и иконка (14.11.2026 — у тем, созданных раньше, эмодзи задваивались). Раз за
+ * запуск; «не изменилось» от Telegram — не ошибка.
+ */
+async function syncTopicLooks(telegram: Telegraf["telegram"]): Promise<void> {
+  const fix = async (chatId: number | string, thread: number | undefined, name: string, emoji: string) => {
+    if (!thread) return;
+    const icon = await topicIconId(telegram, emoji);
+    await telegram.editForumTopic(chatId, thread, { name, ...(icon ? { icon_custom_emoji_id: icon } : {}) })
+      .catch((e: unknown) => { if (!/NOT_MODIFIED/i.test(String(e))) console.warn(`[topics] «${name}»:`, e instanceof Error ? e.message : e); });
+  };
+  const s = await loadSettings(true);
+  if (s.chatId) for (const t of TOPICS) await fix(s.chatId, s.topics[t.key], t.name, t.icon);
+  const route = await loadAdminRoute(true);
+  if (route.chatId) for (const key of ADMIN_TOPIC_KEYS) await fix(route.chatId, route.topics[key], ADMIN_TOPICS[key].title, ADMIN_TOPICS[key].icon);
 }
 
 /** Ждёт ли бот от этого админа текст после нажатия кнопки (причина отказа и т.п.). */
@@ -350,15 +380,19 @@ const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").rep
 
 // ── Регистрация ──────────────────────────────────────────────────────────────
 
-const TOPICS: Array<{ key: PaTopic; name: string; color: number; hello: string }> = [
-  { key: "support", name: "🆘 Поддержка", color: 0xff93b2, hello: "Сюда бот присылает обращения из @RobloxBank_PA, где нужен человек: карточка с сутью, заказом и черновиком ответа. «📤 Отправить черновик» — ответ уйдёт покупателю от имени поддержки." },
-  { key: "test", name: "🧪 Тест ИИ", color: 0xffd67e, hello: "Тестовый режим: что бот ответил бы покупателю или передал бы вам. Покупателям в этом режиме ничего не уходит. Нравится — /support_mode on." },
-  { key: "digest", name: "📊 Сводки", color: 0x6fb9f0, hello: "Каждое утро в 09:00 МСК — итоги вчера и что горит сейчас. По запросу — /digest." },
-  { key: "assistant", name: "🤖 Ассистент", color: 0x8eee98, hello: "Спрашивайте здесь обычным текстом — отвечу по базе: «что с ZT8BW8D», «кто ждёт пасс больше 2 дней», «сколько выкупили вчера», «найди заказы Анны», «открытые риски». Я только смотрю — ничего не меняю. В других темах зовите через @RobloxBankBot." },
+const TOPICS: Array<{ key: PaTopic; name: string; icon: string; color: number; hello: string }> = [
+  { key: "support", name: "Поддержка", icon: "❓", color: 0xff93b2, hello: "Сюда бот присылает обращения из @RobloxBank_PA, где нужен человек: карточка с сутью, заказом и черновиком ответа. «📤 Отправить черновик» — ответ уйдёт покупателю от имени поддержки." },
+  { key: "test", name: "Тест ИИ", icon: "🧪", color: 0xffd67e, hello: "Тестовый режим: что бот ответил бы покупателю или передал бы вам. Покупателям в этом режиме ничего не уходит. Нравится — /support_mode on." },
+  { key: "digest", name: "Сводки", icon: "📈", color: 0x6fb9f0, hello: "Каждое утро в 09:00 МСК — итоги вчера и что горит сейчас. По запросу — /digest." },
+  { key: "assistant", name: "Ассистент", icon: "🤖", color: 0x8eee98, hello: "Спрашивайте здесь обычным текстом — отвечу по базе: «что с ZT8BW8D», «кто ждёт пасс больше 2 дней», «сколько выкупили вчера», «найди заказы Анны», «открытые риски». Я только смотрю — ничего не меняю. В других темах зовите через @RobloxBankBot." },
 ];
 
 export function registerPaGroup(bot: Telegraf): void {
-  setTimeout(() => { void ensureNotifyTopics(bot.telegram).catch(() => undefined); }, 15_000);
+  setTimeout(() => {
+    void ensureNotifyTopics(bot.telegram)
+      .then(() => syncTopicLooks(bot.telegram))
+      .catch(() => undefined);
+  }, 15_000);
 
   bot.command("notify_setup", async (ctx) => {
     if (!isAdmin(ctx.from?.id) || !ctx.chat || ctx.chat.type === "private") return;
@@ -375,10 +409,10 @@ export function registerPaGroup(bot: Telegraf): void {
       return;
     }
     const created = await ensureNotifyTopics(ctx.telegram);
-    await ctx.telegram.setChatDescription(ctx.chat.id, "Уведомления RobloxBank по темам. 📌 Особые заказы · 🛒 Прямые заказы · 🔥 Нужно действие · 💸 К выкупу · ⭐ Отзывы и вопросы · 📦 Лента (тихо) · 🚨 Система.").catch(() => undefined);
+    await ctx.telegram.setChatDescription(ctx.chat.id, "Уведомления RobloxBank по темам: Особые заказы · Прямые заказы · Нужно действие · К выкупу · Отзывы и вопросы · Лента заказов (тихо) · Система.").catch(() => undefined);
     await ctx.reply(
       `✅ Уведомления теперь приходят сюда.${created.length ? `\nСоздал темы: ${created.join(", ")}.` : ""}\n\n` +
-      "Закрепите «📌 Особые заказы» и «🛒 Прямые заказы» (долгое нажатие на тему → «Закрепить»), чтобы они всегда были сверху. Звук «📦 Лента заказов» можно выключить.",
+      "Закрепите «Особые заказы» и «Прямые заказы» (долгое нажатие на тему → «Закрепить»), чтобы они всегда были сверху. Звук «Лента заказов» можно выключить.",
     );
   });
 
@@ -396,10 +430,10 @@ export function registerPaGroup(bot: Telegraf): void {
     for (const t of TOPICS) {
       if (topics[t.key]) continue;
       try {
-        const created = await ctx.telegram.createForumTopic(ctx.chat.id, t.name, { icon_color: t.color as never });
+        const icon = await topicIconId(ctx.telegram, t.icon);
+        const created = await ctx.telegram.createForumTopic(ctx.chat.id, t.name, { icon_color: t.color as never, ...(icon ? { icon_custom_emoji_id: icon } : {}) });
         topics[t.key] = created.message_thread_id;
-        const hello = await ctx.telegram.sendMessage(ctx.chat.id, t.hello, { message_thread_id: created.message_thread_id });
-        await ctx.telegram.pinChatMessage(ctx.chat.id, hello.message_id, { disable_notification: true }).catch(() => undefined);
+        await ctx.telegram.sendMessage(ctx.chat.id, t.hello, { message_thread_id: created.message_thread_id });
       } catch (error) {
         await ctx.reply(`Тема «${t.name}» не создалась: ${error instanceof Error ? error.message : error}. Проверьте, что у бота есть право «Управление темами».`);
       }

@@ -23,6 +23,7 @@ import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import type { Dialog } from "telegram/tl/custom/dialog";
 import { db } from "../shared/db";
+import { setAdminDm } from "../shared/admin-route";
 import { openFlags } from "../shared/order-flags";
 import { DESK_FOLDERS, badReviewMark, deskDecision, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
 import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
@@ -106,6 +107,7 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     if (mode === "on") await tidyPaProfile().catch((e) => console.warn("[pa-profile] порядок/био:", e instanceof Error ? e.message : e));
     await auditPaProfile().catch((e) => console.warn("[pa-profile]", e instanceof Error ? e.message : e));
     await exportPaDialogs().catch((e) => console.warn("[pa-export]", e instanceof Error ? e.message : e));
+    await registerPaDm().catch((e) => console.warn("[pa-dm]", e instanceof Error ? e.message : e));
   }
   await runPaResponseStats().catch((e) => console.warn("[pa-response]", e instanceof Error ? e.message : e));
   return result;
@@ -369,6 +371,23 @@ export async function auditPaProfile(): Promise<string[] | null> {
   }).catch(() => undefined);
   for (const l of lines) console.log(`[pa-profile] ${l}`);
   return lines;
+}
+
+/**
+ * Копии важных уведомлений — в личку этого аккаунта (14.11.2026).
+ *
+ * @RobloxBank_PA — общий аккаунт всех админов, с него работают из лички.
+ * Добавить его в беседу уведомлений = двойные уведомления у всех, поэтому он
+ * получает копию только важного (`DM_TOPICS` в admin-route). Свой id аккаунт
+ * знает сам — вписываем его в получатели, руками ничего настраивать не надо.
+ */
+async function registerPaDm(): Promise<void> {
+  const tg = await getClient();
+  const me = await tg.getMe();
+  const id = String(me.id);
+  const changed = await setAdminDm(db as never, id, true);
+  const admin = (process.env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).includes(id);
+  console.log(`[pa-dm] копии уведомлений в личку аккаунта: ${changed ? "включены" : "уже включены"}${admin ? "" : " · ⚠️ аккаунта нет в ADMIN_IDS — кнопки карточек у него не сработают"}`);
 }
 
 /* ── Порядок папок и био (при старте, 13.11.2026) ───────────────────────── */

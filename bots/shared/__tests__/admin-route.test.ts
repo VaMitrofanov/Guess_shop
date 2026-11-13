@@ -75,6 +75,29 @@ describe("получатели", () => {
   });
 });
 
+describe("копии в личку общего аккаунта (@RobloxBank_PA)", () => {
+  const WITH_DM = { ...GROUP, metadata: { ...GROUP.metadata, dmIds: ["555"] } };
+
+  it("важное со звуком — в беседу и копией в личку", async () => {
+    const { adminTargets } = await load(WITH_DM);
+    const targets = await adminTargets("direct", { loud: true });
+    expect(targets.map((x) => x.chatId)).toEqual(["-1001", "555"]);
+    expect(targets[1]).toMatchObject({ key: "555", group: false, extra: {} });
+  });
+
+  it("тихое и системное в личку не идут", async () => {
+    const { adminTargets } = await load(WITH_DM);
+    expect((await adminTargets("feed")).map((x) => x.chatId)).toEqual(["-1001"]);
+    expect((await adminTargets("direct", { loud: false })).map((x) => x.chatId)).toEqual(["-1001"]);
+    expect((await adminTargets("system", { loud: true })).map((x) => x.chatId)).toEqual(["-1001"]);
+  });
+
+  it("названия тем — без эмодзи (иначе Telegram задваивает их с иконкой)", async () => {
+    const { ADMIN_TOPICS } = await load(null);
+    for (const t of Object.values(ADMIN_TOPICS)) expect(t.title).toMatch(/^[А-ЯЁA-Z]/);
+  });
+});
+
 describe("кнопки и ветки в беседе", () => {
   it("web_app → ссылка startapp с кодом заказа; callback-кнопки не трогаем", async () => {
     const { adminTargets, groupSafeMarkup } = await load(GROUP);

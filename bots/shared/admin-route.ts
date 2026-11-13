@@ -37,17 +37,20 @@ export type AdminTopic =
   | "system";  // 🚨 Система
 
 /**
- * Название темы, цвет иконки (из палитры Telegram) и звук по умолчанию.
+ * Название темы, иконка, цвет и звук по умолчанию. Название — БЕЗ эмодзи:
+ * Telegram сам рисует иконку темы, и эмодзи в имени задваивается в подписи
+ * (14.11.2026). Иконка — только из набора getForumTopicIconStickers (📌🚨📦⚙️
+ * там нет), не нашлась — Telegram рисует цветной кружок по `color`.
  * Порядок = порядок создания (владелец: особые заказы первыми, потом прямые).
  */
-export const ADMIN_TOPICS: Record<AdminTopic, { title: string; color: number; silent: boolean; hello: string }> = {
-  cases: { title: "📌 Особые заказы", color: 0xFF93B2, silent: false, hello: "Договорённости и особые случаи по заказам — то, что должны знать все админы." },
-  direct: { title: "🛒 Прямые заказы", color: 0xFFD67E, silent: false, hello: "Всё по прямым заказам — бот и сайт, без WB: заявки, скриншоты оплаты, карточки к выкупу, отмены." },
-  action: { title: "🔥 Нужно действие", color: 0xFB6F5F, silent: false, hello: "Только то, где нужен человек: код не дошёл, возврат открыт, пасс подменили, нет плейса, обращения покупателей. Всё остальное — в «📦 Лента заказов»." },
-  buyout: { title: "💸 К выкупу", color: 0x8EEE98, silent: false, hello: "Карточки заказов WB к выкупу с кнопками «Выкупить», «ВЫКУПЛЕНО», «ОШИБКА». Прямые заказы — в «🛒 Прямые заказы»." },
-  reviews: { title: "⭐ Отзывы и вопросы", color: 0xCB86DB, silent: false, hello: "Отзывы и вопросы с Wildberries, скриншоты отзывов за бонус." },
-  feed: { title: "📦 Лента заказов", color: 0x6FB9F0, silent: true, hello: "Тихая лента: код активирован, карточки DBS (правятся на месте), покупатель нашёлся, выкуп подтверждён. Делать ничего не нужно — звук можно выключить." },
-  system: { title: "🚨 Система", color: 0xFB6F5F, silent: true, hello: "Упал бот, сервер, токены WB, кончаются карточки. Звук — только на срочном." },
+export const ADMIN_TOPICS: Record<AdminTopic, { title: string; icon: string; color: number; silent: boolean; hello: string }> = {
+  cases: { title: "Особые заказы", icon: "❗️", color: 0xFF93B2, silent: false, hello: "Договорённости и особые случаи по заказам — то, что должны знать все админы." },
+  direct: { title: "Прямые заказы", icon: "🛒", color: 0xFFD67E, silent: false, hello: "Всё по прямым заказам — бот и сайт, без WB: заявки, скриншоты оплаты, карточки к выкупу, отмены." },
+  action: { title: "Нужно действие", icon: "🔥", color: 0xFB6F5F, silent: false, hello: "Только то, где нужен человек: код не дошёл, возврат открыт, пасс подменили, нет плейса, обращения покупателей. Всё остальное — в «Лента заказов»." },
+  buyout: { title: "К выкупу", icon: "💸", color: 0x8EEE98, silent: false, hello: "Карточки заказов WB к выкупу с кнопками «Выкупить», «ВЫКУПЛЕНО», «ОШИБКА». Прямые заказы — в «Прямые заказы»." },
+  reviews: { title: "Отзывы и вопросы", icon: "⭐️", color: 0xCB86DB, silent: false, hello: "Отзывы и вопросы с Wildberries, скриншоты отзывов за бонус." },
+  feed: { title: "Лента заказов", icon: "📰", color: 0x6FB9F0, silent: true, hello: "Тихая лента: код активирован, карточки DBS (правятся на месте), покупатель нашёлся, выкуп подтверждён. Делать ничего не нужно — звук можно выключить." },
+  system: { title: "Система", icon: "💻", color: 0xFB6F5F, silent: true, hello: "Упал бот, сервер, токены WB, кончаются карточки. Звук — только на срочном." },
 };
 
 export const ADMIN_TOPIC_KEYS = Object.keys(ADMIN_TOPICS) as AdminTopic[];
@@ -82,7 +85,15 @@ export interface AdminTarget {
   group: boolean;
 }
 
-interface RouteConfig { chatId: string | null; topics: Partial<Record<string, number>>; off: string[] }
+interface RouteConfig { chatId: string | null; topics: Partial<Record<string, number>>; off: string[]; dmIds: string[] }
+
+/**
+ * Темы, которые дублируются в личку `dmIds` (14.11.2026): общий аккаунт
+ * админов @RobloxBank_PA работает из лички, а добавить его в беседу = двойные
+ * уведомления у всех. Туда — только то, где нужен человек: тихая лента и
+ * системный шум в личку не идут.
+ */
+const DM_TOPICS: AdminTopic[] = ["cases", "direct", "action", "buyout", "reviews"];
 
 type CursorDb = { wbSyncCursor: { findUnique(args: { where: { stream: string } }): Promise<{ cursor: string | null; metadata: unknown } | null> } };
 
@@ -103,19 +114,37 @@ let cache: { at: number; cfg: RouteConfig } | null = null;
 /** Настройки беседы из базы, с минутным кэшем. Никогда не бросает. */
 export async function loadAdminRoute(force = false): Promise<RouteConfig> {
   if (!force && cache && Date.now() - cache.at < CACHE_MS) return cache.cfg;
-  let cfg: RouteConfig = { chatId: null, topics: {}, off: [] };
+  let cfg: RouteConfig = { chatId: null, topics: {}, off: [], dmIds: [] };
   if (!routeDb) return cfg;
   try {
     const row = await routeDb.wbSyncCursor.findUnique({ where: { stream: ADMIN_NOTIFY_STREAM } });
-    const meta = (row?.metadata ?? {}) as { topics?: Record<string, number>; adminRouteOff?: string[] };
+    const meta = (row?.metadata ?? {}) as { topics?: Record<string, number>; adminRouteOff?: string[]; dmIds?: string[] };
     cfg = {
       chatId: row?.cursor && /^-?\d+$/.test(row.cursor) ? row.cursor : null,
       topics: meta.topics ?? {},
       off: Array.isArray(meta.adminRouteOff) ? meta.adminRouteOff : [],
+      dmIds: Array.isArray(meta.dmIds) ? meta.dmIds.map(String).filter((id) => /^\d+$/.test(id)) : [],
     };
   } catch { /* база недоступна — личка */ }
   cache = { at: Date.now(), cfg };
   return cfg;
+}
+
+/** Добавить или убрать получателя копий в личку (`dmIds`). */
+export async function setAdminDm(db: { wbSyncCursor: { findUnique: CursorDb["wbSyncCursor"]["findUnique"]; upsert(args: unknown): Promise<unknown> } }, id: string, on: boolean): Promise<boolean> {
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: ADMIN_NOTIFY_STREAM } });
+  const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+  const cur = Array.isArray(meta.dmIds) ? (meta.dmIds as unknown[]).map(String) : [];
+  const next = on ? [...new Set([...cur, id])] : cur.filter((x) => x !== id);
+  if (next.length === cur.length && next.every((x, i) => x === cur[i])) return false;
+  const metadata = { ...meta, dmIds: next };
+  await db.wbSyncCursor.upsert({
+    where: { stream: ADMIN_NOTIFY_STREAM },
+    create: { stream: ADMIN_NOTIFY_STREAM, cursor: row?.cursor ?? null, metadata },
+    update: { metadata },
+  });
+  cache = null;
+  return true;
 }
 
 /** Сбросить кэш (после создания тем). */
@@ -141,12 +170,17 @@ export async function adminTargets(
   const thread = cfg.topics[topic];
   if (cfg.chatId && thread) {
     const silent = opts.loud === undefined ? ADMIN_TOPICS[topic].silent : !opts.loud;
-    return [{
+    const group: AdminTarget = {
       key: `${cfg.chatId}#${thread}`,
       chatId: cfg.chatId,
       extra: { message_thread_id: thread, ...(silent ? { disable_notification: true } : {}) },
       group: true,
-    }];
+    };
+    // Копия в личку общего аккаунта — только важное и только со звуком.
+    const dm = !silent && DM_TOPICS.includes(topic)
+      ? cfg.dmIds.map((id) => ({ key: id, chatId: id, extra: {}, group: false }))
+      : [];
+    return [group, ...dm];
   }
   return adminIds().map((id) => ({ key: id, chatId: id, extra: {}, group: false }));
 }
