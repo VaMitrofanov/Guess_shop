@@ -91,6 +91,59 @@ async function topicIconId(telegram: Telegraf["telegram"], emoji: string): Promi
  * и иконка (14.11.2026 — у тем, созданных раньше, эмодзи задваивались). Раз за
  * запуск; «не изменилось» от Telegram — не ошибка.
  */
+async function ensurePaTopics(telegram: Telegraf["telegram"]): Promise<void> {
+  const s = await loadSettings(true);
+  if (!s.chatId) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chat = await telegram.getChat(s.chatId).catch(() => null) as any;
+  if (!chat?.is_forum) return;
+  const topics = { ...s.topics };
+  let created = false;
+  for (const t of TOPICS) {
+    if (topics[t.key]) continue;
+    try {
+      const icon = await topicIconId(telegram, t.icon);
+      const made = await telegram.createForumTopic(s.chatId, t.name, { icon_color: t.color as never, ...(icon ? { icon_custom_emoji_id: icon } : {}) });
+      topics[t.key] = made.message_thread_id;
+      await telegram.sendMessage(s.chatId, t.hello, { message_thread_id: made.message_thread_id });
+      created = true;
+      console.log(`[pa-group] создана тема «${t.name}»`);
+    } catch (error) {
+      console.warn(`[pa-group] тема «${t.name}» не создалась:`, error instanceof Error ? error.message : error);
+    }
+  }
+  if (created) await saveSettings({ topics });
+}
+
+/* ── «Фичи и баги» (14.11.2026) ─────────────────────────────────────────────
+   Сообщения из темы копятся в базе (`WbSyncCursor` stream `admin-ideas`,
+   `metadata.items`, последние 500), бот ставит 👀. Сейчас их разбирает
+   владелец, дальше — ИИ-воркер. */
+const IDEAS_STREAM = "admin-ideas";
+const IDEAS_MAX = 500;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function saveIdea(ctx: any, msg: any): Promise<void> {
+  const text = String(msg.text ?? msg.caption ?? "").trim();
+  const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1].file_id : null;
+  if (!text && !photo) return;
+  const from = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name ?? String(ctx.from?.id ?? "?");
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: IDEAS_STREAM } }).catch(() => null);
+  const meta = (row?.metadata ?? {}) as { items?: unknown[] };
+  const items = [...(Array.isArray(meta.items) ? meta.items : []), {
+    at: new Date().toISOString(), from, text: text.slice(0, 4000), photo, messageId: msg.message_id, status: "new",
+  }].slice(-IDEAS_MAX);
+  await db.wbSyncCursor.upsert({
+    where: { stream: IDEAS_STREAM },
+    create: { stream: IDEAS_STREAM, metadata: { items } as never },
+    update: { metadata: { items } as never },
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (ctx.telegram as any).callApi("setMessageReaction", {
+    chat_id: ctx.chat.id, message_id: msg.message_id, reaction: [{ type: "emoji", emoji: "👀" }],
+  }).catch(() => undefined);
+}
+
 async function syncTopicLooks(telegram: Telegraf["telegram"]): Promise<void> {
   const fix = async (chatId: number | string, thread: number | undefined, name: string, emoji: string) => {
     if (!thread) return;
@@ -384,12 +437,14 @@ const TOPICS: Array<{ key: PaTopic; name: string; icon: string; color: number; h
   { key: "support", name: "Поддержка", icon: "❓", color: 0xff93b2, hello: "Сюда бот присылает обращения из @RobloxBank_PA, где нужен человек: карточка с сутью, заказом и черновиком ответа. «📤 Отправить черновик» — ответ уйдёт покупателю от имени поддержки." },
   { key: "test", name: "Тест ИИ", icon: "🧪", color: 0xffd67e, hello: "Тестовый режим: что бот ответил бы покупателю или передал бы вам. Покупателям в этом режиме ничего не уходит. Нравится — /support_mode on." },
   { key: "digest", name: "Сводки", icon: "📈", color: 0x6fb9f0, hello: "Каждое утро в 09:00 МСК — итоги вчера и что горит сейчас. По запросу — /digest." },
+  { key: "ideas", name: "Фичи и баги", icon: "💡", color: 0xffd67e, hello: "Пишите сюда фичи, баги и идеи — одним сообщением на штуку, можно со скриншотом. Бот ставит 👀 — значит записал в базу. Пока их разбирает владелец, дальше — ИИ-воркер." },
   { key: "assistant", name: "Ассистент", icon: "🤖", color: 0x8eee98, hello: "Спрашивайте здесь обычным текстом — отвечу по базе: «что с ZT8BW8D», «кто ждёт пасс больше 2 дней», «сколько выкупили вчера», «найди заказы Анны», «открытые риски». Я только смотрю — ничего не меняю. В других темах зовите через @RobloxBankBot." },
 ];
 
 export function registerPaGroup(bot: Telegraf): void {
   setTimeout(() => {
     void ensureNotifyTopics(bot.telegram)
+      .then(() => ensurePaTopics(bot.telegram))
       .then(() => syncTopicLooks(bot.telegram))
       .catch(() => undefined);
   }, 15_000);
@@ -503,6 +558,13 @@ export function registerPaGroup(bot: Telegraf): void {
       }
     }
     const msg = u.message;
+    if (msg && !ctx.from?.is_bot) {
+      const st = await loadSettings();
+      if (st.chatId && ctx.chat!.id === st.chatId && st.topics.ideas && msg.message_thread_id === st.topics.ideas) {
+        await saveIdea(ctx, msg).catch((e) => console.warn("[ideas]", e instanceof Error ? e.message : e));
+        return;
+      }
+    }
     if (!msg?.text || !isAdmin(ctx.from?.id) || !process.env.ANTHROPIC_API_KEY?.trim()) return;
     const s = await loadSettings();
     if (!s.chatId || ctx.chat!.id !== s.chatId) return;

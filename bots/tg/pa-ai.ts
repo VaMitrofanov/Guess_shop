@@ -40,7 +40,7 @@ const handedOffAt = new Map<number, number>();
 const drafts = new Map<string, { connId: string; chatId: number; text: string; at: number }>();
 let calls = { day: "", n: 0 };
 /** Темы беседы админов (форум): куда что слать. */
-export type PaTopic = "support" | "test" | "digest" | "assistant";
+export type PaTopic = "support" | "test" | "digest" | "assistant" | "ideas";
 export type PaSettings = { chatId: number | null; mode: PaAiMode; topics: Partial<Record<PaTopic, number>>; digestDay?: string; loadedAt: number };
 let settings: PaSettings = { chatId: null, mode: "dry", topics: {}, loadedAt: 0 };
 let outOfMoneyNotified = 0;
