@@ -9,6 +9,12 @@
    массовые действия от пользовательского аккаунта Telegram банит, поэтому
    за проход — не больше `RENAME_CAP` переименований, с паузой.
 
+   С 13.11.2026 ещё: папка «⏰ Без ответа» (последнее слово покупателя, ждёт
+   дольше `WAIT_MIN`), раз в сутки — время ответа поддержки за вчера
+   (`pa-response-stats.ts`, курсор `pa-response`) и при старте — проверка
+   профиля (приветствие, «нет на месте», часы, быстрые ответы, порядок папок)
+   в лог и курсор `pa-profile`.
+
    Включение: `PA_API_ID`, `PA_API_HASH`, `PA_SESSION` в env TG-бота;
    `PA_DESK=off` — выключить, `PA_DESK=dry` — только писать в лог, что сделал бы.
    ───────────────────────────────────────────────────────────────────────── */
@@ -20,6 +26,7 @@ import { db } from "../shared/db";
 import { openFlags } from "../shared/order-flags";
 import { DESK_FOLDERS, badReviewMark, deskDecision, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
 import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
+import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type ResponseStats } from "./pa-response-stats";
 
 const WINDOW_DAYS = 30;
 /** «Новые» — только те, кто писал за неделю: старый незнакомец уже не новый. */
@@ -36,6 +43,15 @@ const ARCHIVE_CAP = 100;
  * оператором в приложении, сохраняем.
  */
 const FOLDER_COLOR: Record<DeskFolder, number> = { NEW: 5, QUEUE: 2, PROBLEM: 1, DONE: 3, REVIEW: 6 };
+/**
+ * «⏰ Без ответа» — не этап заказа, а «кому мы должны ответить»: последнее
+ * сообщение в чате от покупателя, ждёт дольше `WAIT_MIN` и не старше `WAIT_MAX_H`.
+ * Свой id вне `DESK_FOLDERS`: чат одновременно и в папке по заказу.
+ */
+const WAIT_FOLDER = { id: 206, title: "⏰ Без ответа", color: 0 };
+const WAIT_MIN = 15;
+const WAIT_MAX_H = 72;
+const MSK = 3 * 3600_000;
 
 type Mode = "off" | "dry" | "on";
 
@@ -46,6 +62,11 @@ export function paDeskMode(env: NodeJS.ProcessEnv = process.env): Mode {
 }
 
 let client: TelegramClient | null = null;
+
+/** Тот же клиент аккаунта для других задач (одна сессия — одно подключение). */
+export async function paDeskClient(): Promise<TelegramClient> {
+  return getClient();
+}
 
 async function getClient(): Promise<TelegramClient> {
   if (client?.connected) return client;
@@ -68,12 +89,27 @@ export interface PaDeskResult {
   linked: number;
   renamed: number;
   folders: Record<DeskFolder, number>;
+  waiting: number;
   foldersUpdated: number;
   archived: number;
 }
 
+let profileAudited = false;
+
 export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskResult | null> {
   if (mode === "off") return null;
+  const result = await sweepOnce(mode);
+  // Тем же проходом и по очереди (одно подключение аккаунта): проверка профиля —
+  // один раз за запуск; время ответа за вчера — раз в сутки (функция помнит день).
+  if (!profileAudited) {
+    profileAudited = true;
+    await auditPaProfile().catch((e) => console.warn("[pa-profile]", e instanceof Error ? e.message : e));
+  }
+  await runPaResponseStats().catch((e) => console.warn("[pa-response]", e instanceof Error ? e.message : e));
+  return result;
+}
+
+async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
   const tg = await getClient();
   const now = Date.now() / 1000;
   const all = await tg.getDialogs({ limit: 1000 });
@@ -111,7 +147,7 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     for (const r of rows) if (r.stars != null) badStars.set(r.userId, Number(r.stars));
   }
 
-  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0, REVIEW: 0 }, foldersUpdated: 0, archived: 0 };
+  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0, REVIEW: 0 }, waiting: 0, foldersUpdated: 0, archived: 0 };
   const members: Record<DeskFolder, Dialog[]> = { NEW: [], QUEUE: [], PROBLEM: [], DONE: [], REVIEW: [] };
 
   for (const d of dialogs) {
@@ -154,46 +190,21 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     }
   }
 
-  // Папки: пересобираем свои четыре, только если состав поменялся.
+  // Папки: пересобираем свои, только если состав (или цвет) поменялся.
   const existing = await tg.invoke(new Api.messages.GetDialogFilters());
   const list = "filters" in existing ? existing.filters : (existing as unknown as Api.TypeDialogFilter[]);
   for (const key of Object.keys(DESK_FOLDERS) as DeskFolder[]) {
-    const { id } = DESK_FOLDERS[key];
     const want = members[key].slice(0, FOLDER_CAP);
     result.folders[key] = want.length;
-    const have = list.find((f) => f instanceof Api.DialogFilter && f.id === id) as Api.DialogFilter | undefined;
-    const haveIds = new Set((have?.includePeers ?? []).map((p) => ("userId" in p ? String(p.userId) : "")));
-    const wantIds = new Set(want.map((d) => String((d.entity as Api.User).id)));
-    const color = have?.color ?? FOLDER_COLOR[key];
-    const same = have && have.color != null && haveIds.size === wantIds.size && [...wantIds].every((x) => haveIds.has(x));
-    if (same || (want.length === 0 && !have)) continue;
-    result.foldersUpdated++;
-    if (mode === "dry") {
-      console.log(`[pa-desk] (dry) папка «${titleOf(key)}»: ${want.length} чатов`);
-      continue;
-    }
-    try {
-      if (want.length === 0) {
-        await tg.invoke(new Api.messages.UpdateDialogFilter({ id }));
-        continue;
-      }
-      const includePeers = await Promise.all(want.map((d) => tg.getInputEntity(d.entity as Api.User)));
-      await tg.invoke(new Api.messages.UpdateDialogFilter({
-        id,
-        filter: new Api.DialogFilter({
-          id,
-          title: new Api.TextWithEntities({ text: titleOf(key), entities: [] }),
-          color,
-          pinnedPeers: [],
-          includePeers,
-          excludePeers: [],
-        }),
-      }));
-      await sleep(1000);
-    } catch (error) {
-      console.warn(`[pa-desk] папка «${titleOf(key)}» не обновилась: ${error instanceof Error ? error.message : error}`);
-    }
+    if (await syncFolder(tg, list, { id: DESK_FOLDERS[key].id, title: titleOf(key), color: FOLDER_COLOR[key] }, want, mode)) result.foldersUpdated++;
   }
+  const waiting = dialogs.filter((d) => {
+    const age = now - (d.date ?? 0);
+    return d.message && !d.message.out && age >= WAIT_MIN * 60 && age < WAIT_MAX_H * 3600;
+  }).slice(0, FOLDER_CAP);
+  result.waiting = waiting.length;
+  if (await syncFolder(tg, list, WAIT_FOLDER, waiting, mode)) result.foldersUpdated++;
+
   if (stale.length > 0) {
     result.archived = stale.length;
     if (mode === "dry") {
@@ -211,4 +222,141 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     }
   }
   return result;
+}
+
+/** Привести одну папку к составу `want`. `true` — что-то меняли (или хотели в dry). */
+async function syncFolder(
+  tg: TelegramClient,
+  list: Api.TypeDialogFilter[],
+  spec: { id: number; title: string; color: number },
+  want: Dialog[],
+  mode: Mode,
+): Promise<boolean> {
+  const have = list.find((f) => f instanceof Api.DialogFilter && f.id === spec.id) as Api.DialogFilter | undefined;
+  const haveIds = new Set((have?.includePeers ?? []).map((p) => ("userId" in p ? String(p.userId) : "")));
+  const wantIds = new Set(want.map((d) => String((d.entity as Api.User).id)));
+  // Цвет: свой, если оператор выбрал в приложении; иначе наш — без него нет тега под чатом.
+  const color = have?.color ?? spec.color;
+  const same = have && have.color != null && haveIds.size === wantIds.size && [...wantIds].every((x) => haveIds.has(x));
+  if (same || (want.length === 0 && !have)) return false;
+  if (mode === "dry") {
+    console.log(`[pa-desk] (dry) папка «${spec.title}»: ${want.length} чатов`);
+    return true;
+  }
+  try {
+    if (want.length === 0) {
+      await tg.invoke(new Api.messages.UpdateDialogFilter({ id: spec.id }));
+      return true;
+    }
+    const includePeers = await Promise.all(want.map((d) => tg.getInputEntity(d.entity as Api.User)));
+    await tg.invoke(new Api.messages.UpdateDialogFilter({
+      id: spec.id,
+      filter: new Api.DialogFilter({
+        id: spec.id,
+        title: new Api.TextWithEntities({ text: spec.title, entities: [] }),
+        color,
+        pinnedPeers: [],
+        includePeers,
+        excludePeers: [],
+      }),
+    }));
+    await sleep(1000);
+  } catch (error) {
+    console.warn(`[pa-desk] папка «${spec.title}» не обновилась: ${error instanceof Error ? error.message : error}`);
+  }
+  return true;
+}
+
+/* ── Время ответа за вчера (раз в сутки) ─────────────────────────────────── */
+
+export const RESPONSE_STREAM = "pa-response";
+const STATS_CHAT_CAP = 120;
+
+function mskDay(offsetDays = 0): { key: string; from: number; to: number } {
+  const startMsk = Math.floor((Date.now() + MSK) / 86_400_000) * 86_400_000 + offsetDays * 86_400_000;
+  return {
+    key: new Date(startMsk).toISOString().slice(0, 10),
+    from: (startMsk - MSK) / 1000,
+    to: (startMsk - MSK + 86_400_000) / 1000,
+  };
+}
+
+/** Посчитать вчерашний день, если ещё не считали. Только чтение чатов. */
+export async function runPaResponseStats(): Promise<ResponseStats | null> {
+  if (paDeskMode() === "off") return null;
+  const day = mskDay(-1);
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: RESPONSE_STREAM } }).catch(() => null);
+  if (row?.cursor === day.key) return null;
+
+  const tg = await getClient();
+  const all = await tg.getDialogs({ limit: 1000 });
+  const chats = all.filter((d: Dialog) =>
+    d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && (d.date ?? 0) >= day.from,
+  ).slice(0, STATS_CHAT_CAP);
+
+  const turns: Array<{ delaySec: number | null; viaBot: boolean }> = [];
+  for (const d of chats) {
+    try {
+      const msgs = await tg.getMessages(d.entity as Api.User, { limit: 60, offsetDate: Math.floor(day.to + 6 * 3600) });
+      const chat: ChatMsg[] = msgs
+        .filter((m) => m.date >= day.from - 6 * 3600)
+        .map((m) => ({ date: m.date, out: Boolean(m.out), viaBot: Boolean((m as unknown as { viaBusinessBotId?: unknown }).viaBusinessBotId) }));
+      turns.push(...chatTurns(chat, day.from, day.to));
+    } catch (error) {
+      console.warn(`[pa-response] чат не прочитался: ${error instanceof Error ? error.message : error}`);
+    }
+    await sleep(700);
+  }
+  const stats = summarizeTurns(turns);
+  await db.wbSyncCursor.upsert({
+    where: { stream: RESPONSE_STREAM },
+    create: { stream: RESPONSE_STREAM, cursor: day.key, lastSuccessAt: new Date(), metadata: { day: day.key, ...stats } as never },
+    update: { cursor: day.key, lastSuccessAt: new Date(), metadata: { day: day.key, ...stats } as never },
+  });
+  console.log(`[pa-response] ${day.key}: ${formatResponseStats(stats, "").replace(/\n/g, " | ")}`);
+  return stats;
+}
+
+/** Последний посчитанный день — для сводки и команды. */
+export async function loadPaResponseStats(): Promise<(ResponseStats & { day: string }) | null> {
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: RESPONSE_STREAM } }).catch(() => null);
+  const meta = row?.metadata as (ResponseStats & { day: string }) | null | undefined;
+  return meta?.day ? meta : null;
+}
+
+/* ── Проверка профиля (при старте) ───────────────────────────────────────── */
+
+export const PROFILE_STREAM = "pa-profile";
+
+/** Что настроено в профиле аккаунта поддержки. Только чтение. */
+export async function auditPaProfile(): Promise<string[] | null> {
+  if (paDeskMode() === "off") return null;
+  const tg = await getClient();
+  const full = await tg.invoke(new Api.users.GetFullUser({ id: new Api.InputUserSelf() }));
+  const u = full.fullUser;
+  const quick = await tg.invoke(new Api.messages.GetQuickReplies({ hash: 0 as never })).catch(() => null);
+  const shortcuts = quick && "quickReplies" in quick ? quick.quickReplies.map((q) => `/${q.shortcut}`) : [];
+  const filters = await tg.invoke(new Api.messages.GetDialogFilters());
+  const flist = "filters" in filters ? filters.filters : (filters as unknown as Api.TypeDialogFilter[]);
+  const order = flist
+    .map((f) => f instanceof Api.DialogFilter ? f.title.text : f instanceof Api.DialogFilterDefault ? "Все" : null)
+    .filter(Boolean);
+  const hours = u.businessWorkHours;
+  const lines = [
+    `био: ${u.about ? `«${u.about}»` : "нет"}`,
+    `приветствие (Business): ${u.businessGreetingMessage ? `есть, ярлык #${u.businessGreetingMessage.shortcutId}, молчание ${u.businessGreetingMessage.noActivityDays} дн.` : "нет"}`,
+    `«нет на месте» (Business): ${u.businessAwayMessage ? `есть, ярлык #${u.businessAwayMessage.shortcutId}` : "нет"}`,
+    `интро для новых (Business): ${u.businessIntro ? `«${u.businessIntro.title}»` : "нет"}`,
+    `часы работы: ${hours ? `${hours.timezoneId}, интервалов ${hours.weeklyOpen.length}` : "нет"}`,
+    `личный канал: ${u.personalChannelId ? "есть" : "нет"}`,
+    `быстрые ответы: ${shortcuts.length ? shortcuts.join(" ") : "нет"}`,
+    `порядок папок: ${order.join(" → ")}`,
+  ];
+  await db.wbSyncCursor.upsert({
+    where: { stream: PROFILE_STREAM },
+    create: { stream: PROFILE_STREAM, lastSuccessAt: new Date(), metadata: { lines } as never },
+    update: { lastSuccessAt: new Date(), metadata: { lines } as never },
+  }).catch(() => undefined);
+  for (const l of lines) console.log(`[pa-profile] ${l}`);
+  return lines;
 }
