@@ -413,14 +413,18 @@ async function dropStaleQuickReplies(tg: TelegramClient, user: Api.UserFull): Pr
   const res = await tg.invoke(new Api.messages.GetQuickReplies({ hash: 0 as never }));
   if (!("quickReplies" in res)) return;
   const keep = new Set([user.businessGreetingMessage?.shortcutId, user.businessAwayMessage?.shortcutId].filter((x) => x != null));
-  const textById = new Map<number, string>();
-  for (const m of res.messages) if (m instanceof Api.Message) textById.set(m.id, m.message ?? "");
+  let dropped = 0;
   for (const q of res.quickReplies) {
-    const text = textById.get(q.topMessage) ?? "";
-    if (keep.has(q.shortcutId) || !STALE_QUICK_REPLY_MARKERS.some((s) => text.includes(s))) continue;
+    if (keep.has(q.shortcutId)) continue;
+    // `topMessage` — последнее сообщение ярлыка, а не первое: читаем ярлык целиком.
+    const msgs = await tg.invoke(new Api.messages.GetQuickReplyMessages({ shortcutId: q.shortcutId, hash: 0 as never }));
+    const texts = "messages" in msgs ? msgs.messages.map((m) => (m instanceof Api.Message ? m.message ?? "" : "")) : [];
+    if (!texts.some((t) => STALE_QUICK_REPLY_MARKERS.some((s) => t.includes(s)))) continue;
     await tg.invoke(new Api.messages.DeleteQuickReplyShortcut({ shortcutId: q.shortcutId }));
     console.log(`[pa-profile] удалён устаревший быстрый ответ /${q.shortcut}`);
+    dropped++;
   }
+  if (!dropped) console.log("[pa-profile] устаревших быстрых ответов не найдено");
 }
 
 /* ── Разовая выгрузка диалогов для базы знаний ИИ (13.11.2026) ──────────── */
