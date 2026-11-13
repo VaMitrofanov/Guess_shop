@@ -398,6 +398,29 @@ async function tidyPaProfile(): Promise<void> {
     await tg.invoke(new Api.account.UpdateProfile({ about: PA_BIO }));
     console.log(`[pa-profile] био заполнено: «${PA_BIO}»`);
   }
+  await dropStaleQuickReplies(tg, full.fullUser);
+}
+
+/**
+ * Устаревшие быстрые ответы, которые владелец велел убрать (13.11.2026): июньское
+ * «Важное объявление» про опрос и публичный плейс — скрытый плейс давно не отказ.
+ * Ищем по ТЕКСТУ первого сообщения ярлыка, а не по имени (имя оператор мог поменять).
+ * Ярлыки Business-приветствия и «нет на месте» не трогаем никогда.
+ */
+const STALE_QUICK_REPLY_MARKERS = ["Важное объявление для всех покупателей"];
+
+async function dropStaleQuickReplies(tg: TelegramClient, user: Api.UserFull): Promise<void> {
+  const res = await tg.invoke(new Api.messages.GetQuickReplies({ hash: 0 as never }));
+  if (!("quickReplies" in res)) return;
+  const keep = new Set([user.businessGreetingMessage?.shortcutId, user.businessAwayMessage?.shortcutId].filter((x) => x != null));
+  const textById = new Map<number, string>();
+  for (const m of res.messages) if (m instanceof Api.Message) textById.set(m.id, m.message ?? "");
+  for (const q of res.quickReplies) {
+    const text = textById.get(q.topMessage) ?? "";
+    if (keep.has(q.shortcutId) || !STALE_QUICK_REPLY_MARKERS.some((s) => text.includes(s))) continue;
+    await tg.invoke(new Api.messages.DeleteQuickReplyShortcut({ shortcutId: q.shortcutId }));
+    console.log(`[pa-profile] удалён устаревший быстрый ответ /${q.shortcut}`);
+  }
 }
 
 /* ── Разовая выгрузка диалогов для базы знаний ИИ (13.11.2026) ──────────── */
