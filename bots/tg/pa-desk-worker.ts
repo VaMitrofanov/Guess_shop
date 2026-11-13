@@ -103,7 +103,9 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
   // один раз за запуск; время ответа за вчера — раз в сутки (функция помнит день).
   if (!profileAudited) {
     profileAudited = true;
+    if (mode === "on") await tidyPaProfile().catch((e) => console.warn("[pa-profile] порядок/био:", e instanceof Error ? e.message : e));
     await auditPaProfile().catch((e) => console.warn("[pa-profile]", e instanceof Error ? e.message : e));
+    await exportPaDialogs().catch((e) => console.warn("[pa-export]", e instanceof Error ? e.message : e));
   }
   await runPaResponseStats().catch((e) => console.warn("[pa-response]", e instanceof Error ? e.message : e));
   return result;
@@ -237,8 +239,14 @@ async function syncFolder(
   const wantIds = new Set(want.map((d) => String((d.entity as Api.User).id)));
   // Цвет: свой, если оператор выбрал в приложении; иначе наш — без него нет тега под чатом.
   const color = have?.color ?? spec.color;
+  // Закреплённое оператором в папке (например, чат @RobloxBankBot с кнопкой OPEN)
+  // переживает пересборку: раньше pinnedPeers затирались пустым списком.
+  const pinnedPeers = have?.pinnedPeers ?? [];
+  const pinnedIds = new Set(pinnedPeers.map((p) => ("userId" in p ? String(p.userId) : "")));
+  for (const id of pinnedIds) wantIds.delete(id);
   const same = have && have.color != null && haveIds.size === wantIds.size && [...wantIds].every((x) => haveIds.has(x));
   if (same || (want.length === 0 && !have)) return false;
+  if (want.length === 0 && pinnedPeers.length) return false; // пустую папку с закрепом не удаляем
   if (mode === "dry") {
     console.log(`[pa-desk] (dry) папка «${spec.title}»: ${want.length} чатов`);
     return true;
@@ -248,14 +256,16 @@ async function syncFolder(
       await tg.invoke(new Api.messages.UpdateDialogFilter({ id: spec.id }));
       return true;
     }
-    const includePeers = await Promise.all(want.map((d) => tg.getInputEntity(d.entity as Api.User)));
+    const includePeers = await Promise.all(want
+      .filter((d) => !pinnedIds.has(String((d.entity as Api.User).id)))
+      .map((d) => tg.getInputEntity(d.entity as Api.User)));
     await tg.invoke(new Api.messages.UpdateDialogFilter({
       id: spec.id,
       filter: new Api.DialogFilter({
         id: spec.id,
         title: new Api.TextWithEntities({ text: spec.title, entities: [] }),
         color,
-        pinnedPeers: [],
+        pinnedPeers,
         includePeers,
         excludePeers: [],
       }),
@@ -359,4 +369,102 @@ export async function auditPaProfile(): Promise<string[] | null> {
   }).catch(() => undefined);
   for (const l of lines) console.log(`[pa-profile] ${l}`);
   return lines;
+}
+
+/* ── Порядок папок и био (при старте, 13.11.2026) ───────────────────────── */
+
+/** Сначала «кому ответить» и «проблемы», «Готово» — в конце; чужие папки — после наших. */
+const FOLDER_ORDER = [WAIT_FOLDER.id, DESK_FOLDERS.PROBLEM.id, DESK_FOLDERS.NEW.id, DESK_FOLDERS.QUEUE.id, DESK_FOLDERS.REVIEW.id, DESK_FOLDERS.DONE.id];
+/** Био — только если пустое: своё оператора не перетираем. Не длиннее 70 символов. */
+const PA_BIO = "Поддержка RobloxBank 💙 Заказ, статус и инструкция — в @RobloxBankBot";
+
+async function tidyPaProfile(): Promise<void> {
+  const tg = await getClient();
+  const res = await tg.invoke(new Api.messages.GetDialogFilters());
+  const list = "filters" in res ? res.filters : (res as unknown as Api.TypeDialogFilter[]);
+  const current = list.map((f) => f instanceof Api.DialogFilterDefault ? 0 : "id" in f ? (f as { id: number }).id : -1).filter((id) => id >= 0);
+  const ours = FOLDER_ORDER.filter((id) => current.includes(id));
+  const desired = [
+    ...(current.includes(0) ? [0] : []),
+    ...ours,
+    ...current.filter((id) => id !== 0 && !ours.includes(id)),
+  ];
+  if (desired.join(",") !== current.join(",")) {
+    await tg.invoke(new Api.messages.UpdateDialogFiltersOrder({ order: desired }));
+    console.log(`[pa-profile] порядок папок: ${current.join(",")} → ${desired.join(",")}`);
+  }
+  const full = await tg.invoke(new Api.users.GetFullUser({ id: new Api.InputUserSelf() }));
+  if (!full.fullUser.about?.trim()) {
+    await tg.invoke(new Api.account.UpdateProfile({ about: PA_BIO }));
+    console.log(`[pa-profile] био заполнено: «${PA_BIO}»`);
+  }
+}
+
+/* ── Разовая выгрузка диалогов для базы знаний ИИ (13.11.2026) ──────────── */
+
+/**
+ * Только чтение. Один раз на версию (`EXPORT_VERSION`, курсор `pa-export`):
+ * все личные чаты аккаунта (и архив) → `/tmp/pa-export/chats.jsonl` в контейнере.
+ * Имён, юзернеймов, телефонов нет — только номер чата, сторона (C покупатель,
+ * O оператор, B бот аккаунта), время, текст, тип вложения и сводка заказов
+ * из базы. Файл забирается по ssh и в репозиторий не попадает.
+ */
+const EXPORT_VERSION = "2026-11-13";
+const EXPORT_STREAM = "pa-export";
+const EXPORT_MSGS_PER_CHAT = 300;
+
+export async function exportPaDialogs(): Promise<void> {
+  if (paDeskMode() === "off") return;
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: EXPORT_STREAM } }).catch(() => null);
+  if (row?.cursor === EXPORT_VERSION) return;
+  const fs = await import("node:fs/promises");
+  const dir = "/tmp/pa-export";
+  await fs.mkdir(dir, { recursive: true });
+  const file = `${dir}/chats.jsonl`;
+  await fs.writeFile(file, "");
+
+  const tg = await getClient();
+  const main = await tg.getDialogs({ limit: 3000, folder: 0 });
+  const archive = await tg.getDialogs({ limit: 3000, folder: 1 }).catch(() => [] as unknown as typeof main);
+  const chats = [...main, ...archive].filter((d: Dialog) =>
+    d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self);
+
+  const ids = chats.map((d) => String((d.entity as Api.User).id));
+  const users = await db.user.findMany({ where: { tgId: { in: ids } }, select: { id: true, tgId: true } });
+  const userByTg = new Map(users.map((u) => [u.tgId as string, u.id]));
+  const orders = users.length
+    ? await db.wbOrder.findMany({ where: { userId: { in: users.map((u) => u.id) } }, select: { userId: true, status: true, amount: true, isDirectOrder: true, heldAt: true } })
+    : [];
+
+  let n = 0;
+  let msgsTotal = 0;
+  for (const d of chats) {
+    const uid = userByTg.get(String((d.entity as Api.User).id));
+    try {
+      const msgs = await tg.getMessages(d.entity as Api.User, { limit: EXPORT_MSGS_PER_CHAT });
+      const lines = msgs
+        .filter((m) => m.message || m.media)
+        .sort((a, b) => a.date - b.date)
+        .map((m) => ({
+          t: new Date(m.date * 1000).toISOString().slice(0, 16),
+          s: !m.out ? "C" : (m as unknown as { viaBusinessBotId?: unknown }).viaBusinessBotId ? "B" : "O",
+          x: (m.message ?? "").slice(0, 2000),
+          ...(m.media ? { m: m.media.className.replace(/^MessageMedia/, "") } : {}),
+        }));
+      if (lines.length === 0) continue;
+      n++;
+      msgsTotal += lines.length;
+      const chatOrders = uid ? orders.filter((o) => o.userId === uid).map((o) => ({ st: o.status, amt: o.amount, dir: o.isDirectOrder, held: Boolean(o.heldAt) })) : [];
+      await fs.appendFile(file, JSON.stringify({ i: n, archived: d.archived, orders: chatOrders, msgs: lines }) + "\n");
+    } catch (error) {
+      console.warn(`[pa-export] чат не прочитался: ${error instanceof Error ? error.message : error}`);
+    }
+    await sleep(800);
+  }
+  await db.wbSyncCursor.upsert({
+    where: { stream: EXPORT_STREAM },
+    create: { stream: EXPORT_STREAM, cursor: EXPORT_VERSION, lastSuccessAt: new Date(), metadata: { chats: n, messages: msgsTotal } as never },
+    update: { cursor: EXPORT_VERSION, lastSuccessAt: new Date(), metadata: { chats: n, messages: msgsTotal } as never },
+  });
+  console.log(`[pa-export] готово: чатов ${n}, сообщений ${msgsTotal} → ${file}`);
 }
