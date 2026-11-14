@@ -277,7 +277,7 @@ async function syncOrderPins(
     if (have) {
       if (mode === "dry") { console.log(`[pa-pin] (dry) правка закрепа ${key}`); continue; }
       try {
-        await tg.editMessage(u, { message: have.id, text });
+        await tg.editMessage(u, { message: have.id, text, parseMode: "html" });
         pins[key] = { id: have.id, text };
         result.pinsUpdated++;
         changed = true;
@@ -298,7 +298,7 @@ async function syncOrderPins(
     result.pinsCreated++;
     if (mode === "dry") { console.log(`[pa-pin] (dry) новый закреп ${key}`); continue; }
     try {
-      const sent = await tg.sendMessage(u, { message: text, silent: true });
+      const sent = await tg.sendMessage(u, { message: text, silent: true, parseMode: "html" });
       // Общий закреп (не «только у себя»): клиент тоже видит его над чатом.
       await tg.pinMessage(u, sent.id, { notify: false, pmOneSide: false });
       if (have) await tg.unpinMessage(u, have.id).catch(() => undefined);

@@ -9,8 +9,9 @@ const o = (p: Partial<PinOrder>): PinOrder => ({
 describe("закреп заказа в чате поддержки", () => {
   it("показывает код, номинал, ник и этап", () => {
     const text = pinText([o({})], NOW)!;
-    expect(text).toContain("ZT8BW8D · 500 Robux");
-    expect(text).toContain("Misha2010");
+    expect(text).toContain("<code>ZT8BW8D</code> · 500 Robux");
+    expect(text).toContain("<code>Misha2010</code>");
+    expect(text).toContain("@RobloxBankBot");
     expect(text).toContain("ждём ваш геймпасс");
   });
 

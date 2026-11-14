@@ -22,6 +22,8 @@ export interface PinOrder {
   robloxUsername: string | null;
 }
 
+const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 const ACTIVE = new Set(["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"]);
 const DAY = 86_400_000;
 /** Выкупленный заказ держим в закрепе ещё две недели — вопросы «где робуксы» идут после. */
@@ -62,8 +64,9 @@ export function pinText(orders: PinOrder[], now = Date.now()): string | null {
   const shown = pinOrders(orders, now);
   if (!shown.length) return null;
   const blocks = shown.map((o) => [
-    `🎟 Код WB: ${o.wbCode} · ${o.amount.toLocaleString("ru-RU")} Robux`,
-    ...(o.robloxUsername ? [`👤 Ник Roblox: ${o.robloxUsername}`] : []),
+    // <code> — копируется одним нажатием (и у клиента, и у нас).
+    `🎟 Код WB: <code>${esc(o.wbCode)}</code> · ${o.amount.toLocaleString("ru-RU")} Robux`,
+    ...(o.robloxUsername ? [`👤 Ник Roblox: <code>${esc(o.robloxUsername)}</code>`] : []),
     `Статус: ${stageText(o)}`,
   ].join("\n"));
   return [
@@ -71,6 +74,9 @@ export function pinText(orders: PinOrder[], now = Date.now()): string | null {
     "",
     blocks.join("\n\n"),
     "",
-    "Статус обновляется здесь сам. Вопрос по заказу — пишите в этот чат.",
+    // Вопросы «где робуксы» и «что дальше» — в бот: там статус, инструкция и таймер
+    // Pending, а поддержке остаются настоящие проблемы (15.11.2026, владелец).
+    "Всё о заказе — что делать дальше, инструкция, где Robux — в боте @RobloxBankBot, кнопка «📦 Мой заказ». Там ответ сразу.",
+    "Сюда пишите, если в боте не нашли ответа.",
   ].join("\n");
 }
