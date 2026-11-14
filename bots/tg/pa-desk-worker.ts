@@ -27,6 +27,7 @@ import { setAdminDm } from "../shared/admin-route";
 import { openFlags } from "../shared/order-flags";
 import { DESK_FOLDERS, badReviewMark, deskDecision, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
 import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
+import { pinText, pinWorthCreating, type PinOrder } from "../shared/pa-pin";
 import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type ResponseStats } from "./pa-response-stats";
 
 const WINDOW_DAYS = 30;
@@ -93,6 +94,8 @@ export interface PaDeskResult {
   waiting: number;
   foldersUpdated: number;
   archived: number;
+  pinsCreated: number;
+  pinsUpdated: number;
 }
 
 let profileAudited = false;
@@ -131,11 +134,15 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
   const orders = users.length
     ? await db.wbOrder.findMany({
         where: { userId: { in: users.map((u) => u.id) } },
-        select: { userId: true, wbCode: true, amount: true, status: true, createdAt: true, heldAt: true, flags: true },
+        select: { userId: true, wbCode: true, amount: true, status: true, createdAt: true, heldAt: true, flags: true, completedAt: true, robloxUsername: true },
       })
     : [];
   const ordersBy = new Map<string, DeskOrder[]>();
+  const pinOrdersBy = new Map<string, PinOrder[]>();
   for (const o of orders) {
+    const pins = pinOrdersBy.get(o.userId) ?? [];
+    pins.push({ wbCode: o.wbCode, amount: o.amount, status: o.status, createdAt: o.createdAt, completedAt: o.completedAt, heldAt: o.heldAt, robloxUsername: o.robloxUsername });
+    pinOrdersBy.set(o.userId, pins);
     const list = ordersBy.get(o.userId) ?? [];
     list.push({ wbCode: o.wbCode, amount: o.amount, status: o.status, createdAt: o.createdAt, heldAt: o.heldAt, openFlags: openFlags(o).length > 0 });
     ordersBy.set(o.userId, list);
@@ -151,7 +158,7 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
     for (const r of rows) if (r.stars != null) badStars.set(r.userId, Number(r.stars));
   }
 
-  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0, REVIEW: 0 }, waiting: 0, foldersUpdated: 0, archived: 0 };
+  const result: PaDeskResult = { chats: dialogs.length, linked: 0, renamed: 0, folders: { NEW: 0, QUEUE: 0, PROBLEM: 0, DONE: 0, REVIEW: 0 }, waiting: 0, foldersUpdated: 0, archived: 0, pinsCreated: 0, pinsUpdated: 0 };
   const members: Record<DeskFolder, Dialog[]> = { NEW: [], QUEUE: [], PROBLEM: [], DONE: [], REVIEW: [] };
 
   for (const d of dialogs) {
@@ -194,6 +201,12 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
     }
   }
 
+  // 📌 Закреп заказа в самом диалоге — виден и покупателю, и нам.
+  await syncOrderPins(tg, dialogs, (tgId) => {
+    const buyer = userByTg.get(tgId);
+    return buyer ? pinOrdersBy.get(buyer.id) ?? [] : [];
+  }, mode, result).catch((e) => console.warn("[pa-pin]", e instanceof Error ? e.message : e));
+
   // Папки: пересобираем свои, только если состав (или цвет) поменялся.
   const existing = await tg.invoke(new Api.messages.GetDialogFilters());
   const list = "filters" in existing ? existing.filters : (existing as unknown as Api.TypeDialogFilter[]);
@@ -226,6 +239,84 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
     }
   }
   return result;
+}
+
+/* ── 📌 Закреп заказа в диалоге (15.11.2026) ─────────────────────────────── */
+
+const PIN_STREAM = "pa-pin";
+/** Новых закрепов за проход: каждый — сообщение клиенту от аккаунта, не спамим. */
+const PIN_CREATE_CAP = 5;
+/** Новый закреп — только в живом разговоре: клиент писал за последние сутки. */
+const PIN_ACTIVE_S = 24 * 3600;
+
+type PinState = Record<string, { id: number; text: string }>;
+
+async function syncOrderPins(
+  tg: TelegramClient,
+  dialogs: Dialog[],
+  ordersOf: (tgId: string) => PinOrder[],
+  mode: Mode,
+  result: PaDeskResult,
+): Promise<void> {
+  if ((process.env.PA_PIN ?? "").trim().toLowerCase() === "off") return;
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: PIN_STREAM } });
+  const pins: PinState = ((row?.metadata ?? {}) as { pins?: PinState }).pins ?? {};
+  const now = Date.now();
+  let changed = false;
+
+  for (const d of dialogs) {
+    const u = d.entity as Api.User;
+    const key = String(u.id);
+    const orders = ordersOf(key);
+    if (!orders.length) continue;
+    const text = pinText(orders, now);
+    if (!text) continue;
+    const have = pins[key];
+    if (have && have.text === text) continue;
+
+    if (have) {
+      if (mode === "dry") { console.log(`[pa-pin] (dry) правка закрепа ${key}`); continue; }
+      try {
+        await tg.editMessage(u, { message: have.id, text });
+        pins[key] = { id: have.id, text };
+        result.pinsUpdated++;
+        changed = true;
+        await sleep(800);
+        continue;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (/MESSAGE_NOT_MODIFIED/.test(msg)) { pins[key] = { id: have.id, text }; changed = true; continue; }
+        // Удалили или истёк срок правки — поставим новый по правилам создания.
+        console.warn(`[pa-pin] правка не прошла (${msg}) — закреп будет новым`);
+        delete pins[key];
+        changed = true;
+      }
+    }
+
+    const fresh = d.date && now / 1000 - d.date < PIN_ACTIVE_S;
+    if (!fresh || !pinWorthCreating(orders, now) || result.pinsCreated >= PIN_CREATE_CAP) continue;
+    result.pinsCreated++;
+    if (mode === "dry") { console.log(`[pa-pin] (dry) новый закреп ${key}`); continue; }
+    try {
+      const sent = await tg.sendMessage(u, { message: text, silent: true });
+      // Общий закреп (не «только у себя»): клиент тоже видит его над чатом.
+      await tg.pinMessage(u, sent.id, { notify: false, pmOneSide: false });
+      if (have) await tg.unpinMessage(u, have.id).catch(() => undefined);
+      pins[key] = { id: sent.id, text };
+      changed = true;
+      await sleep(2500);
+    } catch (error) {
+      console.warn(`[pa-pin] закреп не встал: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  if (result.pinsCreated || result.pinsUpdated) console.log(`[pa-pin] новых закрепов ${result.pinsCreated}, обновлено ${result.pinsUpdated}`);
+  if (!changed) return;
+  await db.wbSyncCursor.upsert({
+    where: { stream: PIN_STREAM },
+    create: { stream: PIN_STREAM, metadata: { pins } as never },
+    update: { metadata: { pins } as never },
+  });
 }
 
 /** Привести одну папку к составу `want`. `true` — что-то меняли (или хотели в dry). */

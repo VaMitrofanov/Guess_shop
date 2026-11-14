@@ -95,7 +95,9 @@ export function registerPaBusiness(bot: Telegraf): void {
       const fromId = msg.from?.id ?? 0;
       // Пишет сам аккаунт (оператор) или бот от его имени — это не вопрос.
       if (msg.sender_business_bot || (owner && fromId === owner)) {
-        if (!msg.sender_business_bot) {
+        // 📌 Закреп заказа ставит воркер от имени аккаунта — это не живой ответ оператора.
+        const isOrderPin = /^📌 Ваш(и)? заказ/.test(msg.text ?? "");
+        if (!msg.sender_business_bot && !isOrderPin) {
           operatorAt.set(msg.chat.id, Date.now());
           operatorReplied(msg.chat.id);
           rememberTurn(msg.chat.id, "assistant", (msg.text ?? msg.caption ?? "").trim());
