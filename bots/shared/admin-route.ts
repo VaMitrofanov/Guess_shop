@@ -34,7 +34,8 @@ export type AdminTopic =
   | "buyout"   // 💸 К выкупу
   | "reviews"  // ⭐ Отзывы и вопросы
   | "feed"     // 📦 Лента заказов (тихо)
-  | "system";  // 🚨 Система
+  | "system"   // 🚨 Система
+  | "watch";   // 👁 Под наблюдением (15.11.2026)
 
 /**
  * Название темы, иконка, цвет и звук по умолчанию. Название — БЕЗ эмодзи:
@@ -51,6 +52,7 @@ export const ADMIN_TOPICS: Record<AdminTopic, { title: string; icon: string; col
   reviews: { title: "Отзывы и вопросы", icon: "⭐️", color: 0xCB86DB, silent: false, hello: "Отзывы и вопросы с Wildberries, скриншоты отзывов за бонус." },
   feed: { title: "Лента заказов", icon: "📰", color: 0x6FB9F0, silent: true, hello: "Тихая лента: код активирован, карточки DBS (правятся на месте), покупатель нашёлся, выкуп подтверждён. Делать ничего не нужно — звук можно выключить." },
   system: { title: "Система", icon: "💻", color: 0xFB6F5F, silent: true, hello: "Упал бот, сервер, токены WB, кончаются карточки. Звук — только на срочном." },
+  watch: { title: "Под наблюдением", icon: "👀", color: 0xFF93B2, silent: false, hello: "Проблемные покупатели: всё, что они делают (пишут в чат WB, присылают пасс, отзывы, возвраты), приходит сюда. Поставить: /watch КОД причина · снять: /unwatch КОД · список: /watchlist" },
 };
 
 export const ADMIN_TOPIC_KEYS = Object.keys(ADMIN_TOPICS) as AdminTopic[];

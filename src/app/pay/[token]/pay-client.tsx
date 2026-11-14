@@ -3,22 +3,21 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowUpRight,
   CheckCircle2,
   CircleAlert,
   Clock3,
   CreditCard,
   Gift,
-  Headphones,
   Loader2,
   Mail,
   ReceiptText,
   RotateCcw,
-  ShieldCheck,
   UserRound,
 } from "lucide-react";
 import type { PublicCodeOrder } from "@/lib/codes/orders";
 import AfterPayment from "./after-payment";
+import ParentTrust, { PayExplainer } from "./parent-trust";
+import type { TrustStats } from "@/lib/trust-stats";
 import styles from "./pay.module.css";
 
 export type PayViewerExtras = {
@@ -40,7 +39,7 @@ function until(iso: string): string {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
-export default function PayClient({ token, initial, extras, result }: { token: string; initial: PublicCodeOrder; extras: PayViewerExtras; result: "success" | "fail" | null }) {
+export default function PayClient({ token, initial, extras, trust, result }: { token: string; initial: PublicCodeOrder; extras: PayViewerExtras; trust: TrustStats | null; result: "success" | "fail" | null }) {
   const [view, setView] = useState(initial);
   const [receiptEmail, setReceiptEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -143,6 +142,13 @@ export default function PayClient({ token, initial, extras, result }: { token: s
 
   return (
     <div className={styles.grid}>
+      <div className={styles.mainCol}>
+      {view.sharedLink && (
+        <div className={styles.hello}>
+          <span>Вам прислали ссылку на оплату</span>
+          <p>Ваш ребёнок (или друг) собрал заказ в нашем магазине и попросил его оплатить. Проверьте сумму и нажмите «Оплатить» — входить ни в какие аккаунты не нужно.</p>
+        </div>
+      )}
       <section className={styles.card} aria-labelledby="pay-title">
         <p className={styles.shop}><Gift size={16} /> RobloxBank · заказ {view.publicId}</p>
         <h1 id="pay-title" className={styles.title}>Код Roblox на {view.denomination.toLocaleString("ru-RU")} Robux</h1>
@@ -164,6 +170,7 @@ export default function PayClient({ token, initial, extras, result }: { token: s
               : <><UserRound size={15} /> <span>в личный кабинет того, кто оформил заказ</span></>}</dd>
           </div>
         </dl>
+        <p className={styles.locked}>🔒 Сумму, товар и получателя по этой ссылке изменить нельзя — их хранит магазин. Без комиссий и доплат.</p>
 
         {view.status === "REFUNDED" ? (
           <div className={styles.state}>
@@ -232,22 +239,9 @@ export default function PayClient({ token, initial, extras, result }: { token: s
         {info && <p className={styles.ok} role="status"><CheckCircle2 size={16} /> {info}</p>}
       </section>
 
-      <aside className={styles.side}>
-        <section className={styles.sideCard}>
-          <h2><ShieldCheck size={18} /> Условия</h2>
-          <ul>
-            <li>Сумма окончательная: без налогов и комиссий сверху.</li>
-            <li>Товар, цену и получателя по ссылке изменить нельзя — их хранит магазин.</li>
-            <li>Входить в чужой аккаунт для оплаты не нужно. Код по этой ссылке не показывается.</li>
-            <li>Код активируется на roblox.com/redeem в нужном аккаунте Roblox — Robux поступают сразу.</li>
-          </ul>
-        </section>
-        <section className={styles.sideCard}>
-          <h2><Headphones size={18} /> Поддержка</h2>
-          <p className={styles.muted}>Вопросы по заказу {view.publicId} — в Telegram.</p>
-          <a className={styles.link} href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">@RobloxBank_PA <ArrowUpRight size={15} /></a>
-        </section>
-      </aside>
+      <PayExplainer />
+      </div>
+      <ParentTrust trust={trust} denomination={view.denomination} />
     </div>
   );
 }

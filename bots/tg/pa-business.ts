@@ -19,6 +19,7 @@ import { paOrderReply } from "../shared/pa-business-reply";
 import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "./pa-ai";
 import { registerPaGroup } from "./pa-group";
 import { registerReleaseNotes } from "./release-notes";
+import { registerWatchList } from "./watch-list";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -53,6 +54,8 @@ export function registerPaBusiness(bot: Telegraf): void {
   // живут в беседе админов — «Опубликовать» молча отбрасывалось (15.11.2026).
   // Права проверяет сам обработчик (только ADMIN_IDS).
   registerReleaseNotes(bot);
+  // 👁 «Под наблюдением» (15.11.2026): /watch, /unwatch, /watchlist — тоже до защиты беседы.
+  registerWatchList(bot);
   // Беседа админов: защита от ответов в группе, ассистент, темы, сводка.
   registerPaGroup(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

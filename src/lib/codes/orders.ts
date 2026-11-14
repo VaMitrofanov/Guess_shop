@@ -322,6 +322,8 @@ export type PublicCodeOrder = {
   maskedRecipient: string | null;
   gift: { theme: GiftTheme; to: string | null; sendAt: string | null; sent: boolean } | null;
   rating: number | null;
+  /** Ссылку отправили другому человеку (родителю) — страница говорит с ним. */
+  sharedLink: boolean;
   status: "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "PAID" | "ISSUED" | "REFUNDED";
   expired: boolean;
   offerExpiresAt: string;
@@ -368,6 +370,7 @@ export async function publicCodeOrderView(order: OrderWithPayments): Promise<Pub
         }
       : null,
     rating: order.rating,
+    sharedLink: order.createdVia === "SHARE",
     status: order.status,
     expired,
     offerExpiresAt: order.offerExpiresAt.toISOString(),

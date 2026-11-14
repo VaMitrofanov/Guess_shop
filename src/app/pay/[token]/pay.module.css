@@ -1,6 +1,13 @@
 .page { min-height:100vh; background:var(--rb-bg); color:var(--rb-text); }
 .shell { width:min(1040px,calc(100% - 32px)); margin:0 auto; padding:32px 0 64px; }
-.grid { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:18px; align-items:start; }
+.grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:20px; align-items:start; }
+/* 🛡 Страница для родителя (15.11.2026): слева заказ и пояснения, справа доверие. */
+.mainCol { min-width:0; display:flex; flex-direction:column; gap:16px; }
+.hello { display:flex; flex-direction:column; gap:6px; }
+.hello span { color:var(--rb-accent); font-size:14px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+.hello p { margin:0; color:var(--rb-muted); font-size:16px; line-height:1.55; }
+.locked { margin:12px 0 0; padding:10px 12px; border-radius:12px; background:#e3f8f0; color:#16604a; font-size:14px; font-weight:650; line-height:1.45; }
+:global(html[data-theme="dark"]) .locked { background:#10291f; color:#8fe8cb; }
 .card { padding:26px; border:1px solid #cfc6ee; border-radius:26px; background:var(--rb-surface); box-shadow:9px 9px 0 #7556e8; }
 .shop { margin:0; display:inline-flex; align-items:center; gap:7px; color:var(--rb-accent); font-size:13px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
 .title { margin:10px 0 18px; font-family:var(--font-display),sans-serif; font-size:clamp(26px,4vw,36px); line-height:1.1; letter-spacing:-.05em; }

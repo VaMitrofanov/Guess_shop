@@ -7,6 +7,7 @@ import { isPayTokenShape } from "@/lib/codes/secrets";
 import PayClient, { type PayViewerExtras } from "./pay-client";
 import { sessionUserId } from "@/lib/codes/http";
 import { ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
+import { trustStats } from "@/lib/trust-stats";
 import styles from "./pay.module.css";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +49,7 @@ export default async function PayPage({
       </main>
     );
   }
-  const view = await publicCodeOrderView(order);
+  const [view, trust] = await Promise.all([publicCodeOrderView(order), trustStats()]);
   // Экран после оплаты (витрина 2.0): создателю, вошедшему в аккаунт, — код
   // прямо здесь и его ссылка-приглашение. Остальным по ссылке кода не видно.
   let extras: PayViewerExtras = { isCreator: false, referralLink: null, discountPercent: 0, invitedCount: 0, next: null };
@@ -68,7 +69,7 @@ export default async function PayPage({
     <main className={styles.page}>
       <Navbar />
       <div className={styles.shell}>
-        <PayClient token={token} initial={view} extras={extras} result={result === "success" || result === "fail" ? result : null} />
+        <PayClient token={token} initial={view} extras={extras} trust={trust} result={result === "success" || result === "fail" ? result : null} />
       </div>
     </main>
   );
