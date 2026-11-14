@@ -85,6 +85,7 @@ import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../sha
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, COMPLETED_MSG1_BUTTON } from "../shared/completed-messages";
 import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
+import { PENDING_MENU_BUTTON, PENDING_PAGE_BUTTON, PENDING_PAGE_URL, pendingInfoText } from "../shared/pending-info";
 import {
   buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
   loadRobuxEtaOrders, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
@@ -172,6 +173,7 @@ const MENU_BTN = {
   order:  "📦 Мой заказ",
   guide:  "📖 Инструкция",
   faq:    "❓ Частые вопросы",
+  pending: PENDING_MENU_BUTTON,
 } as const;
 
 function menuReplyKb() {
@@ -180,6 +182,7 @@ function menuReplyKb() {
     [CODES_MENU_BTN.codes, CODES_MENU_BTN.invite],
     [MENU_BTN.direct, MENU_BTN.order],
     [MENU_BTN.guide,  MENU_BTN.faq],
+    [MENU_BTN.pending],
   ]).resize();
 }
 
@@ -2330,6 +2333,11 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
     const rows = keyboard.reply_markup.inline_keyboard;
     rows.splice(Math.max(0, rows.length - 1), 0, ...otherOrdersRow);
   }
+  // 📖 Про геймпасс и Pending — над «В моё меню», на любой карточке (15.11.2026).
+  {
+    const rows = keyboard.reply_markup.inline_keyboard;
+    rows.splice(Math.max(0, rows.length - 1), 0, [Markup.button.url(PENDING_PAGE_BUTTON, PENDING_PAGE_URL)]);
+  }
 
   return { text, keyboard };
 }
@@ -2435,6 +2443,18 @@ export function registerText(bot: Telegraf): void {
     if (!isAdmin && text === MENU_BTN.direct) {
       clearUserSession();
       try { await startDirectFlow(ctx); } catch (err) { console.error("[TG] menu→direct failed:", err); }
+      return;
+    }
+    if (!isAdmin && text === MENU_BTN.pending) {
+      clearUserSession();
+      await ctx.reply(pendingInfoText("html"), {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 Открыть — 1 минута", PENDING_PAGE_URL)],
+          [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+        ]),
+      });
       return;
     }
     if (!isAdmin && text === MENU_BTN.order) {
@@ -5895,7 +5915,8 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── ❓ FAQ — self-service answers (hides support for first 24h) ──────
     if (data === CB.faq) {
       await ctx.answerCbQuery("Частые вопросы 👇").catch(() => {});
-      const rows = FAQ_ITEMS.map(item => [Markup.button.callback(item.label, CB.faqItem(item.key))]);
+      const rows: any[][] = [[Markup.button.url(PENDING_PAGE_BUTTON, PENDING_PAGE_URL)]];
+      rows.push(...FAQ_ITEMS.map(item => [Markup.button.callback(item.label, CB.faqItem(item.key))]));
       rows.push([supportBtn("💬 Не нашёл ответ — написать менеджеру")]);
       rows.push([Markup.button.callback("👤 В моё меню", CB.buyerMenu)]);
       await ctx.reply(
@@ -5915,7 +5936,8 @@ export function registerCallbacks(bot: Telegraf): void {
       if (key === "when_rbx" && await replyRobuxEta(ctx, tgId, { forceFull: true }).catch(() => false)) return;
       const answer = item.answer;
 
-      const rows = (item.buttons ?? []).map(row => row.map(b => Markup.button.callback(b.label, b.cb)));
+      const rows: any[][] = (item.buttons ?? []).map(row => row.map(b => Markup.button.callback(b.label, b.cb)));
+      if (key === "when_rbx" || key === "how_gp") rows.push([Markup.button.url(PENDING_PAGE_BUTTON, PENDING_PAGE_URL)]);
       rows.push([Markup.button.callback("⬅️ Все вопросы", CB.faq)]);
       rows.push([supportBtn("💬 Не помогло — написать менеджеру")]);
       await ctx.reply(

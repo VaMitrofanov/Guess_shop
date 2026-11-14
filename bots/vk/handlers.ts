@@ -96,6 +96,7 @@ import {
 } from "../shared/robux-eta";
 
 import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
+import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
 
 /** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
 const vkPendingPhotoKind = new Map<number, { url: string; at: number }>();
@@ -1233,7 +1234,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       }
     } catch { /* персонализация — не повод ронять FAQ */ }
 
-    const lines = ["❓ Частые вопросы\n"];
+    const lines = ["❓ Частые вопросы\n", `📖 Что такое геймпасс и Pending — коротко и со скриншотами: ${PENDING_PAGE_URL}\n`];
     for (const item of VK_FAQ_ITEMS) {
       lines.push(`${item.label}\n${item.answer}${item.key === "when_rbx" ? whenRbxExtra : ""}\n`);
     }
@@ -1242,6 +1243,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       message: lines.join("\n"),
       keyboard: Keyboard.builder()
         .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+        .row()
+        .urlButton({ label: PENDING_PAGE_BUTTON, url: PENDING_PAGE_URL })
         .row()
         // Ф6.1: кнопки бонусного FAQ-пункта (в TG — на самом пункте).
         .textButton({ label: "📸 Прислать отзыв", payload: { command: "review_hint" }, color: "primary" })
@@ -5770,6 +5773,8 @@ async function handleIdleMessage(
     } else {
       kb.row().textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "status" }, color: "secondary" });
     }
+    // 📖 Про геймпасс и Pending (15.11.2026). Рядов не больше 6 — лимит VK.
+    kb.row().urlButton({ label: PENDING_PAGE_BUTTON, url: PENDING_PAGE_URL });
     kb.row().textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
 
     const vkShowEtaNote = order.status === "PENDING" || order.status === "IN_PROGRESS";
