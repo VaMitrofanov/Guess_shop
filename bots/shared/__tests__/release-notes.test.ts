@@ -64,6 +64,10 @@ describe("release notes catalogue", () => {
     ];
     expect(unsentNotes(["2026-02-01-b"], notes).map((n) => n.id)).toEqual(["2026-01-01-a", "2026-03-01-c"]);
     expect(unsentNotes(notes.map((n) => n.id), notes)).toEqual([]);
+    // Запись с будущей датой ждёт своего дня (15.11.2026).
+    const later = [...notes, { ...notes[0], id: "2099-12-01-x", date: "2099-12-01" }];
+    expect(unsentNotes([], later).map((n) => n.id)).not.toContain("2099-12-01-x");
+    expect(unsentNotes([], later, new Date("2099-12-01T09:00:00Z")).map((n) => n.id)).toContain("2099-12-01-x");
   });
 
   test("covers referenced by notes exist in bots/shared/assets/updates", () => {

@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
-import { TG_CAPTION_LIMIT, findNote, formatAdminUpdate, unsentNotes, visibleText, vkPostText, type ReleaseNote } from "../shared/release-notes";
+import { TG_CAPTION_LIMIT, findNote, formatAdminUpdate, noteIsDue, unsentNotes, visibleText, vkPostText, type ReleaseNote } from "../shared/release-notes";
 import { card, loadSettings } from "./pa-ai";
 
 /** Обложки лежат в bots/shared/assets/updates (копируются в образ вместе с bots/shared). */
@@ -153,6 +153,12 @@ export function registerReleaseNotes(bot: Telegraf): void {
     const note = findNote(id);
     if (!note?.public) {
       await ctx.answerCbQuery("Такой записи нет").catch(() => undefined);
+      return;
+    }
+    // Пост «на потом» (новогодний — к 1 декабря) кнопкой раньше даты не уходит.
+    if (action === "pub" && !noteIsDue(note)) {
+      const [, m, d] = note.date.split("-");
+      await ctx.answerCbQuery(`Этот пост — не раньше ${Number(d)}.${m}. Нажмите в этот день.`, { show_alert: true }).catch(() => undefined);
       return;
     }
     if (busy.has(id)) {

@@ -256,10 +256,24 @@ export function vkPostText(note: ReleaseNote): string | null {
   return note.public ? note.public.vkText : null;
 }
 
-/** Записи, которых ещё не было в беседе, — от старых к новым. */
-export function unsentNotes(sent: readonly string[], notes: readonly ReleaseNote[] = RELEASE_NOTES): ReleaseNote[] {
+/** Сегодня по Москве, `YYYY-MM-DD`. */
+export function mskToday(now = new Date()): string {
+  return new Date(now.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Дата записи наступила? Запись «на потом» (пост к 1 декабря, 15.11.2026:
+ * владелец — «всё новогоднее — 1 декабря») не показывается в беседе и не
+ * публикуется кнопкой раньше своей даты.
+ */
+export function noteIsDue(note: Pick<ReleaseNote, "date">, now = new Date()): boolean {
+  return note.date <= mskToday(now);
+}
+
+/** Записи, которых ещё не было в беседе и чья дата наступила, — от старых к новым. */
+export function unsentNotes(sent: readonly string[], notes: readonly ReleaseNote[] = RELEASE_NOTES, now = new Date()): ReleaseNote[] {
   const done = new Set(sent);
-  return notes.filter((note) => !done.has(note.id)).slice().sort((a, b) => a.date.localeCompare(b.date));
+  return notes.filter((note) => !done.has(note.id) && noteIsDue(note, now)).slice().sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function findNote(id: string, notes: readonly ReleaseNote[] = RELEASE_NOTES): ReleaseNote | undefined {
