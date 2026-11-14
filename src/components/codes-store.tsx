@@ -396,9 +396,15 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
     <article id="codes" ref={storeRef} className={styles.store} aria-labelledby="codes-title">
       <span id="gift" className={styles.anchor} aria-hidden="true" />
       <header className={styles.head}>
-        <div>
-          <h3 id="codes-title">Код активации</h3>
-          <p>Оплатил — получил — ввёл на roblox.com/redeem</p>
+        {/* 15.11.2026, владелец: «код» и «геймпасс» — названия товаров, а
+            выглядели блекло. Заголовок — как ценник: иконка, крупное имя, метка. */}
+        <div className={styles.titleRow}>
+          <span className={styles.titleIcon} aria-hidden="true"><KeyRound size={24} strokeWidth={2.4} /></span>
+          <div>
+            <span className={styles.titleTag}>⚡ Сразу на баланс</span>
+            <h3 id="codes-title">Код активации</h3>
+            <p>Оплатил — получил — ввёл на roblox.com/redeem</p>
+          </div>
         </div>
         <div className={styles.segment} role="group" aria-label="Для кого код">
           <button type="button" aria-pressed={mode === "self"} className={mode === "self" ? styles.segmentOn : undefined} onClick={() => switchMode("self")}>Себе</button>

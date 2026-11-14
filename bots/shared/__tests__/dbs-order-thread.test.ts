@@ -58,7 +58,7 @@ function sent(index = 0) {
 
 describe("единая шапка", () => {
   it("несёт и номер WB, и код гейта, и сумму, и покупателя", async () => {
-    notify.notifyDbsBuyerMessage(ref, "Здравствуйте");
+    notify.notifyDbsBuyerMessage(ref, "Здравствуйте, когда придут робуксы?");
     await flush();
     const { text } = sent();
     expect(text).toContain("WB #5638591741");

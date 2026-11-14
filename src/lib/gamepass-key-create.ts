@@ -20,6 +20,7 @@ import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { appendOrderAudit } from "@/lib/order-recovery";
 import { auditGamepassAutocreated, type OrderAuditClient } from "@/lib/order-audit";
 import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
+import { recordKeyOutcome } from "../../bots/shared/key-outcomes";
 
 /**
  * Сколько пассов создаём за раз — столько же частей умеет заказ
@@ -111,6 +112,8 @@ export async function createPassesWithKey(opts: {
     });
   }
 
+  // 🔑 Учёт исходов ключа (15.11.2026): видно, почему ключ не сработал.
+  await recordKeyOutcome(prisma, { via: opts.via === "admin-key" ? "admin" : "site", result: failure ?? "ok", nick: opts.nick });
   return failure ? { created, error: failure } : { created };
 }
 

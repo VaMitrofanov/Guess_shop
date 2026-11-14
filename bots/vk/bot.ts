@@ -34,6 +34,10 @@ import { syncVkActor } from "../shared/user-profile-sync";
 import { db } from "../shared/db";
 import { VkDialogLabelSync, loadVkLabelSnapshots } from "../shared/vk-dialog-labels";
 import { syncOrderPins } from "../shared/order-pin";
+import { recordKeyOutcome, setKeyOutcomeSink } from "../shared/key-outcomes";
+
+// 🔑 Учёт исходов ключа Roblox (15.11.2026): движок общий с сайтом, запись — здесь.
+setKeyOutcomeSink((entry) => { void recordKeyOutcome(db as never, { via: "vk-bot", ...entry }); });
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
 

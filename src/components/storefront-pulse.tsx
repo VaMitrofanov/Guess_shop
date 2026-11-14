@@ -78,12 +78,12 @@ export function HeroPulse() {
     return (
       <div className={styles.pulseCard}>
         <div className={styles.pulseHead}>
-          <span className={styles.pulseLive}><i /> ВЫДАНО ПОКУПАТЕЛЯМ</span>
+          <span className={styles.pulseLive}><i /> ПРОШЛО ЧЕРЕЗ ROBLOXBANK</span>
           <small>все способы, включая Wildberries</small>
         </div>
-        <p className={styles.pulseBig}>{pulse.totals.robux.toLocaleString("ru-RU")} <span>Robux</span></p>
+        <p className={styles.pulseBig}>{(pulse.totals.gross ?? pulse.totals.robux).toLocaleString("ru-RU")} <span>Robux</span></p>
         <p className={styles.pulseSub}>
-          {pulse.totals.orders.toLocaleString("ru-RU")} {plural(pulse.totals.orders, ["выдача", "выдачи", "выдач"])} за всё время
+          {pulse.totals.orders.toLocaleString("ru-RU")} {plural(pulse.totals.orders, ["выдача", "выдачи", "выдач"])} · сумма выкупленных геймпассов и кодов
         </p>
       </div>
     );

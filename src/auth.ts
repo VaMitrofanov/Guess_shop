@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
 import { adminTargets, groupSafeMarkup, replyToRootFor } from "../bots/shared/admin-route";
+import { queueAdminDigest } from "../bots/shared/admin-digest";
 import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 import { verifyTelegramLogin } from "@/lib/telegram-login";
@@ -461,6 +462,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     ? "ничего — покупатель вернулся к своему заказу"
                     : "ничего — вход без активации кода",
                 });
+                // 15.11.2026: вход без активации — делать нечего, строкой в
+                // часовую сводку «Ленты» вместо отдельной карточки.
+                if (process.env.ADMIN_DIGEST !== "off") {
+                  await queueAdminDigest(prisma as never, [
+                    isNewUser ? "🆕 новый на сайте" : "🔐 вход на сайт",
+                    vkDialogLink(vkId, escapeHtml(name)),
+                    liveOrder ? `<code>${escapeHtml(liveOrder.wbCode ?? "")}</code> · ${orderStatusWord(String(liveOrder.status))}` : unknownCode ? `код <code>${escapeHtml(unknownCode)}</code> не найден` : "без заказа",
+                  ].join(" · "));
+                  msg = null;
+                }
               }
               if (msg) {
                 const feed = await adminTargets("feed", { loud: false });

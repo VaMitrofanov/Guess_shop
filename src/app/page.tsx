@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Gift, Headphones, KeyRound, LockKeyhole, Mail, WalletCards } from "lucide-react";
+import { ArrowRight, Gamepad2, Gift, Headphones, KeyRound, LockKeyhole, Mail, WalletCards } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
@@ -104,8 +104,14 @@ export default function Home() {
         <CodesStore instant={instant} />
         <div id="calculator" className={styles.passColumn}>
           <div className={styles.passHead}>
-            <b>Через геймпасс</b>
-            <span>Дешевле, но Robux приходят не сразу: Roblox держит их в ожидании</span>
+            <div className={styles.passTitle}>
+              <span className={styles.passIcon} aria-hidden="true"><Gamepad2 size={24} strokeWidth={2.4} /></span>
+              <div>
+                <span className={styles.passTag}>Дешевле · с ожиданием</span>
+                <b>Геймпасс</b>
+              </div>
+            </div>
+            <span>Robux приходят не сразу: Roblox держит их в ожидании</span>
             <Link href="/guide?source=site&amount=1000" className={styles.passGuide}>Как создать геймпасс — инструкция</Link>
           </div>
           <Calculator />

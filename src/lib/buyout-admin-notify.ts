@@ -1,6 +1,8 @@
 import { sendTelegramMessage } from "@/lib/telegram";
 import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
+import { queueAdminDigest } from "../../bots/shared/admin-digest";
+import { prisma } from "@/lib/prisma";
 
 type RetailBuyoutSource = "twa-order" | "twa-account";
 
@@ -49,8 +51,33 @@ export function buildRetailBuyoutAdminCard(input: RetailBuyoutAdminInput): strin
   });
 }
 
-/** Broadcast a confirmed TWA buyout to every configured Telegram admin. */
+/** Одна строка для часовой сводки «Ленты» (15.11.2026). */
+export function retailBuyoutDigestLine(input: RetailBuyoutAdminInput): string {
+  return [
+    "✅ выкуп",
+    input.wbCode ? `<code>${escapeHtml(input.wbCode)}</code>` : `пасс <code>${escapeHtml(input.gamepassId)}</code>`,
+    Number.isFinite(input.amount) ? `${Number(input.amount).toLocaleString("ru-RU")} R$` : null,
+    `−${Number(input.chargedPrice).toLocaleString("ru-RU")} R$`,
+    input.source === "twa-order" ? "TWA" : "поиск",
+  ].filter(Boolean).join(" · ");
+}
+
+/**
+ * Выкуп подтверждён — делать ничего не нужно (выкупал сам админ): с 15.11.2026
+ * строкой в часовую сводку «Ленты», а не отдельной карточкой.
+ */
 export async function notifyRetailBuyoutAdmins(
+  input: RetailBuyoutAdminInput,
+): Promise<{ admins: number; sent: number }> {
+  if (process.env.ADMIN_DIGEST !== "off") {
+    await queueAdminDigest(prisma as never, retailBuyoutDigestLine(input));
+    return { admins: 1, sent: 1 };
+  }
+  return sendRetailBuyoutCard(input);
+}
+
+/** Отдельная карточка — когда сводка выключена (`ADMIN_DIGEST=off`). */
+async function sendRetailBuyoutCard(
   input: RetailBuyoutAdminInput,
 ): Promise<{ admins: number; sent: number }> {
   const token = process.env.TG_TOKEN;

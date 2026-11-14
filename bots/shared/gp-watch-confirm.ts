@@ -12,6 +12,7 @@ import { tgSend, escapeHtml } from "./notify";
 import { searchGamepassesByNick } from "./gamepass-search";
 import { assertOwnsOrder, type Actor } from "./ownership";
 import { adminTargets } from "./admin-route";
+import { queueAdminDigest } from "./admin-digest";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 
@@ -57,11 +58,16 @@ export async function confirmGpWatch(orderId: string, actor: Actor): Promise<GpW
     });
     if (claim.count === 0) return { status: "already" };
 
-    await Promise.allSettled((await adminTargets("feed", { loud: false })).map((t) => tgSend(t.chatId,
-      `👁 <b>GP-WATCH подтверждён</b> · <code>${order.wbCode}</code>\n` +
-      `Ник: <b>${escapeHtml(probableNick)}</b> · геймпасс <b>${escapeHtml(pass.name)}</b> · ${pass.robux} R$\n` +
-      `Заказ → PENDING (в очереди «К выкупу»).`,
-      { parse_mode: "HTML", ...t.extra })));
+    // 15.11.2026: делать ничего не нужно — строкой в часовую сводку «Ленты».
+    if (process.env.ADMIN_DIGEST !== "off") {
+      await queueAdminDigest(db as never, `👁 GP-watch · <code>${order.wbCode}</code> · ${escapeHtml(probableNick)} · ${pass.robux} R$ → к выкупу`);
+    } else {
+      await Promise.allSettled((await adminTargets("feed", { loud: false })).map((t) => tgSend(t.chatId,
+        `👁 <b>GP-WATCH подтверждён</b> · <code>${order.wbCode}</code>\n` +
+        `Ник: <b>${escapeHtml(probableNick)}</b> · геймпасс <b>${escapeHtml(pass.name)}</b> · ${pass.robux} R$\n` +
+        `Заказ → PENDING (в очереди «К выкупу»).`,
+        { parse_mode: "HTML", ...t.extra })));
+    }
 
     return { status: "ok", passName: pass.name, robux: pass.robux, nick: probableNick, wbCode: order.wbCode };
   } catch (err: any) {

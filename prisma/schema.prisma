@@ -1608,3 +1608,18 @@ model CodeOrderEvent {
 
   @@index([orderId, createdAt])
 }
+
+/// 📰 Часовая сводка «Ленты заказов» (15.11.2026): одиночные «делать ничего не
+/// нужно» (выкуп подтверждён, пасс по ключу, вход без активации, GP-watch)
+/// копятся здесь одной строкой и уходят раз в час одним сообщением
+/// (`bots/shared/admin-digest.ts`, отправляет TG-бот). Корни веток заказов
+/// (карточка активации, живая карточка DBS) сюда не попадают.
+model AdminDigestItem {
+  id        String    @id @default(cuid())
+  topic     String    @default("feed")
+  line      String
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([sentAt, createdAt])
+}

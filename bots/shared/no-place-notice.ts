@@ -19,23 +19,27 @@ interface PlaceHelpShown {
   buyer?: string | null;
 }
 
+/**
+ * Карточка админам — ТОЛЬКО когда покупатель застрял (15.11.2026, владелец:
+ * «отправить часть инструкции — обычное дело, писать так явно не нужно»).
+ * Сам показ инструкции пишется в ленту заказа (`recordPlaceHelp`), а в беседу
+ * уходит короткое «застрял», если инструкцию показали `PLACE_HELP_STUCK_AFTER`
+ * раз за сутки (`shouldNotifyPlaceHelp`).
+ */
 export function placeHelpAdminText(a: PlaceHelpShown): string {
   return formatAdminNotice({
     marker: "waiting",
     zone: "ПОДДЕРЖКА",
-    title: "нет плейса — отправили инструкцию по Studio",
+    title: "застрял на плейсе",
     lines: [
       orderRef({ code: a.wbCode ?? null, denomination: a.denomination ?? null }, [
         a.buyer ? escapeHtml(a.buyer) : null,
         a.via === "site" ? "сайт" : a.via === "tg-bot" ? "TG" : "VK",
+        a.nick ? `<code>${escapeHtml(a.nick)}</code>` : null,
       ]),
-      a.nick ? `👤 Ник: <code>${escapeHtml(a.nick)}</code>` : null,
-      a.verdict === "games_hidden"
-        ? "🙈 Игр по нику не видно (скрыты) — возможно, плейса нет вовсе: скорее всего новый аккаунт."
-        : "🆕 У аккаунта нет ни одной игры — скорее всего новый аккаунт без плейса.",
-      "📖 Ушли шаги: Roblox Studio → New Experience → File → Publish to Roblox.",
+      `Инструкцию по Studio показали ${PLACE_HELP_STUCK_AFTER} раза за сутки — плейс так и не появился.`,
     ],
-    next: "ждём, пока опубликует плейс и пришлёт ключ ещё раз; застрянет — помочь руками",
+    next: "помочь руками",
   });
 }
 
@@ -71,12 +75,20 @@ export async function recordPlaceHelp(client: PlaceHelpClient, a: PlaceHelpShown
   }
 }
 
-/** Карточка — не чаще раза в 30 минут на покупателя: повторный ключ не спамит. */
-const seen = new Map<string, number>();
+/** Сколько показов инструкции за сутки значат «застрял». */
+export const PLACE_HELP_STUCK_AFTER = 3;
+const DAY_MS = 24 * 3_600_000;
+
+/**
+ * Звать человека — один раз, на третьем показе за сутки. Первые показы —
+ * обычная работа инструкции, о них админам не пишем. Счёт в памяти процесса:
+ * после рестарта начинается заново, это допустимо (лишний раз не позовём).
+ */
+const shows = new Map<string, number[]>();
 export function shouldNotifyPlaceHelp(key: string, now = Date.now()): boolean {
-  const last = seen.get(key);
-  if (last && now - last < 30 * 60_000) return false;
-  seen.set(key, now);
-  for (const [k, t] of seen) if (now - t > 2 * 3_600_000) seen.delete(k);
-  return true;
+  const recent = (shows.get(key) ?? []).filter((t) => now - t < DAY_MS);
+  recent.push(now);
+  shows.set(key, recent);
+  for (const [k, list] of shows) if (list.every((t) => now - t >= DAY_MS)) shows.delete(k);
+  return recent.length === PLACE_HELP_STUCK_AFTER;
 }

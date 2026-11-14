@@ -71,7 +71,10 @@
 .buy { padding:12px 0 56px; display:grid; grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr); gap:28px; align-items:start; }
 .passColumn { min-width:0; scroll-margin-top:88px; display:flex; flex-direction:column; gap:14px; }
 .passHead { display:flex; flex-direction:column; gap:4px; padding:0 4px; }
-.passHead b { font-size:22px; letter-spacing:-.03em; }
+.passHead b { display:block; margin-top:2px; font-family:var(--font-display),var(--font-geist-sans),sans-serif; font-size:clamp(26px,3vw,32px); font-weight:800; line-height:1.05; letter-spacing:-.05em; }
+.passTitle { display:flex; align-items:center; gap:14px; margin-bottom:4px; }
+.passIcon { width:56px; height:56px; flex:0 0 auto; display:grid; place-items:center; border-radius:17px; background:var(--rb-text); color:var(--rb-bg); box-shadow:3px 3px 0 #45d6aa; transform:rotate(3deg); }
+.passTag { display:inline-block; padding:3px 9px; border-radius:999px; background:var(--rb-accent-soft); color:var(--rb-accent); font-size:12px; font-weight:900; letter-spacing:.05em; text-transform:uppercase; }
 .passHead span { color:var(--rb-muted); font-size:14.5px; line-height:1.45; }
 .passGuide { align-self:flex-start; color:var(--rb-accent); font-size:14.5px; font-weight:850; text-decoration:underline; text-underline-offset:3px; }
 

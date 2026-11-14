@@ -15,7 +15,19 @@ import {
 } from "../shared/codes-shop";
 import { botAttachReferral, botCodeOrder, botCodesView, botOrderKey, codesTick, siteUrl } from "../shared/codes-bot-api";
 import { storeReviews } from "../shared/wb-reviews-feed";
+import { flushAdminDigest } from "../shared/admin-digest";
+import { adminTargets } from "../shared/admin-route";
+import { tgSend } from "../shared/notify";
 import { fetchGateFeedbacks } from "../shared/wb-delivery-api";
+import { KEY_OUTCOMES_STREAM, recordKeyOutcome, setKeyOutcomeSink, summarizeKeyOutcomes, type KeyOutcomesState } from "../shared/key-outcomes";
+
+/** Человеческие названия исходов ключа для `/key_stats`. */
+const KEY_RESULT_LABEL: Record<string, string> = {
+  no_universe: "нет плейса", games_hidden: "игра скрыта (нет права inventory)", bad_key: "ключ не принят",
+  bad_scope: "нет прав game-passes", bad_scope_write: "нет галочки write", key_other_account: "ключ с другого аккаунта",
+  not_authorized: "ключ не к этой игре", bad_game_link: "кривая ссылка на игру", nick_not_found: "ник не найден",
+  roblox_error: "Roblox отказал", network: "сеть", rate_limited: "лимит Roblox", bad_price: "цена",
+};
 
 /* ─────────────────────────────────────────────────────────────────────────────
    🎟 Коды Roblox и приглашения в Telegram-боте (15.11.2026).
@@ -153,6 +165,20 @@ export function registerCodesShop(bot: Telegraf): void {
     await ctx.reply(updated.count ? `👀 Отзыв ${id} снова на сайте.` : "Такого отзыва нет.");
   });
 
+  // 🔑 Почему ключ не сработал — сводка за 7 дней (только админы).
+  setKeyOutcomeSink((entry) => { void recordKeyOutcome(db as never, { via: "tg-bot", ...entry }); });
+  bot.command("key_stats", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    const row = await db.wbSyncCursor.findUnique({ where: { stream: KEY_OUTCOMES_STREAM } });
+    const sum = summarizeKeyOutcomes((row?.metadata ?? null) as KeyOutcomesState | null, 7);
+    if (sum.total === 0) {
+      await ctx.reply("🔑 За 7 дней попыток ключа ещё не было (учёт ведётся с 15.11.2026).");
+      return;
+    }
+    const lines = sum.failures.map(([result, n]) => `• ${KEY_RESULT_LABEL[result] ?? result} — ${n}`);
+    await ctx.reply(`🔑 Ключ Roblox за 7 дней: ${sum.total} попыток, сработал ${sum.ok} (${Math.round((sum.ok / sum.total) * 100)}%)${lines.length ? `\n\nОтказы:\n${lines.join("\n")}` : ""}`);
+  });
+
   startCodesWorkers();
 }
 
@@ -186,4 +212,18 @@ function startCodesWorkers(): void {
   };
   setTimeout(reviews, 2 * 60_000);
   setInterval(reviews, 60 * 60_000);
+
+  // 📰 Часовая сводка «Ленты заказов» — в начале каждого часа (проверка раз в минуту).
+  let lastHour = new Date().getUTCHours();
+  setInterval(() => {
+    const hour = new Date().getUTCHours();
+    if (hour === lastHour) return;
+    lastHour = hour;
+    void flushAdminDigest(db as never, async (text) => {
+      const targets = await adminTargets("feed", { loud: false });
+      const results = await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, { parse_mode: "HTML", ...t.extra })));
+      return results.some((r) => r.status === "fulfilled");
+    }).then((n) => { if (n) console.log(`[admin-digest] отправлено строк: ${n}`); })
+      .catch((error) => console.warn("[admin-digest]", (error as Error)?.message));
+  }, 60_000);
 }

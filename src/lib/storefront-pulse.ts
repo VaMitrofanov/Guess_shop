@@ -24,7 +24,11 @@ export type StorefrontPulse = {
   feed: PulseFeedItem[];
   todayCount: number;
   showFeed: boolean;
-  totals: { orders: number; robux: number };
+  /** `robux` — сколько получили покупатели (чистые); `gross` — цена выкупленных
+   *  геймпассов (с комиссией Roblox 30 %) плюс номиналы кодов. На витрине — `gross`
+   *  с подписью «прошло через RobloxBank» (решение владельца 15.11.2026: «грязные
+   *  больше»), но НЕ «выдано покупателям» — покупатели получили `robux`. */
+  totals: { orders: number; robux: number; gross: number };
   reviews: { id: string; name: string; text: string; date: string }[];
   reviewsTotal: number;
   /** Страница отзывов товара на WB (по самому свежему отобранному отзыву). */
@@ -47,7 +51,7 @@ const TTL_MS = 60_000;
 export async function storefrontPulse(now = new Date()): Promise<StorefrontPulse> {
   if (cache && now.getTime() - cache.at < TTL_MS) return cache.value;
   const since = moscowDayStart(now);
-  const [codes, gamepasses, wbTotals, codeTotals, reviews, reviewsTotal] = await Promise.all([
+  const [codes, gamepasses, wbTotals, wbGross, codeTotals, reviews, reviewsTotal] = await Promise.all([
     prisma.codeOrder.findMany({
       where: { status: "ISSUED", issuedAt: { gte: since } },
       orderBy: { issuedAt: "desc" },
@@ -61,6 +65,7 @@ export async function storefrontPulse(now = new Date()): Promise<StorefrontPulse
       select: { amount: true, completedAt: true },
     }),
     prisma.wbOrder.aggregate({ where: { status: "COMPLETED" }, _count: { _all: true }, _sum: { amount: true } }),
+    prisma.$queryRaw<{ gross: bigint | null }[]>`SELECT SUM(CEIL(amount / 0.7))::bigint AS gross FROM "WbOrder" WHERE status = 'COMPLETED'`,
     prisma.codeOrder.aggregate({ where: { status: "ISSUED" }, _count: { _all: true }, _sum: { denomination: true } }),
     prisma.wbReview.findMany({
       where: { eligible: true, hidden: false },
@@ -95,6 +100,7 @@ export async function storefrontPulse(now = new Date()): Promise<StorefrontPulse
     totals: {
       orders: wbTotals._count._all + codeTotals._count._all,
       robux: (wbTotals._sum.amount ?? 0) + (codeTotals._sum.denomination ?? 0),
+      gross: Number(wbGross[0]?.gross ?? 0) + (codeTotals._sum.denomination ?? 0),
     },
     reviews: reviews.map((review) => ({ id: review.id, name: review.authorName, text: review.text, date: review.wbCreatedAt.toISOString() })),
     reviewsTotal,

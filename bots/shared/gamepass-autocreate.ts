@@ -17,6 +17,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { createGamePassForUserRouted } from "./roblox";
+import { emitKeyOutcome } from "./key-outcomes";
 import { MAX_AUTO_PARTS } from "./gamepass-plan";
 import { auditGamepassAutocreated, type OrderAuditClient } from "./order-audit";
 import {
@@ -105,6 +106,7 @@ export async function createPassesByKey(opts: {
     if (!res.ok || !res.gamePassId) {
       const error = res.error ?? "roblox_error";
       console.warn(`[gamepass-autocreate] отказ: ${error} (создано ${created.length})`);
+      emitKeyOutcome({ result: error, nick: opts.nick });
       return { created, error };
     }
     created.push({
@@ -115,6 +117,7 @@ export async function createPassesByKey(opts: {
     });
   }
   console.log(`[gamepass-autocreate] создано пассов: ${created.length}`);
+  emitKeyOutcome({ result: "ok", nick: opts.nick });
   return { created };
 }
 

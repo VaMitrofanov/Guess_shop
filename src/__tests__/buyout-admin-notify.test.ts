@@ -42,6 +42,7 @@ describe("buyout admin notifications", () => {
     process.env = {
       ...realEnv,
       TG_TOKEN: "test-token",
+      ADMIN_DIGEST: "off",
       ADMIN_IDS: "111,222,111",
       VALIDATOR_SOURCE_URL: "",
     };
@@ -60,7 +61,7 @@ describe("buyout admin notifications", () => {
 
   it("does not fail when Telegram is not configured", async () => {
     global.fetch = jest.fn() as typeof fetch;
-    process.env = { ...realEnv, TG_TOKEN: "", ADMIN_IDS: "", TG_CHAT_ID: "" };
+    process.env = { ...realEnv, TG_TOKEN: "", ADMIN_IDS: "", TG_CHAT_ID: "", ADMIN_DIGEST: "off" };
 
     await expect(notifyRetailBuyoutAdmins({
       source: "twa-order",

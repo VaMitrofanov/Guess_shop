@@ -1,6 +1,8 @@
 import { sendTelegramMessage } from "@/lib/telegram";
 import { adminTargets, groupSafeMarkup, replyToRootFor } from "../../bots/shared/admin-route";
 import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
+import { queueAdminDigest } from "../../bots/shared/admin-digest";
+import { prisma } from "@/lib/prisma";
 
 /**
  * «Пассы созданы ключом покупателя — ключ вставил админ».
@@ -89,6 +91,11 @@ export function buildKeyCreatedAdminCard(input: KeyCreatedAdminInput): string {
 export async function notifyAdminsKeyCreated(
   input: KeyCreatedAdminInput,
 ): Promise<{ admins: number; sent: number }> {
+  // Всё сошлось — строка в часовую сводку (15.11.2026); вопросы — отдельной карточкой.
+  if (process.env.ADMIN_DIGEST !== "off" && !input.passes.some(passNeedsHands) && !input.error) {
+    await queueAdminDigest(prisma as never, `🔑 пасс по ключу · <code>${escapeHtml(input.wbCode)}</code>${input.amount ? ` · ${input.amount.toLocaleString("ru-RU")} R$` : ""} · ${escapeHtml(input.adminName)}`);
+    return { admins: 1, sent: 1 };
+  }
   const token = process.env.TG_TOKEN;
   // Пасс создан по ключу — автоматика сделала своё: тихо в «📦 Ленту».
   const recipients = await adminTargets("feed", { loud: false });

@@ -48,10 +48,13 @@ export function paBusinessReplyEnabled(env: NodeJS.ProcessEnv = process.env): bo
 export function registerPaBusiness(bot: Telegraf): void {
   // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
   registerPaAiAdmin(bot);
+  // Тема «Апдейты» + публикация клиентам по кнопке (14.11.2026). ДО защиты
+  // беседы: она пропускает нажатия кнопок только из «Уведов», а «Апдейты»
+  // живут в беседе админов — «Опубликовать» молча отбрасывалось (15.11.2026).
+  // Права проверяет сам обработчик (только ADMIN_IDS).
+  registerReleaseNotes(bot);
   // Беседа админов: защита от ответов в группе, ассистент, темы, сводка.
   registerPaGroup(bot);
-  // Тема «Апдейты» + публикация клиентам по кнопке (14.11.2026).
-  registerReleaseNotes(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (method: string, payload: Record<string, unknown>) => (bot.telegram as any).callApi(method, payload);
 

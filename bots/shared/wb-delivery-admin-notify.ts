@@ -7,6 +7,7 @@ import {
 } from "./notify-format";
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
 import { adminTargets, adminTargetsForNotice, replyToRootFor } from "./admin-route";
+import { noteBuyerMessage } from "./buyer-conversation-notice";
 
 const ADMIN_IDS: string[] = [...new Set(
   (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
@@ -72,16 +73,25 @@ function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
 // (`pushDbsCard`), которая переписывает саму себя. Отдельным сообщением уходит
 // только то, что требует человека — редактирование в Telegram не даёт звука.
 
-/** `who` — кто это у нас (`buyer-identity.ts`), обычный текст. */
+/**
+ * Сообщение покупателя — один увед на разговор (15.11.2026,
+ * `buyer-conversation-notice.ts`): следующие сообщения в течение 10 минут
+ * дописываются в него правкой без звука, «спасибо»/«ок» нового уведа не
+ * открывают. `who` — кто это у нас (`buyer-identity.ts`), берём первую строку.
+ */
 export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: string[] = []) {
-  const preview = textPreview.length > 120 ? textPreview.slice(0, 117) + "…" : textPreview;
-  broadcast({
-    marker: "action",
-    zone: "DBS",
-    title: "сообщение покупателя",
-    lines: [refLine(ref), ...who.map((line) => escapeHtml(line)), `<i>${escapeHtml(preview)}</i>`],
-    next: "ответить из консоли DBS или из кабинета WB",
-  }, ref);
+  const notice = { marker: "action" as const, zone: "DBS" as const };
+  void adminTargetsForNotice(notice).then((targets) => noteBuyerMessage({
+    conversationKey: `dbs:${ref.wbOrderId}`,
+    head: refLine(ref),
+    who: who[0] ?? null,
+    text: textPreview,
+    targets: targets.map((t) => ({ key: t.key, chatId: t.chatId, extra: { parse_mode: "HTML", ...replyToRootFor(ref.cardMessages, t), ...t.extra } })),
+    io: {
+      send: async (target, text) => tgMessageId(await tgSend(target.chatId, text, target.extra)),
+      edit: (target, messageId, text) => tgEdit(target.chatId, messageId, text, { parse_mode: "HTML" }),
+    },
+  })).catch((err) => console.warn(`[dbs-notify] сообщение покупателя: ${err instanceof Error ? err.message : err}`));
 }
 
 /** Новые находки сверки денег WB с выдачей — одним сообщением на проход. */

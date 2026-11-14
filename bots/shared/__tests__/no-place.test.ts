@@ -92,17 +92,20 @@ describe("шаги и кадры", () => {
 describe("админам и в заказ", () => {
   it("карточка называет код, ник и что ушло покупателю", () => {
     const text = placeHelpAdminText({ via: "tg-bot", verdict: "no_universe", wbCode: "AB12CD3", denomination: 500, nick: "lox<23>", buyer: "@kid" });
-    expect(text).toContain("нет плейса");
+    expect(text).toContain("застрял на плейсе");
     expect(text).toContain("AB12CD3");
     expect(text).toContain("lox&lt;23&gt;");
-    expect(text).toContain("Publish to Roblox");
+    expect(text.split("\n").length).toBeLessThanOrEqual(4);
   });
 
-  it("карточка не чаще раза в 30 минут на покупателя", () => {
+  it("карточка — только когда застрял: третий показ за сутки", () => {
     const t = 1_000_000_000;
-    expect(shouldNotifyPlaceHelp("tg:1", t)).toBe(true);
+    // Первые два показа — обычная работа инструкции, третий за сутки — «застрял».
+    expect(shouldNotifyPlaceHelp("tg:1", t)).toBe(false);
     expect(shouldNotifyPlaceHelp("tg:1", t + 60_000)).toBe(false);
     expect(shouldNotifyPlaceHelp("tg:1", t + 31 * 60_000)).toBe(true);
+    expect(shouldNotifyPlaceHelp("tg:1", t + 40 * 60_000)).toBe(false);
+    expect(shouldNotifyPlaceHelp("tg:2", t + 25 * 3_600_000)).toBe(false);
   });
 
   it("событие пишется в заказ и читается в карточке", async () => {
