@@ -33,6 +33,8 @@ export const CODES_CB = {
   pick: (denomination: number) => `codes_p:${denomination}`,
   back: "codes",
   myCodes: "codes_my",
+  /** «Я подписался» — перепроверить подписку на канал (скидка 1 %). */
+  subscribed: "codes_sub",
 } as const;
 
 export const CODES_PICK_RE = /^codes_p:(\d{3,5})$/;
@@ -89,6 +91,10 @@ export interface CodesViewer {
   salesOpen: boolean;
   /** Код уходит сам в момент оплаты (склад) или готовится вручную. */
   instant: boolean;
+  /** Подписан на канал/группу (условие скидки 1 %); undefined — не знаем. */
+  subscribed?: boolean;
+  /** Куда подписываться: TG-канал для TG, группа для ВК. */
+  channelUrl?: string;
 }
 
 export interface CodesButton {
@@ -119,9 +125,12 @@ export function codesStoreScreen(viewer: CodesViewer, siteUrl: string): CodesScr
   lines.push("🔒 Пароль от Roblox не нужен.");
   lines.push("");
   const progress = codeDiscountProgress(viewer.invitedCount);
+  const needsSubscribe = viewer.subscribed === false && viewer.discountPercent === 0 && Boolean(viewer.channelUrl);
   lines.push(viewer.discountPercent > 0
     ? `💜 Твоя скидка <b>${viewer.discountPercent}%</b> — уже в ценах ниже${progress.next ? ` · до ${progress.next.percent}% — ещё ${progress.next.remaining} ${friendsWord(progress.next.remaining)}` : ""}`
-    : "💜 Цены ниже — без скидки");
+    : needsSubscribe
+      ? "📢 <b>Подпишись на наш канал — и скидка 1% на все коды</b>, навсегда. Розыгрыши кодов — тоже там."
+      : "💜 Цены ниже — без скидки");
   if (!viewer.salesOpen) {
     lines.push("");
     lines.push("⏳ Продажа кодов откроется совсем скоро — цены уже здесь.");
@@ -141,10 +150,15 @@ export function codesStoreScreen(viewer: CodesViewer, siteUrl: string): CodesScr
       };
     }));
   }
-  rows.push([
-    { label: "🎁 В подарок", url: `${siteUrl}/?gift=1#codes` },
-    { label: "🤝 Скидка до 5%", command: CODES_CB.invite },
-  ]);
+  rows.push(needsSubscribe
+    ? [
+        { label: "📢 Подписаться", url: viewer.channelUrl! },
+        { label: "✅ Я подписался", command: CODES_CB.subscribed, primary: true },
+      ]
+    : [
+        { label: "🎁 В подарок", url: `${siteUrl}/?gift=1#codes` },
+        { label: "🤝 Скидка до 5%", command: CODES_CB.invite },
+      ]);
   const html = lines.join("\n");
   return { html, plain: stripTags(html).trim(), rows };
 }

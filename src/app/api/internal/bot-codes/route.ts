@@ -5,6 +5,7 @@ import { CodeOrderError, codesSalesOpen, createCodeOrder, payUrlFor } from "@/li
 import { claimReferralCode, ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
 import { codesInstantDelivery } from "@/lib/codes/fulfillment";
 import { internalNoStore, readSignedJson } from "@/lib/codes/internal-auth";
+import { TG_CHANNEL_URL, VK_GROUP_URL } from "@/lib/codes/subscription";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 const Base = z.object({ platform: z.enum(["TG", "VK"]), subject: z.string().trim().regex(/^\d{1,20}$/) });
 const Schema = z.discriminatedUnion("action", [
-  Base.extend({ action: z.literal("view") }),
+  Base.extend({ action: z.literal("view"), recheck: z.boolean().optional() }),
   Base.extend({ action: z.literal("order"), denomination: z.number().int().positive(), idempotencyKey: z.uuid() }),
   Base.extend({ action: z.literal("referral"), code: z.string().trim().regex(/^[a-z0-9]{6,12}$/) }),
 ]);
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   try {
     if (input.action === "view") {
-      const [discount, referralCode] = await Promise.all([viewerCodeDiscount(user.id), ensureReferralCode(user.id)]);
+      const [discount, referralCode] = await Promise.all([viewerCodeDiscount(user.id, { forceSubscriptionCheck: input.recheck }), ensureReferralCode(user.id)]);
       return NextResponse.json({
         ok: true,
         salesOpen: codesSalesOpen(),
@@ -60,6 +61,8 @@ export async function POST(req: NextRequest) {
         invitedCount: discount.invitedCount,
         referralCode,
         siteLink: `${appUrl()}/r/${referralCode}`,
+        subscribed: discount.subscription?.subscribed ?? false,
+        channelUrl: input.platform === "VK" ? VK_GROUP_URL : TG_CHANNEL_URL,
       }, { headers: internalNoStore });
     }
 

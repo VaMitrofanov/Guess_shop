@@ -138,6 +138,15 @@ export function registerCodesShop(bot: Telegraf): void {
     await ctx.answerCbQuery().catch(() => undefined);
     await openInvite(ctx, true);
   });
+  bot.action(CODES_CB.subscribed, async (ctx) => {
+    const view = await botCodesView("TG", String(ctx.from?.id ?? ""), true).catch(() => null);
+    if (!view?.ok) {
+      await ctx.answerCbQuery("Не получилось проверить — попробуй через минуту").catch(() => undefined);
+      return;
+    }
+    await ctx.answerCbQuery(view.subscribed ? "✅ Подписка есть — скидка 1% уже в ценах" : "Пока не вижу подписки — подпишись и нажми ещё раз", { show_alert: !view.subscribed }).catch(() => undefined);
+    if (view.subscribed) await show(ctx, codesStoreScreen(view, siteUrl()), true);
+  });
   bot.action(CODES_PICK_RE, async (ctx) => {
     await ctx.answerCbQuery("Собираю заказ…").catch(() => undefined);
     await pick(ctx, Number(ctx.match[1]));

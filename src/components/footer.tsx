@@ -1,6 +1,7 @@
 import Link from "next/link";
 import PaymentMethods from "@/components/payment-methods";
 import PaymentStatusNotice from "@/components/payment-status-notice";
+import { LANDINGS } from "@/lib/seo/landings";
 
 const links = [
   { href: "/guide?source=site&amount=1000", label: "Инструкция" },
@@ -25,6 +26,14 @@ export default function Footer() {
             {links.map((item) => <Link key={item.href} href={item.href} className="hover:text-[var(--rb-accent)]">{item.label}</Link>)}
           </div>
         </div>
+        {/* 🔎 Перелинковка посадочных страниц (15.11.2026) — им нужен путь с каждой страницы сайта. */}
+        <nav aria-label="Полезное" className="mt-7 border-t border-[var(--rb-border)] pt-6">
+          <p className="mb-3 text-sm font-black uppercase tracking-[0.08em] text-[var(--rb-muted)]">Полезное</p>
+          <div className="flex flex-wrap gap-x-5 gap-y-2 text-base font-semibold text-[var(--rb-muted)]">
+            {LANDINGS.map((landing) => <Link key={landing.slug} href={`/${landing.slug}`} className="hover:text-[var(--rb-accent)]">{landing.h1}</Link>)}
+            <a href="https://t.me/Roblox_Bank_Tg" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--rb-accent)]">Наш канал в Telegram ↗</a>
+          </div>
+        </nav>
         <div className="mt-7 border-t border-[var(--rb-border)] pt-6">
           <p className="mb-3 text-sm font-black uppercase tracking-[0.08em] text-[var(--rb-muted)]">Платёжный партнёр и способы оплаты</p>
           {/* F2/F3: состояние витрины, а не аккаунта — подвал одинаков для гостя

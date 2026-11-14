@@ -76,6 +76,11 @@ model User {
   referredById            String?
   referredBy              User?               @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
   referredAt              DateTime?
+  /// Скидка 1 % на коды = регистрация + подписка на канал TG (вход через TG)
+  /// или группу ВК (вход через ВК) — решение владельца 15.11.2026. Кэш
+  /// последней проверки (`src/lib/codes/subscription.ts`).
+  channelSubscribed       Boolean             @default(false)
+  channelCheckedAt        DateTime?
   referrals               User[]              @relation("UserReferrals")
   codeOrders              CodeOrder[]
   wbCodes                 WbCode[]
@@ -1521,6 +1526,8 @@ model CodeOrder {
   /// Оценка «Всё прошло нормально?» с экрана после оплаты, 1–5.
   rating             Int?
   ratedAt            DateTime?
+  /// Напоминание о неоплаченном заказе ушло (одно на заказ).
+  payReminderSentAt  DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   payments           CodePayment[]

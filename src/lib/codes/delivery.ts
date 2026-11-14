@@ -306,3 +306,23 @@ export async function deliverIssuedCode(orderId: string, reason: "issued" | "man
   void reason;
   return { email, chat };
 }
+
+// ─── Напоминание о неоплаченном заказе (15.11.2026) ──────────────────────────
+
+export function buildPayReminderEmail(input: { denomination: number; amountRub: string; payUrl: string; share: boolean }): { subject: string; text: string; html: string } {
+  const amount = input.denomination.toLocaleString("ru-RU");
+  const lead = input.share
+    ? `Ссылка на оплату кода на ${amount} Robux ещё не оплачена. Если её оплачивает родитель — напомните ему, ссылка та же.`
+    : `Заказ кода на ${amount} Robux ждёт оплаты — цена ${input.amountRub} сохранена.`;
+  const subject = `Код на ${amount} Robux ждёт оплаты`;
+  const text = [lead, "", `Оплатить: ${input.payUrl}`, "", "Ссылка действует сутки с момента заказа. Если передумали — просто не оплачивайте.", "", `Поддержка: https://t.me/RobloxBank_PA`].join("\n");
+  const html = `<!doctype html><html lang="ru"><body style="margin:0;background:#f4f5fb;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#151827">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;padding:28px"><tr><td>
+<h1 style="margin:0 0 12px;font-size:22px;line-height:1.25">${escapeHtml(subject)}</h1>
+<p style="margin:0 0 18px;font-size:15px;line-height:1.55">${escapeHtml(lead)}</p>
+<a href="${escapeHtml(input.payUrl)}" style="display:block;text-align:center;background:#7c5cff;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:15px 18px;border-radius:14px">Оплатить ${escapeHtml(input.amountRub)}</a>
+<p style="margin:16px 0 0;font-size:13px;color:#6b6f86;line-height:1.5">Ссылка действует сутки с момента заказа. Если передумали — просто не оплачивайте, ничего не спишется.</p>
+</td></tr></table></td></tr></table></body></html>`;
+  return { subject, text, html };
+}

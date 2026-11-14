@@ -25,6 +25,7 @@ const PUBLIC_MODULES = [
   "src/app/storefront2.module.css",
   "src/app/gift/[token]/gift.module.css",
   "src/app/pay/[token]/after-payment.module.css",
+  "src/components/seo/landing.module.css",
   "src/app/auth-shell.module.css",
   "src/app/public-sections.module.css",
   "src/app/error-pages.module.css",

@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { LANDINGS } from "@/lib/seo/landings";
 
 // Served at /sitemap.xml. Public, indexable pages only — no app/admin routes.
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -10,6 +11,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/guarantees",     priority: 0.6, changeFrequency: "monthly" },
     { path: "/pending",        priority: 0.6, changeFrequency: "monthly" },
     { path: "/reviews",        priority: 0.6, changeFrequency: "weekly"  },
+    // 🔎 Посадочные под поиск (15.11.2026).
+    ...LANDINGS.map((landing) => ({ path: `/${landing.slug}`, priority: 0.8, changeFrequency: "monthly" as const })),
     // Legal pages intentionally stay out until owner requisites replace every
     // placeholder and the texts pass legal acceptance.
   ];

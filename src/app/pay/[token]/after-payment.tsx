@@ -195,7 +195,7 @@ export default function AfterPayment(props: {
         ) : (
           <>
             <h2 id="invite-title">Следующий код — дешевле</h2>
-            <p>С аккаунтом скидка 1% сразу и до 5% — за друзей, которые купят код по вашей ссылке.</p>
+            <p>С аккаунтом и подпиской на канал — скидка 1%, и до 5% — за друзей, которые купят код по вашей ссылке.</p>
             <Link className={styles.inviteButton} href="/register?next=%2Fdashboard%23referral">Получить скидку</Link>
           </>
         )}

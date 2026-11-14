@@ -10,6 +10,8 @@ import GiftArt from "@/components/gift-art";
 import { HeroProof, HeroPulse, ReviewsMarquee, WbReviewsLink } from "@/components/storefront-pulse";
 import { CODE_DISCOUNT_TIERS, CODE_PRICES } from "@/lib/codes-pricing";
 import { codesInstantDelivery } from "@/lib/codes/fulfillment";
+import { Garland, NewYearScene, Snowfall } from "@/components/new-year";
+import { isNewYearSeason } from "@/lib/new-year";
 import styles from "./storefront2.module.css";
 
 // D11: canonical объявляется на самой странице, а не в корневом layout —
@@ -33,8 +35,10 @@ const minCodePrice = Math.min(...Object.values(CODE_PRICES));
  * Код — первым и крупно; геймпасс — вторым: «дешевле, но с ожиданием».
  * Сроков ожидания не называем нигде (правило 26.10.2026).
  */
-export default function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ ny?: string }> }) {
   const instant = codesInstantDelivery();
+  // 🎄 Новогоднее оформление: само с 1 декабря по 14 января (МСК), предпросмотр — `/?ny=1`.
+  const ny = isNewYearSeason() || (await searchParams).ny === "1";
   const trust = [
     { icon: LockKeyhole, title: "Без пароля", text: "Пароль от Roblox не нужен" },
     instant
@@ -47,38 +51,61 @@ export default function Home() {
   return (
     <main className={styles.page}>
       <Navbar />
+      {ny && <Snowfall />}
 
       {/* ── Первый экран: код — главный способ ─────────────────────────── */}
-      <section className={styles.hero}>
+      <section className={`${styles.hero} ${ny ? styles.heroNY : ""}`}>
+        {ny && <div className={styles.garlandRow}><Garland /></div>}
         <div className={styles.heroCopy}>
-          <div className={styles.eyebrow}><span className={styles.statusDot} /> Коды активации Roblox</div>
-          {instant ? (
+          <div className={styles.eyebrow}><span className={styles.statusDot} /> {ny ? "🎄 Новогодние коды Roblox" : "Коды активации Roblox"}</div>
+          {ny ? (
+            <h1 className={styles.title}>Robux<br />под ёлку.<br /><span>Подари открыткой.</span></h1>
+          ) : instant ? (
             <h1 className={styles.title}>Robux<br />за минуту.<br /><span>Без ожидания.</span></h1>
           ) : (
             <h1 className={styles.title}>Robux<br />кодом.<br /><span>Сразу на баланс.</span></h1>
           )}
           <p className={styles.lead}>
-            {instant
+            {ny
+              ? "Код Robux в новогодней открытке: выберите номинал, напишите пару тёплых слов — и письмо придёт точно к празднику, хоть 31 декабря в 23:55. Без пароля от Roblox."
+              : instant
               ? "Код активации приходит сразу после оплаты — на почту или в кабинет. Без ожидания и без пароля от Roblox."
               : "Оплатите — пришлём код активации на почту или в кабинет. Ввели его на roblox.com/redeem — Robux сразу на балансе. Без пароля от Roblox."}
           </p>
           <div className={styles.heroActions}>
-            <a href="#codes" className={styles.buyCode}>
-              <b>Купить код</b>
-              <span>сразу на баланс · от {minCodePrice} ₽</span>
-            </a>
-            <a href="#calculator" className={styles.viaPass}>
-              <b>Через геймпасс</b>
-              <span>дешевле, но с ожиданием</span>
-            </a>
+            {ny ? (
+              <>
+                <a href="#gift" className={styles.buyCode}>
+                  <b>🎁 Подарить открыткой</b>
+                  <span>открытка в нужный день · от {minCodePrice} ₽</span>
+                </a>
+                <a href="#codes" className={styles.viaPass}>
+                  <b>Купить код себе</b>
+                  <span>сразу на баланс</span>
+                </a>
+              </>
+            ) : (
+              <>
+                <a href="#codes" className={styles.buyCode}>
+                  <b>Купить код</b>
+                  <span>сразу на баланс · от {minCodePrice} ₽</span>
+                </a>
+                <a href="#calculator" className={styles.viaPass}>
+                  <b>Через геймпасс</b>
+                  <span>дешевле, но с ожиданием</span>
+                </a>
+              </>
+            )}
           </div>
           <HeroProof />
         </div>
 
         <div className={styles.heroSide}>
+          {ny && <NewYearScene />}
           <HeroPulse />
           {/* Код с карточки Wildberries. Обычный `<a>`: `?source=wb` обслуживает
               инструкция, клиентский переход Next туда не нужен. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- намеренно полная загрузка */}
           <a className={styles.wbCard} href="/guide?source=wb">
             <span>
               <b>Купил карточку на Wildberries?</b>
@@ -101,7 +128,7 @@ export default function Home() {
 
       {/* ── Покупка: код первым и крупнее, геймпасс — вторым ───────────── */}
       <section className={styles.buy}>
-        <CodesStore instant={instant} />
+        <CodesStore instant={instant} festive={ny} />
         <div id="calculator" className={styles.passColumn}>
           <div className={styles.passHead}>
             <div className={styles.passTitle}>
@@ -186,14 +213,14 @@ export default function Home() {
         <div className={styles.inviteCopy}>
           <span className={styles.kicker}>Приглашай друзей</span>
           <h2 id="invite-title">Скидка на коды растёт вместе с друзьями</h2>
-          <p>1% сразу после регистрации. Друг купил код по твоей ссылке — он засчитан. Скидка остаётся навсегда — на сайте и в наших ботах.</p>
-          <a href="/dashboard#referral" className={styles.inviteCta}>Получить ссылку <ArrowRight size={17} /></a>
+          <p>1% — за регистрацию и подписку на наш канал. Друг купил код по твоей ссылке — он засчитан. Скидка остаётся навсегда — на сайте и в наших ботах.</p>
+          <Link href="/dashboard#referral" className={styles.inviteCta}>Получить ссылку <ArrowRight size={17} /></Link>
         </div>
         <ol className={styles.tiers}>
           {CODE_DISCOUNT_TIERS.map((tier, index) => (
             <li key={tier.percent}>
               <b>{tier.percent}%</b>
-              <span>{tier.invited === 0 ? "регистрация" : `${tier.invited} ${tier.invited === 3 ? "друга" : "друзей"}`}</span>
+              <span>{tier.invited === 0 ? "регистрация + канал" : `${tier.invited} ${tier.invited === 3 ? "друга" : "друзей"}`}</span>
               <i aria-hidden="true" style={{ height: `${24 + index * 18}px` }} />
             </li>
           ))}

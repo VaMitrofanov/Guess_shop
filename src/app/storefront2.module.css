@@ -204,3 +204,19 @@
 :global(html[data-theme="dark"]) .giftCopy p { color:#d9c6d2; }
 :global(html[data-theme="dark"]) .giftCopy .kicker { color:#ff9ccc; }
 :global(html[data-theme="dark"]) .bottomCta { background:#1d1530; border:1px solid #3a304b; }
+
+/* 🎄 Новогодний первый экран (15.11.2026; сезон 1.12–14.01, предпросмотр /?ny=1) */
+.heroNY { position:relative; margin-top:18px; padding:20px 36px 44px; border-radius:32px; background:radial-gradient(circle at 80% 0%,rgba(140,200,255,.25),transparent 40%),linear-gradient(170deg,#0f2a52 0%,#16203f 55%,#24184a 100%); color:#f4f0ff; box-shadow:0 30px 80px rgba(15,42,82,.35); }
+.heroNY .eyebrow { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18); color:#ffe08a; }
+.heroNY .title span { color:#ffd36b; }
+.heroNY .lead { color:#cdd6f0; }
+.heroNY .viaPass { background:rgba(255,255,255,.06); border-color:#f4f0ff; color:#f4f0ff; }
+.heroNY .viaPass span { color:#cdd6f0; }
+.heroNY .buyCode { background:linear-gradient(135deg,#e8364f,#ff6a7a); box-shadow:4px 4px 0 #ffd36b; }
+.heroNY .proof small { color:#cdd6f0; }
+.garlandRow { grid-column:1 / -1; margin:0 -20px; }
+.heroNY .pulseCard,.heroNY .wbCard { color:var(--rb-text); }
+@media (max-width: 640px) {
+  .heroNY { padding:12px 16px 28px; border-radius:24px; }
+  .garlandRow { margin:0 -8px; }
+}

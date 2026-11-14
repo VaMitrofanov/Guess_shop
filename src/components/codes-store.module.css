@@ -194,7 +194,7 @@
 .packHit { position:absolute; top:-10px; left:10px; padding:3px 10px; border-radius:999px; background:#ff8a3d; color:#3d1a02; font-size:12px; font-weight:900; letter-spacing:.06em; box-shadow:2px 2px 0 #45d6aa; }
 .summaryGreen { margin:8px 0 0; color:#2f8c6d; font-size:14px; font-weight:800; line-height:1.4; }
 .wide { width:100%; margin-top:14px; min-height:58px; font-size:16.5px; }
-.parentLink { margin:12px auto 0; padding:6px; display:flex; align-items:center; justify-content:center; gap:6px; border:0; background:none; color:#6f6782; font:inherit; font-size:14px; font-weight:650; cursor:pointer; text-align:center; }
+.parentLink { margin:12px auto 0; padding:6px; display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px 6px; border:0; background:none; color:#6f6782; font:inherit; font-size:14px; font-weight:650; cursor:pointer; text-align:center; }
 .parentLink span { color:#7556e8; font-weight:850; text-decoration:underline; text-underline-offset:3px; }
 .parentLink:disabled { opacity:.5; cursor:not-allowed; }
 .giftForm { margin-top:16px; padding:16px; border:1px solid #f1cfe0; border-radius:20px; background:linear-gradient(160deg,#fff4dc,#ffe6f1 60%,#f1ebff); }
@@ -255,3 +255,20 @@
 :global(html[data-theme="dark"]) .stickyBar { background:rgba(21,17,32,.97); border-color:#3a304b; }
 :global(html[data-theme="dark"]) .stickyBar small { color:#b6aec6; }
 :global(html[data-theme="dark"]) .stickyBar button { box-shadow:3px 3px 0 #45d6aa; }
+
+/* Скидка 1 % = регистрация + подписка (15.11.2026) */
+.subscribe { margin-top:10px; padding:12px; border-radius:13px; background:#fff; border:1.5px dashed #7556e8; display:grid; gap:8px; }
+.subscribeTitle { margin:0; display:flex; align-items:flex-start; gap:7px; font-size:14.5px; font-weight:750; line-height:1.4; color:#251b3f; }
+.subscribeTitle svg { flex:0 0 auto; margin-top:3px; color:#7556e8; }
+.subscribeNote { margin:0; color:#6f6782; font-size:14px; line-height:1.45; }
+.subscribeNote a { color:#7556e8; font-weight:850; text-decoration:underline; }
+.subscribeActions { display:flex; flex-wrap:wrap; gap:8px; }
+.subscribeActions a,.subscribeActions button { min-height:44px; padding:0 14px; display:inline-flex; align-items:center; gap:6px; border-radius:11px; font:inherit; font-size:14.5px; font-weight:850; cursor:pointer; text-decoration:none; }
+.subscribeActions a { background:#229ED9; color:#fff; border:0; }
+.subscribeActions a + a { background:#0077FF; }
+.subscribeActions button { border:2px solid #251b3f; background:#fff; color:#251b3f; }
+.subscribeActions a:focus-visible,.subscribeActions button:focus-visible { outline:3px solid #45d6aa; outline-offset:2px; }
+:global(html[data-theme="dark"]) .subscribe { background:#100d18; border-color:#a68bff; }
+:global(html[data-theme="dark"]) .subscribeTitle { color:#f4f0ff; }
+:global(html[data-theme="dark"]) .subscribeNote { color:#b6aec6; }
+:global(html[data-theme="dark"]) .subscribeActions button { background:#100d18; color:#f4f0ff; border-color:#a68bff; }

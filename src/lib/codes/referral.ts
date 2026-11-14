@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { codeDiscountPercent, codeDiscountProgress, type CodeDiscountProgress } from "@/lib/codes-pricing";
+import { CODE_SIGNUP_DISCOUNT_PERCENT, codeDiscountPercent, codeDiscountProgress, type CodeDiscountProgress } from "@/lib/codes-pricing";
+import { channelSubscription, type SubscriptionCheck } from "@/lib/codes/subscription";
 
 /**
  * Программа приглашений для кодов активации.
@@ -136,16 +137,31 @@ export interface ViewerDiscount {
   percent: number;
   invitedCount: number;
   progress: CodeDiscountProgress | null;
+  /** Подписан ли на канал/группу и чем это можно проверить. */
+  subscription: SubscriptionCheck | null;
 }
 
-export async function viewerCodeDiscount(userId: string | null | undefined): Promise<ViewerDiscount> {
-  if (!userId) return { registered: false, percent: 0, invitedCount: 0, progress: null };
-  const invitedCount = await countQualifiedInvites(userId);
+/**
+ * Базовый 1 % — регистрация + подписка на канал (15.11.2026). Уровни за
+ * друзей (2–5 %) от подписки не зависят: их человек заработал приглашениями.
+ */
+export function discountWithSubscription(invitedCount: number, subscribed: boolean): number {
+  const percent = codeDiscountPercent({ registered: true, invitedCount });
+  return percent <= CODE_SIGNUP_DISCOUNT_PERCENT && !subscribed ? 0 : percent;
+}
+
+export async function viewerCodeDiscount(userId: string | null | undefined, opts: { forceSubscriptionCheck?: boolean } = {}): Promise<ViewerDiscount> {
+  if (!userId) return { registered: false, percent: 0, invitedCount: 0, progress: null, subscription: null };
+  const [invitedCount, subscription] = await Promise.all([
+    countQualifiedInvites(userId),
+    channelSubscription(userId, { force: opts.forceSubscriptionCheck }),
+  ]);
   return {
     registered: true,
-    percent: codeDiscountPercent({ registered: true, invitedCount }),
+    percent: discountWithSubscription(invitedCount, subscription.subscribed),
     invitedCount,
     progress: codeDiscountProgress(invitedCount),
+    subscription,
   };
 }
 

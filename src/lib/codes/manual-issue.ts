@@ -2,7 +2,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { activationCodeHmac, encryptActivationCode, normalizeActivationCode } from "@/lib/codes/secrets";
 import { deliverIssuedCode, sendGiftEmail, type CodeEmailResult } from "@/lib/codes/delivery";
-import { sendCodeToChat } from "@/lib/codes/chat-notify";
+import { sendCodeToChat, sendPayReminderToChat } from "@/lib/codes/chat-notify";
+import { buildPayReminderEmail } from "@/lib/codes/delivery";
+import { payUrlFor } from "@/lib/codes/orders";
+import { formatRubKopecks } from "@/lib/codes-pricing";
+import { sendMail } from "@/lib/mailer";
 
 /**
  * Ручная выдача кода по оплаченному заказу (15.11.2026, `CODES_BACKORDER`).
@@ -85,7 +89,52 @@ class ConcurrentIssue extends Error {}
  * Тик раз в минуту (зовёт TG-бот): отложенные подарки, у которых подошло
  * время, и сообщения в чат, которые не ушли с первого раза.
  */
-export async function runCodesTick(now = new Date()): Promise<{ gifts: number; chats: number }> {
+/**
+ * Напоминание о неоплаченном заказе (15.11.2026): через час после создания,
+ * один раз, пока предложение живо. Бот — сообщением с кнопкой, сайт — письмом
+ * (гостю на его почту, клиенту — на подтверждённую почту аккаунта).
+ */
+export async function remindUnpaidCodeOrders(now = new Date()): Promise<number> {
+  const orders = await prisma.codeOrder.findMany({
+    where: {
+      status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] },
+      paidAt: null,
+      payReminderSentAt: null,
+      createdAt: { lte: new Date(now.getTime() - 60 * 60 * 1000), gte: new Date(now.getTime() - 20 * 60 * 60 * 1000) },
+      offerExpiresAt: { gt: new Date(now.getTime() + 60 * 60 * 1000) },
+    },
+    select: {
+      id: true, denomination: true, finalAmountKopecks: true, channel: true, createdVia: true, deliveryMode: true, recipientEmail: true,
+      creator: { select: { email: true, emailVerifiedAt: true } },
+    },
+    take: 20,
+  });
+  let sent = 0;
+  for (const order of orders) {
+    // Сначала отметка — второй тик не напомнит повторно, даже если отправка упадёт.
+    const claimed = await prisma.codeOrder.updateMany({ where: { id: order.id, payReminderSentAt: null }, data: { payReminderSentAt: now } });
+    if (claimed.count !== 1) continue;
+    const payUrl = payUrlFor(order.id);
+    const amountRub = formatRubKopecks(order.finalAmountKopecks).replace(/\u00a0/g, " ");
+    let ok: boolean | null = null;
+    if (order.channel === "TG" || order.channel === "VK") {
+      ok = await sendPayReminderToChat(order.id, payUrl, amountRub).catch(() => false);
+    } else {
+      const to = order.deliveryMode === "EMAIL" ? order.recipientEmail : order.creator?.emailVerifiedAt ? order.creator.email : null;
+      if (to) {
+        const mail = buildPayReminderEmail({ denomination: order.denomination, amountRub, payUrl, share: order.createdVia === "SHARE" });
+        ok = (await sendMail({ to, ...mail }).catch(() => ({ ok: false }))).ok;
+      }
+    }
+    if (ok) sent += 1;
+    await prisma.codeOrderEvent.create({
+      data: { orderId: order.id, type: ok ? "PAY_REMINDER_SENT" : "PAY_REMINDER_SKIPPED", idempotencyKey: `code-pay-reminder:${order.id}`, payload: {} },
+    }).catch(() => undefined);
+  }
+  return sent;
+}
+
+export async function runCodesTick(now = new Date()): Promise<{ gifts: number; chats: number; reminders: number }> {
   const dueGifts = await prisma.codeOrder.findMany({
     where: {
       status: "ISSUED",
@@ -113,5 +162,9 @@ export async function runCodesTick(now = new Date()): Promise<{ gifts: number; c
   for (const order of pendingChats) {
     if (await sendCodeToChat(order.id).catch(() => false)) chats += 1;
   }
-  return { gifts, chats };
+  const reminders = await remindUnpaidCodeOrders(now).catch((error) => {
+    console.warn("[codes] напоминания:", (error as Error)?.message);
+    return 0;
+  });
+  return { gifts, chats, reminders };
 }

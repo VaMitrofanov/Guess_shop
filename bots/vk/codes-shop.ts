@@ -118,6 +118,17 @@ export async function tryVkCodesShop(ctx: MessageContext, vkUserId: number, rawR
   const command = typeof payload?.command === "string" ? payload.command : null;
   if (command === CODES_CB.open) { await openVkCodesStore(ctx, vkUserId); return true; }
   if (command === CODES_CB.invite) { await openVkInvite(ctx, vkUserId); return true; }
+  if (command === CODES_CB.subscribed) {
+    const view = await botCodesView("VK", String(vkUserId), true).catch(() => null);
+    if (!view?.ok) { await sorry(ctx); return true; }
+    if (!view.subscribed) {
+      await ctx.reply(`Пока не вижу подписки на группу — вступи и нажми «✅ Я подписался» ещё раз: ${view.channelUrl}`);
+      return true;
+    }
+    await ctx.reply("✅ Подписка есть — скидка 1% уже в ценах.");
+    await openVkCodesStore(ctx, vkUserId);
+    return true;
+  }
   const picked = command ? CODES_PICK_RE.exec(command) : null;
   if (picked) { await pickVk(ctx, vkUserId, Number(picked[1])); return true; }
 

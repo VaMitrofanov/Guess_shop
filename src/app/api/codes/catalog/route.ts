@@ -6,6 +6,7 @@ import { viewerCodeDiscount } from "@/lib/codes/referral";
 import { claimReferralFromCookies, noStore, sessionUserId } from "@/lib/codes/http";
 import { prisma } from "@/lib/prisma";
 import { codesBackorderEnabled, codesInstantDelivery } from "@/lib/codes/fulfillment";
+import { TG_CHANNEL_URL, VK_GROUP_URL } from "@/lib/codes/subscription";
 import { codesHitDenomination } from "../../../../../bots/shared/codes-shop";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +45,10 @@ export async function GET() {
       discountPercent: discount.percent,
       invitedCount: discount.invitedCount,
       next: discount.progress?.next ?? null,
+      subscribed: discount.subscription?.subscribed ?? false,
+      subscriptionVia: discount.subscription?.via ?? null,
     },
+    channels: { tg: TG_CHANNEL_URL, vk: VK_GROUP_URL },
     tiers: CODE_DISCOUNT_TIERS,
     hit: codesHitDenomination(),
     instant: codesInstantDelivery(),

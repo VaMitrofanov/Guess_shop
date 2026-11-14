@@ -43,6 +43,8 @@ export type BotCodesView = {
   invitedCount: number;
   referralCode: string;
   siteLink: string;
+  subscribed: boolean;
+  channelUrl: string;
 };
 
 export type BotCodeOrder = {
@@ -58,8 +60,8 @@ export type BotCodeOrder = {
 
 type Fail = { ok: false; code?: string; error?: string };
 
-export async function botCodesView(platform: "TG" | "VK", subject: string): Promise<BotCodesView | Fail> {
-  const { data } = await signedPost<BotCodesView | Fail>("/api/internal/bot-codes", { action: "view", platform, subject });
+export async function botCodesView(platform: "TG" | "VK", subject: string, recheck = false): Promise<BotCodesView | Fail> {
+  const { data } = await signedPost<BotCodesView | Fail>("/api/internal/bot-codes", { action: "view", platform, subject, ...(recheck ? { recheck: true } : {}) });
   return data;
 }
 

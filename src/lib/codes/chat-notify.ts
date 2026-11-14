@@ -125,6 +125,22 @@ export async function sendCodeToChat(orderId: string): Promise<boolean | null> {
   return ok;
 }
 
+/** Напоминание о неоплаченном заказе из бота: ссылка на оплату кнопкой. */
+export async function sendPayReminderToChat(orderId: string, payUrl: string, amountRub: string): Promise<boolean | null> {
+  const order = await chatTarget(orderId);
+  if (!order || (order.channel !== "TG" && order.channel !== "VK")) return null;
+  const amount = order.denomination.toLocaleString("ru-RU");
+  const html = `⏳ <b>Код на ${amount} Robux ждёт оплаты</b>\n\nЦена ${amountRub} сохранена. Оплатить можно по кнопке ниже — картой или СБП.`;
+  const plain = `⏳ Код на ${amount} Robux ждёт оплаты\n\nЦена ${amountRub} сохранена. Оплатить: ${payUrl}`;
+  if (order.channel === "TG" && order.creator?.tgId) {
+    return tgPost(order.creator.tgId, html, { inline_keyboard: [[{ text: `💳 Оплатить ${amountRub}`, url: payUrl }]] });
+  }
+  if (order.channel === "VK" && order.creator?.vkId) {
+    return vkPost(order.creator.vkId, plain, { inline: true, buttons: [[{ action: { type: "open_link", link: payUrl, label: `💳 Оплатить ${amountRub}` } }]] });
+  }
+  return null;
+}
+
 /** Ручной режим: «оплата прошла, код пришлём сюда же». */
 export async function sendPaidToChat(orderId: string): Promise<boolean | null> {
   const order = await chatTarget(orderId);

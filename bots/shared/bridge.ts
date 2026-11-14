@@ -44,6 +44,12 @@ import { telegramRequestInit } from "./telegram-photo";
  * fresh message every time. Message text, chat and sender stay off the wire. */
 export function telegramProxySuccessPayload(method: string, result: unknown) {
   if (method === "getChat" || method === "getChatMemberCount") return { ok: true, result };
+  // Подписка на канал (15.11.2026, скидка 1 % = регистрация + подписка): Web
+  // спрашивает getChatMember через мост — отдаём ТОЛЬКО статус участника.
+  if (method === "getChatMember") {
+    const status = (result as { status?: unknown } | null)?.status;
+    return { ok: true, result: { status: typeof status === "string" ? status : null } };
+  }
   if (method === "sendMessage" || method === "sendPhoto") {
     const messageId = (result as { message_id?: unknown } | null)?.message_id;
     if (typeof messageId === "number") return { ok: true, result: { message_id: messageId } };

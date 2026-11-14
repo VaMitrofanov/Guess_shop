@@ -57,7 +57,10 @@ type Catalog = {
     discountPercent: number;
     invitedCount: number;
     next: { percent: number; invited: number; remaining: number } | null;
+    subscribed?: boolean;
+    subscriptionVia?: "tg" | "vk" | "both" | "none" | null;
   };
+  channels?: { tg: string; vk: string };
 };
 
 type SavedOrder = {
@@ -144,7 +147,7 @@ function whenLabel(local: string): string {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-export default function CodesStore({ instant: instantProp = true }: { instant?: boolean }) {
+export default function CodesStore({ instant: instantProp = true, festive = false }: { instant?: boolean; festive?: boolean }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<number>(DEFAULT_PACK);
@@ -158,7 +161,8 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
   const [shared, setShared] = useState<SavedOrder | null>(null);
   const [copied, setCopied] = useState(false);
   const [resume, setResume] = useState<SavedOrder | null>(null);
-  const [theme, setTheme] = useState<GiftTheme>("BIRTHDAY");
+  // В новогодний сезон открытка по умолчанию — новогодняя.
+  const [theme, setTheme] = useState<GiftTheme>(festive ? "NEW_YEAR" : "BIRTHDAY");
   const [giftTo, setGiftTo] = useState("");
   const [giftEmail, setGiftEmail] = useState("");
   const [giftMessage, setGiftMessage] = useState("");
@@ -409,7 +413,7 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
         <div className={styles.segment} role="group" aria-label="Для кого код">
           <button type="button" aria-pressed={mode === "self"} className={mode === "self" ? styles.segmentOn : undefined} onClick={() => switchMode("self")}>Себе</button>
           <button type="button" aria-pressed={mode === "gift"} className={mode === "gift" ? styles.segmentOn : undefined} onClick={() => switchMode("gift")}>
-            <Gift size={15} /> В подарок
+            <Gift size={15} /> {festive ? "🎄 В подарок" : "В подарок"}
           </button>
         </div>
       </header>
@@ -471,7 +475,14 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
               <span>{mode === "gift" ? "В подарок" : "Код на"} <b>{robux(pack.denomination)} Robux</b></span>
               <strong>{rub(pack.finalAmountKopecks)}</strong>
             </div>
-            {registered ? (
+            {registered && discountPercent === 0 && viewer?.subscribed === false ? (
+              <SubscribeNudge
+                via={viewer.subscriptionVia ?? "none"}
+                channels={catalog?.channels ?? { tg: "https://t.me/Roblox_Bank_Tg", vk: "https://vk.ru/bankroblox" }}
+                price={rub(pack.signupAmountKopecks)}
+                onChecked={load}
+              />
+            ) : registered ? (
               discountPercent > 0 && (
                 <p className={styles.summaryNote}>
                   <Sparkles size={15} /> <span>Ваша скидка {discountPercent}%: <s>{rub(pack.baseAmountKopecks)}</s> → {rub(pack.finalAmountKopecks)}</span>
@@ -479,7 +490,7 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
               )
             ) : (
               <p className={styles.summaryGreen}>
-                С регистрацией — {rub(pack.signupAmountKopecks)}, до {rub(quoteCode(pack.denomination, 5).finalAmountKopecks)} за друзей
+                С регистрацией и подпиской на канал — {rub(pack.signupAmountKopecks)}, до {rub(quoteCode(pack.denomination, 5).finalAmountKopecks)} за друзей
               </p>
             )}
           </>
@@ -619,7 +630,7 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
             <div className={styles.choices}>
               <a href={registerHref} className={styles.choiceMain} onClick={() => safeSet("session", PACK_KEY, String(selected))}>
                 <b><UserPlus size={18} /> Купить со скидкой −1%</b>
-                <small>вход через Telegram, ВК или почту</small>
+                <small>регистрация + подписка на канал</small>
               </a>
               <button type="button" className={`${styles.choiceAlt} ${path === "guest" ? styles.choiceOpen : ""}`} aria-expanded={path === "guest"} aria-controls="codes-guest" onClick={() => setPath(path === "guest" ? null : "guest")}>
                 <b>Без регистрации</b>
@@ -660,6 +671,7 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
 
       {error && <p className={styles.error} role="alert"><CircleAlert size={16} /> {error}</p>}
 
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- `?source=wb` — полная загрузка инструкции */}
       <a className={styles.wbLink} href="/guide?source=wb">
         <KeyRound size={16} />
         <span>Купили карточку на Wildberries? Её код вводится не здесь — <b>активировать карточку WB</b></span>
@@ -675,6 +687,43 @@ export default function CodesStore({ instant: instantProp = true }: { instant?: 
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * Скидка 1 % = регистрация + подписка на канал (15.11.2026). Подписку
+ * проверяем по Telegram/ВК аккаунта; кнопка «Я подписался» — проверка сразу.
+ */
+function SubscribeNudge({ via, channels, price, onChecked }: {
+  via: "tg" | "vk" | "both" | "none";
+  channels: { tg: string; vk: string };
+  price: string;
+  onChecked: () => void;
+}) {
+  const [state, setState] = useState<"idle" | "busy" | "not_yet">("idle");
+  const check = async () => {
+    setState("busy");
+    const response = await fetch("/api/codes/subscription", { method: "POST" }).catch(() => null);
+    const data = await response?.json().catch(() => null) as { subscribed?: boolean } | null;
+    if (data?.subscribed) { setState("idle"); onChecked(); return; }
+    setState("not_yet");
+  };
+  return (
+    <div className={styles.subscribe}>
+      <p className={styles.subscribeTitle}><Sparkles size={15} /> Подпишитесь на наш канал — и код за <b>{price}</b> (скидка 1% навсегда)</p>
+      {via === "none" ? (
+        <p className={styles.subscribeNote}>Подписку видно через Telegram или ВК. <Link href="/dashboard#identity-settings">Привяжите Telegram в кабинете</Link> — и подпишитесь на канал.</p>
+      ) : (
+        <div className={styles.subscribeActions}>
+          {(via === "tg" || via === "both") && <a href={channels.tg} target="_blank" rel="noopener noreferrer">Канал в Telegram</a>}
+          {(via === "vk" || via === "both") && <a href={channels.vk} target="_blank" rel="noopener noreferrer">Группа ВКонтакте</a>}
+          <button type="button" onClick={check} disabled={state === "busy"}>
+            {state === "busy" ? <Loader2 size={15} className={styles.spin} /> : <Check size={15} />} Я подписался
+          </button>
+        </div>
+      )}
+      {state === "not_yet" && <p className={styles.subscribeNote}>Пока не видим подписку. Подпишитесь и нажмите ещё раз — бывает задержка в минуту.</p>}
+    </div>
   );
 }
 
