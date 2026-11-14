@@ -137,4 +137,14 @@ export const securityHeaders: NonNullable<NextConfig["headers"]> = async () => [
       },
     ],
   },
+  // 🎟 Платёжная ссылка кода (14.11.2026): токен в пути — это доступ к оплате
+  // заказа. Не отдаём его в Referer сторонним сайтам, не индексируем, не кешируем.
+  {
+    source: "/pay/:path*",
+    headers: [
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+      { key: "Cache-Control", value: "private, no-store" },
+    ],
+  },
 ];

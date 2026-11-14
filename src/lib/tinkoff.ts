@@ -4,7 +4,12 @@
  */
 import crypto from "crypto";
 
-const TINKOFF_INIT_ENDPOINT = "https://securepay.tinkoff.ru/v2/Init";
+/**
+ * База API. Переопределяется ТОЛЬКО для локальных тестов с подставным банком
+ * (`TINKOFF_API_BASE`); в проде переменная не задаётся.
+ */
+const TINKOFF_API_BASE = (process.env.TINKOFF_API_BASE || "https://securepay.tinkoff.ru").replace(/\/+$/, "");
+const TINKOFF_INIT_ENDPOINT = `${TINKOFF_API_BASE}/v2/Init`;
 
 // ── Guard: fail fast if secrets are missing ──────────────────────────────────
 function getRequiredEnv(key: string): string {
@@ -53,6 +58,9 @@ type CanonicalPaymentInit = {
   receiptEmail: string;
   description: string;
   statusToken: string;
+  /** Свои адреса возврата (коды активации ведут на `/pay/<токен>`). */
+  successUrl?: string;
+  failUrl?: string;
 };
 
 type TinkoffInitDiagnosticResponse = {
@@ -168,8 +176,8 @@ export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
     OrderId: input.providerOrderId ?? input.publicOrderId,
     Description: input.description.slice(0, 140),
     NotificationURL: `${appUrl}/api/webhooks/tinkoff`,
-    SuccessURL: `${appUrl}/payment/status?${statusQuery}&result=success`,
-    FailURL: `${appUrl}/payment/status?${statusQuery}&result=fail`,
+    SuccessURL: input.successUrl ?? `${appUrl}/payment/status?${statusQuery}&result=success`,
+    FailURL: input.failUrl ?? `${appUrl}/payment/status?${statusQuery}&result=fail`,
     DATA: { Email: input.receiptEmail },
     Receipt: buildCanonicalReceipt(input.receiptEmail, input.amountKopecks),
   };
@@ -261,7 +269,7 @@ export async function cancelCanonicalTinkoffPayment(input: {
     // возврата. Во всех остальных случаях чек нужен ровно на возвращаемую часть.
     ...(needsReceipt ? { Receipt: buildCanonicalReceipt(input.receiptEmail, input.amountKopecks) } : {}),
   };
-  const response = await fetch("https://securepay.tinkoff.ru/v2/Cancel", {
+  const response = await fetch(`${TINKOFF_API_BASE}/v2/Cancel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...params, Token: buildTinkoffToken(params, secretKey) }),

@@ -32,6 +32,7 @@ export const config = {
     "/login/:path*",
     "/email/:path*",
     "/payment/:path*",
+    "/pay/:path*",
     "/privacy/:path*",
     "/register/:path*",
     "/reset-password/:path*",

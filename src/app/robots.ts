@@ -19,6 +19,8 @@ export default function robots(): MetadataRoute.Robots {
         "/forgot-password",
         "/reset-password",
         "/email",
+        "/pay",
+        "/r/",
       ],
     },
     sitemap: "https://robloxbank.ru/sitemap.xml",

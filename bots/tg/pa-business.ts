@@ -18,6 +18,7 @@ import { isRepeatEtaQuestion } from "../shared/robux-eta";
 import { paOrderReply } from "../shared/pa-business-reply";
 import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "./pa-ai";
 import { registerPaGroup } from "./pa-group";
+import { registerReleaseNotes } from "./release-notes";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -49,6 +50,8 @@ export function registerPaBusiness(bot: Telegraf): void {
   registerPaAiAdmin(bot);
   // Беседа админов: защита от ответов в группе, ассистент, темы, сводка.
   registerPaGroup(bot);
+  // Тема «Апдейты» + публикация клиентам по кнопке (14.11.2026).
+  registerReleaseNotes(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (method: string, payload: Record<string, unknown>) => (bot.telegram as any).callApi(method, payload);
 

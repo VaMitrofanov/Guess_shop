@@ -14,6 +14,7 @@ import {
   revertWebOrderBenefits,
 } from "@/lib/web-order-benefits";
 import { CREATED_ATTEMPT_STALE_MS } from "@/lib/payment-init-retry";
+import { CODE_PROVIDER_ORDER_PREFIX, handleCodePaymentNotification } from "@/lib/codes/webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,14 @@ export async function POST(req: NextRequest) {
   const terminalKey = process.env.TINKOFF_TERMINAL_KEY;
   if (!terminalKey) return fail("terminal is not configured", 503);
   if (body.TerminalKey !== terminalKey) return fail("terminal mismatch", 409);
+
+  // 🎟 Коды активации (14.11.2026) — свой контур заказа и платежа, тот же
+  // терминал и та же проверка подписи выше. Префикс OrderId `CODE-` у
+  // платежей геймпасса не встречается (у них `WEB-…`/`DIR-…`).
+  if (String(body.OrderId ?? "").startsWith(CODE_PROVIDER_ORDER_PREFIX)) {
+    const outcome = await handleCodePaymentNotification(body, rawBody);
+    return new NextResponse(outcome.body, { status: outcome.status });
+  }
 
   const publicOrderId = typeof body.OrderId === "string" ? body.OrderId : String(body.OrderId ?? "");
   const paymentId = typeof body.PaymentId === "string" ? body.PaymentId : String(body.PaymentId ?? "");

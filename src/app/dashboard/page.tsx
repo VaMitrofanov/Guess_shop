@@ -45,6 +45,10 @@ import { loadCustomerRobloxProfile } from "@/lib/roblox-profile";
 import { continueHref } from "@/lib/active-order";
 import { listRobloxApiKeys } from "@/lib/roblox-api-key-store";
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
+import { CodesDashboard, ReferralCard, type DashboardCodeOrder } from "@/components/codes-dashboard";
+import { buyersWord, ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
+import { claimReferralFromCookies } from "@/lib/codes/http";
+import { offerExpired, payTokenFor } from "@/lib/codes/orders";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -193,7 +197,10 @@ export default async function DashboardPage() {
   const userId = (session.user as { id?: string }).id;
   if (!userId) redirect("/login");
 
-  const [user, canonicalOrders] = await Promise.all([
+  // 🎟 Привязка приглашения — до подсчёта скидки (новый аккаунт после входа по ссылке).
+  await claimReferralFromCookies(userId);
+
+  const [user, canonicalOrders, codeOrders, referralCode, codeDiscount] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -240,8 +247,41 @@ export default async function DashboardPage() {
         },
       },
     }),
+    prisma.codeOrder.findMany({
+      where: { creatorUserId: userId },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+      select: {
+        id: true, publicId: true, denomination: true, finalAmountKopecks: true, discountPercent: true,
+        status: true, createdAt: true, offerExpiresAt: true, paidAt: true, emailSentAt: true,
+      },
+    }),
+    ensureReferralCode(userId).catch(() => null),
+    viewerCodeDiscount(userId),
   ]);
   if (!user) redirect("/login");
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
+  const dashboardCodes: DashboardCodeOrder[] = codeOrders.map((order) => ({
+    publicId: order.publicId,
+    denomination: order.denomination,
+    finalAmountKopecks: order.finalAmountKopecks,
+    discountPercent: order.discountPercent,
+    status: order.status,
+    createdAt: order.createdAt.toISOString(),
+    expired: offerExpired(order),
+    payPath: order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING" ? `/pay/${payTokenFor(order.id)}` : null,
+    emailSent: Boolean(order.emailSentAt),
+    canEmail: Boolean(user.email && user.emailVerifiedAt),
+  }));
+  const referral = referralCode && codeDiscount.progress ? {
+    link: `${appUrl}/r/${referralCode}`,
+    invitedCount: codeDiscount.invitedCount,
+    percent: codeDiscount.percent,
+    next: codeDiscount.progress.next,
+    progress: codeDiscount.progress.progress,
+    remainingWord: buyersWord(codeDiscount.progress.next?.remaining ?? 0),
+  } : null;
 
   // U13: legacy-слой `Order` удалён (в проде 0 строк, роуты всегда отвечали
   // 401 из-за отсутствующих секретов). ЛК показывает только канонические заказы.
@@ -336,6 +376,7 @@ export default async function DashboardPage() {
                 <div className={styles.activeOrderBottom}><span>Следующий шаг: <strong>{customerOrderStatus(latestActive.kind, latestActive.status).label}</strong></span>{latestActiveHref && <Link href={latestActiveHref}>Подробнее <ArrowRight size={16} /></Link>}</div>
               </section>
             )}
+            <CodesDashboard orders={dashboardCodes} />
             <section className={styles.sectionCard}>
               <div className={styles.sectionHead}>
                 <div><span className={styles.kicker}>Центр событий</span><h2>Что сейчас важно</h2></div>
@@ -411,6 +452,7 @@ export default async function DashboardPage() {
           </div>
 
           <aside className={styles.sidebar}>
+            {referral && <ReferralCard summary={referral} />}
             <section className={styles.profileCard}>
               <div className={styles.profileTop}>
                 <span className={styles.avatar}><User size={25} /></span>

@@ -42,6 +42,11 @@
 /* D4: тихий вход в блок кодов — ссылка, а не кнопка. Покупка кодов не
    включена, поэтому на первом экране не должно быть ничего, похожего на
    активную кнопку покупки. */
+/* 14.11.2026: две равные кнопки первого экрана — геймпасс и код. */
+.heroActions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); max-width:600px; gap:14px; }
+.heroActions .primaryAction,.heroActions .codeAction { min-height:60px; font-size:16px; }
+.codeAction { min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 13px; padding: 0 20px; background: #45d6aa; color: #173f34; box-shadow: 4px 4px 0 #251b3f; font-size: 15px; font-weight: 800; transition: transform .2s ease, box-shadow .2s ease; }
+.codeAction:hover { transform: translateY(-2px); }
 .heroTextLink { min-height: 52px; display: inline-flex; align-items: center; gap: 8px; padding: 0 6px; color: #6751b9; font-size: 15px; font-weight: 800; text-decoration: underline; text-underline-offset: 4px; }
 .heroTextLink:hover { color: #7556e8; }
 .heroFacts { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 24px; color: #756e86; font-size: 14px; font-weight: 700; }
@@ -205,7 +210,8 @@ a.codeTeaser:hover { border-color:#7556e8; transform:translateY(-1px); }
   .title { font-size: clamp(42px,13vw,62px); }
   .lead { font-size: 17px; }
   .heroActions { flex-direction: column; }
-  .primaryAction,.heroTextLink { width: 100%; justify-content: center; }
+  .primaryAction,.heroTextLink,.codeAction { width: 100%; justify-content: center; }
+  .heroActions { display:grid; grid-template-columns:1fr; max-width:none; }
   .methodDeck { transform:none; }
   .gamepassHeroCard { padding:22px; box-shadow:7px 7px 0 #45d6aa; }
   .calculator { padding: 22px; transform: none; box-shadow: 7px 7px 0 #251b3f; }
@@ -285,14 +291,16 @@ a.codeTeaser:hover { border-color:#7556e8; transform:translateY(-1px); }
 :global(html[data-theme="dark"]) .soonBadge { border-color: #3a304b; background: rgba(117,86,232,.16); color: #cbb9ff; }
 :global(html[data-theme="dark"]) .controlCard { background: linear-gradient(135deg,#211831,#171020); }
 :global(html[data-theme="dark"]) .bottomCta { background: #7556e8; }
+:global(html[data-theme="dark"]) .codeAction { box-shadow: 4px 4px 0 #f4f0ff; }
 :global(html[data-theme="dark"]) .bottomCta .sectionKicker { color: #bff5e4; }
 /* D5: единый видимый фокус для всего кликабельного на витрине — карточка
    геймпасса теперь ссылка, и её обязательно должно быть видно с клавиатуры. */
 .primaryAction:focus-visible,
+.codeAction:focus-visible,
 .heroTextLink:focus-visible,
 .gamepassHeroCard:focus-visible,
 .codeTeaser a:focus-visible,
 .codesStatus a:focus-visible,
 .stepCard a:focus-visible,
 .bottomTextLink:focus-visible { outline: 3px solid #45d6aa; outline-offset: 3px; }
-@media (prefers-reduced-motion: reduce) { .vaultWheel { animation:none; } .gamepassHeroCard,.primaryAction { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .vaultWheel { animation:none; } .gamepassHeroCard,.primaryAction,.codeAction { transition:none; } }

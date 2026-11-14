@@ -67,6 +67,17 @@ model User {
   /// Контекст ожидания (JSON): платформа, этап кнопки, код заказа, номинал и
   /// признак того, что про «нажал и молчит» админам уже сказали.
   supportIntakeCtx        String?
+  /// 🎟 Программа приглашений кодов (14.11.2026). Код ссылки выдаётся лениво,
+  /// при первом открытии кабинета; `referredById` ставится ОДИН раз — только
+  /// новому аккаунту, пришедшему по ссылке (`src/lib/codes/referral.ts`).
+  /// Засчитанные приглашения не хранятся счётчиком, а считаются по заказам:
+  /// повторный webhook и возврат денег пересчитывают их сами.
+  referralCode            String?             @unique
+  referredById            String?
+  referredBy              User?               @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referredAt              DateTime?
+  referrals               User[]              @relation("UserReferrals")
+  codeOrders              CodeOrder[]
   wbCodes                 WbCode[]
   wbOrders                WbOrder[]
   directIntents           DirectIntent[]
@@ -81,6 +92,8 @@ model User {
   mergeTargets            AccountMergeAudit[] @relation("AccountMergeTarget")
   createdAt               DateTime            @default(now())
   updatedAt               DateTime            @updatedAt
+
+  @@index([referredById])
 }
 
 /// Roblox identities known to one RobloxBank customer. ORDER_HISTORY means
@@ -586,19 +599,19 @@ model WbOrder {
 /// Снятая заморозка не удаляется, а помечается `releasedAt` — историю «кто и
 /// почему заморозил» затирать нельзя, ради неё всё и делалось.
 model OrderHold {
-  id         String    @id @default(cuid())
-  wbCode     String    @unique
-  reason     String
-  createdBy  String
-  createdAt  DateTime  @default(now())
-  releasedAt DateTime?
-  releasedBy String?
+  id              String    @id @default(cuid())
+  wbCode          String    @unique
+  reason          String
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  releasedAt      DateTime?
+  releasedBy      String?
   /// Последняя разморозка ЧЕЛОВЕКОМ (11.11.2026). Автоматика её не стирает:
   /// гейт, снявший свой замок, не отменяет решение админа. Стирает только
   /// ручная заморозка — админ передумал.
   manualReleaseAt DateTime?
   manualReleaseBy String?
-  updatedAt  DateTime  @updatedAt
+  updatedAt       DateTime  @updatedAt
 
   // Крон-свип и алерт поддержки читают только активные заморозки.
   @@index([releasedAt])
@@ -1417,4 +1430,138 @@ model DirectIntent {
   updatedAt      DateTime           @updatedAt
 
   @@index([userId, status])
+}
+
+// ─── Коды активации Roblox на сайте (14.11.2026) ─────────────────────────────
+// Отдельный контур, а не `WbOrder`: у заказа геймпасса `PENDING` = очередь
+// выкупа, и оплаченный код попал бы во все очереди админов и ботов. Платёж —
+// свой (`CodePayment`), но тот же эквайринг и тот же webhook
+// (`/api/webhooks/tinkoff` различает их по префиксу OrderId `CODE-`).
+
+enum CodeOrderStatus {
+  /// Заказ сохранён, ссылка на оплату есть, банк ещё не открывали.
+  AWAITING_PAYMENT
+  /// Создана платёжная сессия банка.
+  PAYMENT_PENDING
+  /// Оплата подтверждена webhook-ом, кода на складе не нашлось — нужен человек.
+  PAID
+  /// Код закреплён за заказом (письмо и/или кабинет).
+  ISSUED
+  /// Деньги возвращены.
+  REFUNDED
+}
+
+enum CodeDeliveryMode {
+  /// Гость: код уходит письмом на `recipientEmail`.
+  EMAIL
+  /// Зарегистрированный: код в кабинете создателя заказа (+ письмо, если почта подтверждена).
+  ACCOUNT
+}
+
+enum ActivationCodeStatus {
+  IN_STOCK
+  RESERVED
+  ISSUED
+  VOID
+}
+
+model CodeOrder {
+  id                 String           @id @default(cuid())
+  /// Номер заказа для покупателя и поддержки: `CODE-XXXXXXXX`.
+  publicId           String           @unique
+  denomination       Int
+  pricingVersion     String
+  baseAmountKopecks  Int
+  discountPercent    Int              @default(0)
+  discountKopecks    Int              @default(0)
+  finalAmountKopecks Int
+  creatorUserId      String?
+  creator            User?            @relation(fields: [creatorUserId], references: [id], onDelete: Restrict)
+  deliveryMode       CodeDeliveryMode
+  /// Адрес получения кода. У гостя обязателен; email для чека хранится в платеже.
+  recipientEmail     String?
+  /// sha256 токена платёжной ссылки. Сам токен в базе не лежит.
+  payTokenHash       String           @unique
+  status             CodeOrderStatus  @default(AWAITING_PAYMENT)
+  /// SELF — оплачивает создатель, SHARE — ссылка ушла другому человеку.
+  createdVia         String
+  offerExpiresAt     DateTime
+  termsAcceptedAt    DateTime?
+  termsVersion       String?
+  idempotencyKey     String           @unique
+  activationCodeId   String?          @unique
+  activationCode     ActivationCode?  @relation(fields: [activationCodeId], references: [id])
+  paidAt             DateTime?
+  issuedAt           DateTime?
+  revealedAt         DateTime?
+  refundedAt         DateTime?
+  emailSentAt        DateTime?
+  emailAttempts      Int              @default(0)
+  emailLastError     String?
+  /// Почему заказу нужен человек (нет кода после оплаты и т.п.).
+  attentionReason    String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  payments           CodePayment[]
+  events             CodeOrderEvent[]
+
+  @@index([creatorUserId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model CodePayment {
+  id                    String               @id @default(cuid())
+  orderId               String
+  order                 CodeOrder            @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  provider              String               @default("TBANK")
+  /// OrderId у банка: `CODE-…`, уникален на каждую попытку.
+  providerOrderId       String               @unique
+  paymentId             String?              @unique
+  amountKopecks         Int
+  status                PaymentAttemptStatus @default(CREATED)
+  idempotencyKey        String               @unique
+  paymentUrl            String?
+  receiptEmail          String
+  rawEventHash          String?
+  refundedAmountKopecks Int                  @default(0)
+  initiatedAt           DateTime?
+  finalizedAt           DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@index([orderId, createdAt(sort: Desc)])
+}
+
+/// Единица товара. Значение кода — только в конверте AES-256-GCM
+/// (`ACTIVATION_CODE_ENCRYPTION_KEY`), дубли ловит HMAC.
+model ActivationCode {
+  id                 String               @id @default(cuid())
+  denomination       Int
+  encryptedValue     String
+  codeHmac           String               @unique
+  keyVersion         String               @default("v1")
+  status             ActivationCodeStatus @default(IN_STOCK)
+  batchLabel         String?
+  reservedForOrderId String?
+  reservedUntil      DateTime?
+  issuedAt           DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  order              CodeOrder?
+
+  @@index([denomination, status, createdAt])
+  @@index([reservedForOrderId])
+}
+
+/// Журнал заказа кода; `idempotencyKey` делает повторные уведомления банка безвредными.
+model CodeOrderEvent {
+  id             String    @id @default(cuid())
+  orderId        String
+  order          CodeOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  type           String
+  idempotencyKey String    @unique
+  payload        Json
+  createdAt      DateTime  @default(now())
+
+  @@index([orderId, createdAt])
 }

@@ -7,7 +7,12 @@ const ENDPOINT = "/api/observability/client";
 const sentInMemory = new Set<string>();
 
 function route() {
-  return window.location.pathname.replace(/[^A-Za-z0-9_\-./]/g, "").slice(0, 160) || "/";
+  // Токен платёжной ссылки кода (`/pay/<токен>`) — доступ к оплате заказа,
+  // в журналы он не уходит (14.11.2026).
+  return window.location.pathname
+    .replace(/^\/pay\/[^/]+/, "/pay/[token]")
+    .replace(/[^A-Za-z0-9_\-./[\]]/g, "")
+    .slice(0, 160) || "/";
 }
 
 function fingerprint(value: string) {
