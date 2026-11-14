@@ -1,0 +1,49 @@
+.card,.referral { padding:22px; border:1px solid var(--rb-border); border-radius:22px; background:var(--rb-surface); color:var(--rb-text); scroll-margin-top:90px; }
+.head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; color:var(--rb-accent); }
+.head h2 { margin:4px 0 0; color:var(--rb-text); font-size:22px; letter-spacing:-.03em; }
+.kicker { color:var(--rb-accent); font-size:13px; font-weight:900; letter-spacing:.07em; text-transform:uppercase; }
+.list { margin-top:14px; display:grid; gap:10px; }
+.row { padding:14px; border:1px solid var(--rb-border); border-radius:16px; }
+.top { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:8px 12px; }
+.amount { display:block; font-size:19px; letter-spacing:-.03em; }
+.meta { display:block; margin-top:3px; color:var(--rb-muted); font-size:13.5px; font-weight:650; }
+.status { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-size:13px; font-weight:850; white-space:nowrap; }
+.ok { background:#ddfaf0; color:#1f6b53; }
+.wait { background:#fff3d6; color:#7a5a0e; }
+.work { background:var(--rb-accent-soft); color:var(--rb-accent); }
+.bad { background:#ffe3ea; color:#8c2f47; }
+.codeBox { margin-top:12px; padding:12px; border-radius:14px; background:var(--rb-accent-soft); }
+.codeLine { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.codeLine code { flex:1 1 200px; min-width:0; padding:12px; border:2px dashed #7556e8; border-radius:12px; background:var(--rb-surface); font-family:SFMono-Regular,Menlo,Consolas,monospace; font-size:19px; font-weight:800; letter-spacing:.06em; overflow-wrap:anywhere; user-select:all; }
+.codeLine button,.reveal,.ghost,.redeem,.redeemButton { min-height:44px; padding:0 14px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border-radius:12px; font:inherit; font-size:14.5px; font-weight:850; cursor:pointer; }
+.codeLine button,.reveal { border:0; background:#7556e8; color:#fff; }
+.reveal { width:100%; }
+.steps { margin:10px 0 0; padding-left:20px; color:var(--rb-muted); font-size:14px; line-height:1.5; }
+.actions { margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; }
+.redeem,.redeemButton { border:0; background:#251b3f; color:#fff; }
+.ghost { border:1.5px solid var(--rb-border); background:transparent; color:var(--rb-text); }
+.ghost:disabled,.reveal:disabled { opacity:.5; cursor:not-allowed; }
+.message { margin:10px 0 0; color:var(--rb-muted); font-size:14px; }
+.empty p { margin:12px 0; color:var(--rb-muted); font-size:15px; line-height:1.5; }
+.spin { animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+.referral { background:linear-gradient(160deg,var(--rb-accent-soft),var(--rb-surface)); }
+.refHead { display:flex; align-items:flex-start; gap:12px; }
+.refHead h2 { margin:0; font-size:19px; letter-spacing:-.03em; }
+.refHead p { margin:4px 0 0; color:var(--rb-muted); font-size:14.5px; line-height:1.45; }
+.refIcon { width:40px; height:40px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px; background:#45d6aa; color:#173f34; }
+.meter { margin-top:14px; height:10px; overflow:hidden; border-radius:99px; background:rgba(117,86,232,.16); }
+.meter i { display:block; height:100%; min-width:6px; border-radius:99px; background:linear-gradient(90deg,#45d6aa,#7556e8); }
+.refCount { margin:8px 0 0; color:var(--rb-muted); font-size:14px; }
+.refCount b { color:var(--rb-text); }
+.refLink { display:block; margin-top:12px; padding:10px 12px; overflow:hidden; border-radius:10px; background:var(--rb-surface); border:1px solid var(--rb-border); color:var(--rb-accent); font-size:13.5px; white-space:nowrap; text-overflow:ellipsis; }
+.refRule { margin:10px 0 0; color:var(--rb-muted); font-size:13px; line-height:1.45; }
+
+.codeLine button:focus-visible,.reveal:focus-visible,.ghost:focus-visible,.redeem:focus-visible,.redeemButton:focus-visible { outline:3px solid #45d6aa; outline-offset:2px; }
+
+:global(html[data-theme="dark"]) .ok { background:#0f2c24; color:#9ff0d4; }
+:global(html[data-theme="dark"]) .wait { background:#2c2410; color:#f3dc95; }
+:global(html[data-theme="dark"]) .bad { background:#3a1621; color:#ffb3c4; }
+:global(html[data-theme="dark"]) .redeem,
+:global(html[data-theme="dark"]) .redeemButton { background:#7556e8; }

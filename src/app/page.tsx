@@ -1,325 +1,246 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+import { ArrowRight, Gamepad2, Gift, Headphones, KeyRound, LockKeyhole, Mail, WalletCards } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
-import { Zap, ShieldCheck, Clock, TrendingUp, Users, Check, Star } from "lucide-react";
-import AnoAI from "@/components/ui/animated-shader-background";
-import { GlowCard } from "@/components/ui/spotlight-card";
+import CodesStore from "@/components/codes-store";
+import CodesInfo from "@/components/codes-info";
+import GiftArt from "@/components/gift-art";
+import { HeroProof, HeroPulse, ReviewsMarquee, WbReviewsLink } from "@/components/storefront-pulse";
+import { CODE_DISCOUNT_TIERS, CODE_PRICES } from "@/lib/codes-pricing";
+import { codesInstantDelivery } from "@/lib/codes/fulfillment";
+import { Garland, NewYearScene, Snowfall } from "@/components/new-year";
+import { isNewYearSeason } from "@/lib/new-year";
+import styles from "./storefront2.module.css";
 
-// Pixel Robux icon
-function RobuxIcon({ className }: { className?: string }) {
+// D11: canonical объявляется на самой странице, а не в корневом layout —
+// метаданные layout наследуются всеми маршрутами, и «/» в корне заставил бы
+// /login и /checkout выдавать себя за главную. Значение берётся от
+// metadataBase, то есть от канонического хоста (apex).
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
+
+// Тексты первого экрана зависят от серверного режима выдачи кодов
+// (`CODES_BACKORDER`, рестарт без пересборки): страница рендерится на запрос,
+// иначе «код за минуту» вшился бы в статику на момент сборки.
+export const dynamic = "force-dynamic";
+
+const minCodePrice = Math.min(...Object.values(CODE_PRICES));
+
+/**
+ * 🏠 Главная — витрина 2.0 (макет утверждён владельцем 14.11.2026,
+ * docs/storefront-2-plan.md). Главная мысль: маркетинг в сторону кодов.
+ * Код — первым и крупно; геймпасс — вторым: «дешевле, но с ожиданием».
+ * Сроков ожидания не называем нигде (правило 26.10.2026).
+ */
+export default async function Home({ searchParams }: { searchParams: Promise<{ ny?: string }> }) {
+  const instant = codesInstantDelivery();
+  // 🎄 Новогоднее оформление: само с 1 декабря по 14 января (МСК), предпросмотр — `/?ny=1`.
+  const ny = isNewYearSeason() || (await searchParams).ny === "1";
+  const trust = [
+    { icon: LockKeyhole, title: "Без пароля", text: "Пароль от Roblox не нужен" },
+    instant
+      ? { icon: KeyRound, title: "Код сразу", text: "Приходит после оплаты" }
+      : { icon: Mail, title: "Код на почту", text: "Пришлём после оплаты" },
+    { icon: WalletCards, title: "Картой или СБП", text: "Чек придёт на почту" },
+    { icon: Headphones, title: "Поможем", text: "Живой человек в Telegram" },
+  ];
+
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none">
-      <rect x="9" y="2" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="3" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="18" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="6" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="9" y="19" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="8" width="6" height="6" fill="currentColor" />
-    </svg>
-  );
-}
+    <main className={styles.page}>
+      <Navbar />
+      {ny && <Snowfall />}
 
-// Floating pixel block decoration
-function PixelBlocks() {
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
-      {[
-        { size: 12, top: "15%", left: "8%", delay: "0s", color: "#00b06f" },
-        { size: 8, top: "25%", right: "10%", delay: "1s", color: "#00b06f" },
-        { size: 16, top: "60%", left: "5%", delay: "2s", color: "#3b82f6" },
-        { size: 10, top: "70%", right: "8%", delay: "0.5s", color: "#00b06f" },
-        { size: 6, top: "40%", left: "92%", delay: "1.5s", color: "#6366f1" },
-        { size: 14, top: "80%", left: "15%", delay: "3s", color: "#00b06f" },
-      ].map(({ size, top, left, right, delay, color }, i) => (
-        <div
-          key={i}
-          className="pixel-float absolute opacity-20"
-          style={{
-            width: size, height: size,
-            top, left, right,
-            backgroundColor: color,
-            animationDelay: delay,
-            borderRadius: 0,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-export default function Home() {
-  return (
-    <main className="min-h-screen relative bg-[#080c18]"> 
-      {/* 1. Шейдер как фиксированный фон */}
-      <div className="fixed inset-0 z-0 pointer-events-none opacity-50">
-        <AnoAI />
-      </div>
-
-      {/* 2. Контент поверх фона (z-10 чтобы быть выше) */}
-      <div className="relative z-10">
-        <Navbar />
-
-      {/* ── HERO ─────────────────────────────────────────────── */}
-      <section className="relative pt-16 pb-24 overflow-hidden scanlines">
-        <PixelBlocks />
-
-        {/* Subtle grid */}
-        <div
-          className="absolute inset-0 opacity-[0.025] pointer-events-none"
-          style={{
-            backgroundImage: `linear-gradient(rgba(0,176,111,0.8) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(0,176,111,0.8) 1px, transparent 1px)`,
-            backgroundSize: "40px 40px",
-          }}
-        />
-
-        <div className="container mx-auto px-4 relative z-10">
-
-          {/* Status badge */}
-          <div className="flex justify-center mb-10">
-            <div className="inline-flex items-center gap-2 px-4 py-2 border border-[#00b06f]/20 bg-[#00b06f]/5 text-[#00b06f] text-xs font-black uppercase tracking-[0.15em] rounded-none">
-              <span className="w-1.5 h-1.5 bg-[#00b06f] animate-pulse block rounded-none" />
-              Система активна · Заказы обрабатываются
-            </div>
+      {/* ── Первый экран: код — главный способ ─────────────────────────── */}
+      <section className={`${styles.hero} ${ny ? styles.heroNY : ""}`}>
+        {ny && <div className={styles.garlandRow}><Garland /></div>}
+        <div className={styles.heroCopy}>
+          <div className={styles.eyebrow}><span className={styles.statusDot} /> {ny ? "🎄 Новогодние коды Roblox" : "Коды активации Roblox"}</div>
+          {ny ? (
+            <h1 className={styles.title}>Robux<br />под ёлку.<br /><span>Подари открыткой.</span></h1>
+          ) : instant ? (
+            <h1 className={styles.title}>Robux<br />за минуту.<br /><span>Без ожидания.</span></h1>
+          ) : (
+            <h1 className={styles.title}>Robux<br />кодом.<br /><span>Сразу на баланс.</span></h1>
+          )}
+          <p className={styles.lead}>
+            {ny
+              ? "Код Robux в новогодней открытке: выберите номинал, напишите пару тёплых слов — и письмо придёт точно к празднику, хоть 31 декабря в 23:55. Без пароля от Roblox."
+              : instant
+              ? "Код активации приходит сразу после оплаты — на почту или в кабинет. Без ожидания и без пароля от Roblox."
+              : "Оплатите — пришлём код активации на почту или в кабинет. Ввели его на roblox.com/redeem — Robux сразу на балансе. Без пароля от Roblox."}
+          </p>
+          <div className={styles.heroActions}>
+            {ny ? (
+              <>
+                <a href="#gift" className={styles.buyCode}>
+                  <b>🎁 Подарить открыткой</b>
+                  <span>открытка в нужный день · от {minCodePrice} ₽</span>
+                </a>
+                <a href="#codes" className={styles.viaPass}>
+                  <b>Купить код себе</b>
+                  <span>сразу на баланс</span>
+                </a>
+              </>
+            ) : (
+              <>
+                <a href="#codes" className={styles.buyCode}>
+                  <b>Купить код</b>
+                  <span>сразу на баланс · от {minCodePrice} ₽</span>
+                </a>
+                <a href="#calculator" className={styles.viaPass}>
+                  <b>Через геймпасс</b>
+                  <span>дешевле, но с ожиданием</span>
+                </a>
+              </>
+            )}
           </div>
-
-          {/* Main headline */}
-          <div className="text-center max-w-5xl mx-auto mb-4 space-y-6">
-
-            <h1 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-[-0.04em] leading-[0.88] uppercase">
-              Купи{" "}
-              <span className="inline-flex items-center gap-3">
-                <RobuxIcon className="w-12 h-12 md:w-16 md:h-16 text-[#00b06f] coin-spin inline-block" />
-                <span className="gold-text">Robux</span>
-              </span>
-              <br />
-              <span className="text-4xl md:text-6xl text-zinc-300">быстро и безопасно</span>
-            </h1>
-
-            <p className="text-zinc-400 text-lg font-medium max-w-lg mx-auto leading-relaxed">
-              Официальный курс обновляется каждые 10 минут.
-              Доставка через геймпасс — без ввода пароля.
-            </p>
-          </div>
-
-          {/* Calculator */}
-          <div className="max-w-lg mx-auto mb-14 mt-12">
-            <Calculator />
-          </div>
-
-          {/* Trust row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-3xl mx-auto">
-            {[
-              { icon: Zap, label: "~10 мин", sub: "Время доставки" },
-              { icon: ShieldCheck, label: "Гарантия", sub: "Возврат денег" },
-              { icon: RobuxIcon, label: "5 000+ заказов", sub: "С 2024 года" },
-              { icon: TrendingUp, label: "Лучший курс", sub: "Авто-обновление" },
-            ].map(({ icon: Icon, label, sub }) => (
-              <GlowCard
-                key={label}
-                customSize
-                glowColor="green"
-                className="bg-[#0f1528] p-4 flex flex-col items-center gap-2 text-center"
-              >
-                <Icon className="w-5 h-5 text-[#00b06f]" />
-                <span className="text-xs font-black uppercase tracking-wider text-white">{label}</span>
-                <span className="text-xs text-zinc-500 uppercase tracking-wider">{sub}</span>
-              </GlowCard>
-            ))}
-          </div>
+          <HeroProof />
         </div>
 
-        {/* Glow orb */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] rounded-full bg-[#00b06f]/[0.03] blur-[100px] pointer-events-none" />
-      </section>
-
-      <div className="accent-line" />
-
-      {/* ── STATS BAR ────────────────────────────────────────── */}
-      <section className="py-12 bg-[#0a0e1a]">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto">
-            {[
-              { value: "5 247", label: "Выполнено заказов", pixel: true },
-              { value: "99.8%", label: "Успешных сделок", pixel: true },
-              { value: "~10 мин", label: "Среднее время", pixel: true },
-            ].map(({ value, label }) => (
-              <div key={label} className="text-center space-y-2">
-                <div className="font-pixel text-[#00b06f] text-sm md:text-base">{value}</div>
-                <div className="text-xs font-black uppercase tracking-wider text-zinc-400">{label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="accent-line" />
-
-      {/* ── HOW IT WORKS ─────────────────────────────────────── */}
-      <section className="py-20 bg-[#080c18]">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <div className="flex items-center gap-4 mb-14">
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-            <div className="text-center space-y-1">
-              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
-              <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Как это работает</h2>
-            </div>
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              {
-                step: "01",
-                icon: "🎮",
-                title: "Создай геймпасс",
-                desc: "Открой Roblox Creator Hub, создай геймпасс в своей игре и установи нужную цену.",
-                link: "/guide",
-                cta: "Смотреть инструкцию",
-                color: "#00b06f",
-              },
-              {
-                step: "02",
-                icon: "💳",
-                title: "Оформи заказ",
-                desc: "Введи ник, найди геймпасс через поиск, оплати удобным способом.",
-                link: "/checkout",
-                cta: "Оформить заказ",
-                color: "#3b82f6",
-              },
-              {
-                step: "03",
-                icon: "⚡",
-                title: "Получи Robux",
-                desc: "Наш бот купит твой геймпасс. Robux поступят через 5–7 дней по правилам Roblox.",
-                link: null,
-                cta: null,
-                color: "#00b06f",
-              },
-            ].map(({ step, icon, title, desc, link, cta, color }) => (
-              <GlowCard
-                key={step}
-                customSize
-                glowColor="green"
-                className="bg-[#0f1528] p-6 space-y-4"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-pixel text-[10px] tracking-wider" style={{ color }}>{step}</span>
-                  <span className="text-2xl">{icon}</span>
-                </div>
-                <div className="rb-progress">
-                  <div className="rb-progress-fill" style={{ width: step === "01" ? "33%" : step === "02" ? "66%" : "100%", background: color }} />
-                </div>
-                <h3 className="text-lg font-black uppercase tracking-tight">{title}</h3>
-                <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
-                {link && (
-                  <Link href={link} className="text-xs font-black uppercase tracking-widest hover:opacity-70 transition-opacity flex items-center gap-1" style={{ color }}>
-                    {cta} →
-                  </Link>
-                )}
-              </GlowCard>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="accent-line" />
-
-      {/* ── WHY US ───────────────────────────────────────────── */}
-      <section className="py-20 bg-[#0a0e1a]">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <div className="flex items-center gap-4 mb-14">
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-            <div className="text-center space-y-1">
-              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">PERKS</div>
-              <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Почему мы</h2>
-            </div>
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {[
-              {
-                title: "Прямые поставки",
-                desc: "Работаем напрямую с поставщиками Robux. Никаких посредников — только честная цена.",
-                tag: "OFFICIAL",
-              },
-              {
-                title: "Гарантия возврата",
-                desc: "Если заказ не выполнен в срок — возвращаем деньги без вопросов.",
-                tag: "ГАРАНТИЯ",
-              },
-              {
-                title: "Полная автоматизация",
-                desc: "Заказы обрабатываются системой круглосуточно. Мгновенно после оплаты.",
-                tag: "24/7",
-              },
-              {
-                title: "Без скрытых комиссий",
-                desc: "Цена в калькуляторе — финальная. Налог Roblox уже учтён в стоимости.",
-                tag: "ЧЕСТНО",
-              },
-
-            ].map(({ title, desc, tag }) => (
-              <GlowCard
-                key={title}
-                customSize
-                glowColor="green"
-                className="bg-[#0f1528]/80 backdrop-blur-xl p-6 flex gap-4"
-              >
-                <div className="w-2 h-full min-h-[60px] bg-[#00b06f]/20 flex-shrink-0 relative">
-                  <div className="absolute top-0 left-0 w-full h-1/2 bg-[#00b06f]" />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-black uppercase tracking-tight text-sm">{title}</h3>
-                    <span className="font-pixel text-[9px] text-[#00b06f]/60 border border-[#00b06f]/20 px-1.5 py-0.5">{tag}</span>
-                  </div>
-                  <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
-                </div>
-              </GlowCard>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="accent-line" />
-
-      {/* ── CTA ──────────────────────────────────────────────── */}
-      <section className="py-20 bg-[#080c18] relative overflow-hidden">
-        <PixelBlocks />
-        <div className="container mx-auto px-4 max-w-2xl text-center space-y-8 relative z-10">
-          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">READY?</div>
-          <h2 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-tight">
-            Начни<br />
-            <span className="gold-text flex items-center justify-center gap-3">
-              <RobuxIcon className="w-10 h-10 coin-spin" />
-              прямо сейчас
+        <div className={styles.heroSide}>
+          {ny && <NewYearScene />}
+          <HeroPulse />
+          {/* Код с карточки Wildberries. Обычный `<a>`: `?source=wb` обслуживает
+              инструкция, клиентский переход Next туда не нужен. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- намеренно полная загрузка */}
+          <a className={styles.wbCard} href="/guide?source=wb">
+            <span>
+              <b>Купил карточку на Wildberries?</b>
+              <small>Введи код с карточки — платить второй раз не нужно</small>
             </span>
-          </h2>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link
-              href="/checkout"
-              className="h-14 px-10 gold-gradient flex items-center justify-center font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none"
-            >
-              Купить Robux
-            </Link>
-            <Link
-              href="/guide"
-              className="h-14 px-10 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 flex items-center justify-center font-black text-sm uppercase tracking-widest hover:text-[#00b06f] transition-all rounded-none"
-            >
-              Инструкция
-            </Link>
+            <span className={styles.wbCardAction}>Ввести код</span>
+          </a>
+        </div>
+      </section>
+
+      {/* ── Полоса доверия: простыми словами ───────────────────────────── */}
+      <section className={styles.trust} aria-label="Почему это безопасно">
+        {trust.map(({ icon: Icon, title, text }) => (
+          <div key={title} className={styles.trustItem}>
+            <span className={styles.trustIcon}><Icon size={18} /></span>
+            <span><b>{title}</b><small>{text}</small></span>
           </div>
+        ))}
+      </section>
+
+      {/* ── Покупка: код первым и крупнее, геймпасс — вторым ───────────── */}
+      <section className={styles.buy}>
+        <CodesStore instant={instant} festive={ny} />
+        <div id="calculator" className={styles.passColumn}>
+          <div className={styles.passHead}>
+            <div className={styles.passTitle}>
+              <span className={styles.passIcon} aria-hidden="true"><Gamepad2 size={24} strokeWidth={2.4} /></span>
+              <div>
+                <span className={styles.passTag}>Дешевле · с ожиданием</span>
+                <b>Геймпасс</b>
+              </div>
+            </div>
+            <span>Robux приходят не сразу: Roblox держит их в ожидании</span>
+            <Link href="/guide?source=site&amount=1000" className={styles.passGuide}>Как создать геймпасс — инструкция</Link>
+          </div>
+          <Calculator />
+        </div>
+      </section>
+
+      {/* ── Сравнение: код рекомендован ────────────────────────────────── */}
+      <section className={styles.compare} aria-labelledby="compare-title">
+        <div className={styles.sectionHead}>
+          <span className={styles.kicker}>Как выбрать</span>
+          <h2 id="compare-title">Не хочешь ждать? Бери код</h2>
+        </div>
+        <div className={styles.compareGrid}>
+          <article className={`${styles.compareCard} ${styles.compareMain}`}>
+            <span className={styles.recommend}>РЕКОМЕНДУЕМ</span>
+            <span className={styles.compareKicker}>КОД АКТИВАЦИИ</span>
+            <dl>
+              <dt>Robux на балансе</dt><dd>Сразу после ввода кода</dd>
+              <dt>Что сделать</dt><dd>Ввести код на roblox.com/redeem</dd>
+              <dt>Подойдёт</dt><dd>Себе, в подарок, за ребёнка</dd>
+            </dl>
+            <a href="#codes" className={styles.compareCta}>Купить код <ArrowRight size={17} /></a>
+          </article>
+          <article className={styles.compareCard}>
+            <span className={styles.compareKicker}>ГЕЙМПАСС</span>
+            <dl>
+              <dt>Robux на балансе</dt><dd>Не сразу — Roblox держит в ожидании</dd>
+              <dt>Что сделать</dt><dd>Создать пасс по инструкции</dd>
+              <dt>Подойдёт</dt><dd>Кто готов подождать ради цены</dd>
+            </dl>
+            <a href="#calculator" className={styles.compareAlt}>Через геймпасс</a>
+          </article>
+        </div>
+      </section>
+
+      {/* ── Отзывы с Wildberries ───────────────────────────────────────── */}
+      <section id="reviews" className={styles.reviews} aria-labelledby="reviews-title">
+        <div className={styles.reviewsHead}>
+          <div className={styles.sectionHead}>
+            <span className={styles.kicker}>Отзывы покупателей с Wildberries</span>
+            <h2 id="reviews-title">Пишут покупатели</h2>
+          </div>
+          <WbReviewsLink className={styles.reviewsLink} />
+        </div>
+        <ReviewsMarquee />
+      </section>
+
+      {/* ── Подарок ───────────────────────────────────────────────────── */}
+      <section className={styles.giftPromo} aria-labelledby="gift-title">
+        <div className={styles.giftCopy}>
+          <span className={styles.kicker}>Подарок, который точно порадует</span>
+          <h2 id="gift-title">Подари Robux открыткой</h2>
+          <p>Выбери номинал и открытку, напиши пару слов. Получатель откроет подарок по кнопке в письме и сразу введёт код. Можно отправить в день праздника.</p>
+          <a href="#gift" className={styles.giftCta}><Gift size={18} /> Выбрать подарок</a>
+        </div>
+        <div className={styles.giftCards} aria-hidden="true">
+          <div className={`${styles.giftCard} ${styles.giftBirthday}`}>
+            <GiftArt theme="BIRTHDAY" className={styles.giftArt} />
+            <span>С днём рождения!</span>
+            <b>1 000<small>ROBUX</small></b>
+          </div>
+          <div className={`${styles.giftCard} ${styles.giftNewYear}`}>
+            <GiftArt theme="NEW_YEAR" className={styles.giftArt} />
+            <span>С Новым годом!</span>
+            <b>800<small>ROBUX</small></b>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Приглашения ───────────────────────────────────────────────── */}
+      <section id="invite" className={styles.invite} aria-labelledby="invite-title">
+        <div className={styles.inviteCopy}>
+          <span className={styles.kicker}>Приглашай друзей</span>
+          <h2 id="invite-title">Скидка на коды растёт вместе с друзьями</h2>
+          <p>1% — за регистрацию и подписку на наш канал. Друг купил код по твоей ссылке — он засчитан. Скидка остаётся навсегда — на сайте и в наших ботах.</p>
+          <Link href="/dashboard#referral" className={styles.inviteCta}>Получить ссылку <ArrowRight size={17} /></Link>
+        </div>
+        <ol className={styles.tiers}>
+          {CODE_DISCOUNT_TIERS.map((tier, index) => (
+            <li key={tier.percent}>
+              <b>{tier.percent}%</b>
+              <span>{tier.invited === 0 ? "регистрация + канал" : `${tier.invited} ${tier.invited === 3 ? "друга" : "друзей"}`}</span>
+              <i aria-hidden="true" style={{ height: `${24 + index * 18}px` }} />
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <CodesInfo instant={instant} />
+
+      <section className={styles.bottomCta}>
+        <div>
+          <span className={styles.kicker}>Готов?</span>
+          <h2>{instant ? "Robux через минуту" : "Robux — кодом"}</h2>
+        </div>
+        <div className={styles.bottomActions}>
+          <a href="#codes" className={styles.bottomPrimary}>Купить код <ArrowRight size={18} /></a>
+          <a href="#calculator" className={styles.bottomSecondary}>или через геймпасс</a>
         </div>
       </section>
 
       <Footer />
-      </div>{/* /relative z-10 */}
     </main>
   );
 }

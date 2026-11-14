@@ -36,18 +36,52 @@ import {
   registerCallbacks,
   registerAdmin,
   registerChatMember,
+  setupBotProfile,
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
+import { registerPaBusiness } from "./pa-business";
+import { registerCodesShop } from "./codes-shop";
+import { registerGiveaways } from "./giveaways";
+import { startReviewReminderCron } from "./crons";
+import { notifyBotError } from "../shared/admin";
+import { syncTelegramActor } from "../shared/user-profile-sync";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
 
 export const bot = new Telegraf(token);
 
+// Telegram supplies `ctx.from` on every private update. Sync at most once per
+// actor per process/6h; profile persistence stays off the reply critical path.
+bot.use(async (ctx, next) => {
+  await next();
+  if (ctx.from) void syncTelegramActor(ctx.from);
+});
+
+bot.catch((err: any, ctx: any) => {
+  console.error("[TG] Unhandled error:", err);
+  // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
+  const uid = ctx?.from?.id;
+  // Текст сообщения (или payload нажатой кнопки) — часть улики: без него
+  // ветку, на которой упало, не воспроизвести.
+  const input = ctx?.message?.text ?? ctx?.callbackQuery?.data ?? null;
+  if (uid) notifyBotError({ platform: "TG", userId: uid, err, input }).catch(() => {});
+  try {
+    ctx?.reply?.("⚠️ Произошла ошибка. Попробуй ещё раз или напиши /start");
+  } catch {}
+});
+
 // Register all handlers (order matters: admin hubs → commands → callbacks → text → photo)
 // Admin hubs must be registered FIRST so their text interceptors (search, codes, rate)
 // fire before the generic text handler in handlers.ts.
+// Сообщения аккаунта поддержки (Telegram Business) — до всех веток бота и мимо них.
+registerPaBusiness(bot);
 registerAdminHubs(bot);
+// 🎟 Коды и приглашения (15.11.2026) — до /start и текста: свои кнопки, /codes,
+// /invite и `/start r_<код>`; остальное уходит дальше через next().
+registerCodesShop(bot);
+// 🎁 Розыгрыши кода в канале (15.11.2026): /giveaway в личке бота, кнопка «Участвовать» в канале.
+registerGiveaways(bot);
 registerStart(bot);
 registerStatus(bot);
 registerAdmin(bot);
@@ -80,13 +114,20 @@ if (disablePolling) {
   );
 } else {
   bot.launch({
-    allowedUpdates: ["message", "callback_query", "my_chat_member", "chat_member"],
+    allowedUpdates: [
+      "message", "callback_query", "my_chat_member", "chat_member",
+      // Аккаунт поддержки @RobloxBank_PA через Telegram Business (12.11.2026).
+      "business_connection", "business_message",
+    ] as never,
   }).catch((err: Error) => {
     console.error("[TG] Failed to start:", err);
     process.exit(1);
   });
   // Set Menu Button (left of input) for each admin — opens TWA dashboard directly
   setupMenuButton(bot).catch((err: Error) => console.error("[TG] setChatMenuButton failed:", err));
+  // Public profile (description + command menu) — once, on the polling instance.
+  setupBotProfile(bot).catch((err: Error) => console.error("[TG] setupBotProfile failed:", err));
+  startReviewReminderCron(bot);
   console.log("[TG] Bot started ✅ (polling)");
   const adminIds = process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "";
   if (!adminIds.trim()) {

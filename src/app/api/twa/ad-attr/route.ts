@@ -4,7 +4,7 @@ import { getAdvertSpendSince } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
 
 async function getSettings() {
-  return (prisma as any).wbSettings.upsert({
+  return prisma.wbSettings.upsert({
     where:  { id: 1 },
     update: {},
     create: { id: 1, kursRb: 4, kursUsd: 75, fixedCost: 87.5 },
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   const spend = await getAdvertSpendSince(fromDate);
 
   // Update lastAdAttributedAt to right now
-  await (prisma as any).wbSettings.update({
+  await prisma.wbSettings.update({
     where:  { id: 1 },
     data:   { lastAdAttributedAt: new Date() },
   });

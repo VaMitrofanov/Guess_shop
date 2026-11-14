@@ -1,0 +1,187 @@
+/*
+ * Оформление юридических документов (оферта, политика, реквизиты).
+ *
+ * Раньше эти страницы жили в старом тёмном макете: захардкоженный фон
+ * `#080c18`, зелёный акцент `#00b06f`, шейдерная подложка и палитра zinc-*.
+ * После перевода публичного шелла на Violet/Frost шапка и подвал стали
+ * светлыми, а тело документа осталось тёмным — на светлой теме страница
+ * выглядела сломанной.
+ *
+ * Здесь только токены `--rb-*` (правило №4 в launch-roadmap.md §6): документ
+ * следует теме пользователя так же, как витрина. Размеры шрифта — не меньше
+ * 15px в основном тексте, чтобы не нарушать контракт D8.
+ */
+
+.page {
+  min-height: 100vh;
+  color: var(--rb-text);
+  background:
+    radial-gradient(circle at 84% 4%, rgba(117, 86, 232, .15), transparent 29rem),
+    linear-gradient(180deg, var(--rb-bg), var(--rb-surface-2));
+}
+
+.shell {
+  width: min(880px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 72px 0 96px;
+}
+
+/* ── Шапка документа ─────────────────────────────────────────────────── */
+
+.header { margin-bottom: 38px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: var(--rb-accent);
+  font-size: 14px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.badge::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #45d6aa;
+  box-shadow: 0 0 0 5px rgba(69, 214, 170, .14);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(34px, 5.5vw, 58px);
+  line-height: 1.02;
+  letter-spacing: -.055em;
+  /* Длинные юридические заголовки не должны вылезать за экран на 360px. */
+  overflow-wrap: anywhere;
+}
+
+.title span {
+  background: linear-gradient(90deg, #7556e8, #5d83ed);
+  background-clip: text;
+  color: transparent;
+}
+
+.subtitle {
+  max-width: 660px;
+  margin: 20px 0 0;
+  color: var(--rb-muted);
+  font-size: 18px;
+  line-height: 1.6;
+  font-weight: 550;
+}
+
+.updated {
+  margin: 18px 0 0;
+  color: var(--rb-muted);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.rule {
+  height: 3px;
+  margin: 34px 0 40px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--rb-accent), transparent);
+}
+
+/* ── Тело документа ──────────────────────────────────────────────────── */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  color: var(--rb-text);
+  font-size: 17px;
+  line-height: 1.68;
+}
+
+.body h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 16px;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(23px, 3vw, 30px);
+  letter-spacing: -.035em;
+  line-height: 1.15;
+  color: var(--rb-text);
+}
+
+.body h2 > span:first-child {
+  color: var(--rb-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.body h3 {
+  margin: 26px 0 8px;
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+  color: var(--rb-text);
+}
+
+.body p { margin: 0 0 14px; min-width: 0; }
+.body p:last-child { margin-bottom: 0; }
+
+.body ul,
+.body ol {
+  margin: 14px 0;
+  padding-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.body ul { list-style: disc; }
+.body ol { list-style: decimal; }
+.body li { min-width: 0; line-height: 1.62; }
+.body li::marker { color: var(--rb-accent); }
+
+.body strong { font-weight: 900; color: var(--rb-text); }
+
+.body a {
+  color: var(--rb-accent);
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.body a:hover { opacity: .78; }
+
+/* Карточка реквизитов: списки «ключ — значение» читаются лучше блоком. */
+.body section {
+  padding: 26px 28px;
+  border: 1px solid var(--rb-border);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--rb-surface) 92%, transparent);
+}
+
+/* ── Подпись ─────────────────────────────────────────────────────────── */
+
+.note {
+  margin-top: 52px;
+  padding-top: 28px;
+  border-top: 1px solid var(--rb-border);
+  color: var(--rb-muted);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+@media (max-width: 620px) {
+  .shell { width: calc(100% - 28px); padding: 44px 0 72px; }
+  .body { font-size: 16px; gap: 30px; }
+  .body section { padding: 20px 18px; border-radius: 18px; }
+  .subtitle { font-size: 17px; }
+}

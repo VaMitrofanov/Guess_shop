@@ -1,118 +1,60 @@
+import Link from "next/link";
+import { ArrowRight, BadgeCheck, CreditCard, FileCheck2, LockKeyhole, MessageCircleMore, ScanSearch } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
-import Link from "next/link";
-import { ShieldCheck, Zap, Users, Star, Lock, HeartHandshake, ArrowRight } from "lucide-react";
+import styles from "../public-sections.module.css";
+import type { Metadata } from "next";
 
+export const metadata: Metadata = {
+  title: "Гарантии — RobloxBank",
+  description: "Простыми словами: почему покупать Robux в RobloxBank безопасно — без пароля от Roblox, с чеком, с живой поддержкой.",
+  alternates: { canonical: "/guarantees" },
+};
+
+/* Витрина 2.0 (15.11.2026): переписано простыми словами. Старый текст обещал
+   «оплата на сайте появится после проверки банка» — оплата давно работает.
+   Без терминов: часть покупателей — родители, которые еле пользуются интернетом. */
 const guarantees = [
-  {
-    title: "Безопасные платежи",
-    desc: "Все транзакции проходят через официальный шлюз Тинькофф. Мы не храним данные карт. Все операции защищены 3D-Secure.",
-    icon: Lock,
-    tag: "SECURITY",
-  },
-  {
-    title: "Мгновенная обработка",
-    desc: "Система автоматически обрабатывает заказ сразу после оплаты. Никаких ожиданий оператора.",
-    icon: Zap,
-    tag: "AUTO",
-  },
-  {
-    title: "Официальный курс",
-    desc: "Работаем напрямую с поставщиками. Предлагаем один из лучших курсов на рынке СНГ.",
-    icon: HeartHandshake,
-    tag: "FAIR PRICE",
-  },
-  {
-    title: "Поддержка 24/7",
-    desc: "Наша команда всегда онлайн. Если возникла проблема — ответим в течение нескольких минут.",
-    icon: ShieldCheck,
-    tag: "SUPPORT",
-  },
-  {
-    title: "Опыт и репутация",
-    desc: "Работаем с 2024 года. Более 5 000 выполненных заказов. Ваша покупка в надёжных руках.",
-    icon: Users,
-    tag: "TRUSTED",
-  },
-  {
-    title: "Реальные отзывы",
-    desc: "Тысячи довольных клиентов в Telegram и VK. Проверьте сами, почитав реальные истории.",
-    icon: Star,
-    tag: "VERIFIED",
-  },
+  { title: "Пароль от Roblox не нужен", text: "Мы никогда не просим пароль, коды из СМС или вход в ваш аккаунт. Если кто-то просит от нашего имени — это мошенник.", icon: LockKeyhole, tag: "Аккаунт" },
+  { title: "Цена — до оплаты", text: "Сумма на кнопке — окончательная. Никаких доплат и комиссий сверху: сколько видите, столько и платите.", icon: ScanSearch, tag: "Цена" },
+  { title: "Оплата через банк", text: "Платите картой или по СБП на странице Т-Банка. Данные карты видит только банк — нам они не приходят.", icon: CreditCard, tag: "Оплата" },
+  { title: "Чек на почту", text: "После оплаты банк присылает электронный чек на вашу почту. Это официальное подтверждение покупки.", icon: FileCheck2, tag: "Документы" },
+  { title: "Код — только ваш", text: "Код активации приходит на почту, в личный кабинет или в чат бота — только тому, кто покупал. Повторно его можно отправить в любой момент.", icon: BadgeCheck, tag: "Коды" },
+  { title: "Живой человек на связи", text: "Если что-то непонятно — пишите в Telegram @RobloxBank_PA. Отвечает человек, а не робот: поможем найти заказ и довести до конца.", icon: MessageCircleMore, tag: "Поддержка" },
 ];
 
 export default function GuaranteesPage() {
   return (
-    <main className="min-h-screen">
+    <main className={styles.page}>
       <Navbar />
+      <div className={styles.shell}>
+        <header className={styles.hero}>
+          <div className={styles.heroCopy}>
+            <span className={styles.kicker}>Гарантии</span>
+            <h1>Покупать у нас<br /><span>безопасно.</span></h1>
+            <p>Простыми словами — что мы делаем и чего не делаем никогда. Обещаем только то, что вы видите своими глазами.</p>
+          </div>
+          <div className={styles.seal}>R$</div>
+        </header>
 
-      <section className="container mx-auto px-4 pt-16 pb-24 max-w-5xl">
-
-        {/* Header */}
-        <div className="mb-14 space-y-4">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">TRUST & SAFETY</div>
-          <h1 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
-            Наши<br />
-            <span className="gold-text">гарантии</span>
-          </h1>
-          <p className="text-zinc-400 font-medium max-w-lg">
-            Мы несём полную ответственность за каждый заказ. Вот почему тысячи игроков доверяют нам.
-          </p>
+        <div className={styles.sectionTop}>
+          <h2>Шесть простых правил</h2>
+          <p>Про аккаунт, деньги и ваш заказ.</p>
         </div>
-
-        <div className="accent-line mb-10" />
-
-        {/* Guarantees grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-16">
-          {guarantees.map(({ title, desc, icon: Icon, tag }) => (
-            <div
-              key={title}
-              className="pixel-card border-2 border-[#1e2a45] p-6 space-y-5 hover:border-[#00b06f]/30 transition-colors group"
-            >
-              <div className="flex items-start justify-between">
-                <div className="w-10 h-10 bg-[#00b06f]/10 border border-[#00b06f]/20 flex items-center justify-center group-hover:bg-[#00b06f]/15 transition-colors">
-                  <Icon className="w-5 h-5 text-[#00b06f]" />
-                </div>
-                <span className="font-pixel text-[7px] text-[#00b06f]/50 border border-[#00b06f]/15 px-2 py-1">{tag}</span>
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-black uppercase tracking-tight">{title}</h3>
-                <p className="text-sm text-zinc-500 font-medium leading-relaxed">{desc}</p>
-              </div>
-            </div>
+        <section className={styles.grid}>
+          {guarantees.map(({ title, text, icon: Icon, tag }) => (
+            <article key={title} className={styles.card}>
+              <div className={styles.cardIcon}><Icon size={25} /></div>
+              <div><span className={styles.cardTag}>{tag}</span><h3>{title}</h3><p>{text}</p></div>
+            </article>
           ))}
-        </div>
+        </section>
 
-        {/* CTA banner */}
-        <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/3 p-8 md:p-12 relative overflow-hidden">
-          {/* Decorative background text */}
-          <div
-            className="absolute inset-0 flex items-center justify-center font-black text-[80px] md:text-[120px] uppercase tracking-tighter text-[#00b06f]/[0.03] pointer-events-none select-none whitespace-nowrap"
-            aria-hidden
-          >
-            ROBLOX BANK
-          </div>
-
-          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8 text-center md:text-left">
-            <div className="space-y-3">
-              <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">JOIN US</div>
-              <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tight leading-tight">
-                Тысячи игроков<br />выбирают нас каждый день
-              </h2>
-              <p className="text-zinc-500 text-sm font-medium">
-                Присоединяйся к самому надёжному сервису в СНГ
-              </p>
-            </div>
-            <Link
-              href="/checkout"
-              className="h-14 px-10 gold-gradient font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none flex items-center gap-3 flex-shrink-0"
-            >
-              Купить Robux <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
+        <section className={styles.cta}>
+          <div className={styles.ctaText}><h2>Готовы пополнить баланс?</h2><p>Код активации — сразу на баланс, без пароля от Roblox.</p></div>
+          <Link href="/#codes" className={styles.button}>Купить код <ArrowRight size={19} /></Link>
+        </section>
+      </div>
       <Footer />
     </main>
   );

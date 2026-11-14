@@ -1,0 +1,41 @@
+/* 🛡 Доверие для родителя на странице оплаты (15.11.2026). Поверхности — токены --rb-*. */
+.side { display:flex; flex-direction:column; gap:16px; min-width:0; }
+.card { padding:20px; border-radius:22px; background:var(--rb-surface); border:1px solid var(--rb-border); display:flex; flex-direction:column; gap:12px; min-width:0; }
+.card h2 { margin:0; font-size:18px; font-weight:800; letter-spacing:-.01em; }
+.muted { margin:0; color:var(--rb-muted); font-size:14.5px; line-height:1.5; }
+.what { display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px; align-items:start; }
+.what > span { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; background:var(--rb-accent-soft); font-size:20px; }
+.what b { font-size:15.5px; }
+.what p { margin:2px 0 0; color:var(--rb-muted); font-size:14.5px; line-height:1.5; }
+.promise { margin:0; padding:0; list-style:none; display:grid; gap:8px; }
+.promise li { display:flex; gap:10px; align-items:flex-start; font-size:15px; line-height:1.45; }
+.promise li::before { content:"✓"; flex:0 0 auto; width:22px; height:22px; margin-top:1px; border-radius:50%; background:#45d6aa; color:#14473a; display:grid; place-items:center; font-weight:900; font-size:13px; }
+.check { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.src { min-width:0; padding:14px; border-radius:16px; border:1px solid var(--rb-border); background:var(--rb-surface); color:var(--rb-text); display:flex; flex-direction:column; gap:4px; text-decoration:none; }
+a.src:hover { border-color:#7556e8; }
+.badge { align-self:flex-start; padding:3px 8px; border-radius:8px; color:#fff; font-size:12px; font-weight:800; }
+.badge[data-brand="wb"] { background:#cb11ab; }
+.badge[data-brand="tg"] { background:#229ED9; }
+.badge[data-brand="vk"] { background:#0077FF; }
+.badge[data-brand="rb"] { background:#7556e8; }
+.src b { margin-top:4px; font-family:var(--font-display),sans-serif; font-size:22px; letter-spacing:-.04em; }
+.src small { color:var(--rb-muted); font-size:13.5px; line-height:1.35; }
+.src em { margin-top:auto; padding-top:4px; display:inline-flex; align-items:center; gap:3px; font-style:normal; color:var(--rb-accent); font-size:14px; font-weight:750; }
+.src .plain { color:var(--rb-muted); font-weight:600; }
+.reviews { display:flex; flex-direction:column; gap:10px; }
+.review { margin:0; padding:12px 14px; border-radius:14px; background:var(--rb-accent-soft); }
+.stars { display:inline-flex; gap:2px; color:#f2a516; }
+.review blockquote { margin:4px 0 0; font-size:14.5px; line-height:1.5; }
+.review figcaption { margin-top:4px; color:var(--rb-muted); font-size:13px; }
+.support { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; }
+.tgButton { min-height:44px; padding:0 16px; display:inline-flex; align-items:center; border-radius:12px; background:#229ED9; color:#fff; font-size:15px; font-weight:800; text-decoration:none; }
+.phone { display:inline-flex; align-items:center; gap:6px; color:var(--rb-text); font-size:15px; font-weight:800; text-decoration:none; }
+.faq details { border-top:1px solid var(--rb-border); padding-top:12px; }
+.faq details:first-of-type { border-top:0; padding-top:0; }
+.faq summary { cursor:pointer; font-size:15.5px; font-weight:750; }
+.faq details p { margin:8px 0 0; color:var(--rb-muted); font-size:14.5px; line-height:1.5; }
+.legal { margin:0; color:var(--rb-muted); font-size:13.5px; line-height:1.6; }
+.legal b { color:var(--rb-text); }
+.legal a { color:var(--rb-accent); font-weight:750; }
+.src:focus-visible,.tgButton:focus-visible,.phone:focus-visible,.faq summary:focus-visible,.legal a:focus-visible { outline:3px solid #45d6aa; outline-offset:2px; }
+@media (max-width:420px) { .check { gap:8px; } .src { padding:12px; } .src b { font-size:19px; } }

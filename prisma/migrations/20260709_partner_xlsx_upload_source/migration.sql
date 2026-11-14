@@ -1,0 +1,1 @@
+ALTER TYPE "PartnerExternalSource" ADD VALUE IF NOT EXISTS 'XLSX_UPLOAD';

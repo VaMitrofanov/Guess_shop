@@ -1,0 +1,785 @@
+<title>Квест в ботах</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap">
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   Макет ветки заказа в TG и VK. Моноширинный текст — комментарий к макету;
+   всё внутри рамки телефона — то, что реально отправляют боты (строки взяты
+   из `bots/shared/gamepass-quest.ts`, не переписаны от руки).
+
+   Лаборатория намеренно одна тёмная: это стенд для двух мессенджеров, а не
+   документ. Цвета выставлены явно, чтобы страница держалась на любом фоне.
+   ───────────────────────────────────────────────────────────────────────── */
+:root{
+  --lab:#08060e; --labline:#1e1830; --labtxt:#8f86a8; --dim:#5f5878;
+  --panel:#120e1d; --line:#2a2338; --txt:#f4f0ff; --mut:#aaa3b8;
+  --vio:#7556e8; --vio2:#c2b2ff; --grn:#45d6aa; --amb:#fcd34d; --red:#ff8087;
+  --tg:#2ea6ff; --tg-bg:#17212b; --tg-in:#182533; --tg-me:#2b5278; --tg-wall:#0e1621;
+  --vk:#5181b8; --vk-bg:#19191a; --vk-in:#232324; --vk-me:#2a4361; --vk-wall:#101010;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ui:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--lab);color:var(--txt);font-family:var(--mono);
+  background-image:radial-gradient(circle at 10% -8%,rgba(117,86,232,.17),transparent 44rem),
+                   radial-gradient(circle at 95% 8%,rgba(46,166,255,.07),transparent 38rem),
+                   radial-gradient(circle at 88% 100%,rgba(69,214,170,.08),transparent 40rem);
+  background-attachment:fixed;
+}
+a{color:var(--vio2)}
+.wrap{max-width:1280px;margin:0 auto;padding:26px 20px 72px}
+
+/* ── Шапка ─────────────────────────────────────────────────────────────── */
+.head{max-width:78ch}
+.eye{font-size:11px;letter-spacing:.19em;color:var(--vio2);font-weight:800}
+h1{font-family:var(--ui);font-size:clamp(28px,4.2vw,40px);line-height:1.02;letter-spacing:-.035em;
+   margin:10px 0 0;font-weight:900;text-wrap:balance}
+.sub{font-size:13px;line-height:1.7;color:var(--labtxt);margin:12px 0 0;max-width:70ch}
+.sub b{color:#ded6f2;font-weight:700}
+
+/* ── Переключатели ─────────────────────────────────────────────────────── */
+.bar{display:flex;flex-wrap:wrap;gap:22px;margin:26px 0 22px;align-items:flex-end}
+.seg-w{display:flex;flex-direction:column;gap:7px;min-width:max-content}
+.seg-l{font-size:10px;letter-spacing:.17em;color:var(--dim);font-weight:800}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+@media(min-width:760px){.seg{flex-wrap:nowrap}}
+.seg button{font-family:var(--mono);font-size:12.5px;padding:8px 13px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--labline);background:rgba(255,255,255,.02);color:var(--labtxt);transition:.15s}
+.seg button:hover{border-color:#3a3054;color:#ded6f2}
+.seg button[aria-pressed="true"]{border-color:var(--vio);background:rgba(117,86,232,.2);color:#efeaff}
+.seg.msg button[aria-pressed="true"][data-m="tg"]{border-color:var(--tg);background:rgba(46,166,255,.16);color:#dcefff}
+.seg.msg button[aria-pressed="true"][data-m="vk"]{border-color:var(--vk);background:rgba(81,129,184,.2);color:#dfe9f5}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--grn);outline-offset:2px}
+
+/* ── Сетка ─────────────────────────────────────────────────────────────── */
+.lab{display:grid;grid-template-columns:minmax(0,330px) minmax(0,1fr);gap:30px;align-items:start}
+@media(max-width:1020px){.lab{grid-template-columns:1fr;gap:20px}}
+.spec{position:sticky;top:22px;display:flex;flex-direction:column;gap:16px}
+@media(max-width:1020px){.spec{position:static}}
+.block{border:1px solid var(--labline);border-radius:14px;background:rgba(255,255,255,.016);padding:14px}
+.b-lbl{font-size:10px;letter-spacing:.17em;color:#6f6788;font-weight:800;margin-bottom:11px}
+.why{border-left:2px solid var(--vio);padding:3px 0 3px 13px;font-size:12.5px;line-height:1.75;color:#b9b1ce}
+.why b{color:#fff;font-weight:700}
+.why + .why{margin-top:12px}
+.keep{font-size:12px;line-height:1.75;color:var(--labtxt);display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.keep i{color:var(--grn);font-style:normal;font-weight:700}
+.keep s{color:#6b6382;text-decoration-color:#4a4362}
+
+/* карта шагов */
+.map{display:flex;flex-direction:column;gap:1px}
+.node{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center;font-size:12.5px;
+  color:var(--labtxt);padding:8px;border-radius:8px;background:none;border:0;font-family:var(--mono);
+  text-align:left;width:100%;cursor:pointer}
+.node:hover{background:rgba(255,255,255,.04);color:#d6cfe8}
+.node .pin{width:7px;height:7px;border-radius:50%;background:#3b3352;margin-left:3px}
+.node.on{color:#fff;background:rgba(117,86,232,.15)}
+.node.on .pin{background:var(--grn);box-shadow:0 0 0 4px rgba(69,214,170,.15)}
+.node .tag{font-size:10px;letter-spacing:.07em;color:#6f6788}
+.node.new .tag{color:var(--grn)}
+
+/* ── Сцена ─────────────────────────────────────────────────────────────── */
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+.phone{width:min(430px,100%);border:9px solid #221c33;border-radius:36px;overflow:hidden;
+  box-shadow:0 44px 96px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05)}
+.appbar{display:flex;align-items:center;gap:10px;padding:11px 14px;font-family:var(--ui);
+  border-bottom:1px solid rgba(255,255,255,.06)}
+.appbar .ava{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;color:#fff}
+.appbar .nm{font-size:14px;font-weight:650;color:#fff;line-height:1.25}
+.appbar .st{font-size:11px;color:rgba(255,255,255,.45)}
+.chat{height:min(70vh,740px);overflow-y:auto;padding:16px 12px 26px;display:flex;flex-direction:column;gap:11px;
+  font-family:var(--ui);font-size:14px;line-height:1.45}
+.tg .appbar{background:var(--tg-bg)} .tg .appbar .ava{background:linear-gradient(140deg,#2ea6ff,#0f6fbf)}
+.tg .chat{background:var(--tg-wall);background-image:radial-gradient(circle at 30% 10%,rgba(46,166,255,.09),transparent 22rem)}
+.vk .appbar{background:var(--vk-bg)} .vk .appbar .ava{background:linear-gradient(140deg,#5181b8,#2a4d7d)}
+.vk .chat{background:var(--vk-wall)}
+
+/* пузыри */
+.msg{max-width:88%;border-radius:14px;padding:9px 12px;color:#eef3f8;white-space:pre-wrap;word-break:break-word;position:relative}
+.tg .msg.bot{background:var(--tg-in);border-bottom-left-radius:5px;align-self:flex-start}
+.tg .msg.me{background:var(--tg-me);border-bottom-right-radius:5px;align-self:flex-end}
+.vk .msg.bot{background:var(--vk-in);border-bottom-left-radius:5px;align-self:flex-start}
+.vk .msg.me{background:var(--vk-me);border-bottom-right-radius:5px;align-self:flex-end}
+.msg b{font-weight:700;color:#fff}
+.msg code{font-family:var(--mono);font-size:12.5px;background:rgba(255,255,255,.09);padding:1px 5px;border-radius:5px}
+.msg .time{font-size:10.5px;color:rgba(255,255,255,.35);float:right;margin:6px 0 -3px 10px}
+.msg.gone{opacity:.5}
+.msg.gone .txt{text-decoration:line-through;text-decoration-color:rgba(255,255,255,.35)}
+
+/* клавиатура под сообщением */
+.kb{display:flex;flex-direction:column;gap:5px;margin-top:9px}
+.kb button{font-family:var(--ui);font-size:13px;font-weight:600;padding:9px 10px;border-radius:9px;
+  border:0;cursor:default;text-align:center;width:100%}
+.tg .kb button{background:rgba(46,166,255,.16);color:#8fd0ff}
+.tg .kb button.url{background:rgba(255,255,255,.07);color:#cfe6f7}
+.tg .kb button.go{background:rgba(69,214,170,.18);color:#8ff0d2}
+.tg .kb button.mut{background:rgba(255,255,255,.05);color:#8ea4b8}
+.vk .kb{gap:6px}
+.vk .kb button{border-radius:10px;font-size:13px}
+.vk .kb button{background:#3f4a5a;color:#dfe9f5}
+.vk .kb button.go{background:#4bb34b;color:#fff}
+.vk .kb button.url{background:#5181b8;color:#fff}
+.vk .kb button.mut{background:#2c2d2e;color:#9aa5b1}
+
+/* служебные метки внутри чата */
+.note{align-self:center;max-width:92%;font-family:var(--mono);font-size:10.5px;line-height:1.6;
+  color:#7f7899;background:rgba(117,86,232,.09);border:1px solid rgba(117,86,232,.25);
+  border-radius:9px;padding:6px 10px;text-align:center}
+.note.warn{color:#d8b25e;background:rgba(252,211,77,.07);border-color:rgba(252,211,77,.28)}
+.note.new{color:#7fe3c4;background:rgba(69,214,170,.08);border-color:rgba(69,214,170,.3)}
+.edit{align-self:flex-start;font-family:var(--mono);font-size:10px;color:#6f6788;margin:-6px 0 -2px 4px}
+
+/* ── Карточка админа ───────────────────────────────────────────────────── */
+.after{margin-top:30px;display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px;align-items:start}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.card-h{font-size:10px;letter-spacing:.17em;font-weight:800;color:#6f6788;padding:12px 14px;border-bottom:1px solid var(--line)}
+.card-b{padding:14px;font-family:var(--ui);font-size:13px;line-height:1.5;color:#dfe3ea;white-space:pre-wrap}
+.card-b b{color:#fff}
+.card-b code{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:5px}
+.card-b .hl{color:var(--amb);font-weight:700}
+.card-b .hl2{color:var(--grn);font-weight:700}
+.card-k{display:flex;gap:6px;padding:0 14px 14px;flex-wrap:wrap}
+.card-k span{font-family:var(--ui);font-size:12px;font-weight:650;padding:7px 11px;border-radius:8px;
+  background:rgba(255,255,255,.06);color:#c9d3de}
+.card-k span.ok{background:rgba(69,214,170,.16);color:#8ff0d2}
+.card-k span.no{background:rgba(255,128,135,.14);color:#ffb3b7}
+
+/* ── Таблица различий ──────────────────────────────────────────────────── */
+.diff{margin-top:30px;border:1px solid var(--labline);border-radius:14px;overflow:hidden}
+.diff table{border-collapse:collapse;width:100%;font-size:12.5px}
+.diff caption{text-align:left;font-size:10px;letter-spacing:.17em;font-weight:800;color:#6f6788;
+  padding:13px 14px;background:rgba(255,255,255,.016);border-bottom:1px solid var(--labline)}
+.diff th{text-align:left;font-weight:700;color:#8f86a8;font-size:10.5px;letter-spacing:.1em;
+  padding:10px 14px;border-bottom:1px solid var(--labline);background:rgba(255,255,255,.012)}
+.diff td{padding:11px 14px;border-bottom:1px solid rgba(30,24,48,.7);color:var(--labtxt);line-height:1.6;vertical-align:top}
+.diff tr:last-child td{border-bottom:0}
+.diff td:first-child{color:#ded6f2;font-weight:700}
+.diff .was{color:#7a7292}
+.diff .now{color:#c9c1de}
+.diff .now b{color:var(--grn);font-weight:700}
+.scroll{overflow-x:auto}
+
+.foot{margin-top:30px;font-size:11.5px;line-height:1.85;color:var(--dim);max-width:88ch}
+.foot b{color:#8f86a8}
+@media (prefers-reduced-motion:no-preference){
+  .chat{scroll-behavior:smooth}
+}
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div class="eye">ROBLOXBANK · ВЕТКА ЗАКАЗА В БОТАХ</div>
+    <h1>Тот же квест, что на сайте — теперь в TG и VK</h1>
+    <p class="sub">
+      С 06.09 инструкция на сайте работает так: <b>ник → что нашли → как сделаем → заказ</b>. Боты
+      при этом жили по-старому: спрашивали <b>один</b> геймпасс ровно за <code>ceil(номинал/0.7)</code>,
+      не смотрели, что у покупателя уже выставлено, и ничего не знали про ключ. Один и тот же аккаунт
+      получал два разных ответа — смотря где спросить. Ниже — как ветка выглядит после правки.
+      Все реплики бота взяты из кода (<code>bots/shared/gamepass-quest.ts</code>), не написаны для картинки.
+    </p>
+  </header>
+
+  <div class="bar">
+    <div class="seg-w">
+      <div class="seg-l">МЕССЕНДЖЕР</div>
+      <div class="seg msg" role="group" aria-label="Мессенджер">
+        <button type="button" data-m="tg" aria-pressed="true">Telegram</button>
+        <button type="button" data-m="vk" aria-pressed="false">ВКонтакте</button>
+      </div>
+    </div>
+    <div class="seg-w">
+      <div class="seg-l">СЦЕНАРИЙ</div>
+      <div class="seg sc" role="group" aria-label="Сценарий">
+        <button type="button" data-s="key" aria-pressed="true">Пасса нет → ключ</button>
+        <button type="button" data-s="ready" aria-pressed="false">Всё уже есть</button>
+        <button type="button" data-s="split" aria-pressed="false">2000 → два пасса</button>
+        <button type="button" data-s="miss" aria-pressed="false">Ник с опечаткой</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="lab">
+    <aside class="spec">
+      <div class="block">
+        <div class="b-lbl">ШАГИ ВЕТКИ</div>
+        <div class="map" id="map"></div>
+      </div>
+      <div class="block">
+        <div class="b-lbl">ПОЧЕМУ ТАК</div>
+        <div id="why"></div>
+      </div>
+      <div class="block">
+        <div class="b-lbl">ЧТО ОСТАЛОСЬ КАК БЫЛО</div>
+        <ul class="keep">
+          <li><i>✓</i> Ссылка и Pass ID принимаются как раньше — в любой момент, вместо ника.</li>
+          <li><i>✓</i> Поиск идёт через SG-мост: с RF-хоста Roblox недоступен.</li>
+          <li><i>✓</i> Отказ поиска — это «Roblox не ответил», а не «ника нет».</li>
+          <li><i>✓</i> Стейл-стейт: если заказ уже уехал дальше, бот отвечает статусом, а не ждёт ник.</li>
+          <li><s>✗</s> Пикер «выбери из найденных» ушёл — теперь бот сам собирает набор.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div class="phone" id="phone">
+        <div class="appbar">
+          <div class="ava" id="ava">RB</div>
+          <div>
+            <div class="nm" id="botname">RobloxBank</div>
+            <div class="st" id="botstat">бот · отвечает сразу</div>
+          </div>
+        </div>
+        <div class="chat" id="chat" tabindex="0" aria-label="Переписка с ботом"></div>
+      </div>
+      <div class="seg-l" style="color:#4d4763">Карточка выкупа, которую получит менеджер по этому заказу, — ниже</div>
+    </div>
+  </div>
+
+  <section class="after">
+    <div class="card">
+      <div class="card-h">КАРТОЧКА ВЫКУПА У АДМИНА · TELEGRAM</div>
+      <div class="card-b" id="adminCard"></div>
+      <div class="card-k">
+        <span class="ok">✅ ВЫКУПЛЕНО</span><span class="no">❌ ОШИБКА</span>
+        <span>🛒 Выкупить</span><span>📋 Скрипт</span><span>📊 Дашборд</span>
+      </div>
+    </div>
+    <div class="block">
+      <div class="b-lbl">ЧТО В КАРТОЧКЕ НОВОГО</div>
+      <div class="why">
+        <b>🔑 ПАСС СОЗДАН ПО API-КЛЮЧУ.</b> Признак берётся из событий заказа
+        (<code>AUDIT_GAMEPASS_AUTOCREATED</code>), а не со слов клиента: цену и «в продаже» выставили
+        мы — значит и отвечаем за них мы. Тот же маркер уже есть у заказов с сайта.
+      </div>
+      <div class="why">
+        <b>🧩 РАЗБИВКА.</b> Заказ, собранный из нескольких пассов, показывает каждую часть с её
+        номиналом и ценой. Части обязаны идти с <b>разных</b> доноров: повтор одного пасса с того же
+        аккаунта Roblox вернёт <code>AlreadyOwned</code>.
+      </div>
+      <div class="why">
+        Оба маркера появляются в карточке из <b>любого</b> входа — бот, сайт, поиск админа, обновление
+        статуса: они читаются из базы при отрисовке, а не передаются флагом из одного места.
+      </div>
+    </div>
+  </section>
+
+  <section class="diff scroll">
+    <table>
+      <caption>ЧТО ИМЕННО ПОМЕНЯЛОСЬ В БОТАХ</caption>
+      <thead>
+        <tr><th style="width:22%">Место</th><th style="width:39%">Было</th><th style="width:39%">Стало</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>После кода</td>
+          <td class="was">Первая кнопка — «ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ», проверка ника второй.</td>
+          <td class="now">Первая — <b>«Проверить мой аккаунт»</b>: половина заказов закрывается без единого действия покупателя. Инструкция осталась вторым входом.</td>
+        </tr>
+        <tr>
+          <td>Ответ на ник</td>
+          <td class="was">Пять текстовых веток по числу найденных пассов. Все просили <b>один</b> пасс за <code>ceil(номинал/0.7)</code>.</td>
+          <td class="now">Один разбор плана (<code>gamepass-plan.ts</code>, <b>общий с сайтом</b>): что уже подходит, что докупим повтором, что осталось создать.</td>
+        </tr>
+        <tr>
+          <td>Несколько пассов</td>
+          <td class="was">Не умел вовсе: заказ на 2000 просил пасс за 2858 — такой выкупается только с крупного донора и висел дольше всех.</td>
+          <td class="now">Набор частей пишется в <code>WbOrderGamepass</code>, сумма сверяется перед записью. <b>2000 = 2143 + 715</b>, выкупаются параллельно.</td>
+        </tr>
+        <tr>
+          <td>Цена на разбитом заказе</td>
+          <td class="was">—</td>
+          <td class="now">Основной пасс сверяется с номиналом <b>своей части</b>, а не всего заказа: прайс-гард заказа к разбивке неприменим.</td>
+        </tr>
+        <tr>
+          <td>«Сделаем за тебя»</td>
+          <td class="was">Ветки не было. Про ключ бот не знал ничего.</td>
+          <td class="now">Дверь в развилке, 5 шагов выпуска ключа, приём ключа сообщением, создание пасса через мост, вердикт — <b>под тем же флагом</b> <code>GAMEPASS_AUTOCREATE</code>, что и сайт.</td>
+        </tr>
+        <tr>
+          <td>Ключ в переписке</td>
+          <td class="was">—</td>
+          <td class="now">TG: сообщение с ключом бот <b>удаляет сам</b>. VK: удалить чужое сообщество не может — бот честно просит удалить и не обещает лишнего.</td>
+        </tr>
+        <tr>
+          <td>Тексты TG и VK</td>
+          <td class="was">Две почти одинаковые копии в двух файлах по 4–6 тысяч строк.</td>
+          <td class="now">Один <code>gamepass-quest.ts</code> отдаёт текст и кнопки, бот только рисует. Правка формулировки — <b>в одном месте</b>.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <p class="foot">
+    <b>Что ещё не проверено живьём:</b> ключ покупателя через бота ни разу не проходил боевой прогон —
+    цепочка сайт → мост → Roblox проверена (на заведомо неверный ключ Roblox отвечает отказом, то есть
+    доходит), но успешного создания пасса <b>через бота</b> ещё не было, как и выкупа созданного пасса
+    с проверкой, что робуксы дошли. До этого ветку ключа стоит держать на флаге.<br>
+    <b>Границы метода:</b> скрытый или неопубликованный плейс ключом не лечится — там нужна публикация
+    игры, и это отдельный разговор с покупателем.
+  </p>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────
+   Реплики бота — копии строк из `bots/shared/gamepass-quest.ts`. VK-вариант
+   получается снятием тегов (`plainText`), поэтому здесь один текст и флаг
+   `plain` у рендера, а не два набора.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const KB = {
+  fork:    [{t:"➡️ Выбрать, как это сделать",c:"go"},{t:"📖 Инструкция",c:"url"},{t:"✏️ Другой ник",c:"mut"}],
+  confirm: [{t:"✅ Подтвердить заказ",c:"go"},{t:"✏️ Это не мои пассы",c:"mut"}],
+  doors:   [{t:"📖 Создам сам (инструкция)",c:"url"},{t:"🔑 Сделайте за меня",c:"go"},{t:"🔢 Он у меня уже есть",c:""},{t:"🔄 Уже сделал — проверить",c:"mut"}],
+  key:     [{t:"📸 Те же шаги с картинками",c:"url"},{t:"↩️ Другой способ",c:"mut"}],
+  entry:   [{t:"🔎 Проверить мой аккаунт",c:"go"},{t:"📖 Открыть инструкцию",c:"url"}],
+  done:    [{t:"📊 Проверить статус",c:""},{t:"👤 Открыть моё меню",c:"mut"}],
+  nonick:  [{t:"✏️ Ввести ник ещё раз",c:"go"},{t:"📖 Где взять ник",c:"url"},{t:"🔢 У меня есть Pass ID",c:"mut"}],
+};
+
+const ENTRY = (amount, code) =>
+`✅ Код <b>${code}</b> активирован!
+💎 Номинал: <b>${amount} R$</b>
+
+🔎 <b>Начнём с ника Roblox.</b> Посмотрю, что у тебя уже выставлено: часто заказ собирается из готового и создавать ничего не нужно. Если нужно — покажу, что именно, и дам выбрать способ (сделать самому, прислать номер готового или <b>сделать за тебя</b>).
+
+📖 Та же проверка и инструкция со скринами — на сайте: robloxbank.ru/guide?code=${code}
+
+🔔 А здесь, в боте, придут <b>уведомления о заказе</b> — приняли → выкупаем → готово.`;
+
+const ASK_NICK = (amount, code) =>
+`🔎 Введи ник Roblox для заказа ${code} — то, как ты заходишь в игру.
+
+Посмотрю, что у тебя уже выставлено, и соберу заказ на ${amount} R$ из этого — создавать что-то новое нужно не всегда.
+Если под рукой есть ссылка на геймпасс — пришли её, этого тоже достаточно.`;
+
+const ACCEPTED = (code) =>
+`🎉 Твой геймпасс принят!
+👤 Создатель: lokomotiv_2018
+💰 Цена: 1429 R$
+
+📋 <b>Что будет дальше:</b>
+1. Выкупим твой геймпасс
+2. Пришлём уведомление сюда ✅
+3. Roblox начислит робуксы — это <b>5–7 дней</b> после выкупа
+
+Ничего делать не нужно — просто жди сообщение 👌
+
+Код ВБ: <code>${code}</code> · Статус и бонусы — в меню 👇`;
+
+const KEY_SCREEN = (price) =>
+`🔑 СДЕЛАЕМ ЗА ТЕБЯ
+
+<b>Пришли ключ — остальное на нас</b>
+Нужен один ключ из Roblox, это <b>минута</b>. <b>Пароль от Roblox не нужен</b> и никогда не понадобится: ключ умеет ровно одно — создавать геймпассы на твоём аккаунте.
+
+<b>Как его выпустить:</b>
+1. Три полоски внизу справа → вниз до пункта <b>Create</b>
+2. Нажми <b>лупу</b> и напиши <code>api</code> → первый пункт <b>API Extensions</b>
+3. Синяя кнопка <b>Create API Key</b> → имя любое, хоть <code>1</code>
+4. В поле <b>Select API System</b> напиши <code>pass</code> → выбери <b>game-passes</b> (соседний <b>legacy</b>-game-passes не подойдёт)
+5. Ниже появится блок <b>game-passes</b>, а <b>под названием</b> (ниже ползунка) — пустая рамка со стрелочкой ▾. Нажми на неё и отметь <b>обе</b> строки: <code>game-pass:read</code> и <code>game-pass:write</code>. Готово выглядит так: в рамке лежат две плашки. Пустая рамка = прав нет, пасс не создастся
+6. <b>Save &amp; Generate Key</b> → галочка <b>I understand the security risks</b> → <b>Copy Key To Clipboard</b>
+
+Пришли ключ следующим сообщением — создадим ${price} и сразу поставим в продажу.`;
+
+const KEY_TAIL_TG = `
+
+🔒 Сообщение с ключом удалим из переписки сразу, как прочитаем. Сам ключ храним зашифрованным — чтобы поправить геймпасс без тебя; доступа к аккаунту он не даёт.`;
+const KEY_TAIL_VK = `
+
+🔒 Своё сообщение с ключом удали сразу, как я отвечу, — ВКонтакте чужие сообщения я стирать не умею. Сам ключ храним зашифрованным; доступа к аккаунту он не даёт.`;
+
+const RESULT_EMPTY_1000 =
+`🔍 ПОДХОДЯЩЕГО НЕ НАШЛИ
+
+<b>На аккаунте нет геймпасса, который мы можем купить</b>
+<b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Такой вещи у тебя пока нет.
+
+👤 Аккаунт: <b>lokomotiv_2018</b> — робуксы придут на него.
+
+⚠️ ЧТО НУЖНО СДЕЛАТЬ
+Выставить один геймпасс ценой <b>1429 R$</b>
+С него придёт <b>1 000 R$</b>.
+
+Способа три — выбери любой, результат одинаковый.`;
+
+const RESULT_READY_KEY =
+`✅ ВСЁ УЖЕ ГОТОВО
+
+<b>Создавать ничего не нужно</b>
+У тебя уже выставлены геймпассы с нужными ценами — мы подставили их сами.
+
+👤 Аккаунт: <b>lokomotiv_2018</b> — робуксы придут на него.
+
+🎯 Берём твой геймпасс:
+1. «RobloxBank» · <b>1429 R$</b> → 1 000 R$ на руки
+
+💰 Итого на руки: <b>1 000 R$</b>`;
+
+const RESULT_ASSEMBLED =
+`🧩 СОБРАЛИ ИЗ ТВОИХ
+
+<b>Создавать ничего не нужно</b>
+Твои геймпассы складываются ровно в <b>1 000 R$</b> без остатка. Один из них выкупим несколько раз — покупки идут с разных аккаунтов, тебе делать ничего не надо.
+
+👤 Аккаунт: <b>lokomotiv_2018</b> — робуксы придут на него.
+
+🧩 Заказ соберём так:
+1. «Robux Pack» · <b>715 R$</b> → 500 R$ на руки
+2. «Robux Pack» · <b>715 R$</b> → 500 R$ на руки · тот же пасс, купим с другого аккаунта
+
+💰 Итого на руки: <b>1 000 R$</b>`;
+
+const RESULT_SPLIT_EMPTY =
+`🔍 ПОДХОДЯЩЕГО НЕ НАШЛИ
+
+<b>На аккаунте нет геймпасса, который мы можем купить</b>
+<b>Геймпасс — это платная вещь внутри твоей игры в Roblox.</b> Ты её выставляешь, мы покупаем — Roblox переводит тебе робуксы. Такой вещи у тебя пока нет.
+
+👤 Аккаунт: <b>mono262910</b> — робуксы придут на него.
+
+⚠️ ЧТО НУЖНО СДЕЛАТЬ
+Нужны два геймпасса: <b>2143 R$</b> и <b>715 R$</b>.
+С них придёт 1 500 R$ и 500 R$ — вместе ровно <b>2 000 R$</b>.
+Два вместо одного дорогого: так заказ выкупается быстрее, а сумма та же.
+
+Способа три — выбери любой, результат одинаковый.`;
+
+const RESULT_SPLIT_READY =
+`✅ ВСЁ УЖЕ ГОТОВО
+
+<b>Создавать ничего не нужно</b>
+У тебя уже выставлены геймпассы с нужными ценами — мы подставили их сами.
+
+👤 Аккаунт: <b>mono262910</b> — робуксы придут на него.
+
+🧩 Заказ соберём так:
+1. «RobloxBank» · <b>2143 R$</b> → 1 500 R$ на руки
+2. «RobloxBank Robux» · <b>715 R$</b> → 500 R$ на руки
+
+💰 Итого на руки: <b>2 000 R$</b>`;
+
+const FORK_ONE =
+`ВЫБЕРИ, КАК СДЕЛАЕМ
+
+<b>Как сделаем геймпасс?</b>
+Нужен один геймпасс за <b>1429 R$</b>. Сделать его можно тремя способами — результат одинаковый.
+
+📖 <b>Создам сам</b> — покажем каждое нажатие с картинкой · 3–5 минут
+🔑 <b>Сделайте за меня</b> · НОВОЕ — пришлёшь один ключ из Roblox, создадим сами. Пароль не нужен · минута
+🔢 <b>Он у меня уже есть</b> — найдём по номеру, даже скрытый · 10 секунд
+
+Не знаешь, что выбрать? Жми первый — это обычный путь.`;
+
+const FORK_TWO =
+`ВЫБЕРИ, КАК СДЕЛАЕМ
+
+<b>Нужно два геймпасса</b>
+Нужны два: на <b>2143</b> и <b>715 R$</b>. Способ один на оба — результат одинаковый.
+
+📖 <b>Создам сам</b> — покажем каждое нажатие с картинкой · 3–5 минут
+🔑 <b>Сделайте за меня</b> · НОВОЕ — пришлёшь один ключ из Roblox, создадим сами. Пароль не нужен · минута
+🔢 <b>Он у меня уже есть</b> — найдём по номеру, даже скрытый · 10 секунд
+
+Не знаешь, что выбрать? Жми первый — это обычный путь.`;
+
+const NO_NICK =
+`🤷 <b>Пользователя lokomotv_218 нет на Roblox</b>
+
+Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`;
+
+/* Сценарии: последовательность реплик + карта шагов слева. */
+const SCEN = {
+  key: {
+    map: [
+      ["Код в боте","вход"],["Ник Roblox","шаг 1"],["Проверка аккаунта","шаг 2"],
+      ["Что нашли","шаг 3"],["Выбор способа","шаг 4"],["Ключ · 5 шагов","НОВОЕ"],
+      ["Создали пасс","НОВОЕ"],["Подтверждение","шаг 5"],
+    ],
+    why: [
+      ["Ключ — единственная ветка, где мы делаем работу за покупателя.","«Нет пасса» — самая частая причина застрявшего заказа: 28 из 54 в живой диагностике. Инструкция этот случай не лечит, а объясняет; ключ — закрывает."],
+      ["Сообщение с ключом бот удаляет сам.","В личном чате Telegram это разрешено, и делается это до похода в Roblox. ВКонтакте так не умеет — там текст ветки просит удалить сообщение самому, а не обещает невозможное."],
+      ["Отказ ведёт на конкретный шаг, а не в начало.","«Не хватает одной галочки» → шаг с правами; «ключ не принят» → шаг выпуска. Возвращать человека в начало пути — значит заставлять пролистывать то, что он уже сделал."],
+      ["Права различаются по одной пробе.","Roblox отвечает одинаковым отказом и на «выбран legacy-game-passes», и на «отмечена только одна операция». После отказа мы пробуем ключом ПРОЧИТАТЬ пассы: получилось — значит не хватает только write, и человеку говорим про одну галочку, а не про новый ключ."],
+    ],
+    admin: "key",
+    msgs: [
+      ["me","84CR7UZ"],
+      ["bot",ENTRY(1000,"84CR7UZ"),KB.entry],
+      ["tap","Нажал «🔎 Проверить мой аккаунт»"],
+      ["bot",ASK_NICK(1000,"84CR7UZ")],
+      ["me","lokomotiv_2018"],
+      ["bot","🔎 Ищу геймпассы у lokomotiv_2018…"],
+      ["edit","этот же пузырь переписывается результатом — иначе ответ уезжает ниже экрана"],
+      ["bot",RESULT_EMPTY_1000,KB.fork],
+      ["tap","Нажал «➡️ Выбрать, как это сделать»"],
+      ["bot",FORK_ONE,KB.doors],
+      ["tap","Нажал «🔑 Сделайте за меня»"],
+      ["bot","KEY_SCREEN:пасс на <b>1429 R$</b>",KB.key],
+      ["gone","OcW7…—ключ покупателя, 48 символов"],
+      ["bot","🔑 Ключ принят. Создаём геймпасс на 1429 R$…"],
+      ["note-new","мост (SG) → Open Cloud: POST /universes/{id}/game-passes · цена и «в продаже» ставятся одним запросом"],
+      ["bot","✅ <b>Сделали за тебя</b>\n\nПасс на 1429 R$ создан и уже стоит в продаже."],
+      ["bot",RESULT_READY_KEY,KB.confirm],
+      ["tap","Нажал «✅ Подтвердить заказ»"],
+      ["bot",ACCEPTED("84CR7UZ"),KB.done],
+    ],
+  },
+
+  ready: {
+    map: [["Код в боте","вход"],["Ник Roblox","шаг 1"],["Проверка аккаунта","шаг 2"],["Заказ собран из своих","НОВОЕ"],["Подтверждение","шаг 3"]],
+    why: [
+      ["Самый частый исход, которого раньше не было вовсе.","Заказ на 1000 закрывается двумя выкупами пасса на 715. Раньше бот требовал создать пасс за 1429 — то есть просил сделать работу, которая уже сделана."],
+      ["«Тот же пасс, купим с другого аккаунта» — не оговорка, а условие.","Повтор одного пасса с того же аккаунта Roblox вернёт AlreadyOwned, поэтому части расходятся по разным донорам. Покупателю при этом делать нечего."],
+      ["Дверей нет — есть кнопка «Подтвердить».","Развилка показывается только когда что-то действительно нужно создать."],
+    ],
+    admin: "ready",
+    msgs: [
+      ["me","84CR7UZ"],
+      ["bot",ENTRY(1000,"84CR7UZ"),KB.entry],
+      ["tap","Нажал «🔎 Проверить мой аккаунт»"],
+      ["bot",ASK_NICK(1000,"84CR7UZ")],
+      ["me","lokomotiv_2018"],
+      ["bot","🔎 Ищу геймпассы у lokomotiv_2018…"],
+      ["bot",RESULT_ASSEMBLED,KB.confirm],
+      ["tap","Нажал «✅ Подтвердить заказ»"],
+      ["bot",ACCEPTED("84CR7UZ"),KB.done],
+      ["note","заказ уходит менеджеру уже с набором из двух частей — обе по 500 R$ на руки"],
+    ],
+  },
+
+  split: {
+    map: [["Код в боте","вход"],["Ник Roblox","шаг 1"],["Что нашли","шаг 2"],["Нужно ДВА пасса","НОВОЕ"],["Ключ создаёт оба","НОВОЕ"],["Подтверждение","шаг 3"]],
+    why: [
+      ["Номинал 2000 — тот, что висел дольше всех.","Один пасс на 2000 стоит 2858 R$: выкупить его может только донор, у которого столько есть целиком. Пара 2143 + 715 стоит ровно столько же для покупателя, но выкупается двумя донорами параллельно."],
+      ["Разбивка — не выдумка бота, а общая таблица.","SPLIT_PLANS живёт в одном файле с разбором плана, и её же читают сайт и админка. Сумма частей обязана равняться номиналу — сверяется ещё раз перед записью в базу."],
+      ["Ключ создаёт оба пасса по одному, по очереди.","create не идемпотентен: параллельный запуск на одном ключе ловит лимиты Roblox, а повтор после отказа рождает лишний пасс на чужом аккаунте."],
+    ],
+    admin: "split",
+    msgs: [
+      ["me","CVX3PHS"],
+      ["bot",ENTRY(2000,"CVX3PHS"),KB.entry],
+      ["me","mono262910"],
+      ["bot","🔎 Ищу геймпассы у mono262910…"],
+      ["bot",RESULT_SPLIT_EMPTY,KB.fork],
+      ["tap","Нажал «➡️ Выбрать, как это сделать»"],
+      ["bot",FORK_TWO,KB.doors],
+      ["tap","Нажал «🔑 Сделайте за меня»"],
+      ["bot","KEY_SCREEN:два пасса на <b>2143 и 715 R$</b>",KB.key],
+      ["gone","OcW7…—ключ покупателя, 48 символов"],
+      ["bot","🔑 Ключ принят. Создаём два геймпасса — на 2143 и 715 R$…"],
+      ["bot","✅ <b>Сделали за тебя</b>\n\nСоздали два пасса — на 2143 и 715 R$. Оба уже стоят в продаже."],
+      ["bot",RESULT_SPLIT_READY,KB.confirm],
+      ["tap","Нажал «✅ Подтвердить заказ»"],
+      ["note","в базу ложатся две части: 1500 и 500. Карточка менеджера ведёт по одной"],
+    ],
+  },
+
+  miss: {
+    map: [["Код в боте","вход"],["Ник с опечаткой","шаг 1"],["Аккаунта нет","тупик снят"],["Ник заново","шаг 1"]],
+    why: [
+      ["«Ника нет на Roblox» и «Roblox не ответил» — разные ответы.","Раньше инфра-сбой моста показывался как «такого ника нет», и человек с рабочим ником уходил переписывать его по кругу. Теперь у сбоя свой экран и своя кнопка «попробовать ещё раз»."],
+      ["Из тупика всегда две двери.","Повторить ввод — и запасной вход по Pass ID: если плейс скрыт, по нику мы пасс не найдём никогда, а по номеру находим всегда."],
+    ],
+    admin: "none",
+    msgs: [
+      ["me","84CR7UZ"],
+      ["bot",ENTRY(1000,"84CR7UZ"),KB.entry],
+      ["me","lokomotv_218"],
+      ["bot","🔎 Ищу геймпассы у lokomotv_218…"],
+      ["bot",NO_NICK,KB.nonick],
+      ["note-warn","опечатка — самая частая причина; ник копируется со страницы профиля"],
+      ["me","lokomotiv_2018"],
+      ["bot","🔎 Ищу геймпассы у lokomotiv_2018…"],
+      ["bot",RESULT_EMPTY_1000,KB.fork],
+    ],
+  },
+};
+
+/* Карточки админа — текст ровно того вида, что собирает formatAdminNotice. */
+const ADMIN = {
+  key:
+`🟠 <b>WB · ЗАКАЗ ЖДЁТ ВЫКУПА</b>
+🔑 <code>84CR7UZ</code> · 1000 R$ · геймпасс 1429 R$
+<span class="hl">🔑 ПАСС СОЗДАН ПО API-КЛЮЧУ</span> — цену и «в продаже» выставили мы
+📱 Источник: <b>WB (Telegram)</b>
+👤 Юзер: @buyer_2018
+🎮 Создатель ГП: <b>lokomotiv_2018</b>
+⏳ Возраст заказа: <b>4 минуты</b>
+🔗 Открыть Gamepass
+🎫 Pass ID: <code>1970412655</code>
+
+▸ скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»`,
+  ready:
+`🟠 <b>WB · ЗАКАЗ ЖДЁТ ВЫКУПА</b>
+🔑 <code>84CR7UZ</code> · 1000 R$ · <span class="hl2">2 пасса на 1429 R$ суммарно</span>
+📱 Источник: <b>WB (Telegram)</b>
+👤 Юзер: @buyer_2018
+🎮 Создатель ГП: <b>lokomotiv_2018</b>
+⏳ Возраст заказа: <b>2 минуты</b>
+<span class="hl2">🧩 РАЗБИВКА: 2 части</span> — каждую покупать с ОТДЕЛЬНОГО донора
+   1. <code>1963665231</code> · 500 R$ · пасс 715 R$
+   2. <code>1963665231</code> · 500 R$ · пасс 715 R$
+🔗 Открыть Gamepass
+
+▸ выкупить части с разных доноров (карточка заказа ведёт по одной) и нажать «ВЫКУПЛЕНО»`,
+  split:
+`🟠 <b>WB · ЗАКАЗ ЖДЁТ ВЫКУПА</b>
+🔑 <code>CVX3PHS</code> · 2000 R$ · <span class="hl2">2 пасса на 2858 R$ суммарно</span>
+<span class="hl">🔑 ПАСС СОЗДАН ПО API-КЛЮЧУ</span> — цену и «в продаже» выставили мы
+📘 Источник: <b>WB (ВКонтакте)</b>
+👤 Юзер: mono262910
+⏳ Возраст заказа: <b>6 минут</b>
+<span class="hl2">🧩 РАЗБИВКА: 2 части</span> — каждую покупать с ОТДЕЛЬНОГО донора
+   1. <code>1970321037</code> · 1500 R$ · пасс 2143 R$
+   2. <code>1970321038</code> · 500 R$ · пасс 715 R$
+🔗 Открыть Gamepass
+
+▸ выкупить части с разных доноров (карточка заказа ведёт по одной) и нажать «ВЫКУПЛЕНО»`,
+  none:
+`— заказа по этому сценарию ещё нет: покупатель не дошёл до подтверждения.
+
+Карточка менеджеру уходит только после «Подтвердить»: до этого момента у заказа
+нет ни геймпасса, ни статуса PENDING.`,
+};
+
+/* ── Рендер ─────────────────────────────────────────────────────────────── */
+let messenger = "tg";
+let scenario = "key";
+
+const chat = document.getElementById("chat");
+const phone = document.getElementById("phone");
+const mapEl = document.getElementById("map");
+const whyEl = document.getElementById("why");
+const cardEl = document.getElementById("adminCard");
+const ava = document.getElementById("ava");
+const botname = document.getElementById("botname");
+const botstat = document.getElementById("botstat");
+
+const strip = (s) => s
+  .replace(/<\/?(b|code)>/g, "")
+  .replace(/&amp;/g, "&");
+
+function esc(s){ return s.replace(/&(?!amp;)/g,"&amp;").replace(/<(?!\/?(b|code)>)/g,"&lt;"); }
+
+function bubble(kind, text, kb){
+  const el = document.createElement("div");
+  el.className = "msg " + kind;
+  const body = document.createElement("span");
+  body.className = "txt";
+  body.innerHTML = messenger === "vk" ? esc(strip(text)) : esc(text);
+  el.appendChild(body);
+  if (kb) {
+    const box = document.createElement("div");
+    box.className = "kb";
+    for (const b of kb) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.tabIndex = -1;
+      btn.className = b.c || "";
+      btn.textContent = b.t;
+      box.appendChild(btn);
+    }
+    el.appendChild(box);
+  }
+  return el;
+}
+
+function render(){
+  const sc = SCEN[scenario];
+  phone.className = "phone " + messenger;
+  ava.textContent = messenger === "tg" ? "RB" : "RB";
+  botname.textContent = messenger === "tg" ? "RobloxBank Bot" : "RobloxBank";
+  botstat.textContent = messenger === "tg" ? "бот · отвечает сразу" : "сообщество · отвечает сразу";
+
+  chat.textContent = "";
+  sc.msgs.forEach(([kind, text, kb], i) => {
+    if (kind === "tap") {
+      const n = document.createElement("div");
+      n.className = "note";
+      n.textContent = "👆 " + text;
+      chat.appendChild(n);
+      return;
+    }
+    if (kind === "note" || kind === "note-warn" || kind === "note-new") {
+      const n = document.createElement("div");
+      n.className = "note" + (kind === "note-warn" ? " warn" : kind === "note-new" ? " new" : "");
+      n.textContent = text;
+      chat.appendChild(n);
+      return;
+    }
+    if (kind === "edit") {
+      const n = document.createElement("div");
+      n.className = "edit";
+      n.textContent = "↑ " + text;
+      chat.appendChild(n);
+      return;
+    }
+    if (kind === "gone") {
+      const [key, tail] = text.split("—");
+      const el = bubble("me gone", key);
+      chat.appendChild(el);
+      const n = document.createElement("div");
+      n.className = "note new";
+      n.textContent = messenger === "tg"
+        ? tail + " · бот удалил это сообщение сразу после чтения"
+        : tail + " · ВКонтакте бот удалить его не может — просит удалить самому";
+      chat.appendChild(n);
+      return;
+    }
+    let body = text;
+    if (body.startsWith("KEY_SCREEN:")) {
+      body = KEY_SCREEN(body.slice("KEY_SCREEN:".length)) + (messenger === "tg" ? KEY_TAIL_TG : KEY_TAIL_VK);
+    }
+    chat.appendChild(bubble(kind, body, kb));
+  });
+
+  mapEl.textContent = "";
+  sc.map.forEach(([label, tag], i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "node" + (tag === "НОВОЕ" ? " new" : "") + (i === 0 ? " on" : "");
+    b.innerHTML = '<span class="pin"></span><span></span><span class="tag"></span>';
+    b.children[1].textContent = label;
+    b.children[2].textContent = tag;
+    b.addEventListener("click", () => {
+      mapEl.querySelectorAll(".node").forEach(n => n.classList.remove("on"));
+      b.classList.add("on");
+      const bubbles = chat.querySelectorAll(".msg.bot");
+      const target = bubbles[Math.min(i, bubbles.length - 1)];
+      if (target) target.scrollIntoView({ block: "center" });
+    });
+    mapEl.appendChild(b);
+  });
+
+  whyEl.textContent = "";
+  sc.why.forEach(([h, t]) => {
+    const d = document.createElement("div");
+    d.className = "why";
+    d.innerHTML = "<b></b> ";
+    d.children[0].textContent = h;
+    d.appendChild(document.createTextNode(t));
+    whyEl.appendChild(d);
+  });
+
+  cardEl.innerHTML = ADMIN[sc.admin];
+}
+
+document.querySelectorAll(".seg.msg button").forEach(b => {
+  b.addEventListener("click", () => {
+    messenger = b.dataset.m;
+    document.querySelectorAll(".seg.msg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    render();
+  });
+});
+document.querySelectorAll(".seg.sc button").forEach(b => {
+  b.addEventListener("click", () => {
+    scenario = b.dataset.s;
+    document.querySelectorAll(".seg.sc button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    render();
+  });
+});
+
+render();
+</script>

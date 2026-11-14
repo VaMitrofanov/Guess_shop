@@ -1,40 +1,43 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import {
+  DIRECT_PACKS,
+  DIRECT_PRICES,
+  RETAIL_PRICING_POLICY_VERSION,
+  directPrice,
+  getRetailPriceBreakdown,
+} from "@/lib/retail-pricing";
 
 interface PricingState {
-  rubPerRobux: number;
-  inventory: number;
-  maxLimit: number;
+  policyVersion: string;
+  packs: { amountRobux: number; rubles: number }[];
   loading: boolean;
 }
 
 export function usePricing() {
-  const FIXED_RATE = 0.65;
-
   const [pricing, setPricing] = useState<PricingState>({
-    rubPerRobux: FIXED_RATE,
-    inventory: 0,
-    maxLimit: 0,
-    loading: true,
+    policyVersion: RETAIL_PRICING_POLICY_VERSION,
+    packs: DIRECT_PACKS.map((amountRobux) => ({ amountRobux, rubles: DIRECT_PRICES[amountRobux] })),
+    loading: false,
   });
 
   useEffect(() => {
     fetch("/api/pricing")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("pricing unavailable"))))
       .then((data) => {
         setPricing({
-          rubPerRobux: FIXED_RATE,
-          inventory: data.inventory ?? 0,
-          maxLimit: data.maxLimit ?? 0,
+          policyVersion: data.policyVersion ?? RETAIL_PRICING_POLICY_VERSION,
+          packs: Array.isArray(data.packs)
+            ? data.packs
+            : DIRECT_PACKS.map((amountRobux) => ({ amountRobux, rubles: DIRECT_PRICES[amountRobux] })),
           loading: false,
         });
       })
-      .catch(() => setPricing((p) => ({ ...p, rubPerRobux: FIXED_RATE, loading: false })));
+      .catch(() => setPricing((p) => ({ ...p, loading: false })));
   }, []);
 
-  const getPrice = (amountRobux: number) =>
-    Math.round(amountRobux * pricing.rubPerRobux);
+  const getPrice = (amountRobux: number) => directPrice(amountRobux);
 
-  return { ...pricing, getPrice };
+  return { ...pricing, getPrice, getBreakdown: getRetailPriceBreakdown };
 }
