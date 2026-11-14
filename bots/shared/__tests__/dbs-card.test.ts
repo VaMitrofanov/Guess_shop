@@ -94,7 +94,8 @@ describe("renderDbsCard", () => {
     expect(text).toContain("5536525331");
     expect(text).toContain("Максим");
     expect(text).toContain("7KA63QA");
-    expect(text).toContain("Дальше:");
+    // 15.11.2026: «Дальше:» убрано из уведов (кроме сути у срочных).
+    expect(text).not.toContain("Дальше:");
     expect(text).toContain("гейт отправлен");
   });
 

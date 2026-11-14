@@ -67,7 +67,10 @@ export type AdminNotice = {
 export function formatAdminNotice(notice: AdminNotice): string {
   const head = `${MARKER[notice.marker]} <b>${notice.zone} · ${notice.title}</b>`;
   const body = (notice.lines ?? []).filter((line): line is string => Boolean(line));
-  const tail = notice.next ? [`Дальше: ${notice.next}`] : [];
+  // 15.11.2026, владелец: «убери „Дальше:“ везде — мы и так знаем, что делать».
+  // Исключение — 🔴 срочные: там в `next` лежит суть (почему заморожен заказ,
+  // как продлить токен), она остаётся строкой, но без слова «Дальше».
+  const tail = notice.marker === "urgent" && notice.next ? [`👉 ${notice.next}`] : [];
   return [head, ...body, ...tail].join("\n");
 }
 

@@ -120,15 +120,19 @@ async function postToTelegramChannel(bot: Telegraf, note: ReleaseNote): Promise<
 async function postToVkWall(note: ReleaseNote): Promise<string> {
   const token = process.env.VK_TOKEN;
   const group = process.env.VK_GROUP_ID;
-  const message = vkPostText(note);
-  if (!token || !group || !message) return "ВК не настроен";
+  const text = vkPostText(note);
+  if (!token || !group || !text) return "ВК не настроен";
+  /* 15.11.2026: ссылка вложением падает — «link_photo_sizing_rule. No photo
+     given»: ВК больше не принимает ссылку-сниппет от сообщества без фото, а
+     загрузить фото на стену токен сообщества не может (photos.getWallUploadServer
+     — только пользовательский токен). Поэтому ссылка — строкой в конце текста. */
+  const link = note.public?.link;
+  const message = link && !text.includes(link) ? `${text}\n\n👉 ${link}` : text;
   const response = await fetch("https://api.vk.com/method/wall.post", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       access_token: token, v: "5.131", owner_id: `-${group}`, from_group: "1", message,
-      // Ссылка вложением — ВК покажет карточку сайта с картинкой.
-      ...(note.public?.link ? { attachments: note.public.link } : {}),
     }),
     signal: AbortSignal.timeout(15_000),
   });

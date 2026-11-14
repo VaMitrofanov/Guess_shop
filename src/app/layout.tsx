@@ -35,11 +35,13 @@ export const metadata: Metadata = {
   // come up blank.
   metadataBase: new URL("https://robloxbank.ru"),
   title: "Roblox Bank — купить Robux за рубли",
-  description: "Быстрая и безопасная покупка Robux за рубли. Актуальный курс, доставка через геймпасс без ввода пароля.",
-  keywords: ["купить робуксы", "robux за рубли", "roblox bank", "робуксы дешево"],
+  description: "Коды Robux от 239 ₽ — сразу на баланс, без пароля от Roblox. Оплата картой или СБП, подарок открыткой, геймпасс — дешевле.",
+  keywords: ["купить робуксы", "robux за рубли", "roblox bank", "робуксы дешево", "код роблокс", "подарочная карта roblox"],
+  // Яндекс.Вебмастер (15.11.2026): подтверждение и файлом public/yandex_bf0d3da6d4e6e62e.html, и мета-тегом.
+  verification: { yandex: "bf0d3da6d4e6e62e" },
   openGraph: {
     title: "Roblox Bank — купить Robux за рубли",
-    description: "Покупка Robux за рубли. Актуальный курс, доставка через геймпасс.",
+    description: "Коды Robux — сразу на баланс, без пароля от Roblox. Картой или СБП, можно в подарок открыткой.",
     url: "https://robloxbank.ru",
     siteName: "Roblox Bank",
     locale: "ru_RU",
@@ -48,7 +50,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Roblox Bank — купить Robux за рубли",
-    description: "Покупка Robux за рубли. Актуальный курс, доставка через геймпасс.",
+    description: "Коды Robux — сразу на баланс, без пароля от Roblox. Картой или СБП, можно в подарок открыткой.",
   },
 };
 
