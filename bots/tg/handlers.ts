@@ -8,7 +8,7 @@
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
-import { orderPinText, recordOrderPin } from "../shared/order-pin";
+import { orderPinMarkupTg, orderPinText, recordOrderPin } from "../shared/order-pin";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
@@ -87,6 +87,7 @@ import { buildCompletedMessages, COMPLETED_MSG1_BUTTON } from "../shared/complet
 import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
 import { PENDING_MENU_BUTTON, PENDING_PAGE_BUTTON, PENDING_PAGE_URL, pendingInfoText } from "../shared/pending-info";
 import { robuxWaitText } from "../shared/robux-wait";
+import { robuxGotCardText } from "../shared/robux-got-card";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, gpPassPrice, personalFaqAnswer, priceLabelSuffix, stageNextLine, type FaqStage } from "../shared/smart-faq";
 import {
   buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
@@ -94,7 +95,7 @@ import {
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
-  activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText, ROBUX_CONFIRM,
+  activeOrderLeadText, type SelfCheckContext, SURVEY_CMD, ROBUX_CONFIRM,
   isPendingScreenshotContext, ROBUX_LOW_PENDING_RETRY_CONTEXT,
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, EXPLICIT_REVIEW_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
@@ -113,7 +114,7 @@ import {
   readyParts,
   type DirectPlanScreen,
 } from "../shared/direct-plan";
-import { intentPartsRows, priceMismatchMessage } from "../shared/gamepass-acceptance";
+import { intentPartsRows, passChecklist, priceMismatchMessage } from "../shared/gamepass-acceptance";
 import { buildBuyerMenuText } from "../shared/buyer-menu";
 import { passFitsAmount } from "../shared/direct-requote";
 import { loadRobloxApiKeyForUser, rememberRobloxApiKey, type RobloxApiKeyClient } from "../shared/roblox-api-key-store";
@@ -428,7 +429,7 @@ function supportBtn(label = "💬 Написать в поддержку", ctxKe
  */
 async function pinOrderCodeTg(ctx: any, code: string, denomination: number): Promise<void> {
   try {
-    const sent = await ctx.reply(orderPinText({ code, amount: denomination, stage: "wait", format: "html" }), { parse_mode: "HTML" });
+    const sent = await ctx.reply(orderPinText({ code, amount: denomination, stage: "wait", format: "html" }), { parse_mode: "HTML", reply_markup: orderPinMarkupTg("wait", code) });
     if (sent?.message_id && ctx.chat?.id) {
       await ctx.telegram.pinChatMessage(ctx.chat.id, sent.message_id, { disable_notification: true });
       // Дальше карточку правит свип (bots/shared/order-pin.ts) по мере выкупа.
@@ -3992,6 +3993,7 @@ async function processGamepassSubmission(
         } else {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
           const notActiveText =
+            passChecklist({ forSale: false, price: gamepassInfo.price, expected: expectedPrice, owner: gamepassInfo.creatorName }) + `\n\n` +
             `⚠️ Геймпасс не выставлен на продажу.\n\n` +
             `Зайди в Creator Dashboard → Creations → Passes, найди геймпасс <b>${passId}</b>, ` +
             `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.\n\n` +
@@ -4022,6 +4024,7 @@ async function processGamepassSubmission(
         // Managed pricing называем только когда product-info его ПОДТВЕРДИЛ,
         // иначе первой причиной идёт «цена просто не та» (правка 18.10.2026).
         const priceMismatchText =
+          passChecklist({ forSale: true, price: gamepassInfo.price, expected: expectedPrice, managed: prodInfo ? isManaged : null, owner: gamepassInfo.creatorName }) + `\n\n` +
           priceMismatchMessage({
             expected: expectedPrice,
             actual: gamepassInfo.price,
@@ -6077,7 +6080,16 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       if (data === SURVEY_CMD.got) {
         await ctx.answerCbQuery("Спасибо! 🙌").catch(() => {});
-        await ctx.reply(robuxSurveyGotText());
+        // 🎁 Одна карточка: спасибо + отзыв с бонусом + купить напрямую (15.11.2026).
+        const gotUser = await db.user.findUnique({ where: { tgId }, select: { reviewBonusGrantedAt: true } }).catch(() => null);
+        const reviewPending = Boolean(gotUser && !gotUser.reviewBonusGrantedAt && sc.wbCode && !String(sc.wbCode).startsWith("DIR-"));
+        await ctx.reply(robuxGotCardText({ reviewPending, bonus: REVIEW_BONUS_AMOUNT, fmt: "html" }), {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            ...(reviewPending ? [[Markup.button.callback("📸 Прислать отзыв", CB.reviewHint)]] : []),
+            [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+          ]),
+        });
         return;
       }
       data = data === SURVEY_CMD.pending ? "rbx_pend" : "rbx_low";

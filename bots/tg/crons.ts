@@ -22,6 +22,7 @@ import { priceWatchFlagged, priceWatchTargets, type PriceWatchPart } from "../sh
 import { notifyBuyerViaWbChat, wbChatGamepassNudgeMessage } from "../shared/wb-chat-notify";
 import { vkDialogLink } from "../shared/vk-links";
 import { adminTargets } from "../shared/admin-route";
+import { isBuyerQuietHourMsk } from "../shared/quiet-hours";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -294,8 +295,37 @@ function buildReminderMsgPlain(level: number, guideUrl: string): string {
   );
 }
 
+const REMINDER_MSG_EVENT = "REMINDER_MSG";
+
+/**
+ * 🧹 Бот убирает свои устаревшие напоминания (15.11.2026): пасс пришёл, а в чате
+ * висят «создай геймпасс». Заказ ушёл из AWAITING_GAMEPASS — удаляем их.
+ * Telegram даёт удалять только 48 ч, старше — просто помечаем, что разобрали.
+ */
+async function cleanupStaleReminders(bot: Telegraf): Promise<void> {
+  const since = new Date(Date.now() - 48 * 3600_000);
+  const orders = await db.wbOrder.findMany({
+    where: { remindersSent: { gt: 0 }, status: { not: "AWAITING_GAMEPASS" }, updatedAt: { gte: since } },
+    select: { id: true },
+    take: 100,
+  });
+  if (!orders.length) return;
+  const events = await db.orderEvent.findMany({
+    where: { orderId: { in: orders.map((o) => o.id) }, type: REMINDER_MSG_EVENT, createdAt: { gte: since } },
+    select: { id: true, payload: true },
+  });
+  for (const e of events) {
+    const p = (e.payload ?? {}) as { chatId?: string; messageId?: number; cleaned?: boolean };
+    if (p.cleaned || !p.chatId || !p.messageId) continue;
+    await bot.telegram.deleteMessage(p.chatId, p.messageId).catch(() => undefined);
+    await db.orderEvent.update({ where: { id: e.id }, data: { payload: { ...p, cleaned: true } } }).catch(() => undefined);
+  }
+}
+
+// 🌙 Тихие часы — `bots/shared/quiet-hours.ts`.
 async function processAwaitingReminders(bot: Telegraf): Promise<void> {
   const now = Date.now();
+  if (isBuyerQuietHourMsk(now)) return;
 
   const orders = await db.wbOrder.findMany({
     where: {
@@ -357,12 +387,21 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
             ],
           };
         }
-        await bot.telegram.sendMessage(
+        const sentMsg = await bot.telegram.sendMessage(
           order.user.tgId,
           buildReminderMsg(newLevel, guideUrl),
           extra,
         );
         delivered = true;
+        // Запомнить, чтобы убрать, когда заказ уйдёт дальше (`cleanupStaleReminders`).
+        await db.orderEvent.create({
+          data: {
+            orderId: order.id,
+            type: REMINDER_MSG_EVENT,
+            idempotencyKey: `${REMINDER_MSG_EVENT}:${order.id}:${newLevel}:${sentMsg.message_id}`,
+            payload: { chatId: String(order.user.tgId), messageId: sentMsg.message_id, level: newLevel },
+          },
+        }).catch(() => undefined);
       } catch { }
     } else if (order.user.vkId) {
       try {
@@ -575,6 +614,11 @@ export function startReviewReminderCron(bot: Telegraf): void {
       console.error("[AwaitingReminder] error:", err)
     );
   }, 2 * 60 * 60 * 1000); // every 2 hours
+
+  // 🧹 Убрать напоминания «создай пасс» у заказов, которые ушли дальше — раз в 15 минут.
+  setInterval(() => {
+    cleanupStaleReminders(bot).catch(err => console.error("[ReminderCleanup] error:", err));
+  }, 15 * 60 * 1000);
 
   // Сторож цены принятого пасса — каждые 15 минут
   setTimeout(() => {

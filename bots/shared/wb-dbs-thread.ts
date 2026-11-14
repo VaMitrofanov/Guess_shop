@@ -182,7 +182,21 @@ export async function refreshDbsCard(db: Db, orderId: string) {
   const buyout = order.wbCode?.code ? await buyoutStateOf(db, order.wbCode.code) : null;
 
   const hasLiveSecret = wbDeliverySecretIsLive(order.deliverySecret);
+  // Шкала этапов (15.11.2026): первый непройденный — текущий.
+  const passed = [
+    order.chatState !== "WAITING_BUYER_CHAT",
+    hasLiveSecret || Boolean(order.completedAt),
+    wbGateDelivered(order.gateState),
+    Boolean(buyout && (buyout.hasGamepass || ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(buyout.status))),
+    buyout?.status === "COMPLETED",
+  ];
+  const current = passed.indexOf(false);
+  const steps = ["чат", "код", "гейт", "пасс", "выкуп"].map((label, index) => ({
+    label,
+    state: (passed[index] ? "done" : index === current ? "current" : "todo") as "done" | "current" | "todo",
+  }));
   const state: DbsCardState = {
+    steps,
     wbOrderId: order.wbOrderId,
     buyerName: order.buyerName,
     denomination: order.denominationSnapshot,

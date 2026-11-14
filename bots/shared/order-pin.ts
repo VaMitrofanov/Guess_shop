@@ -37,6 +37,10 @@ export function orderPinStage(status: string): OrderPinStage | null {
 const DAY_FMT = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "Europe/Moscow" });
 
 /** Текст закрепа. `html` — для TG (код моноширинный), `plain` — для VK. */
+/* 15.11.2026 (владелец: «закреп-шкала»): шаги со статусом ✅/⏳/○ и цена пасса —
+   человек видит, сколько осталось, а в TG под закрепом — кнопка текущего шага. */
+const PIN_DOTS: Record<OrderPinStage, string> = { wait: "●○○○", queue: "●●○○", done: "●●●○" };
+
 export function orderPinText(opts: {
   code: string;
   amount: number;
@@ -44,16 +48,38 @@ export function orderPinText(opts: {
   completedAt?: Date | null;
   format: "html" | "plain";
 }): string {
-  const code = opts.format === "html" ? `<code>${opts.code}</code>` : opts.code;
-  const head = `📌 Ваш заказ: ${code} · ${opts.amount.toLocaleString("ru-RU")} R$`;
-  if (opts.stage === "queue") {
-    return `${head}\n🛒 Геймпасс принят — заказ в очереди выкупа.\nКак выкупим — карточка обновится сама.`;
+  const html = opts.format === "html";
+  const code = html ? `<code>${opts.code}</code>` : opts.code;
+  const b = (s: string) => (html ? `<b>${s}</b>` : s);
+  const head = `📌 Ваш заказ: ${code} · ${opts.amount.toLocaleString("ru-RU")} R$ · ${PIN_DOTS[opts.stage]}`;
+  const price = opts.amount <= 1500 ? ` — цена ${Math.ceil(opts.amount / 0.7)} R$` : " — по инструкции";
+  const day = opts.completedAt ? ` ${DAY_FMT.format(opts.completedAt).replace(".", "")}` : "";
+  const steps = opts.stage === "wait"
+    ? ["✅ Код активирован", `⏳ ${b(`Геймпасс${price}`)}`, "○ Выкуп", "○ Robux на балансе"]
+    : opts.stage === "queue"
+      ? ["✅ Код активирован", "✅ Геймпасс принят", `⏳ ${b("Выкуп — заказ в очереди выкупа")}`, "○ Robux на балансе"]
+      : ["✅ Код активирован", "✅ Геймпасс принят", `✅ Выкуплен${day}`, `⏳ ${b("Robux в Pending у Roblox")} — зачислит сам`];
+  const foot = opts.stage === "wait"
+    ? "Напишете в поддержку — назовите этот код, так мы сразу найдём заказ."
+    : opts.stage === "queue"
+      ? "Как выкупим — карточка обновится сама."
+      : "С нашей стороны всё готово, дальше их зачисляет Roblox.";
+  return [head, "", ...steps, "", foot].join("\n");
+}
+
+/** Кнопки под закрепом в TG — по текущему шагу (callback_data — как у бота). */
+export function orderPinMarkupTg(stage: OrderPinStage, code: string): { inline_keyboard: Array<Array<Record<string, string>>> } {
+  if (stage === "wait") {
+    return { inline_keyboard: [
+      [{ text: "🔗 Прислать ссылку на геймпасс", callback_data: "send_gp_link" }],
+      [{ text: "📖 Моя инструкция", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${encodeURIComponent(code)}` }],
+    ] };
   }
-  if (opts.stage === "done") {
-    const day = opts.completedAt ? ` ${DAY_FMT.format(opts.completedAt).replace(".", "")}` : "";
-    return `${head}\n✅ Выкуплен${day} — робуксы в Pending у Roblox.\nС нашей стороны всё готово, дальше их зачисляет Roblox.`;
-  }
-  return `${head}\n⏳ Ждём геймпасс — инструкция ниже.\nНапишете в поддержку — назовите этот код, так мы сразу найдём заказ.`;
+  if (stage === "queue") return { inline_keyboard: [[{ text: "📊 Мой заказ", callback_data: "refresh_status" }]] };
+  return { inline_keyboard: [
+    [{ text: "🔍 Проверить Robux — Transactions", url: "https://www.roblox.com/transactions" }],
+    [{ text: "💬 Робуксов нет", callback_data: "rbx_chk" }],
+  ] };
 }
 
 export interface PinRecord {

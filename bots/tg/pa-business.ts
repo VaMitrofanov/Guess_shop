@@ -20,6 +20,8 @@ import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "
 import { registerPaGroup } from "./pa-group";
 import { registerReleaseNotes } from "./release-notes";
 import { registerWatchList } from "./watch-list";
+import { registerWbReply } from "./wb-reply";
+import { registerWbMorningDigest } from "./wb-morning-digest";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -56,6 +58,9 @@ export function registerPaBusiness(bot: Telegraf): void {
   registerReleaseNotes(bot);
   // 👁 «Под наблюдением» (15.11.2026): /watch, /unwatch, /watchlist — тоже до защиты беседы.
   registerWatchList(bot);
+  // 💬 Ответ в чат WB из Telegram и ☀️ утренняя сводка WB (15.11.2026) — до беседы админов.
+  registerWbReply(bot);
+  registerWbMorningDigest(bot);
   // Беседа админов: защита от ответов в группе, ассистент, темы, сводка.
   registerPaGroup(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

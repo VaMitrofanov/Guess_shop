@@ -90,7 +90,7 @@ import {
   robuxSelfCheckText, robuxPendingSeenText, isArrivalQuestion,
   selfCheckTarget, selfCheckButtons, robuxPendingWhereText, robuxScreenshotRequestText,
   robuxScreenshotRepeatText, intakeNeedsScreenshot, ROBUX_LOW_PENDING_CONTEXT,
-  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, robuxSurveyGotText, ROBUX_CONFIRM,
+  activeOrderLeadText, ACTIVE_ORDER_STATUSES, type SelfCheckContext, SURVEY_CMD, ROBUX_CONFIRM,
   isPendingScreenshotContext, ROBUX_LOW_PENDING_RETRY_CONTEXT,
   PHOTO_KIND_CMD, PHOTO_KIND_BUTTONS, PHOTO_KIND_TTL_MS, photoKindQuestionText, pendingPhotoReplyText,
 } from "../shared/robux-eta";
@@ -99,13 +99,14 @@ import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReply
 import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, personalFaqAnswer, priceLabelSuffix, type FaqStage } from "../shared/smart-faq";
 import { robuxWaitText } from "../shared/robux-wait";
+import { robuxGotCardText } from "../shared/robux-got-card";
 
 /** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
 const vkPendingPhotoKind = new Map<number, { url: string; at: number }>();
 import { requoteForPass } from "../shared/direct-requote";
 import { priceMismatchText } from "../shared/direct-gamepass-copy";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
-import { priceMismatchMessage } from "../shared/gamepass-acceptance";
+import { passChecklist, priceMismatchMessage } from "../shared/gamepass-acceptance";
 import { buildBuyerMenuText } from "../shared/buyer-menu";
 import {
   cancelIntake,
@@ -1194,7 +1195,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       wbCode: sc.wbCode, via: "vk-bot",
     });
     if (surveyCmd === SURVEY_CMD.got) {
-      await ctx.reply(robuxSurveyGotText());
+      // 🎁 Одна карточка: спасибо + отзыв с бонусом + купить напрямую (15.11.2026).
+      const gotUser = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { reviewBonusGrantedAt: true } }).catch(() => null);
+      const reviewPending = Boolean(gotUser && !gotUser.reviewBonusGrantedAt && sc.wbCode && !String(sc.wbCode).startsWith("DIR-"));
+      const kb = Keyboard.builder();
+      if (reviewPending) kb.textButton({ label: "📸 Прислать отзыв", payload: { command: "review_hint" }, color: "primary" }).row();
+      kb.textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" });
+      await ctx.reply({ message: robuxGotCardText({ reviewPending, bonus: REVIEW_BONUS_AMOUNT, fmt: "plain" }), keyboard: kb.inline() });
       return;
     }
     msgPayload.command = surveyCmd === SURVEY_CMD.pending ? "rbx_pend" : "rbx_low";
@@ -2966,6 +2973,7 @@ async function handleGamepassLink(
       } else {
         await showResult({
           message:
+            passChecklist({ forSale: false, price: gamepassInfo.price, expected: expectedPrice, owner: gamepassInfo.creatorName, html: false }) + `\n\n` +
             `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
             `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.\n\n` +
             `📖 Как правильно создать и активировать — в инструкции:`,
@@ -2984,6 +2992,7 @@ async function handleGamepassLink(
       const prodInfo = await getGamepassProductInfo(passId).catch(() => null);
       await showResult({
         message:
+          passChecklist({ forSale: true, price: gamepassInfo.price, expected: expectedPrice, managed: prodInfo ? Boolean(prodInfo.isManagedPricing) : null, owner: gamepassInfo.creatorName, html: false }) + `\n\n` +
           stripHtml(
             priceMismatchMessage({
               expected: expectedPrice,

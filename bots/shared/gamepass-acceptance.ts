@@ -315,3 +315,34 @@ export function priceMismatchMessage(opts: {
     `Потом пришли ссылку снова.`
   );
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ✅ Чек-лист проверки пасса (15.11.2026, владелец: «человек видит, что именно
+   не так, а не "пасс не подходит"»). Те же проверки, что уже делаются, одним
+   списком над подсказкой «что поправить». Пункт без данных не показываем.
+   ───────────────────────────────────────────────────────────────────────── */
+export function passChecklist(opts: {
+  forSale: boolean;
+  price: number | null | undefined;
+  expected: number;
+  /** Региональные цены: true — включены (подтвердил product-info), false — выключены, null — не знаем. */
+  managed?: boolean | null;
+  owner?: string | null;
+  html?: boolean;
+}): string {
+  const b = (s: string) => (opts.html === false ? s : `<b>${s}</b>`);
+  const esc = (s: string) => (opts.html === false ? s : s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+  const expected = Math.round(opts.expected);
+  const lines = [`🔎 ${b("Проверил твой геймпасс")}`];
+  lines.push(opts.forSale ? "✅ В продаже" : "❌ Не в продаже — включи «On Sale»");
+  if (typeof opts.price === "number" && opts.price > 0) {
+    const price = Math.round(opts.price);
+    lines.push(Math.abs(price - expected) <= 2 ? `✅ Цена ${price} R$` : `❌ Цена ${price} R$ — нужно ${b(`${expected} R$`)}`);
+  } else {
+    lines.push(`○ Цена — нужно ${b(`${expected} R$`)}`);
+  }
+  if (opts.managed === true) lines.push("❌ Региональные цены включены — их нужно выключить");
+  if (opts.managed === false) lines.push("✅ Региональные цены выключены");
+  if (opts.owner) lines.push(`✅ Пасс на аккаунте ${opts.html === false ? opts.owner : `<code>${esc(opts.owner)}</code>`}`);
+  return lines.join("\n");
+}

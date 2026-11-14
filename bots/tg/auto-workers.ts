@@ -22,7 +22,7 @@ import { searchGamepassesByNick } from "../shared/gamepass-search";
 
 import { runWbTokenWatch } from "../shared/wb-token-watch";
 import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
-import { syncOrderPins } from "../shared/order-pin";
+import { orderPinMarkupTg, syncOrderPins } from "../shared/order-pin";
 import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
@@ -264,7 +264,7 @@ export function startAutoWorkers(bot: Telegraf): void {
   // Сообщение удалено / бот заблокирован — стадию двигаем, чтобы не биться вечно.
   const pinSweep = () => syncOrderPins(db, "TG", async (pin, text) => {
     try {
-      await bot.telegram.editMessageText(pin.chatId, pin.messageId, undefined, text, { parse_mode: "HTML" });
+      await bot.telegram.editMessageText(pin.chatId, pin.messageId, undefined, text, { parse_mode: "HTML", reply_markup: orderPinMarkupTg(pin.next, pin.code) as never });
       return {};
     } catch (err) {
       const msg = String((err as Error)?.message ?? err);

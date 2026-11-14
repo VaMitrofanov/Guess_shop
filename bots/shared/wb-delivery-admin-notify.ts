@@ -8,6 +8,7 @@ import {
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
 import { adminTargets, adminTargetsForNotice, replyToRootFor } from "./admin-route";
 import { noteBuyerMessage } from "./buyer-conversation-notice";
+import { rememberWbReplyMessage, wbReplyMarkup } from "./wb-reply-buttons";
 
 const ADMIN_IDS: string[] = [...new Set(
   (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
@@ -81,15 +82,25 @@ function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
  */
 export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: string[] = []) {
   const notice = { marker: "action" as const, zone: "DBS" as const };
+  // 15.11.2026: под уведом — ответы в чат WB кнопками и «ответить на увед» (`wb-chat-reply.ts`).
+  const markup = { reply_markup: wbReplyMarkup(ref.wbOrderId) };
   void adminTargetsForNotice(notice).then((targets) => noteBuyerMessage({
     conversationKey: `dbs:${ref.wbOrderId}`,
     head: refLine(ref),
     who: who[0] ?? null,
     text: textPreview,
-    targets: targets.map((t) => ({ key: t.key, chatId: t.chatId, extra: { parse_mode: "HTML", ...replyToRootFor(ref.cardMessages, t), ...t.extra } })),
+    targets: targets.map((t) => ({ key: t.key, chatId: t.chatId, extra: { parse_mode: "HTML", ...markup, ...replyToRootFor(ref.cardMessages, t), ...t.extra } })),
     io: {
-      send: async (target, text) => tgMessageId(await tgSend(target.chatId, text, target.extra)),
-      edit: (target, messageId, text) => tgEdit(target.chatId, messageId, text, { parse_mode: "HTML" }),
+      send: async (target, text) => {
+        const messageId = tgMessageId(await tgSend(target.chatId, text, target.extra));
+        if (messageId !== null) {
+          void import("./db")
+            .then(({ db }) => rememberWbReplyMessage(db as never, target.chatId, messageId, ref.wbOrderId))
+            .catch(() => undefined);
+        }
+        return messageId;
+      },
+      edit: (target, messageId, text) => tgEdit(target.chatId, messageId, text, { parse_mode: "HTML", ...markup }),
     },
   })).catch((err) => console.warn(`[dbs-notify] сообщение покупателя: ${err instanceof Error ? err.message : err}`));
 }
@@ -840,24 +851,42 @@ export type DbsCardState = {
    * покупателя, поэтому второе — догадка, а не факт (тёзки бывают).
    */
   related?: string[];
+  /**
+   * Шкала этапов (15.11.2026, владелец: «3 строки вместо 12»): чат → код →
+   * гейт → пасс → выкуп. История целиком — в свёрнутом блоке под карточкой.
+   */
+  steps?: Array<{ label: string; state: "done" | "current" | "todo" }>;
 };
 
+/** «✓ чат · ✓ код · <b>▸ пасс</b> · ○ выкуп» — где заказ сейчас. */
+export function dbsStepsLine(steps: NonNullable<DbsCardState["steps"]>): string {
+  return steps.map((s) => (s.state === "done" ? `✓ ${s.label}` : s.state === "current" ? `<b>▸ ${s.label}</b>` : `○ ${s.label}`)).join(" · ");
+}
+
+/** Кнопка карточки — только «Открыть в TWA» (решение владельца 15.11.2026). */
+export function dbsCardMarkup(state: Pick<DbsCardState, "activationCode" | "wbOrderId">): Record<string, unknown> {
+  const key = state.activationCode || state.wbOrderId;
+  if (!key || !/^[A-Za-z0-9_-]{1,64}$/.test(key)) return {};
+  return { reply_markup: { inline_keyboard: [[{ text: "📱 Открыть в TWA", url: `https://t.me/RobloxBankBot?startapp=${encodeURIComponent(key)}` }]] } };
+}
+
 export function renderDbsCard(state: DbsCardState): string {
+  /* 15.11.2026: компактная карточка. Номер WB и история этапов — в свёрнутом
+     блоке (раскрывается тапом), сверху — код, номинал, шкала этапов и кто это.
+     Закрытый заказ (выкуплен/отменён) — одна строка под шапкой. */
+  const terminal = state.marker === "done" || state.marker === "cancelled";
   const head = formatAdminNotice({
     marker: state.marker,
     zone: "DBS",
     title: state.title,
-    // Шапка карточки и шапка любого сообщения о заказе — одна и та же строка:
-    // код гейта переехал в неё из отдельной строки «Код гейта: …», чтобы у
-    // карточки и у ответов в ветке совпадал каждый ключ, а не только номер WB.
     lines: [
       orderRef({
-        wbOrderId: state.wbOrderId,
         code: state.activationCode,
         denomination: state.denomination,
         priceKopecks: state.priceKopecks,
         buyerName: state.buyerName,
       }),
+      !terminal && state.steps?.length ? dbsStepsLine(state.steps) : null,
       state.buyer
         ? [
             state.buyer.url
@@ -871,12 +900,11 @@ export function renderDbsCard(state: DbsCardState): string {
     ],
     next: state.next,
   });
-  if (!state.timeline.length) return head;
-  const rows = state.timeline.map((row, index) => {
-    const glyph = index === state.timeline.length - 1 ? "└" : "├";
-    return `<code>${glyph}</code> ${escapeHtml(row)}`;
-  });
-  return `${head}\n\n${rows.join("\n")}`;
+  const history = [
+    `WB #${escapeHtml(state.wbOrderId)}`,
+    ...state.timeline.map((row, index) => `${index === state.timeline.length - 1 ? "└" : "├"} ${escapeHtml(row)}`),
+  ];
+  return `${head}\n<blockquote expandable>${history.join("\n")}</blockquote>`;
 }
 
 /** Пишет или обновляет карточку у каждого админа.
@@ -893,15 +921,16 @@ export async function pushDbsCard(
   const targets = await adminTargets("feed", { loud: false });
   if (!targets.length) return existing ?? {};
   const text = renderDbsCard(state);
+  const markup = dbsCardMarkup(state);
   const next: Record<string, number> = { ...(existing ?? {}) };
   await Promise.allSettled(targets.map(async (t) => {
     const known = next[t.key];
     if (known) {
-      if (await tgEdit(t.chatId, known, text, { parse_mode: "HTML" })) return;
+      if (await tgEdit(t.chatId, known, text, { parse_mode: "HTML", ...markup })) return;
       await tgDelete(t.chatId, known);
       delete next[t.key];
     }
-    const messageId = tgMessageId(await tgSend(t.chatId, text, { parse_mode: "HTML", ...t.extra }));
+    const messageId = tgMessageId(await tgSend(t.chatId, text, { parse_mode: "HTML", ...markup, ...t.extra }));
     if (messageId !== null) next[t.key] = messageId;
   }));
   return next;
