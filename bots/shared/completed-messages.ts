@@ -22,6 +22,7 @@
 /* Тексты про Pending — в `robux-eta`. `fmtDateRu` реэкспортируется под старым
    именем для остальных модулей ботов. */
 import { fmtDateRu, PENDING_INFO_URL, ROBUX_CONFIRM, confirmHintLine } from "./robux-eta";
+import { robuxWaitText } from "./robux-wait";
 export { fmtDateRu };
 
 export type CompletedButton = {
@@ -75,13 +76,13 @@ export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMe
      и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
   const tgMsg1 =
     `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
-    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
     `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
     confirmHintLine("html");
   const vkMsg1 =
     `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
-    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
     `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
     confirmHintLine("plain");

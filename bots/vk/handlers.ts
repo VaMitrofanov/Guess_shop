@@ -97,6 +97,8 @@ import {
 
 import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
 import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
+import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, personalFaqAnswer, priceLabelSuffix, type FaqStage } from "../shared/smart-faq";
+import { robuxWaitText } from "../shared/robux-wait";
 
 /** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
 const vkPendingPhotoKind = new Map<number, { url: string; at: number }>();
@@ -833,11 +835,13 @@ async function isVkSubscribed(_ctx: MessageContext, vkUserId: number): Promise<b
 
 const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
-  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя.\n\nПроверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("ty") + "\n\nПроверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
   { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставь отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформи следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.` },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — открой 📖 Инструкцию и пройди все шаги." },
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Напиши «сменить ник» — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
+  // 🧭 15.11.2026: ответ строится под заказ (`personalFaqAnswer`).
+  { key: GP_HIDDEN_ITEM.key, label: GP_HIDDEN_ITEM.label, answer: personalFaqAnswer(GP_HIDDEN_ITEM.key, null, "none", "plain", "vk") ?? "" },
   { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
   { key: "price",     label: "💰 Какую цену ставить?",      answer: "Цена геймпасса = номинал ÷ 0.7 (округлённо вверх).\n\nНапример: 500 R$ → 715 R$, 1000 R$ → 1429 R$.\n\nТочная цена написана в карточке заказа и в инструкции." },
   { key: "managed",   label: "⚠️ Managed pricing?",         answer: "Managed pricing (региональные цены) должен быть ОТКЛЮЧЁН.\n\nЕсли он включён — Roblox автоматически меняет цену геймпасса и мы не сможем его выкупить. Робуксы ты получишь только когда всё будет сделано правильно.\n\nПроверь: Passes → твой пасс → ☰ → Sales → переключатель Managed pricing = OFF.\n\nПо умолчанию он отключён, но если случайно включил — отключи и нажми Save Changes." },
@@ -1216,8 +1220,48 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── 🧭 Умный FAQ (15.11.2026): вопросы и кнопки по этапу заказа ─────────
+  // Этап знаем — разделы кнопками (не простыня); этапа нет или «Другие» —
+  // общий список ниже. Тексты и этапы — `bots/shared/smart-faq.ts`.
+  if (msgPayload?.command === "faq" || msgPayload?.command === "faq_item") {
+    const faqUser = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } }).catch(() => null);
+    const faqOrder = faqUser ? await findRelevantOrder(faqUser.id).catch(() => null) : null;
+    const stage = faqStage(faqOrder);
+    const ctxLine = faqContextLines(faqOrder, stage, "plain").join("\n");
+    if (msgPayload.command === "faq_item") {
+      const key = String(msgPayload.key ?? "");
+      const item = VK_FAQ_ITEMS.find((i) => i.key === key);
+      if (item) {
+        let answer = personalFaqAnswer(key, faqOrder, stage, "plain", "vk") ?? item.answer;
+        if (key === "when_rbx" && stage === "done" && faqOrder?.completedAt) {
+          answer += `\n\n📌 Твой заказ на ${faqOrder.amount} R$ выкуплен ${fmtDateRu(new Date(faqOrder.completedAt))} — робуксы в Pending у Roblox.`;
+        }
+        const kb = Keyboard.builder();
+        vkFaqNextRows(kb, faqOrder, stage);
+        if (key === "when_rbx" || key === "how_gp") kb.urlButton({ label: PENDING_PAGE_BUTTON, url: PENDING_PAGE_URL }).row();
+        kb.textButton({ label: "⬅️ Все вопросы", payload: { command: "faq" }, color: "secondary" })
+          .textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
+        await ctx.reply({ message: `${item.label}\n\n${answer}`, keyboard: kb.inline() });
+        return;
+      }
+    } else if (stage !== "none") {
+      const kb = Keyboard.builder();
+      for (const k of STAGE_KEYS[stage].slice(0, 4)) {
+        const item = VK_FAQ_ITEMS.find((i) => i.key === k);
+        if (!item) continue;
+        const label = k === "price" ? `${item.label}${priceLabelSuffix(faqOrder, stage)}` : item.label;
+        kb.textButton({ label: label.slice(0, 40), payload: { command: "faq_item", key: k }, color: "primary" }).row();
+      }
+      kb.urlButton({ label: PENDING_PAGE_BUTTON, url: PENDING_PAGE_URL }).row()
+        .textButton({ label: "➕ Другие вопросы", payload: { command: "faq_all" }, color: "secondary" })
+        .textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
+      await ctx.reply({ message: `❓ Частые вопросы\n\n${ctxLine}\n\nСверху — вопросы про твой этап 👇`, keyboard: kb.inline() });
+      return;
+    }
+  }
+
   // ── ❓ FAQ — self-service answers ─────────────────────────────────────────
-  if (msgPayload?.command === "faq") {
+  if (msgPayload?.command === "faq" || msgPayload?.command === "faq_all") {
     // Ф6.2: when_rbx персонализируется датой разблокировки последнего заказа.
     let whenRbxExtra = "";
     try {
@@ -3288,6 +3332,29 @@ async function handleGamepassLink(
  * Бот всегда умел принимать ссылку, но на тупиковых ветках об этом не говорил.
  */
 const GP_LINK_LABEL = "🔗 Прислать ссылку на геймпасс";
+
+/** 🧭 «Что дальше» под ответом умного FAQ — по этапу заказа (≤3 ряда: лимит VK — 6). */
+function vkFaqNextRows(kb: any, order: any, stage: FaqStage): void {
+  const guide = order?.isDirectOrder
+    ? "https://robloxbank.ru/guide?source=direct"
+    : order?.wbCode && !String(order.wbCode).startsWith("DIR-")
+      ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`
+      : "https://robloxbank.ru/guide?source=wb";
+  if (stage === "gp") {
+    kb.urlButton({ label: "📖 Моя инструкция", url: guide }).row()
+      .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "primary" }).row()
+      .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "secondary" }).row();
+  } else if (stage === "queue") {
+    kb.textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
+    if (!order?.isDirectOrder) kb.textButton({ label: "⚠️ Ошибся с ником? Изменить заказ", payload: { command: "change_nick" }, color: "negative" }).row();
+  } else if (stage === "done") {
+    kb.urlButton({ label: "🔍 Открыть Transactions", url: ROBLOX_TRANSACTIONS_URL }).row()
+      .textButton({ label: NO_ROBUX_BUTTON, payload: { command: "rbx_chk" }, color: "secondary" }).row();
+  } else {
+    kb.urlButton({ label: "📖 Инструкция", url: guide }).row()
+      .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+  }
+}
 
 /** Текст-подсказка, откуда взять ссылку. Общий для всех точек входа. */
 const GP_LINK_PROMPT =

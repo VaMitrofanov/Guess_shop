@@ -86,6 +86,8 @@ import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT,
 import { buildCompletedMessages, COMPLETED_MSG1_BUTTON } from "../shared/completed-messages";
 import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
 import { PENDING_MENU_BUTTON, PENDING_PAGE_BUTTON, PENDING_PAGE_URL, pendingInfoText } from "../shared/pending-info";
+import { robuxWaitText } from "../shared/robux-wait";
+import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, gpPassPrice, personalFaqAnswer, priceLabelSuffix, stageNextLine, type FaqStage } from "../shared/smart-faq";
 import {
   buildRobuxEtaReply, buildRobuxEtaShort, isRepeatEtaQuestion, NO_ROBUX_BUTTON,
   loadRobuxEtaOrders, ROBLOX_TRANSACTIONS_URL, type RobuxEtaDb,
@@ -370,12 +372,14 @@ async function getDirectKbParams(tgId: string): Promise<{ bonus: number; rubleDi
 
 const FAQ_ITEMS: { key: string; label: string; answer: string; buttons?: { label: string; cb: string }[][] }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
-  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте — в статусе <b>Pending</b>. Так Roblox делает с каждой покупкой геймпасса.\n\n<b>Если робуксы в Pending — с нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя.\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending Robux</b>, там должна быть сумма заказа." },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте — в статусе <b>Pending</b>. Так Roblox делает с каждой покупкой геймпасса.\n\n<b>Если робуксы в Pending — с нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("ty") + "\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending Robux</b>, там должна быть сумма заказа." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
   { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим <b>+${REVIEW_BONUS_AMOUNT} R$</b> к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставь отзыв <b>с текстом и фото</b> (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформи следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.`,
     buttons: [[{ label: "📸 Прислать отзыв", cb: "review_hint" }, { label: "💎 Купить напрямую", cb: "start_direct" }]] },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ <b>оформлен</b> — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё <b>не создал геймпасс</b> — открой 📖 Инструкцию и пройди все шаги." },
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Нажми кнопку <b>«✏️ Сменить ник Roblox»</b> в карточке заказа — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
+  // 🧭 15.11.2026: ответ строится под заказ (`personalFaqAnswer`).
+  { key: GP_HIDDEN_ITEM.key, label: GP_HIDDEN_ITEM.label, answer: personalFaqAnswer(GP_HIDDEN_ITEM.key, null, "none", "html", "tg") ?? "" },
   { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ в меню.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
   { key: "price",     label: "💰 Какую цену ставить?",      answer: "Цена геймпасса = <b>номинал ÷ 0.7</b> (округлённо вверх).\n\nНапример: 500 R$ → <b>715 R$</b>, 1000 R$ → <b>1429 R$</b>.\n\nТочная цена написана в карточке заказа и в инструкции." },
   { key: "managed",   label: "⚠️ Managed pricing?",         answer: "<b>Managed pricing</b> (региональные цены) должен быть <b>ОТКЛЮЧЁН</b>.\n\nЕсли он включён — Roblox автоматически меняет цену геймпасса и мы <b>не сможем</b> его выкупить. Робуксы ты получишь только когда всё будет сделано правильно.\n\nПроверь: Passes → твой пасс → ☰ → Sales → переключатель <b>Managed pricing = OFF</b>.\n\nПо умолчанию он отключён, но если случайно включил — отключи и нажми <b>Save Changes</b>." },
@@ -2125,6 +2129,70 @@ function pendingStage(createdAt: Date | string): { label: string; note: string }
   return            { label: "⏳ В очереди на выкуп",        note: "Заказ в очереди и никуда не пропадёт — из-за задержек Roblox выкуп сейчас может занять до нескольких суток. Уведомим сразу, как выкупим 🙏" };
 }
 
+// ── 🧭 Умный FAQ (15.11.2026): вопросы и кнопки по этапу заказа ──────────
+// Логика этапов и тексты — `bots/shared/smart-faq.ts` (общая с ВК).
+const CB_FAQ_ALL = "faq_all";
+
+async function faqOrderFor(tgId: string): Promise<{ order: any | null; stage: FaqStage }> {
+  const user = await db.user.findUnique({ where: { tgId }, select: { id: true } }).catch(() => null);
+  const order = user ? await findRelevantOrder(user.id).catch(() => null) : null;
+  return { order, stage: faqStage(order) };
+}
+
+function faqGuideUrl(order: any): string {
+  if (order?.isDirectOrder) return "https://robloxbank.ru/guide?source=direct";
+  if (order?.wbCode && !String(order.wbCode).startsWith("DIR-")) return `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`;
+  return "https://robloxbank.ru/guide?source=wb";
+}
+
+/** «Что дальше» под любым ответом FAQ — по этапу заказа, а не «все вопросы». */
+function faqNextRows(order: any, stage: FaqStage): any[][] {
+  if (stage === "gp") {
+    return [
+      [Markup.button.url("📖 Моя инструкция", faqGuideUrl(order))],
+      [gpLinkBtn()],
+      [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+    ];
+  }
+  if (stage === "queue") {
+    return [
+      [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+      ...(order?.isDirectOrder ? [] : [[Markup.button.callback("⚠️ Ошибся с ником? Изменить заказ", CB.changeNick)]]),
+    ];
+  }
+  if (stage === "done") {
+    return [
+      [Markup.button.url("🔍 Открыть Transactions", ROBLOX_TRANSACTIONS_URL)],
+      [Markup.button.callback(ROBUX_CONFIRM.label, ROBUX_CONFIRM.command)],
+      [Markup.button.callback(NO_ROBUX_BUTTON, "rbx_chk")],
+    ];
+  }
+  return [
+    [Markup.button.url("📖 Инструкция", faqGuideUrl(order))],
+    [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+  ];
+}
+
+/** Меню FAQ: шапка с заказом и вопросы его этапа сверху; `all` — весь список. */
+async function buildFaqMenu(tgId: string, all: boolean): Promise<{ text: string; keyboard: ReturnType<typeof Markup.inlineKeyboard> }> {
+  const { order, stage } = await faqOrderFor(tgId);
+  const full = all || stage === "none";
+  const items = full ? FAQ_ITEMS : STAGE_KEYS[stage].map((k) => FAQ_ITEMS.find((i) => i.key === k)).filter((i): i is (typeof FAQ_ITEMS)[number] => Boolean(i));
+  const rows: any[][] = items.map((item) => [Markup.button.callback(item.key === "price" ? `${item.label}${priceLabelSuffix(order, stage)}` : item.label, CB.faqItem(item.key))]);
+  rows.push([Markup.button.url(PENDING_PAGE_BUTTON, PENDING_PAGE_URL)]);
+  if (!full) rows.push([Markup.button.callback("➕ Другие вопросы", CB_FAQ_ALL)]);
+  else rows.push([supportBtn("💬 Не нашёл ответ — написать менеджеру")]);
+  rows.push([Markup.button.callback("👤 В моё меню", CB.buyerMenu)]);
+  const ctxLines = faqContextLines(order, stage, "html");
+  const text = [
+    "❓ <b>Частые вопросы</b>",
+    ...(ctxLines.length ? ["", ...ctxLines] : []),
+    "",
+    full ? "Выбери тему — отвечу сразу 👇" : "Сверху — вопросы про твой этап 👇",
+  ].join("\n");
+  return { text, keyboard: Markup.inlineKeyboard(rows) };
+}
+
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
 async function buildStatusMessage(tgId: string, focusCode?: string): Promise<StatusMessage> {
   const refreshRow = [Markup.button.callback("🔄 Обновить", CB.refreshStatus)];
@@ -2199,7 +2267,8 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   } else if (order.status === "PAYMENT_PENDING") {
     note = "\n\n💳 <i>Пришли скриншот оплаты сюда (фотографией, не файлом).</i>";
   } else if (order.status === "AWAITING_GAMEPASS") {
-    note = "\n\n⚠️ <i>Пройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎</i>" +
+    // 💰 Цена пасса прямо в карточке (15.11.2026; в ВК была и раньше).
+    note = (singlePassFits(order.amount) ? `\n💰 Цена геймпасса: <b>${gpPassPrice(order.amount)} R$</b>` : "") + "\n\n⚠️ <i>Пройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎</i>" +
       "\n💡 <i>Ник, ссылку на геймпасс или ключ можно прислать прямо сюда — одним сообщением.</i>";
   } else if (order.status === "PENDING") {
     note = `\n\n💬 <i>${stage!.note}</i>`;
@@ -2447,12 +2516,16 @@ export function registerText(bot: Telegraf): void {
     }
     if (!isAdmin && text === MENU_BTN.pending) {
       clearUserSession();
-      await ctx.reply(pendingInfoText("html"), {
+      // 🧭 Ушёл читать — в конце кнопки назад к своему этапу (15.11.2026).
+      const { order: pOrder, stage } = await faqOrderFor(tgId);
+      const next = stageNextLine(stage, "html");
+      await ctx.reply(pendingInfoText("html") + (next ? `\n\n${next}` : ""), {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 Открыть — 1 минута", PENDING_PAGE_URL)],
-          [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+          ...faqNextRows(pOrder, stage),
+          ...(stage === "gp" || stage === "done" ? [[Markup.button.callback("📊 Мой заказ", CB.refreshStatus)]] : []),
         ]),
       });
       return;
@@ -2497,9 +2570,8 @@ export function registerText(bot: Telegraf): void {
     }
     if (!isAdmin && text === MENU_BTN.faq) {
       clearUserSession();
-      const faqText = "❓ <b>Частые вопросы</b>\n\nВыбери тему:";
-      const faqRows = FAQ_ITEMS.map(f => [Markup.button.callback(f.label, CB.faqItem(f.key))]);
-      await ctx.reply(faqText, { parse_mode: "HTML", ...Markup.inlineKeyboard(faqRows) });
+      const menu = await buildFaqMenu(tgId, false);
+      await ctx.reply(menu.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu.keyboard });
       return;
     }
 
@@ -5913,16 +5985,10 @@ export function registerCallbacks(bot: Telegraf): void {
     }
 
     // ── ❓ FAQ — self-service answers (hides support for first 24h) ──────
-    if (data === CB.faq) {
+    if (data === CB.faq || data === CB_FAQ_ALL) {
       await ctx.answerCbQuery("Частые вопросы 👇").catch(() => {});
-      const rows: any[][] = [[Markup.button.url(PENDING_PAGE_BUTTON, PENDING_PAGE_URL)]];
-      rows.push(...FAQ_ITEMS.map(item => [Markup.button.callback(item.label, CB.faqItem(item.key))]));
-      rows.push([supportBtn("💬 Не нашёл ответ — написать менеджеру")]);
-      rows.push([Markup.button.callback("👤 В моё меню", CB.buyerMenu)]);
-      await ctx.reply(
-        "❓ <b>Частые вопросы</b>\n\nВыбери тему — отвечу сразу 👇",
-        { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) }
-      );
+      const menu = await buildFaqMenu(tgId, data === CB_FAQ_ALL);
+      await ctx.reply(menu.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu.keyboard });
       return;
     }
 
@@ -5934,9 +6000,12 @@ export function registerCallbacks(bot: Telegraf): void {
 
       // when_rbx: есть свежий выкуп — вместо общего ответа карточка по заказу.
       if (key === "when_rbx" && await replyRobuxEta(ctx, tgId, { forceFull: true }).catch(() => false)) return;
-      const answer = item.answer;
+      // 🧭 Ответ под заказ и кнопки следующего шага по этапу (15.11.2026).
+      const { order: faqOrder, stage } = await faqOrderFor(tgId);
+      const answer = personalFaqAnswer(key, faqOrder, stage, "html", "tg") ?? item.answer;
 
       const rows: any[][] = (item.buttons ?? []).map(row => row.map(b => Markup.button.callback(b.label, b.cb)));
+      rows.push(...faqNextRows(faqOrder, stage));
       if (key === "when_rbx" || key === "how_gp") rows.push([Markup.button.url(PENDING_PAGE_BUTTON, PENDING_PAGE_URL)]);
       rows.push([Markup.button.callback("⬅️ Все вопросы", CB.faq)]);
       rows.push([supportBtn("💬 Не помогло — написать менеджеру")]);

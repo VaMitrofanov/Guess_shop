@@ -3,6 +3,7 @@ import { fmtUnlockDate } from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
 import { PENDING_INFO_URL, ROBUX_CONFIRM, confirmHintLine } from "../../bots/shared/robux-eta";
+import { robuxWaitText } from "../../bots/shared/robux-wait";
 import {
   BUYER_STEP_COMMANDS,
   buyerStepMessage,
@@ -138,13 +139,13 @@ function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages 
      и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
   const tgMsg1 =
     `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
-    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
     `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
     confirmHintLine("html");
   const vkMsg1 =
     `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
-    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя.\n\n` +
+    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
     `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
     `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
     confirmHintLine("plain");

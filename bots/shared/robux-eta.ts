@@ -13,6 +13,7 @@
  */
 
 import type { WbOrderStatus } from "@prisma/client";
+import { robuxWaitText } from "./robux-wait";
 /** Старше этого вопрос уже не про Pending: карточку не показываем. */
 const ROBUX_ETA_LOOKBACK_DAYS = 30;
 /** Сколько заказов перечисляем в одном ответе. */
@@ -32,7 +33,7 @@ export function fmtDateRu(d: Date): string {
 function ourPartDoneText(fmt: RobuxEtaFormat): string {
   return (
     `✅ ${b(fmt, "С нашей стороны всё сделано:")} геймпасс выкуплен, робуксы уже на твоём аккаунте — в статусе Pending. ` +
-    `Дальше всё зависит от Roblox: он сам решает, когда перевести их на баланс. Ускорить это не может ни наша поддержка, ни мы.`
+    `Дальше всё зависит от Roblox: он сам решает, когда перевести их на баланс. Ускорить это не может ни наша поддержка, ни мы. ${robuxWaitText("ty")}`
   );
 }
 
@@ -302,7 +303,7 @@ export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new D
   return {
     text:
       `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox — в статусе Pending. Выкупили: ${fmtDateRu(completedAt)}.\n\n` +
-      `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, ускорить это мы не можем.\n\n` +
+      `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, ускорить это мы не можем. ${robuxWaitText("vy")}\n\n` +
       `Проверить можно в Roblox: раздел Transactions, строка Pending Robux — в ней должно быть число не меньше ${amount}. ` +
       `Если там меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.`,
   };
