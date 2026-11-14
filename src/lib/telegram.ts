@@ -57,6 +57,10 @@ async function sendTelegramRaw(
     ...(extra?.allow_sending_without_reply ? { allow_sending_without_reply: true } : {}),
     ...(extra?.message_thread_id ? { message_thread_id: extra.message_thread_id } : {}),
     ...(extra?.disable_notification ? { disable_notification: true } : {}),
+    // Без превью ссылок (15.11.2026): ссылка на профиль ВК в карточке выкупа
+    // разворачивалась в «VK | Welcome! …» на пол-экрана. Боты так делают давно.
+    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
   };
   const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
   const validatorKey = process.env.VALIDATOR_KEY?.trim();
