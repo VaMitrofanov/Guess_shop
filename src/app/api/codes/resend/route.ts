@@ -35,13 +35,14 @@ export async function POST(req: NextRequest) {
     where: { id: orderId },
     select: { deliveryMode: true, recipientEmail: true, creator: { select: { email: true } } },
   });
-  const to = maskEmail(order?.deliveryMode === "EMAIL" ? order?.recipientEmail : order?.creator?.email);
+  const to = maskEmail(order?.deliveryMode === "EMAIL" || order?.deliveryMode === "GIFT" ? order?.recipientEmail : order?.creator?.email);
   const messages: Record<typeof result, [number, string]> = {
     sent: [200, `Письмо отправлено${to ? ` на ${to}` : ""}.`],
     no_address: [409, "У аккаунта нет подтверждённой почты — код доступен в личном кабинете."],
     not_issued: [409, "Код ещё не выдан — письмо придёт сразу после подтверждения оплаты."],
     failed: [502, "Почта не ответила. Код сохранён — попробуйте ещё раз чуть позже."],
     exhausted: [429, "Слишком много повторов. Напишите в поддержку — код сохранён в заказе."],
+    scheduled: [409, "Открытка уйдёт в выбранный день — раньше отправить её нельзя."],
   };
   const [status, message] = messages[result];
   return NextResponse.json({ result, message }, { status, headers: noStore });

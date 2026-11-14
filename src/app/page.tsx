@@ -1,23 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  ArrowRight,
-  CircleCheck,
-  Gamepad2,
-  Gift,
-  KeyRound,
-  ShieldCheck,
-  Sparkles,
-  TimerReset,
-  WalletCards,
-} from "lucide-react";
+import { ArrowRight, Gift, Headphones, KeyRound, LockKeyhole, Mail, WalletCards } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
 import CodesStore from "@/components/codes-store";
 import CodesInfo from "@/components/codes-info";
-import { directPrice } from "@/lib/retail-pricing";
-import styles from "./storefront.module.css";
+import GiftArt from "@/components/gift-art";
+import { HeroProof, HeroPulse, ReviewsMarquee, WbReviewsLink } from "@/components/storefront-pulse";
+import { CODE_DISCOUNT_TIERS, CODE_PRICES } from "@/lib/codes-pricing";
+import { codesInstantDelivery } from "@/lib/codes/fulfillment";
+import styles from "./storefront2.module.css";
 
 // D11: canonical объявляется на самой странице, а не в корневом layout —
 // метаданные layout наследуются всеми маршрутами, и «/» в корне заставил бы
@@ -27,211 +20,190 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-const steps = [
-  {
-    number: "01",
-    icon: Sparkles,
-    title: "Выбери количество",
-    text: "Калькулятор сразу покажет стоимость. Итоговая цена фиксируется перед оплатой.",
-  },
-  {
-    number: "02",
-    icon: Gamepad2,
-    title: "Создай геймпасс",
-    text: "Новая инструкция проведёт по Creator Hub и рассчитает правильную цену пасса.",
-    href: "/guide?source=site&amount=1000",
-  },
-  {
-    number: "03",
-    icon: CircleCheck,
-    title: "Оформи заказ",
-    text: "Введи ник, выбери найденный геймпасс и следи за состоянием заказа на сайте.",
-  },
-];
+// Тексты первого экрана зависят от серверного режима выдачи кодов
+// (`CODES_BACKORDER`, рестарт без пересборки): страница рендерится на запрос,
+// иначе «код за минуту» вшился бы в статику на момент сборки.
+export const dynamic = "force-dynamic";
 
-const assurances = [
-  { icon: ShieldCheck, title: "Без пароля", text: "Пароль Roblox не нужен ни на одном шаге." },
-  { icon: WalletCards, title: "Цена заранее", text: "Сумма и количество Robux видны до оплаты." },
-  { icon: TimerReset, title: "Понятный статус", text: "Каждый шаг заказа виден в личном кабинете." },
-  { icon: KeyRound, title: "Код активации", text: "Оплатил — код на почте или в кабинете, ввод на roblox.com/redeem." },
-];
+const minCodePrice = Math.min(...Object.values(CODE_PRICES));
 
-const minimumGamepassPrice = directPrice(100);
-
+/**
+ * 🏠 Главная — витрина 2.0 (макет утверждён владельцем 14.11.2026,
+ * docs/storefront-2-plan.md). Главная мысль: маркетинг в сторону кодов.
+ * Код — первым и крупно; геймпасс — вторым: «дешевле, но с ожиданием».
+ * Сроков ожидания не называем нигде (правило 26.10.2026).
+ */
 export default function Home() {
+  const instant = codesInstantDelivery();
+  const trust = [
+    { icon: LockKeyhole, title: "Без пароля", text: "Пароль от Roblox не нужен" },
+    instant
+      ? { icon: KeyRound, title: "Код сразу", text: "Приходит после оплаты" }
+      : { icon: Mail, title: "Код на почту", text: "Пришлём после оплаты" },
+    { icon: WalletCards, title: "Картой или СБП", text: "Чек придёт на почту" },
+    { icon: Headphones, title: "Поможем", text: "Живой человек в Telegram" },
+  ];
+
   return (
     <main className={styles.page}>
       <Navbar />
 
+      {/* ── Первый экран: код — главный способ ─────────────────────────── */}
       <section className={styles.hero}>
-        <div className={styles.heroGlow} aria-hidden="true" />
-        <div className={styles.vaultBackdrop} aria-hidden="true">
-          <div className={styles.vaultDoor}>
-            <div className={styles.vaultBolts}>{Array.from({ length: 8 }).map((_, index) => <i key={index} />)}</div>
-            <div className={styles.vaultWheel}><span>R$</span></div>
-          </div>
-        </div>
         <div className={styles.heroCopy}>
-          <div className={styles.eyebrow}>
-            <span className={styles.statusDot} />
-            Покупка Robux за рубли
-          </div>
-          <h1 className={styles.title}>
-            Robux.
-            <br />
-            Твой способ.
-            <br />
-            <span>Твой темп.</span>
-          </h1>
+          <div className={styles.eyebrow}><span className={styles.statusDot} /> Коды активации Roblox</div>
+          {instant ? (
+            <h1 className={styles.title}>Robux<br />за минуту.<br /><span>Без ожидания.</span></h1>
+          ) : (
+            <h1 className={styles.title}>Robux<br />кодом.<br /><span>Сразу на баланс.</span></h1>
+          )}
           <p className={styles.lead}>
-            Два способа. Через геймпасс — больше Robux за те же деньги. Кодом активации — проще:
-            оплатил, получил код на почту или в кабинет и ввёл его на сайте Roblox.
-            Пароль Roblox не нужен ни там, ни там.
+            {instant
+              ? "Код активации приходит сразу после оплаты — на почту или в кабинет. Без ожидания и без пароля от Roblox."
+              : "Оплатите — пришлём код активации на почту или в кабинет. Ввели его на roblox.com/redeem — Robux сразу на балансе. Без пароля от Roblox."}
           </p>
-          {/* 14.11.2026: коды в продаже — вместо тихой ссылки «скоро» вторая
-              полноценная кнопка того же размера. На телефоне — друг под другом. */}
           <div className={styles.heroActions}>
-            <a href="#calculator" className={styles.primaryAction}>
-              <Gamepad2 size={19} /> Купить через геймпасс <ArrowRight size={18} />
+            <a href="#codes" className={styles.buyCode}>
+              <b>Купить код</b>
+              <span>сразу на баланс · от {minCodePrice} ₽</span>
             </a>
-            <a href="#codes" className={styles.codeAction}>
-              <Gift size={19} /> Пополнить кодом <ArrowRight size={18} />
+            <a href="#calculator" className={styles.viaPass}>
+              <b>Через геймпасс</b>
+              <span>дешевле, но с ожиданием</span>
             </a>
           </div>
-          <div className={styles.heroFacts}>
-            <span><ShieldCheck size={15} /> Без пароля Roblox</span>
-            <span><Sparkles size={15} /> Цена фиксируется до оплаты</span>
-          </div>
+          <HeroProof />
         </div>
 
-        <div className={styles.methodDeck} aria-label="Способы покупки Robux">
-          {/* D5: карточка выглядит кнопкой и на телефоне по ней тапают первой —
-              значит она обязана вести к калькулятору. Обычный <a>, а не Link:
-              это якорь на этой же странице. */}
-          <a href="#calculator" className={styles.gamepassHeroCard} aria-label="Перейти к покупке через геймпасс">
-            <div className={styles.methodTopline}>
-              <span><Gamepad2 size={14} /> Основной способ</span>
-              <small>от {minimumGamepassPrice.toLocaleString("ru-RU")} ₽</small>
-            </div>
-            <div className={styles.methodCopy}>
-              <span className={styles.methodIcon}><Gamepad2 size={24} /></span>
-              <div>
-                <p>Покупка через геймпасс</p>
-                <h2>Больше Robux</h2>
-              </div>
-            </div>
-            <ul className={styles.methodPoints}>
-              <li><CircleCheck size={16} /> Цена и количество видны до оплаты</li>
-              <li><CircleCheck size={16} /> Пароль Roblox не нужен</li>
-              <li><CircleCheck size={16} /> Инструкция проведёт по шагам</li>
-            </ul>
-            <div className={styles.methodFooter}>
-              <span><TimerReset size={16} /> Статус — в кабинете</span>
-              <strong>Купить <ArrowRight size={17} /></strong>
-            </div>
-          </a>
-
-          {/* Код с карточки Wildberries. До 07.09.2026 ввести его на сайте было
-              негде вообще: человек с оплаченной картой в руках попадал на
-              витрину и уходил платить второй раз. Обычный `<a>`: `?source=wb`
-              обслуживает отдельный контейнер Guide. */}
-          <a className={styles.codeTeaser} href="/guide?source=wb">
-            <span className={styles.codeTeaserIcon}><KeyRound size={18} /></span>
-            <p>
-              <strong>Купил карточку на Wildberries?</strong>
-              <small>Введи код — откроем твой заказ</small>
-            </p>
-            <span>Ввести код</span>
+        <div className={styles.heroSide}>
+          <HeroPulse />
+          {/* Код с карточки Wildberries. Обычный `<a>`: `?source=wb` обслуживает
+              инструкция, клиентский переход Next туда не нужен. */}
+          <a className={styles.wbCard} href="/guide?source=wb">
+            <span>
+              <b>Купил карточку на Wildberries?</b>
+              <small>Введи код с карточки — платить второй раз не нужно</small>
+            </span>
+            <span className={styles.wbCardAction}>Ввести код</span>
           </a>
         </div>
       </section>
 
-      <section className={styles.assuranceStrip} aria-label="Преимущества покупки">
-        {assurances.map(({ icon: Icon, title, text }) => (
-          <article key={title} className={styles.assuranceItem}>
-            <span className={styles.assuranceIcon}><Icon size={18} /></span>
-            <span><strong>{title}</strong><small>{text}</small></span>
-          </article>
+      {/* ── Полоса доверия: простыми словами ───────────────────────────── */}
+      <section className={styles.trust} aria-label="Почему это безопасно">
+        {trust.map(({ icon: Icon, title, text }) => (
+          <div key={title} className={styles.trustItem}>
+            <span className={styles.trustIcon}><Icon size={18} /></span>
+            <span><b>{title}</b><small>{text}</small></span>
+          </div>
         ))}
       </section>
 
-      <section className={styles.productsSection}>
-        <div className={styles.sectionHeading}>
-          <div>
-            <span className={styles.sectionKicker}>Как купить Robux</span>
-            <h2>Геймпасс или<br />код активации</h2>
+      {/* ── Покупка: код первым и крупнее, геймпасс — вторым ───────────── */}
+      <section className={styles.buy}>
+        <CodesStore instant={instant} />
+        <div id="calculator" className={styles.passColumn}>
+          <div className={styles.passHead}>
+            <b>Через геймпасс</b>
+            <span>Дешевле, но Robux приходят не сразу: Roblox держит их в ожидании</span>
+            <Link href="/guide?source=site&amount=1000" className={styles.passGuide}>Как создать геймпасс — инструкция</Link>
           </div>
-          <p>Геймпасс выгоднее — нужно создать пасс по инструкции. Код проще — ничего не нужно создавать в Roblox: оплатил, получил код, ввёл на roblox.com/redeem.</p>
-        </div>
-
-        <div className={styles.productsGrid}>
-          <div id="calculator" className={styles.calculatorWrap}>
-            <div className={styles.gamepassLabel}>
-              <span><Gamepad2 size={16} /> Через геймпасс</span>
-              <small>Работает сейчас</small>
-            </div>
-            <Calculator />
-          </div>
-
-          <CodesStore />
+          <Calculator />
         </div>
       </section>
 
-      <CodesInfo />
-
-      <section className={styles.section}>
-        <div className={styles.sectionHeading}>
-          <div>
-            <span className={styles.sectionKicker}>Геймпасс: как это работает</span>
-            <h2>От выбора пакета<br />до готового заказа</h2>
-          </div>
-          <p>Технические детали остаются внутри сервиса. Пользователь видит только следующий понятный шаг.</p>
+      {/* ── Сравнение: код рекомендован ────────────────────────────────── */}
+      <section className={styles.compare} aria-labelledby="compare-title">
+        <div className={styles.sectionHead}>
+          <span className={styles.kicker}>Как выбрать</span>
+          <h2 id="compare-title">Не хочешь ждать? Бери код</h2>
         </div>
-        <div className={styles.stepsGrid}>
-          {steps.map(({ number, icon: Icon, title, text, href }) => (
-            <article key={number} className={styles.stepCard}>
-              <div className={styles.stepTop}>
-                <span>{number} / 03</span>
-                <span className={styles.stepIcon}><Icon size={22} /></span>
-              </div>
-              <div className={styles.stepProgress}><i style={{ width: `${Number(number) * 33.33}%` }} /></div>
-              <div>
-                <h3>{title}</h3>
-                <p>{text}</p>
-                {href && <Link href={href}>Перейти к инструкции <ArrowRight size={15} /></Link>}
-              </div>
-            </article>
+        <div className={styles.compareGrid}>
+          <article className={`${styles.compareCard} ${styles.compareMain}`}>
+            <span className={styles.recommend}>РЕКОМЕНДУЕМ</span>
+            <span className={styles.compareKicker}>КОД АКТИВАЦИИ</span>
+            <dl>
+              <dt>Robux на балансе</dt><dd>Сразу после ввода кода</dd>
+              <dt>Что сделать</dt><dd>Ввести код на roblox.com/redeem</dd>
+              <dt>Подойдёт</dt><dd>Себе, в подарок, за ребёнка</dd>
+            </dl>
+            <a href="#codes" className={styles.compareCta}>Купить код <ArrowRight size={17} /></a>
+          </article>
+          <article className={styles.compareCard}>
+            <span className={styles.compareKicker}>ГЕЙМПАСС</span>
+            <dl>
+              <dt>Robux на балансе</dt><dd>Не сразу — Roblox держит в ожидании</dd>
+              <dt>Что сделать</dt><dd>Создать пасс по инструкции</dd>
+              <dt>Подойдёт</dt><dd>Кто готов подождать ради цены</dd>
+            </dl>
+            <a href="#calculator" className={styles.compareAlt}>Через геймпасс</a>
+          </article>
+        </div>
+      </section>
+
+      {/* ── Отзывы с Wildberries ───────────────────────────────────────── */}
+      <section id="reviews" className={styles.reviews} aria-labelledby="reviews-title">
+        <div className={styles.reviewsHead}>
+          <div className={styles.sectionHead}>
+            <span className={styles.kicker}>Отзывы покупателей с Wildberries</span>
+            <h2 id="reviews-title">Пишут покупатели</h2>
+          </div>
+          <WbReviewsLink className={styles.reviewsLink} />
+        </div>
+        <ReviewsMarquee />
+      </section>
+
+      {/* ── Подарок ───────────────────────────────────────────────────── */}
+      <section className={styles.giftPromo} aria-labelledby="gift-title">
+        <div className={styles.giftCopy}>
+          <span className={styles.kicker}>Подарок, который точно порадует</span>
+          <h2 id="gift-title">Подари Robux открыткой</h2>
+          <p>Выбери номинал и открытку, напиши пару слов. Получатель откроет подарок по кнопке в письме и сразу введёт код. Можно отправить в день праздника.</p>
+          <a href="#gift" className={styles.giftCta}><Gift size={18} /> Выбрать подарок</a>
+        </div>
+        <div className={styles.giftCards} aria-hidden="true">
+          <div className={`${styles.giftCard} ${styles.giftBirthday}`}>
+            <GiftArt theme="BIRTHDAY" className={styles.giftArt} />
+            <span>С днём рождения!</span>
+            <b>1 000<small>ROBUX</small></b>
+          </div>
+          <div className={`${styles.giftCard} ${styles.giftNewYear}`}>
+            <GiftArt theme="NEW_YEAR" className={styles.giftArt} />
+            <span>С Новым годом!</span>
+            <b>800<small>ROBUX</small></b>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Приглашения ───────────────────────────────────────────────── */}
+      <section id="invite" className={styles.invite} aria-labelledby="invite-title">
+        <div className={styles.inviteCopy}>
+          <span className={styles.kicker}>Приглашай друзей</span>
+          <h2 id="invite-title">Скидка на коды растёт вместе с друзьями</h2>
+          <p>1% сразу после регистрации. Друг купил код по твоей ссылке — он засчитан. Скидка остаётся навсегда — на сайте и в наших ботах.</p>
+          <a href="/dashboard#referral" className={styles.inviteCta}>Получить ссылку <ArrowRight size={17} /></a>
+        </div>
+        <ol className={styles.tiers}>
+          {CODE_DISCOUNT_TIERS.map((tier, index) => (
+            <li key={tier.percent}>
+              <b>{tier.percent}%</b>
+              <span>{tier.invited === 0 ? "регистрация" : `${tier.invited} ${tier.invited === 3 ? "друга" : "друзей"}`}</span>
+              <i aria-hidden="true" style={{ height: `${24 + index * 18}px` }} />
+            </li>
           ))}
-        </div>
+        </ol>
       </section>
 
-      <section className={styles.controlSection}>
-        <div className={styles.controlCard}>
-          <div>
-            <span className={styles.sectionKicker}>Статус заказа</span>
-            <h2>Всегда понятно,<br />что происходит дальше</h2>
-            <p>Заказ через геймпасс проходит проверку и выкуп — каждый шаг виден в личном кабинете.</p>
-          </div>
-          <div className={styles.orderWidgets}>
-            <div className={styles.orderWidget}>
-              <div className={styles.orderWidgetTop}>
-                <span>Через геймпасс</span><strong>Геймпасс проверяется</strong>
-              </div>
-              <div className={styles.orderTrack}><i /><i /><i className={styles.current} /><i /></div>
-              <div className={styles.orderLabels}><span>Создан</span><span>Оплачен</span><span>Проверка</span><span>Готово</span></div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <CodesInfo instant={instant} />
 
       <section className={styles.bottomCta}>
         <div>
-          <span className={styles.sectionKicker}>Готов начать?</span>
-          <h2>Выбери свой способ</h2>
+          <span className={styles.kicker}>Готов?</span>
+          <h2>{instant ? "Robux через минуту" : "Robux — кодом"}</h2>
         </div>
         <div className={styles.bottomActions}>
-          <a href="#calculator" className={styles.primaryAction}>Через геймпасс <ArrowRight size={18} /></a>
-          <a href="#codes" className={styles.codeAction}>Пополнить кодом <ArrowRight size={18} /></a>
+          <a href="#codes" className={styles.bottomPrimary}>Купить код <ArrowRight size={18} /></a>
+          <a href="#calculator" className={styles.bottomSecondary}>или через геймпасс</a>
         </div>
       </section>
 

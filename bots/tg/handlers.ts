@@ -156,6 +156,7 @@ import {
   xlinkWaitingText,
 } from "../shared/cross-platform-notify";
 import { SUPPORT_METRIC_EVENT, isRobuxSupportContext, recordSupportMetric } from "../shared/support-metric";
+import { CODES_CB, CODES_MENU_BTN } from "../shared/codes-shop";
 import {
   BUYER_HINT_CONTEXT, BUYER_HINT_REQUEST_TEXT, extractBuyerHints, findOrderByBuyerHints, matchedByLabel,
 } from "../shared/buyer-contact";
@@ -174,7 +175,9 @@ const MENU_BTN = {
 } as const;
 
 function menuReplyKb() {
+  // 15.11.2026: коды и приглашения — первым рядом (обработчики в ./codes-shop.ts).
   return Markup.keyboard([
+    [CODES_MENU_BTN.codes, CODES_MENU_BTN.invite],
     [MENU_BTN.direct, MENU_BTN.order],
     [MENU_BTN.guide,  MENU_BTN.faq],
   ]).resize();
@@ -1891,7 +1894,7 @@ export function registerStatus(bot: Telegraf): void {
  */
 export async function setupBotProfile(bot: Telegraf): Promise<void> {
   const shortDescription =
-    "Выкуп Robux: инструкция, статус заказа и покупка напрямую — без карты WB 💎";
+    "Robux кодом — сразу на баланс 🎟 Инструкция для карты WB, статус заказа и покупка напрямую 💎";
   const description =
     "Привет! 👋 Это RobloxBank — здесь ты получишь робуксы за код с карты Wildberries.\n\n" +
     "Дальше всё происходит в этом боте:\n" +
@@ -1903,6 +1906,8 @@ export async function setupBotProfile(bot: Telegraf): Promise<void> {
   const commands = [
     { command: "menu", description: "👤 Моё меню — профиль и заказы" },
     { command: "status", description: "📊 Статус моего заказа" },
+    { command: "codes", description: "🎟 Код Robux — сразу на баланс" },
+    { command: "invite", description: "🤝 Скидка за друзей — до 5%" },
     { command: "direct", description: "💎 Купить Robux напрямую" },
     { command: "help", description: "📖 Инструкция и помощь" },
   ];
@@ -2371,6 +2376,7 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
   if (menu.othersCount > 0) {
     rows.push([Markup.button.callback(`📦 Другие заказы (${menu.othersCount})`, CB.ordersList)]);
   }
+  rows.push([Markup.button.callback(CODES_MENU_BTN.codes, CODES_CB.open), Markup.button.callback(CODES_MENU_BTN.invite, CODES_CB.invite)]);
   rows.push([Markup.button.callback(nickBtn, CB.editNick)]);
 
   return {

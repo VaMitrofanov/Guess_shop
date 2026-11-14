@@ -9,17 +9,21 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import ActiveOrderBar from "@/components/active-order-bar";
 
-const NAV_LINKS = [
-  { href: "/", label: "Купить" },
+const NAV_LINKS: { href: string; label: string; match?: string; external?: boolean; mobileOnly?: boolean }[] = [
+  // Витрина 2.0 (15.11.2026): шапка ведёт по главной — коды первыми.
+  // Якоря — обычные `<a>`: на главной это прокрутка, с других страниц — переход.
+  { href: "/#codes", match: "/#codes", label: "Коды", external: true },
+  { href: "/#gift", match: "/#gift", label: "В подарок", external: true },
+  { href: "/#calculator", match: "/#calculator", label: "Геймпасс", external: true },
   // Вход по коду с карточки WB — такой же, как «напиши код боту». До 07.09.2026
   // его на сайте не было вообще: человек с картой в руках попадал на витрину и
-  // шёл платить второй раз. Обычный `<a>`, а не `Link`: `?source=wb` обслуживает
-  // отдельный контейнер Guide, и клиентский переход внутри Next до него не дойдёт.
-  { href: "/guide?source=wb", match: "/guide", label: "Код WB", external: true },
-  { href: "/guide?source=site&amount=1000", match: "/guide", label: "Инструкция" },
-  { href: "/guarantees", label: "Гарантии" },
-  { href: "/reviews", label: "Отзывы" },
+  // шёл платить второй раз. `?source=wb` обслуживает инструкция.
+  { href: "/guide?source=wb", match: "/guide", label: "Код с WB", external: true },
+  { href: "/#reviews", match: "/#reviews", label: "Отзывы", external: true },
   { href: "/faq", label: "Помощь" },
+  // Инструкция по геймпассу — только в меню телефона: на десктопе шапка из
+  // мокапа (5 разделов + «Помощь»), а инструкция есть в блоке геймпасса.
+  { href: "/guide?source=site&amount=1000", match: "/guide", label: "Инструкция по геймпассу", mobileOnly: true },
 ];
 
 export default function Navbar() {
@@ -42,7 +46,7 @@ export default function Navbar() {
             портрете). В 768–1023 px секции живут в бургере, который теперь
             прячется только с lg. */}
         <div className="hidden items-center gap-1 lg:flex">
-          {NAV_LINKS.map((item) => {
+          {NAV_LINKS.filter((item) => !item.mobileOnly).map((item) => {
             const active = pathname === (item.match ?? item.href);
             const className = cn("rounded-full px-4 py-2 text-base font-bold transition-colors", active ? "bg-[var(--rb-accent-soft)] text-[var(--rb-accent)]" : "text-[var(--rb-muted)] hover:bg-[var(--rb-surface)] hover:text-[var(--rb-text)]");
             return item.external
@@ -68,7 +72,7 @@ export default function Navbar() {
           <Link href={loggedIn ? "/dashboard" : "/login"} aria-label={loggedIn ? "Личный кабинет" : "Войти"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] md:flex">
             <User size={15} /> <span className="hidden lg:inline">{loggedIn ? "Кабинет" : "Войти"}</span>
           </Link>
-          <Link href="/#calculator" className="hidden h-11 items-center gap-2 rounded-xl bg-[var(--rb-strong)] px-4 text-base font-extrabold text-white shadow-[3px_3px_0_#45d6aa] transition-transform hover:-translate-y-0.5 md:flex">
+          <Link href="/#codes" className="hidden h-11 items-center gap-2 rounded-xl bg-[var(--rb-strong)] px-4 text-base font-extrabold text-white shadow-[3px_3px_0_#45d6aa] transition-transform hover:-translate-y-0.5 md:flex">
             Купить Robux <ArrowRight size={15} />
           </Link>
           <button type="button" onClick={() => setOpen((value) => !value)} className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] text-[var(--rb-text)] lg:hidden" aria-label={open ? "Закрыть меню" : "Открыть меню"}>
@@ -93,7 +97,7 @@ export default function Navbar() {
                 <Link href="/admin" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--rb-accent)] bg-[var(--rb-accent-soft)] text-sm font-bold text-[var(--rb-accent)]"><Shield size={15} /> Админка</Link>
               )}
               <Link href={loggedIn ? "/dashboard" : "/login"} onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] text-sm font-bold text-[var(--rb-text)]"><User size={15} /> {loggedIn ? "Кабинет" : "Войти"}</Link>
-              <Link href="/#calculator" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--rb-strong)] text-base font-bold text-white">Купить <ArrowRight size={15} /></Link>
+              <Link href="/#codes" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--rb-strong)] text-base font-bold text-white">Купить <ArrowRight size={15} /></Link>
             </div>
           </div>
         </div>

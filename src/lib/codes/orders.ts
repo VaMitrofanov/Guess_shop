@@ -7,6 +7,8 @@ import { isCodeDenomination, quoteCode, type CodeQuote } from "@/lib/codes-prici
 import { viewerCodeDiscount } from "@/lib/codes/referral";
 import { hasStock, reserveCodeForOrder } from "@/lib/codes/stock";
 import { activationCryptoReady, hashPayToken, maskEmail, newCodeOrderPublicId } from "@/lib/codes/secrets";
+import { codesBackorderEnabled } from "@/lib/codes/fulfillment";
+import { giftOpenTokenFor, hashGiftToken, type GiftInput, type GiftTheme } from "@/lib/codes/gift";
 
 /**
  * Заказ кода активации на сайте (14.11.2026).
@@ -78,19 +80,27 @@ async function quoteFor(denomination: number, userId: string | null): Promise<Co
   return quoteCode(denomination, discount.percent);
 }
 
+export type CodeOrderChannel = "SITE" | "TG" | "VK";
+
 export type CreateCodeOrderInput = {
   denomination: number;
   userId: string | null;
   recipientEmail?: string | null;
   createdVia: "SELF" | "SHARE";
   idempotencyKey: string;
+  /** Подарок открыткой: код уходит получателю, а не создателю. */
+  gift?: GiftInput | null;
+  /** Где оформлен заказ; TG/VK получают код ещё и сообщением в чат. */
+  channel?: CodeOrderChannel;
 };
 
 export async function createCodeOrder(input: CreateCodeOrderInput): Promise<{ order: CodeOrder; token: string; reused: boolean }> {
   if (!codesSalesOpen()) throw new CodeOrderError("SALES_CLOSED", "Продажа кодов откроется совсем скоро.", 503);
   if (!isCodeDenomination(input.denomination)) throw new CodeOrderError("BAD_DENOMINATION", "Такого номинала нет.");
-  const recipientEmail = input.userId ? null : normalizeEmail(input.recipientEmail);
+  const gift = input.gift ?? null;
+  const recipientEmail = gift ? normalizeEmail(gift.email) : input.userId ? null : normalizeEmail(input.recipientEmail);
   if (!input.userId && !recipientEmail) throw new CodeOrderError("EMAIL_REQUIRED", "Укажите email, на который отправить код.");
+  if (gift && !recipientEmail) throw new CodeOrderError("EMAIL_REQUIRED", "Укажите почту получателя подарка.");
 
   const existing = await prisma.codeOrder.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (existing) {
@@ -101,7 +111,9 @@ export async function createCodeOrder(input: CreateCodeOrderInput): Promise<{ or
     return { order: existing, token: payTokenFor(existing.id), reused: true };
   }
 
-  if (!(await hasStock(input.denomination))) {
+  // Ручной режим (15.11.2026): пустой склад не мешает продаже — код выдаём
+  // руками после оплаты (`src/lib/codes/fulfillment.ts`).
+  if (!codesBackorderEnabled() && !(await hasStock(input.denomination))) {
     throw new CodeOrderError("OUT_OF_STOCK", "Коды этого номинала закончились. Выберите другой номинал — пополним склад в ближайшее время.", 409);
   }
 
@@ -121,8 +133,17 @@ export async function createCodeOrder(input: CreateCodeOrderInput): Promise<{ or
           discountKopecks: quote.discountKopecks,
           finalAmountKopecks: quote.finalAmountKopecks,
           creatorUserId: input.userId,
-          deliveryMode: input.userId ? "ACCOUNT" : "EMAIL",
+          deliveryMode: gift ? "GIFT" : input.userId ? "ACCOUNT" : "EMAIL",
           recipientEmail,
+          channel: input.channel ?? "SITE",
+          ...(gift ? {
+            giftTheme: gift.theme,
+            giftTo: gift.to,
+            giftFrom: gift.from,
+            giftMessage: gift.message,
+            giftSendAt: gift.sendAt,
+            giftOpenTokenHash: hashGiftToken(giftOpenTokenFor(id)),
+          } : {}),
           payTokenHash: hashPayToken(token),
           createdVia: input.createdVia,
           offerExpiresAt: new Date(Date.now() + CODE_OFFER_TTL_MS),
@@ -168,6 +189,8 @@ export function offerExpired(order: Pick<CodeOrder, "offerExpiresAt" | "paidAt">
 
 /** Адрес для чека по умолчанию: гостю — его email, клиенту — почта аккаунта. */
 export function defaultReceiptEmail(order: OrderWithPayments): string | null {
+  // Подарок: адрес получателя — не для чека, иначе сюрприз раскроется письмом банка.
+  if (order.deliveryMode === "GIFT") return order.creator?.email ?? null;
   return order.recipientEmail ?? order.creator?.email ?? null;
 }
 
@@ -200,11 +223,12 @@ export async function startCodePayment(order: OrderWithPayments, receiptEmailInp
     await reserveCodeForOrder(prisma, order.id, order.denomination);
     return { paymentUrl: reusable.paymentUrl, reused: true };
   }
+  const backorder = codesBackorderEnabled();
 
   const attemptNumber = order.payments.length + 1;
   const payment = await prisma.$transaction(async (tx) => {
     const reserved = await reserveCodeForOrder(tx, order.id, order.denomination);
-    if (!reserved) throw new CodeOrderError("OUT_OF_STOCK", "Коды этого номинала только что закончились. Выберите другой номинал или попробуйте позже.", 409);
+    if (!reserved && !backorder) throw new CodeOrderError("OUT_OF_STOCK", "Коды этого номинала только что закончились. Выберите другой номинал или попробуйте позже.", 409);
     return tx.codePayment.create({
       data: {
         orderId: order.id,
@@ -293,8 +317,11 @@ export type PublicCodeOrder = {
   discountPercent: number;
   discountKopecks: number;
   finalAmountKopecks: number;
-  deliveryMode: "EMAIL" | "ACCOUNT";
+  deliveryMode: "EMAIL" | "ACCOUNT" | "GIFT";
+  channel: CodeOrderChannel;
   maskedRecipient: string | null;
+  gift: { theme: GiftTheme; to: string | null; sendAt: string | null; sent: boolean } | null;
+  rating: number | null;
   status: "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "PAID" | "ISSUED" | "REFUNDED";
   expired: boolean;
   offerExpiresAt: string;
@@ -330,7 +357,17 @@ export async function publicCodeOrderView(order: OrderWithPayments): Promise<Pub
     discountKopecks: order.discountKopecks,
     finalAmountKopecks: order.finalAmountKopecks,
     deliveryMode: order.deliveryMode,
-    maskedRecipient: order.deliveryMode === "EMAIL" ? maskEmail(order.recipientEmail) : null,
+    channel: (order.channel === "TG" || order.channel === "VK" ? order.channel : "SITE"),
+    maskedRecipient: order.deliveryMode === "EMAIL" || order.deliveryMode === "GIFT" ? maskEmail(order.recipientEmail) : null,
+    gift: order.deliveryMode === "GIFT" && order.giftTheme
+      ? {
+          theme: order.giftTheme as GiftTheme,
+          to: order.giftTo,
+          sendAt: order.giftSendAt ? order.giftSendAt.toISOString() : null,
+          sent: Boolean(order.giftSentAt),
+        }
+      : null,
+    rating: order.rating,
     status: order.status,
     expired,
     offerExpiresAt: order.offerExpiresAt.toISOString(),

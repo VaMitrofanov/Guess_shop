@@ -6,9 +6,12 @@ import { ArrowRight, Check, Gamepad2, Loader2, LockKeyhole, WalletCards } from "
 import { usePricing } from "@/hooks/usePricing";
 import CorridorNotice from "@/components/corridor-notice";
 import { gamepassPriceMatches } from "@/lib/gamepass-search-view";
+import { CODE_PRICES } from "@/lib/codes-pricing";
 import styles from "@/app/storefront.module.css";
 
 const PACKS = [500, 1000, 2000, 5000];
+/** «ХИТ» у геймпасса — 1 000 (решение владельца 14.11.2026; у кодов — 800). */
+const HIT_PACK = 1000;
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
 const formatCustomerRate = (rate: number) => rate.toLocaleString("ru-RU", {
   minimumFractionDigits: 2,
@@ -121,10 +124,14 @@ export default function Calculator() {
           <button
             key={pack}
             type="button"
-            className={amount === pack ? styles.packActive : styles.pack}
+            aria-pressed={amount === pack}
+            className={`${amount === pack ? styles.packActive : styles.pack} ${styles.packTall}`}
             onClick={() => setRobux(String(pack))}
           >
-            {amount === pack && <Check size={13} />} {pack.toLocaleString("ru-RU")}
+            {pack === HIT_PACK && <span className={styles.packHit}>ХИТ</span>}
+            <b>{pack.toLocaleString("ru-RU")}</b>
+            <small>{loading ? "…" : `${getPrice(pack).toLocaleString("ru-RU")} ₽`}</small>
+            {amount === pack && <Check size={13} className={styles.packTick} />}
           </button>
         ))}
       </div>
@@ -137,6 +144,10 @@ export default function Calculator() {
       {!loading && amount > 0 && (
         <p className={styles.tierNote}>Твой курс: {formatCustomerRate(breakdown.rubPerRobux)} ₽/R$</p>
       )}
+      {/* Мостик в коды (витрина 2.0): без «вы экономите» — только честная альтернатива. */}
+      <a href="#codes" className={styles.codeBridge}>
+        {CODE_PRICES[amount] ? `Кодом — ${CODE_PRICES[amount].toLocaleString("ru-RU")} ₽, зато сразу на баланс →` : "Кодом — сразу на баланс, без геймпасса →"}
+      </a>
       <CorridorNotice className={styles.corridorNotice} linkClassName={styles.corridorNoticeLink} />
       <label className={styles.nicknameLabel} htmlFor="calculator-username">Куда зачислить Robux</label>
       <div className={`${styles.nicknameField} ${validUsername ? styles.nicknameFieldReady : ""}`}>

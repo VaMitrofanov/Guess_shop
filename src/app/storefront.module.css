@@ -304,3 +304,13 @@ a.codeTeaser:hover { border-color:#7556e8; transform:translateY(-1px); }
 .stepCard a:focus-visible,
 .bottomTextLink:focus-visible { outline: 3px solid #45d6aa; outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .vaultWheel { animation:none; } .gamepassHeroCard,.primaryAction,.codeAction { transition:none; } }
+
+/* Витрина 2.0 (15.11.2026): карточки пакетов геймпасса в стиле кодов. */
+.packTall { position:relative; min-height:72px; flex-direction:column; gap:2px; }
+.packTall b { font-family:var(--font-display),sans-serif; font-size:19px; letter-spacing:-.04em; }
+.packTall small { font-size:13px; font-weight:700; opacity:.8; }
+.packTick { position:absolute; top:6px; right:6px; }
+.packHit { position:absolute; top:-9px; left:8px; padding:2px 8px; border-radius:999px; background:#ff8a3d; color:#3d1a02; font-size:12px; font-weight:900; letter-spacing:.06em; box-shadow:2px 2px 0 #45d6aa; }
+.codeBridge { display:block; margin-top:12px; padding:12px 14px; border-radius:13px; background:#ece7ff; color:#5b3fd0; font-size:14.5px; font-weight:850; text-decoration:none; text-align:center; }
+.codeBridge:hover { background:#e1d9ff; }
+:global(html[data-theme="dark"]) .codeBridge { background:#241b3b; color:#cbb9ff; }

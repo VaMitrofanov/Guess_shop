@@ -1456,6 +1456,9 @@ enum CodeDeliveryMode {
   EMAIL
   /// Зарегистрированный: код в кабинете создателя заказа (+ письмо, если почта подтверждена).
   ACCOUNT
+  /// Подарок (витрина 2.0, 15.11.2026): письмо-открытка на `recipientEmail`
+  /// получателя, код открывается по отдельной ссылке «Открыть подарок».
+  GIFT
 }
 
 enum ActivationCodeStatus {
@@ -1500,6 +1503,24 @@ model CodeOrder {
   emailLastError     String?
   /// Почему заказу нужен человек (нет кода после оплаты и т.п.).
   attentionReason    String?
+  /// Где оформлен заказ: SITE | TG | VK. У TG/VK код дополнительно приходит
+  /// сообщением в чат бота (`src/lib/codes/chat-notify.ts`).
+  channel            String           @default("SITE")
+  chatDeliveredAt    DateTime?
+  /// 🎁 Подарок открыткой: тема BIRTHDAY | NEW_YEAR | JUST, кому, от кого,
+  /// пожелание (≤140, без ссылок), когда отправить. Код в письме не виден —
+  /// открывается по токену получателя (в базе только его sha256).
+  giftTheme          String?
+  giftTo             String?
+  giftFrom           String?
+  giftMessage        String?
+  giftSendAt         DateTime?
+  giftSentAt         DateTime?
+  giftOpenTokenHash  String?          @unique
+  giftOpenedAt       DateTime?
+  /// Оценка «Всё прошло нормально?» с экрана после оплаты, 1–5.
+  rating             Int?
+  ratedAt            DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   payments           CodePayment[]
@@ -1507,6 +1528,28 @@ model CodeOrder {
 
   @@index([creatorUserId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+  @@index([status, issuedAt])
+}
+
+/// ⭐ Отзывы покупателей с Wildberries для витрины (15.11.2026). Кладёт
+/// TG-бот раз в час из feedbacks-api продавца (`bots/shared/wb-reviews-feed.ts`),
+/// сайт только читает. Берём 5★ с текстом; `hidden` — админ скрыл отзыв.
+model WbReview {
+  /// id отзыва в WB.
+  id          String   @id
+  nmId        Int?
+  rating      Int
+  text        String
+  /// Первое слово имени покупателя или «Покупатель».
+  authorName  String
+  wbCreatedAt DateTime
+  /// Прошёл фильтр витрины (5★, есть текст, не «надеюсь придут»).
+  eligible    Boolean  @default(false)
+  hidden      Boolean  @default(false)
+  fetchedAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([eligible, hidden, wbCreatedAt(sort: Desc)])
 }
 
 model CodePayment {

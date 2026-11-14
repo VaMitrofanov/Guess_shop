@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
+  CalendarClock,
   Check,
   CircleAlert,
   Copy,
@@ -13,6 +14,7 @@ import {
   Link2,
   Loader2,
   Mail,
+  ReceiptText,
   RotateCcw,
   Send,
   Share2,
@@ -20,16 +22,20 @@ import {
   UserPlus,
 } from "lucide-react";
 import { CODE_DENOMINATIONS, CODE_PRICES, quoteCode } from "@/lib/codes-pricing";
+import GiftArt from "@/components/gift-art";
 import styles from "./codes-store.module.css";
 
 /**
- * 🎟 Покупка кода активации на главной (14.11.2026).
+ * 🎟 Покупка кода активации на главной (14.11.2026, витрина 2.0 — 15.11.2026).
  *
- * Цены и наличие — с сервера (`/api/codes/catalog`), сумму в заказ пишет тоже
- * сервер; здесь только выбор и показ. Выбранный номинал живёт в адресе
- * (`?pack=`) и в sessionStorage — переживает вход/регистрацию, мессенджер и
- * банковское приложение. Последний созданный заказ — в localStorage, чтобы
- * вернувшийся из банка или мессенджера человек снова видел свою ссылку.
+ * Цены, наличие, «ХИТ» и режим выдачи — с сервера (`/api/codes/catalog`),
+ * сумму в заказ пишет тоже сервер; здесь только выбор и показ. Выбранный
+ * номинал живёт в адресе (`?pack=`) и в sessionStorage — переживает вход,
+ * мессенджер и банковское приложение. Последний созданный заказ — в
+ * localStorage, чтобы вернувшийся человек снова видел свою ссылку.
+ *
+ * «Себе / В подарок»: подарок — та же оплата и тот же код, другая доставка
+ * (письмо-открытка получателю, код открывается по кнопке).
  */
 
 type Pack = {
@@ -42,6 +48,8 @@ type Pack = {
 
 type Catalog = {
   salesOpen: boolean;
+  hit?: number;
+  instant?: boolean;
   packs: Pack[];
   viewer: {
     registered: boolean;
@@ -61,10 +69,20 @@ type SavedOrder = {
   createdAt: number;
 };
 
+type GiftTheme = "BIRTHDAY" | "NEW_YEAR" | "JUST";
+
 const PACK_KEY = "rb-code-pack";
 const LAST_ORDER_KEY = "rb-code-last-order";
 const DEFAULT_PACK = 800;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const GIFT_MESSAGE_MAX = 140;
+const LINK_RE = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(ru|рф|com|net|org|me|io|gg|su|xyz|site|online|shop|cc|ly|link|app|club|pro|info|biz|top)\b|t\.me|vk\.(com|cc|me)|@[a-z0-9_]{3,})/i;
+
+const THEMES: { id: GiftTheme; label: string }[] = [
+  { id: "BIRTHDAY", label: "День рождения" },
+  { id: "NEW_YEAR", label: "Новый год" },
+  { id: "JUST", label: "Просто так" },
+];
 
 function rub(kopecks: number): string {
   const whole = kopecks % 100 === 0;
@@ -97,17 +115,41 @@ function safeSet(storage: "local" | "session", key: string, value: string | null
   }
 }
 
+function notPast(local: string): boolean {
+  return local !== "" && new Date(local).getTime() > Date.now() - 60_000;
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
 function newKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ (Math.random() * 16) >> (Number(c) / 4)).toString(16));
 }
 
-export default function CodesStore() {
+/** Значение для `<input type="datetime-local">`: завтра в 9:00 по времени устройства. */
+function tomorrowMorning(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(9, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T09:00`;
+}
+
+function whenLabel(local: string): string {
+  const date = new Date(local);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+export default function CodesStore({ instant: instantProp = true }: { instant?: boolean }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<number>(DEFAULT_PACK);
-  const [path, setPath] = useState<"register" | "guest" | null>(null);
+  const [mode, setMode] = useState<"self" | "gift">("self");
+  const [path, setPath] = useState<"guest" | null>(null);
   const [email, setEmail] = useState("");
   const [receiptEmail, setReceiptEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -116,8 +158,19 @@ export default function CodesStore() {
   const [shared, setShared] = useState<SavedOrder | null>(null);
   const [copied, setCopied] = useState(false);
   const [resume, setResume] = useState<SavedOrder | null>(null);
+  const [theme, setTheme] = useState<GiftTheme>("BIRTHDAY");
+  const [giftTo, setGiftTo] = useState("");
+  const [giftEmail, setGiftEmail] = useState("");
+  const [giftMessage, setGiftMessage] = useState("");
+  const [giftFrom, setGiftFrom] = useState("");
+  const [scheduled, setScheduled] = useState(false);
+  const [sendAt, setSendAt] = useState("");
+  const [barVisible, setBarVisible] = useState(false);
+  const [typing, setTyping] = useState(false);
   const keyRef = useRef<string>("");
-  const summaryRef = useRef<HTMLDivElement>(null);
+  const packsRef = useRef<HTMLFieldSetElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const storeRef = useRef<HTMLElement>(null);
 
   const load = useCallback(() => {
     setLoadError(false);
@@ -136,6 +189,8 @@ export default function CodesStore() {
     const initial = fromUrl || fromSession;
     if (initial) setSelected(initial);
     if (params.get("buy") === "guest") setPath("guest");
+    if (params.get("gift") === "1") setMode("gift");
+    setSendAt(tomorrowMorning());
     const saved = safeGet("local", LAST_ORDER_KEY);
     if (saved) {
       try {
@@ -147,14 +202,57 @@ export default function CodesStore() {
         safeSet("local", LAST_ORDER_KEY, null);
       }
     }
+    // Ссылки «В подарок» снаружи (шапка, боты) ведут на #gift.
+    const onHash = () => { if (window.location.hash === "#gift") setMode("gift"); };
+    onHash();
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, [load]);
 
+  // Закреплённая панель на телефоне: видна, когда выбор номинала уехал вверх,
+  // а кнопки покупки ещё не на экране. Прячется, пока открыта клавиатура.
+  useEffect(() => {
+    const packsEl = packsRef.current;
+    const actionsEl = actionsRef.current;
+    if (!packsEl || !actionsEl) return;
+    // По прокрутке, а не IntersectionObserver: резкий прыжок (якорь, «наверх»)
+    // перескакивает через пересечение, и панель не появлялась.
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const packs = packsEl.getBoundingClientRect();
+      const actions = actionsEl.getBoundingClientRect();
+      const actionsVisible = actions.top < window.innerHeight && actions.bottom > 0;
+      setBarVisible(packs.bottom < 0 && !actionsVisible);
+    };
+    const onScroll = () => { if (!frame) frame = window.requestAnimationFrame(update); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) setTyping(true);
+    };
+    const onFocusOut = () => setTyping(false);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
+  const instant = catalog?.instant ?? instantProp;
   const packs = catalog?.packs ?? FALLBACK_PACKS;
   const pack = packs.find((item) => item.denomination === selected) ?? null;
   const viewer = catalog?.viewer;
   const registered = Boolean(viewer?.registered);
+  const hit = catalog?.hit ?? DEFAULT_PACK;
   const emailValid = EMAIL_RE.test(email.trim());
-  const receiptValid = receiptEmail.trim() === "" ? Boolean(viewer?.hasEmail) : EMAIL_RE.test(receiptEmail.trim());
+  const receiptTrim = receiptEmail.trim();
+  const receiptValid = receiptTrim === "" ? Boolean(viewer?.hasEmail) : EMAIL_RE.test(receiptTrim);
 
   // Номинал сохраняется в адресе и в сессии — его не теряют ни вход, ни переключение сценария.
   const choose = (denomination: number) => {
@@ -168,25 +266,51 @@ export default function CodesStore() {
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash || "#codes"}`);
   };
 
-  const returnPath = `/?pack=${selected}#codes`;
+  const switchMode = (next: "self" | "gift") => {
+    setMode(next);
+    setError("");
+    setShared(null);
+    keyRef.current = "";
+  };
+
+  const returnPath = `/?pack=${selected}${mode === "gift" ? "&gift=1" : ""}#codes`;
   const registerHref = `/register?next=${encodeURIComponent(returnPath)}`;
   const loginHref = `/login?next=${encodeURIComponent(returnPath)}`;
 
-  const submit = async (mode: "self" | "share") => {
+  // ── Подарок: проверка на клиенте повторяет серверную (validateGift) ──────
+  const giftEmailValid = EMAIL_RE.test(giftEmail.trim());
+  const giftHasLink = [giftTo, giftFrom, giftMessage].some((value) => value && LINK_RE.test(value));
+  const giftTooLong = giftMessage.trim().length > GIFT_MESSAGE_MAX;
+  const sendAtValid = !scheduled || notPast(sendAt);
+  const giftReceiptValid = registered ? receiptValid : EMAIL_RE.test(receiptTrim);
+  const giftReady = giftEmailValid && !giftHasLink && !giftTooLong && sendAtValid && giftReceiptValid && agreed;
+
+  const submit = async (kind: "self" | "share") => {
     if (!pack || busy) return;
     setError("");
-    setBusy(mode);
+    setBusy(kind);
     if (!keyRef.current) keyRef.current = newKey();
+    const gift = mode === "gift"
+      ? {
+          theme,
+          to: giftTo.trim() || undefined,
+          from: giftFrom.trim() || undefined,
+          message: giftMessage.trim() || undefined,
+          email: giftEmail.trim(),
+          sendAt: scheduled && sendAt ? new Date(sendAt).toISOString() : null,
+        }
+      : undefined;
     try {
       const response = await fetch("/api/codes/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           denomination: pack.denomination,
-          mode,
-          ...(registered ? {} : { email: email.trim() }),
-          ...(registered && receiptEmail.trim() ? { receiptEmail: receiptEmail.trim() } : {}),
-          ...(mode === "self" ? { agreedToTerms: agreed } : {}),
+          mode: kind,
+          ...(registered || gift ? {} : { email: email.trim() }),
+          ...(receiptTrim ? { receiptEmail: receiptTrim } : {}),
+          ...(kind === "self" ? { agreedToTerms: agreed } : {}),
+          ...(gift ? { gift } : {}),
           idempotencyKey: keyRef.current,
         }),
       });
@@ -203,12 +327,12 @@ export default function CodesStore() {
         orderId: data.orderId,
         denomination: pack.denomination,
         finalAmountKopecks: data.finalAmountKopecks,
-        kind: mode,
-        createdAt: Date.now(),
+        kind,
+        createdAt: nowMs(),
       };
       safeSet("local", LAST_ORDER_KEY, JSON.stringify(saved));
       keyRef.current = "";
-      if (mode === "self" && data.paymentUrl) {
+      if (kind === "self" && data.paymentUrl) {
         window.location.assign(data.paymentUrl);
         return;
       }
@@ -249,16 +373,16 @@ export default function CodesStore() {
     await copyLink(saved);
   };
 
-  // Якорь «Выгоднее всего» — пакет с самой низкой ценой за 1 R$ среди тех, что
+  // «Выгоднее всего» — пакет с самой низкой ценой за 1 R$ среди тех, что
   // можно купить; цифра честная, считается из той же цены, что на карточке.
   const bestValue = useMemo(() => {
     const pool = packs.some((item) => item.available) ? packs.filter((item) => item.available) : packs;
     return pool.reduce((min, item) => (item.finalAmountKopecks / item.denomination < min.finalAmountKopecks / min.denomination ? item : min), pool[0])?.denomination ?? null;
   }, [packs]);
 
-  const shareBlocked = !pack?.available || !catalog?.salesOpen;
-  const guestReady = path === "guest" && emailValid;
+  const blocked = !pack?.available || !catalog?.salesOpen;
   const discountPercent = viewer?.discountPercent ?? 0;
+  const deliveryWord = instant ? "придёт сразу после оплаты" : "пришлём после оплаты";
 
   const nextLine = useMemo(() => {
     if (!viewer?.registered) return null;
@@ -266,13 +390,21 @@ export default function CodesStore() {
     return `Ваша скидка ${discountPercent}%. До ${viewer.next.percent}% осталось пригласить ${viewer.next.remaining}.`;
   }, [viewer, discountPercent]);
 
+  const scrollToActions = () => actionsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+
   return (
-    <article id="codes" className={styles.store} aria-labelledby="codes-title">
+    <article id="codes" ref={storeRef} className={styles.store} aria-labelledby="codes-title">
+      <span id="gift" className={styles.anchor} aria-hidden="true" />
       <header className={styles.head}>
-        <span className={styles.headIcon}><Gift size={23} /></span>
         <div>
-          <h3 id="codes-title">Код активации Roblox</h3>
-          <p>Оплатите — код придёт на почту или в кабинет. Ввести его можно на roblox.com/redeem.</p>
+          <h3 id="codes-title">Код активации</h3>
+          <p>Оплатил — получил — ввёл на roblox.com/redeem</p>
+        </div>
+        <div className={styles.segment} role="group" aria-label="Для кого код">
+          <button type="button" aria-pressed={mode === "self"} className={mode === "self" ? styles.segmentOn : undefined} onClick={() => switchMode("self")}>Себе</button>
+          <button type="button" aria-pressed={mode === "gift"} className={mode === "gift" ? styles.segmentOn : undefined} onClick={() => switchMode("gift")}>
+            <Gift size={15} /> В подарок
+          </button>
         </div>
       </header>
 
@@ -286,12 +418,13 @@ export default function CodesStore() {
         </div>
       )}
 
-      <fieldset className={styles.packs} aria-describedby="codes-summary">
+      <fieldset ref={packsRef} className={styles.packs} aria-describedby="codes-summary">
         <legend className={styles.srOnly}>Выберите номинал</legend>
         {packs.map((item) => {
           const active = item.denomination === selected;
           const discounted = registered && item.finalAmountKopecks < item.baseAmountKopecks;
           const best = item.denomination === bestValue;
+          const isHit = item.denomination === hit;
           return (
             <label key={item.denomination} className={`${styles.pack} ${active ? styles.packActive : ""} ${best ? styles.packBest : ""} ${catalog && !item.available ? styles.packOut : ""}`}>
               <input
@@ -302,7 +435,7 @@ export default function CodesStore() {
                 onChange={() => choose(item.denomination)}
                 className={styles.srOnly}
               />
-              {best && <span className={styles.packBadge}>Выгоднее всего</span>}
+              {isHit ? <span className={styles.packHit}>ХИТ</span> : best ? <span className={styles.packBadge}>Выгоднее всего</span> : null}
               <strong className={styles.packAmount}>
                 <span className={styles.packNumber}>{robux(item.denomination)}</span>
                 <span className={styles.packUnit}>Robux</span>
@@ -325,11 +458,11 @@ export default function CodesStore() {
         </p>
       )}
 
-      <div id="codes-summary" ref={summaryRef} className={styles.summary} aria-live="polite">
+      <div id="codes-summary" className={styles.summary} aria-live="polite">
         {pack ? (
           <>
             <div className={styles.summaryRow}>
-              <span>Код на <b>{robux(pack.denomination)} Robux</b></span>
+              <span>{mode === "gift" ? "В подарок" : "Код на"} <b>{robux(pack.denomination)} Robux</b></span>
               <strong>{rub(pack.finalAmountKopecks)}</strong>
             </div>
             {registered ? (
@@ -339,8 +472,8 @@ export default function CodesStore() {
                 </p>
               )
             ) : (
-              <p className={styles.summaryNote}>
-                <UserPlus size={15} /> <span>С регистрацией — <b>{rub(pack.signupAmountKopecks)}</b> (−1% сразу). До −5% — за приглашённых друзей.</span>
+              <p className={styles.summaryGreen}>
+                С регистрацией — {rub(pack.signupAmountKopecks)}, до {rub(quoteCode(pack.denomination, 5).finalAmountKopecks)} за друзей
               </p>
             )}
           </>
@@ -355,126 +488,186 @@ export default function CodesStore() {
         </p>
       )}
 
-      {shared ? (
-        <section className={styles.shareCard} aria-label="Ссылка на оплату">
-          <div className={styles.shareTop}>
-            <span className={styles.shareIcon}><Link2 size={18} /></span>
-            <div>
-              <strong>Ссылка на оплату готова</strong>
-              <small>Заказ {shared.orderId} · {robux(shared.denomination)} R$ · {rub(shared.finalAmountKopecks)}</small>
+      <div ref={actionsRef}>
+        {shared ? (
+          <section className={styles.shareCard} aria-label="Ссылка на оплату">
+            <div className={styles.shareTop}>
+              <span className={styles.shareIcon}><Link2 size={18} /></span>
+              <div>
+                <strong>Ссылка на оплату готова</strong>
+                <small>Заказ {shared.orderId} · {robux(shared.denomination)} R$ · {rub(shared.finalAmountKopecks)}</small>
+              </div>
             </div>
-          </div>
-          <p className={styles.shareText}>Отправьте её тому, кто оплатит. Он увидит магазин, номинал, сумму и куда придёт код. Вход в аккаунт ему не нужен. Ссылка действует 24 часа.</p>
-          <code className={styles.shareLink}>{fullLink(shared)}</code>
-          <div className={styles.actions}>
-            <button type="button" className={styles.primary} onClick={() => shareLink(shared)}>
-              <Share2 size={18} /> Отправить
-            </button>
-            <button type="button" className={styles.secondary} onClick={() => copyLink(shared)} aria-live="polite">
-              {copied ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> Скопировать</>}
-            </button>
-          </div>
-          <div className={styles.shareFoot}>
-            <a href={shared.payPath}>Открыть страницу оплаты <ArrowRight size={15} /></a>
-            <button type="button" onClick={() => setShared(null)}>Изменить заказ</button>
-          </div>
-        </section>
-      ) : registered ? (
-        <section className={styles.flow} aria-label="Оформление">
-          <p className={styles.flowLead}>
-            Код появится в <Link href="/dashboard#codes">личном кабинете</Link>{viewer?.hasEmail ? " и придёт письмом на почту аккаунта" : ""}.
-          </p>
-          {nextLine && <p className={styles.tierLine}>{nextLine} <Link href="/dashboard#referral">Пригласить</Link></p>}
-          {!viewer?.hasEmail && (
+            <p className={styles.shareText}>Отправьте её тому, кто оплатит. Он увидит магазин, номинал, сумму и куда придёт код. Вход в аккаунт ему не нужен. Ссылка действует 24 часа.</p>
+            <code className={styles.shareLink}>{fullLink(shared)}</code>
+            <div className={styles.actions}>
+              <button type="button" className={styles.primary} onClick={() => shareLink(shared)}>
+                <Share2 size={18} /> Отправить
+              </button>
+              <button type="button" className={styles.secondary} onClick={() => copyLink(shared)} aria-live="polite">
+                {copied ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> Скопировать</>}
+              </button>
+            </div>
+            <div className={styles.shareFoot}>
+              <a href={shared.payPath}>Открыть страницу оплаты <ArrowRight size={15} /></a>
+              <button type="button" onClick={() => setShared(null)}>Изменить заказ</button>
+            </div>
+          </section>
+        ) : mode === "gift" ? (
+          <section className={styles.giftForm} aria-label="Подарок открыткой">
+            <div className={styles.themes} role="radiogroup" aria-label="Открытка">
+              {THEMES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === item.id}
+                  className={`${styles.themeCard} ${styles[`theme${item.id}`]} ${theme === item.id ? styles.themeOn : ""}`}
+                  onClick={() => setTheme(item.id)}
+                >
+                  <GiftArt theme={item.id} className={styles.themeArt} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className={styles.giftGrid}>
+              <label className={styles.field}>
+                <span>Кому</span>
+                <span className={styles.input}><input type="text" maxLength={40} placeholder="Мише" value={giftTo} onChange={(event) => setGiftTo(event.target.value)} /></span>
+              </label>
+              <label className={styles.field}>
+                <span>От кого</span>
+                <span className={styles.input}><input type="text" maxLength={40} placeholder="Папа" value={giftFrom} onChange={(event) => setGiftFrom(event.target.value)} /></span>
+              </label>
+            </div>
             <label className={styles.field}>
-              <span>Email для чека</span>
-              <span className={styles.input}><Mail size={18} /><input type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} /></span>
+              <span>Почта получателя</span>
+              <span className={`${styles.input} ${giftEmail && !giftEmailValid ? styles.inputBad : ""}`}>
+                <Mail size={18} />
+                <input type="email" inputMode="email" autoComplete="off" placeholder="misha@example.ru" value={giftEmail} onChange={(event) => setGiftEmail(event.target.value)} aria-invalid={Boolean(giftEmail) && !giftEmailValid} />
+              </span>
+              {giftEmail && !giftEmailValid && <small className={styles.fieldError}>Проверьте адрес — в нём ошибка.</small>}
             </label>
-          )}
-          <Consent agreed={agreed} onChange={setAgreed} />
-          <div className={styles.actions}>
-            <button type="button" className={styles.primary} disabled={shareBlocked || !agreed || !receiptValid || busy !== null} onClick={() => submit("self")}>
+            <label className={styles.field}>
+              <span>Пожелание <small>· {giftMessage.trim().length}/{GIFT_MESSAGE_MAX}</small></span>
+              <span className={`${styles.input} ${styles.textarea} ${giftTooLong || giftHasLink ? styles.inputBad : ""}`}>
+                <textarea rows={3} maxLength={GIFT_MESSAGE_MAX + 20} placeholder="С днём рождения! Трать с умом" value={giftMessage} onChange={(event) => setGiftMessage(event.target.value)} />
+              </span>
+              {giftHasLink
+                ? <small className={styles.fieldError}>Без ссылок и @ников — иначе письмо примут за мошенническое.</small>
+                : giftTooLong ? <small className={styles.fieldError}>Не длиннее {GIFT_MESSAGE_MAX} символов.</small> : null}
+            </label>
+            <label className={styles.check}>
+              <input type="checkbox" checked={scheduled} onChange={(event) => setScheduled(event.target.checked)} />
+              <span><CalendarClock size={16} /> Отправить в день праздника{scheduled && sendAt ? <> — <b>{whenLabel(sendAt)}</b></> : null}</span>
+            </label>
+            {scheduled && (
+              <label className={styles.field}>
+                <span>Когда отправить открытку</span>
+                <span className={`${styles.input} ${!sendAtValid ? styles.inputBad : ""}`}>
+                  <input type="datetime-local" value={sendAt} onChange={(event) => setSendAt(event.target.value)} />
+                </span>
+              </label>
+            )}
+            {(!registered || !viewer?.hasEmail) && (
+              <label className={styles.field}>
+                <span>Ваша почта — для чека</span>
+                <span className={`${styles.input} ${receiptTrim && !EMAIL_RE.test(receiptTrim) ? styles.inputBad : ""}`}>
+                  <ReceiptText size={18} />
+                  <input type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} />
+                </span>
+                <small className={styles.hint}>Получатель чек не увидит — сюрприз останется сюрпризом.</small>
+              </label>
+            )}
+            <Consent agreed={agreed} onChange={setAgreed} />
+            <button type="button" className={`${styles.primary} ${styles.giftButton}`} disabled={blocked || !giftReady || busy !== null} onClick={() => submit("self")}>
+              {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <Gift size={18} />}
+              Подарить {pack ? `${robux(pack.denomination)} Robux · ${rub(pack.finalAmountKopecks)}` : ""}
+            </button>
+            <p className={styles.quiet}>Код в письме не виден — получатель откроет подарок по кнопке. {instant ? "Письмо уйдёт сразу после оплаты" : "Открытку отправим, как только код будет готов"}{scheduled ? " или в выбранный день" : ""}.</p>
+          </section>
+        ) : registered ? (
+          <section className={styles.flow} aria-label="Оформление">
+            <p className={styles.flowLead}>
+              Код {deliveryWord} — в <Link href="/dashboard#codes">личный кабинет</Link>{viewer?.hasEmail ? " и на почту аккаунта" : ""}.
+            </p>
+            {nextLine && <p className={styles.tierLine}>{nextLine} <Link href="/dashboard#referral">Пригласить</Link></p>}
+            {!viewer?.hasEmail && (
+              <label className={styles.field}>
+                <span>Email для чека</span>
+                <span className={styles.input}><Mail size={18} /><input type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} /></span>
+              </label>
+            )}
+            <Consent agreed={agreed} onChange={setAgreed} />
+            <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={blocked || !agreed || !receiptValid || busy !== null} onClick={() => submit("self")}>
               {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <CreditCard size={18} />}
               Оплатить {pack ? rub(pack.finalAmountKopecks) : ""}
             </button>
-            <button type="button" className={styles.secondary} disabled={shareBlocked || busy !== null} onClick={() => submit("share")}>
-              {busy === "share" ? <Loader2 size={18} className={styles.spin} /> : <Send size={18} />}
-              Отправить ссылку на оплату
+            <button type="button" className={styles.parentLink} disabled={blocked || busy !== null} onClick={() => submit("share")}>
+              {busy === "share" ? <Loader2 size={14} className={styles.spin} /> : null}
+              Платит родитель? <span>Отправить ему заказ ссылкой</span>
             </button>
-          </div>
-        </section>
-      ) : (
-        <section className={styles.flow} aria-label="Как купить">
-          <div className={styles.choices} role="group" aria-label="Способ покупки">
-            <a href={registerHref} className={`${styles.choice} ${styles.choiceMain}`} onClick={() => safeSet("session", PACK_KEY, String(selected))}>
-              <span className={styles.choiceIcon}><UserPlus size={20} /></span>
-              <span>
-                <strong>Зарегистрироваться и купить со скидкой</strong>
-                <small>−1% сразу · до −5% за приглашения · код в кабинете</small>
-              </span>
-              <ArrowRight size={18} />
-            </a>
-            <button
-              type="button"
-              className={`${styles.choice} ${path === "guest" ? styles.choiceOpen : ""}`}
-              aria-expanded={path === "guest"}
-              aria-controls="codes-guest"
-              onClick={() => setPath(path === "guest" ? null : "guest")}
-            >
-              <span className={styles.choiceIcon}><Mail size={20} /></span>
-              <span>
-                <strong>Купить без регистрации</strong>
-                <small>Полная цена · код придёт на email</small>
-              </span>
-              <ArrowRight size={18} className={styles.choiceChevron} />
-            </button>
-          </div>
-          <p className={styles.loginLine}>Уже есть аккаунт? <a href={loginHref}>Войти</a> — так же, как при покупке через геймпасс.</p>
-
-          {path === "guest" && (
-            <div id="codes-guest" className={styles.guest}>
-              <label className={styles.field}>
-                <span>Email для получения кода</span>
-                <span className={`${styles.input} ${email && !emailValid ? styles.inputBad : ""}`}>
-                  <Mail size={18} />
-                  <input
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    aria-invalid={Boolean(email) && !emailValid}
-                  />
-                </span>
-                {email && !emailValid && <small className={styles.fieldError}>Проверьте адрес — в нём ошибка.</small>}
-              </label>
-              {guestReady && (
-                <>
-                  <Consent agreed={agreed} onChange={setAgreed} />
-                  <div className={styles.actions}>
-                    <button type="button" className={styles.primary} disabled={shareBlocked || !agreed || busy !== null} onClick={() => submit("self")}>
-                      {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <CreditCard size={18} />}
-                      Оплатить самому
-                    </button>
-                    <button type="button" className={styles.secondary} disabled={shareBlocked || busy !== null} onClick={() => submit("share")}>
-                      {busy === "share" ? <Loader2 size={18} className={styles.spin} /> : <Send size={18} />}
-                      Отправить ссылку на оплату
-                    </button>
-                  </div>
-                </>
-              )}
+          </section>
+        ) : (
+          <section className={styles.flow} aria-label="Как купить">
+            <div className={styles.choices}>
+              <a href={registerHref} className={styles.choiceMain} onClick={() => safeSet("session", PACK_KEY, String(selected))}>
+                <b><UserPlus size={18} /> Купить со скидкой −1%</b>
+                <small>вход через Telegram, ВК или почту</small>
+              </a>
+              <button type="button" className={`${styles.choiceAlt} ${path === "guest" ? styles.choiceOpen : ""}`} aria-expanded={path === "guest"} aria-controls="codes-guest" onClick={() => setPath(path === "guest" ? null : "guest")}>
+                <b>Без регистрации</b>
+                <small>код придёт на почту</small>
+              </button>
             </div>
-          )}
-        </section>
-      )}
+            <p className={styles.loginLine}>Уже есть аккаунт? <a href={loginHref}>Войти</a></p>
+
+            {path === "guest" && (
+              <div id="codes-guest" className={styles.guest}>
+                <label className={styles.field}>
+                  <span>Email для получения кода</span>
+                  <span className={`${styles.input} ${email && !emailValid ? styles.inputBad : ""}`}>
+                    <Mail size={18} />
+                    <input type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(email) && !emailValid} />
+                  </span>
+                  {email && !emailValid && <small className={styles.fieldError}>Проверьте адрес — в нём ошибка.</small>}
+                </label>
+                <Consent agreed={agreed} onChange={setAgreed} />
+                <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={blocked || !emailValid || !agreed || busy !== null} onClick={() => submit("self")}>
+                  {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <CreditCard size={18} />}
+                  Оплатить {pack ? rub(pack.finalAmountKopecks) : ""}
+                </button>
+                <button type="button" className={styles.parentLink} disabled={blocked || !emailValid || busy !== null} onClick={() => submit("share")}>
+                  {busy === "share" ? <Loader2 size={14} className={styles.spin} /> : <Send size={14} />}
+                  Платит родитель? <span>Отправить ему заказ ссылкой</span>
+                </button>
+              </div>
+            )}
+            {path !== "guest" && (
+              <button type="button" className={styles.parentLink} onClick={() => setPath("guest")}>
+                Платит родитель? <span>Отправить ему заказ ссылкой</span>
+              </button>
+            )}
+          </section>
+        )}
+      </div>
 
       {error && <p className={styles.error} role="alert"><CircleAlert size={16} /> {error}</p>}
 
       <a className={styles.wbLink} href="/guide?source=wb">
         <KeyRound size={16} />
-        <span>Уже купили карточку на Wildberries? Её код вводится не здесь — <b>активировать карточку WB</b></span>
+        <span>Купили карточку на Wildberries? Её код вводится не здесь — <b>активировать карточку WB</b></span>
       </a>
+
+      {pack && (
+        <div className={`${styles.stickyBar} ${barVisible && !typing ? styles.stickyOn : ""}`} aria-hidden={!barVisible || typing}>
+          <span>
+            <b>{robux(pack.denomination)} Robux</b>
+            <small>{mode === "gift" ? "в подарок" : "код"} · {rub(pack.finalAmountKopecks)} · сразу на баланс</small>
+          </span>
+          <button type="button" tabIndex={barVisible && !typing ? 0 : -1} onClick={scrollToActions}>{mode === "gift" ? "Подарить" : "Купить"}</button>
+        </div>
+      )}
     </article>
   );
 }

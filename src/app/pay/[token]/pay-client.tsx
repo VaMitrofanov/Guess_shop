@@ -18,7 +18,16 @@ import {
   UserRound,
 } from "lucide-react";
 import type { PublicCodeOrder } from "@/lib/codes/orders";
+import AfterPayment from "./after-payment";
 import styles from "./pay.module.css";
+
+export type PayViewerExtras = {
+  isCreator: boolean;
+  referralLink: string | null;
+  discountPercent: number;
+  invitedCount: number;
+  next: { percent: number; invited: number; remaining: number } | null;
+};
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -31,7 +40,7 @@ function until(iso: string): string {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
-export default function PayClient({ token, initial, result }: { token: string; initial: PublicCodeOrder; result: "success" | "fail" | null }) {
+export default function PayClient({ token, initial, extras, result }: { token: string; initial: PublicCodeOrder; extras: PayViewerExtras; result: "success" | "fail" | null }) {
   const [view, setView] = useState(initial);
   const [receiptEmail, setReceiptEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -42,7 +51,8 @@ export default function PayClient({ token, initial, result }: { token: string; i
 
   const unpaid = view.status === "AWAITING_PAYMENT" || view.status === "PAYMENT_PENDING";
   const waitingBank = unpaid && result === "success";
-  const shouldPoll = (waitingBank || view.status === "PAID") && polls < 60;
+  // Ручная выдача (PAID) может занять время — опрашиваем реже, но дольше.
+  const shouldPoll = waitingBank ? polls < 60 : view.status === "PAID" && polls < 300;
 
   const refreshView = useCallback(async () => {
     const response = await fetch("/api/codes/status", {
@@ -57,9 +67,10 @@ export default function PayClient({ token, initial, result }: { token: string; i
   // Возврат из банка: ждём подтверждение от банка (webhook), а не верим адресу возврата.
   useEffect(() => {
     if (!shouldPoll) return;
-    const timer = window.setTimeout(() => { setPolls((n) => n + 1); void refreshView(); }, polls < 10 ? 2500 : 6000);
+    const delay = view.status === "PAID" ? (polls < 20 ? 6000 : 30_000) : polls < 10 ? 2500 : 6000;
+    const timer = window.setTimeout(() => { setPolls((n) => n + 1); void refreshView(); }, delay);
     return () => window.clearTimeout(timer);
-  }, [shouldPoll, polls, refreshView]);
+  }, [shouldPoll, polls, refreshView, view.status]);
 
   const post = async (url: string, body: Record<string, unknown>) => {
     const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -116,6 +127,20 @@ export default function PayClient({ token, initial, result }: { token: string; i
   const receiptValid = receiptEmail.trim() === "" ? !view.needsReceiptEmail : EMAIL_RE.test(receiptEmail.trim());
   const amount = view.expired && view.quoteIfRefreshed ? view.quoteIfRefreshed.finalAmountKopecks : view.finalAmountKopecks;
 
+  if (view.status === "ISSUED" || view.status === "PAID") {
+    return (
+      <AfterPayment
+        token={token}
+        view={view}
+        extras={extras}
+        busy={busy === "resend"}
+        info={info}
+        error={error}
+        onResend={resend}
+      />
+    );
+  }
+
   return (
     <div className={styles.grid}>
       <section className={styles.card} aria-labelledby="pay-title">
@@ -130,36 +155,17 @@ export default function PayClient({ token, initial, result }: { token: string; i
           <div className={styles.total}><dt>К оплате</dt><dd>{rub(view.finalAmountKopecks)}</dd></div>
           <div>
             <dt>Куда придёт код</dt>
-            <dd>{view.deliveryMode === "EMAIL"
+            <dd>{view.deliveryMode === "GIFT"
+              ? <><Gift size={15} /> <span>подарком-открыткой на {view.maskedRecipient}</span></>
+              : view.deliveryMode === "EMAIL"
               ? <><Mail size={15} /> <span>на почту {view.maskedRecipient}</span></>
+              : view.channel !== "SITE"
+              ? <><UserRound size={15} /> <span>в чат бота {view.channel === "TG" ? "Telegram" : "ВКонтакте"} и в кабинет</span></>
               : <><UserRound size={15} /> <span>в личный кабинет того, кто оформил заказ</span></>}</dd>
           </div>
         </dl>
 
-        {view.status === "ISSUED" ? (
-          <div className={styles.state}>
-            <span className={styles.stateIconOk}><CheckCircle2 size={26} /></span>
-            <h2>Оплачено — код выдан</h2>
-            <p className={styles.muted}>
-              {view.deliveryMode === "EMAIL"
-                ? <>Код отправлен на {view.maskedRecipient}. Если письма нет — проверьте «Спам» или отправьте ещё раз.</>
-                : <>Код уже в личном кабинете того, кто оформил заказ. Входить в его аккаунт не нужно.</>}
-            </p>
-            <p className={styles.muted}>Robux поступят, когда владелец аккаунта введёт код на roblox.com/redeem.</p>
-            <div className={styles.row}>
-              <button type="button" className={styles.secondary} onClick={resend} disabled={busy !== null}>
-                {busy === "resend" ? <Loader2 size={17} className={styles.spin} /> : <RotateCcw size={17} />} Отправить письмо ещё раз
-              </button>
-              <a className={styles.primary} href="https://www.roblox.com/redeem" target="_blank" rel="noopener noreferrer">Активировать на Roblox <ArrowUpRight size={17} /></a>
-            </div>
-          </div>
-        ) : view.status === "PAID" ? (
-          <div className={styles.state}>
-            <span className={styles.stateIconWait}><Clock3 size={26} /></span>
-            <h2>Оплата получена — готовим код</h2>
-            <p className={styles.muted}>Обычно это несколько минут. Код придёт туда, куда указано выше. Если что-то задержится, напишите в поддержку — номер заказа {view.publicId}.</p>
-          </div>
-        ) : view.status === "REFUNDED" ? (
+        {view.status === "REFUNDED" ? (
           <div className={styles.state}>
             <span className={styles.stateIconBad}><RotateCcw size={26} /></span>
             <h2>Деньги по заказу возвращены</h2>

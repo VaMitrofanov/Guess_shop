@@ -30,6 +30,7 @@
 
 import { expectedGamepassPrice } from "./gamepass-plan";
 import { fmtDateRu } from "./completed-messages";
+import { CODES_MENU_LINE } from "./codes-shop";
 
 interface BuyerMenuOrder {
   amount: number;
@@ -201,7 +202,9 @@ export function buildBuyerMenuText(input: BuyerMenuInput): BuyerMenuText {
     }
   }
 
+  // 15.11.2026: коды — самый быстрый путь к Robux, им — отдельная строка.
   lines.push("");
+  lines.push(CODES_MENU_LINE);
   lines.push(nick && !focus
     ? `💎 Ещё робуксы <b>напрямую</b> на <b>${nick}</b> — без карты WB, быстрее и выгоднее 👇`
     : `💎 Робуксы <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`);

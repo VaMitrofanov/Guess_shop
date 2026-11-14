@@ -1,0 +1,203 @@
+/* 🏠 Витрина 2.0 (15.11.2026) — по утверждённому мокапу 14.11.2026.
+   Язык прежний: фиолетовый #7556e8, чернильный #251b3f, мятный #45d6aa,
+   жёсткая тень. Поверхности и текст — через токены `--rb-*` (тёмная тема
+   работает сама), брендовые акценты фиксированы. */
+
+.page { min-height:100vh; min-height:100dvh; overflow-x:hidden; color:var(--rb-text); background:radial-gradient(circle at 80% 4%,rgba(117,86,232,.12),transparent 30rem),var(--rb-bg); }
+.wrap,.hero,.trust,.buy,.compare,.reviewsHead,.giftPromo,.invite,.bottomCta { width:min(1240px,calc(100% - 40px)); margin-left:auto; margin-right:auto; }
+
+/* ── Первый экран ─────────────────────────────────────────────────────── */
+.hero { padding:64px 0 40px; display:grid; grid-template-columns:minmax(0,1.1fr) minmax(340px,.9fr); gap:56px; align-items:center; }
+.heroCopy,.heroSide { min-width:0; }
+.eyebrow { display:inline-flex; align-items:center; gap:10px; padding:9px 13px; border:1px solid var(--rb-border); border-radius:999px; background:var(--rb-surface); color:var(--rb-accent); font-size:13px; font-weight:850; letter-spacing:.07em; text-transform:uppercase; }
+.statusDot { width:8px; height:8px; border-radius:50%; background:#45d6aa; box-shadow:0 0 0 5px rgba(69,214,170,.16); }
+.title { margin:22px 0 20px; font-family:var(--font-display),var(--font-geist-sans),sans-serif; font-size:clamp(46px,6.4vw,86px); line-height:.98; letter-spacing:-.07em; font-weight:800; }
+.title span { color:var(--rb-accent); }
+.lead { max-width:560px; margin:0; color:var(--rb-muted); font-size:18px; line-height:1.6; font-weight:500; }
+.heroActions { margin-top:28px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; max-width:580px; }
+.buyCode,.viaPass { min-height:68px; padding:10px 18px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border-radius:15px; text-align:center; text-decoration:none; transition:transform .18s ease; }
+.buyCode { background:#7556e8; color:#fff; box-shadow:4px 4px 0 #251b3f; }
+.buyCode b { font-size:18px; font-weight:900; }
+.buyCode span { font-size:13.5px; font-weight:650; opacity:.9; }
+.viaPass { border:2px solid var(--rb-text); background:var(--rb-surface); color:var(--rb-text); }
+.viaPass b { font-size:16px; font-weight:850; }
+.viaPass span { color:var(--rb-muted); font-size:13px; font-weight:650; }
+.buyCode:hover,.viaPass:hover { transform:translateY(-2px); }
+.proof { margin-top:24px; display:flex; align-items:center; gap:12px; min-height:44px; }
+.proof > span:last-child { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.proof b { font-size:15px; }
+.proof small { color:var(--rb-muted); font-size:13.5px; font-weight:600; }
+.wbBadge { flex:0 0 auto; padding:6px 9px; border-radius:10px; background:#cb11ab; color:#fff; font-size:12px; font-weight:900; letter-spacing:.02em; }
+
+.heroSide { display:flex; flex-direction:column; gap:14px; }
+.pulseCard { min-height:228px; padding:22px; border:1px solid var(--rb-border); border-radius:24px; background:var(--rb-surface); box-shadow:9px 9px 0 #45d6aa; display:flex; flex-direction:column; gap:14px; }
+.pulseSkeleton { flex:1; border-radius:14px; background:linear-gradient(90deg,var(--rb-surface-2),var(--rb-accent-soft),var(--rb-surface-2)); background-size:200% 100%; animation:shimmer 1.4s linear infinite; }
+@keyframes shimmer { to { background-position:-200% 0; } }
+.pulseHead { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; }
+.pulseHead small { color:var(--rb-muted); font-size:13px; font-weight:650; }
+.pulseLive { display:inline-flex; align-items:center; gap:8px; color:#2f8c6d; font-size:12.5px; font-weight:900; letter-spacing:.08em; }
+.pulseLive i { width:8px; height:8px; border-radius:50%; background:#45d6aa; box-shadow:0 0 0 4px rgba(69,214,170,.18); animation:pulseDot 2s ease-in-out infinite; }
+@keyframes pulseDot { 50% { box-shadow:0 0 0 8px rgba(69,214,170,0); } }
+.pulseBig { margin:8px 0 0; font-family:var(--font-display),sans-serif; font-size:clamp(34px,4.4vw,52px); line-height:1; letter-spacing:-.05em; font-weight:800; }
+.pulseBig span { color:var(--rb-accent); font-size:.5em; letter-spacing:-.02em; }
+.pulseSub { margin:0; color:var(--rb-muted); font-size:15px; font-weight:650; }
+.pulseList { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px; }
+.pulseList li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 12px; border-radius:14px; background:var(--rb-surface-2); }
+.pulseIcon { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--rb-accent-soft); color:var(--rb-accent); }
+.pulseIcon[data-kind="gift"] { background:#ffe6f1; color:#b2386d; }
+.pulseIcon[data-kind="gamepass"] { background:#ddfaf0; color:#1f7a5f; }
+.pulseText { display:flex; flex-direction:column; min-width:0; }
+.pulseText b { font-size:15.5px; }
+.pulseText small { color:var(--rb-muted); font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pulseTag { padding:4px 9px; border-radius:999px; background:#ddfaf0; color:#1f6b53; font-size:12px; font-weight:850; white-space:nowrap; }
+.pulseFoot { margin:0; color:var(--rb-muted); font-size:12.5px; line-height:1.4; }
+
+.wbCard { padding:16px 18px; display:flex; align-items:center; justify-content:space-between; gap:14px; border:1px dashed var(--rb-border); border-radius:18px; background:var(--rb-surface); color:var(--rb-text); text-decoration:none; transition:border-color .18s ease; }
+.wbCard:hover { border-color:#7556e8; }
+.wbCard > span:first-child { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.wbCard b { font-size:15.5px; }
+.wbCard small { color:var(--rb-muted); font-size:13.5px; font-weight:600; }
+.wbCardAction { flex:0 0 auto; color:var(--rb-accent); font-size:14.5px; font-weight:900; text-decoration:underline; text-underline-offset:3px; }
+
+/* ── Полоса доверия ───────────────────────────────────────────────────── */
+.trust { padding:8px 0 36px; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.trustItem { padding:14px 16px; display:flex; align-items:center; gap:12px; border:1px solid var(--rb-border); border-radius:16px; background:var(--rb-surface); }
+.trustItem > span:last-child { display:flex; flex-direction:column; min-width:0; }
+.trustItem b { font-size:15.5px; }
+.trustItem small { color:var(--rb-muted); font-size:13.5px; font-weight:600; }
+.trustIcon { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px; background:var(--rb-accent-soft); color:var(--rb-accent); }
+
+/* ── Покупка ──────────────────────────────────────────────────────────── */
+.buy { padding:12px 0 56px; display:grid; grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr); gap:28px; align-items:start; }
+.passColumn { min-width:0; scroll-margin-top:88px; display:flex; flex-direction:column; gap:14px; }
+.passHead { display:flex; flex-direction:column; gap:4px; padding:0 4px; }
+.passHead b { font-size:22px; letter-spacing:-.03em; }
+.passHead span { color:var(--rb-muted); font-size:14.5px; line-height:1.45; }
+.passGuide { align-self:flex-start; color:var(--rb-accent); font-size:14.5px; font-weight:850; text-decoration:underline; text-underline-offset:3px; }
+
+/* ── Сравнение ────────────────────────────────────────────────────────── */
+.sectionHead { display:flex; flex-direction:column; gap:8px; }
+.kicker { color:var(--rb-accent); font-size:13px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+.sectionHead h2,.giftCopy h2,.inviteCopy h2,.bottomCta h2 { margin:0; font-family:var(--font-display),var(--font-geist-sans),sans-serif; font-size:clamp(28px,3.6vw,44px); line-height:1.05; letter-spacing:-.05em; font-weight:800; }
+.compare { padding:24px 0 56px; display:flex; flex-direction:column; gap:22px; }
+.compareGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.compareCard { position:relative; padding:24px; border:1px solid var(--rb-border); border-radius:22px; background:var(--rb-surface); display:flex; flex-direction:column; gap:16px; }
+.compareMain { border-color:#251b3f; background:#251b3f; color:#fff; box-shadow:8px 8px 0 #45d6aa; }
+.recommend { position:absolute; top:-12px; left:20px; padding:4px 11px; border-radius:999px; background:#45d6aa; color:#173f34; font-size:12px; font-weight:900; letter-spacing:.06em; }
+.compareKicker { color:var(--rb-muted); font-size:13px; font-weight:900; letter-spacing:.1em; }
+.compareMain .compareKicker { color:#8cf0d0; }
+.compareCard dl { margin:0; display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px 18px; }
+.compareCard dt { color:var(--rb-muted); font-size:14.5px; }
+.compareMain dt { color:#b9b0cf; }
+.compareCard dd { margin:0; font-size:15.5px; font-weight:800; }
+.compareCta,.compareAlt { margin-top:auto; min-height:52px; display:inline-flex; align-items:center; justify-content:center; gap:8px; border-radius:13px; font-size:15.5px; font-weight:900; text-decoration:none; }
+.compareCta { background:#45d6aa; color:#173f34; }
+.compareAlt { border:2px solid var(--rb-text); color:var(--rb-text); }
+
+/* ── Отзывы ───────────────────────────────────────────────────────────── */
+.reviews { padding:24px 0 56px; display:flex; flex-direction:column; gap:22px; scroll-margin-top:88px; }
+.reviewsHead { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; }
+.reviewsLink { color:var(--rb-accent); font-size:15px; font-weight:850; }
+.marqueeViewport { overflow:hidden; mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent); -webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent); }
+.marquee { display:flex; width:max-content; animation:marquee 70s linear infinite; }
+.marqueeViewport:hover .marquee,.marqueeViewport:active .marquee,.marqueeViewport:focus-within .marquee { animation-play-state:paused; }
+@keyframes marquee { to { transform:translateX(-50%); } }
+.marqueeTrack { margin:0; padding:4px 7px; list-style:none; display:flex; gap:14px; }
+.reviewCard { width:300px; flex:0 0 auto; padding:18px; border:1px solid var(--rb-border); border-radius:18px; background:var(--rb-surface); display:flex; flex-direction:column; gap:10px; }
+.reviewCard p { margin:0; font-size:15px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; }
+.reviewCard small { margin-top:auto; color:var(--rb-muted); font-size:13px; font-weight:650; }
+.reviewStars { display:inline-flex; gap:2px; color:#f2a516; }
+.reviewsSkeleton { width:min(1240px,calc(100% - 40px)); margin:0 auto; height:170px; border-radius:18px; background:var(--rb-surface-2); }
+.reviewsEmpty { width:min(1240px,calc(100% - 40px)); margin:0 auto; color:var(--rb-muted); font-size:15px; }
+.reviewsEmpty a { color:var(--rb-accent); font-weight:850; }
+
+/* ── Подарок ─────────────────────────────────────────────────────────── */
+.giftPromo { margin-bottom:56px; padding:40px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:32px; align-items:center; border-radius:30px; background:linear-gradient(135deg,#fff4dc,#ffe2ef 55%,#efe7ff); color:#251b3f; }
+.giftCopy { display:flex; flex-direction:column; gap:12px; max-width:560px; }
+.giftCopy .kicker { color:#b2386d; }
+.giftCopy p { margin:0; color:#5d4554; font-size:16.5px; line-height:1.55; }
+.giftCta { align-self:flex-start; margin-top:6px; min-height:54px; padding:0 22px; display:inline-flex; align-items:center; gap:8px; border-radius:14px; background:#251b3f; color:#fff; font-size:16px; font-weight:900; text-decoration:none; box-shadow:4px 4px 0 #ff8a3d; }
+.giftCards { display:flex; gap:16px; }
+.giftCard { position:relative; width:190px; height:240px; overflow:hidden; border-radius:22px; padding:18px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; color:#fff; box-shadow:0 18px 40px rgba(37,27,63,.18); }
+.giftCard:nth-child(1) { transform:rotate(-4deg); }
+.giftCard:nth-child(2) { transform:rotate(3deg) translateY(14px); }
+.giftBirthday { background:linear-gradient(165deg,#ff6aa8,#7556e8); }
+.giftNewYear { background:linear-gradient(165deg,#12396b,#0b1f3d); }
+.giftArt { position:absolute; inset:0; width:100%; height:100%; }
+.giftCard span,.giftCard b { position:relative; }
+.giftCard span { font-size:13px; font-weight:900; letter-spacing:.04em; color:#ffe6a6; }
+.giftNewYear span { color:#bfe6ff; }
+.giftCard b { font-family:var(--font-display),sans-serif; font-size:40px; line-height:.95; letter-spacing:-.05em; }
+.giftCard b small { display:block; margin-top:4px; font-family:var(--font-geist-sans),sans-serif; font-size:13px; letter-spacing:.1em; }
+
+/* ── Приглашения ─────────────────────────────────────────────────────── */
+.invite { margin-bottom:56px; padding:36px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:32px; align-items:end; border:1px solid var(--rb-border); border-radius:28px; background:var(--rb-surface); scroll-margin-top:88px; }
+.inviteCopy { display:flex; flex-direction:column; gap:12px; }
+.inviteCopy p { margin:0; color:var(--rb-muted); font-size:16px; line-height:1.55; }
+.inviteCta { align-self:flex-start; margin-top:4px; color:var(--rb-accent); font-size:15.5px; font-weight:900; display:inline-flex; align-items:center; gap:6px; }
+.tiers { margin:0; padding:0; list-style:none; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; align-items:end; }
+.tiers li { display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; }
+.tiers b { font-family:var(--font-display),sans-serif; font-size:26px; letter-spacing:-.04em; color:var(--rb-accent); }
+.tiers span { color:var(--rb-muted); font-size:13px; font-weight:700; }
+.tiers i { width:100%; margin-top:6px; border-radius:10px 10px 4px 4px; background:linear-gradient(180deg,#7556e8,#45d6aa); opacity:.85; }
+
+/* ── Низ ─────────────────────────────────────────────────────────────── */
+.bottomCta { margin-bottom:64px; padding:36px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:20px; border-radius:28px; background:#251b3f; color:#fff; }
+.bottomCta .kicker { color:#8cf0d0; }
+.bottomActions { display:flex; flex-wrap:wrap; align-items:center; gap:16px; }
+.bottomPrimary { min-height:56px; padding:0 24px; display:inline-flex; align-items:center; gap:8px; border-radius:14px; background:#45d6aa; color:#173f34; font-size:16.5px; font-weight:900; text-decoration:none; }
+.bottomSecondary { color:#cfc6e9; font-size:15px; font-weight:800; text-decoration:underline; text-underline-offset:3px; }
+
+.buyCode:focus-visible,.viaPass:focus-visible,.wbCard:focus-visible,.compareCta:focus-visible,.compareAlt:focus-visible,.giftCta:focus-visible,.inviteCta:focus-visible,.bottomPrimary:focus-visible,.bottomSecondary:focus-visible,.reviewsLink:focus-visible { outline:3px solid #45d6aa; outline-offset:3px; }
+
+@media (max-width: 1080px) {
+  .hero { grid-template-columns:1fr; gap:28px; padding-top:44px; }
+  .buy { grid-template-columns:1fr; }
+  .trust { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .giftPromo { grid-template-columns:1fr; }
+  .giftCards { justify-content:center; }
+  .invite { grid-template-columns:1fr; align-items:start; }
+}
+@media (max-width: 640px) {
+  .wrap,.hero,.trust,.buy,.compare,.reviewsHead,.giftPromo,.invite,.bottomCta { width:calc(100% - 32px); }
+  .hero { padding:28px 0 18px; }
+  .title { font-size:clamp(40px,12vw,52px); margin:18px 0 14px; }
+  .lead { font-size:16.5px; }
+  .heroActions { grid-template-columns:1fr; gap:10px; }
+  .pulseCard { box-shadow:6px 6px 0 #45d6aa; padding:18px; min-height:0; }
+  .trust { gap:8px; padding-bottom:24px; }
+  .trustItem { padding:12px; gap:10px; }
+  .trustIcon { display:none; }
+  .trustItem b { font-size:14.5px; }
+  .trustItem small { font-size:13px; }
+  .compareGrid { grid-template-columns:1fr; gap:22px; }
+  .compareCard { padding:20px 18px; }
+  .compareCard dl { grid-template-columns:1fr; gap:2px; }
+  .compareCard dd { margin-bottom:8px; }
+  .reviewCard { width:270px; }
+  .giftPromo,.invite,.bottomCta { padding:24px 18px; border-radius:24px; }
+  .giftCard { width:150px; height:196px; }
+  .giftCard b { font-size:32px; }
+  .tiers { gap:6px; }
+  .tiers b { font-size:20px; }
+  .tiers span { font-size:12px; }
+  .wbCard { align-items:flex-start; flex-direction:column; gap:8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee,.pulseSkeleton,.pulseLive i { animation:none; }
+  .marqueeViewport { overflow-x:auto; }
+  .buyCode,.viaPass { transition:none; }
+}
+
+/* Тёмная тема: брендовые плашки, которые не на токенах */
+:global(html[data-theme="dark"]) .buyCode,
+:global(html[data-theme="dark"]) .giftCta { box-shadow:4px 4px 0 #45d6aa; }
+:global(html[data-theme="dark"]) .compareMain { border-color:#3a304b; background:#1d1530; }
+:global(html[data-theme="dark"]) .pulseIcon[data-kind="gift"] { background:#3a1630; color:#ff9ccc; }
+:global(html[data-theme="dark"]) .pulseIcon[data-kind="gamepass"],
+:global(html[data-theme="dark"]) .pulseTag { background:#0f2c24; color:#7fe3c3; }
+:global(html[data-theme="dark"]) .pulseLive { color:#7fe3c3; }
+:global(html[data-theme="dark"]) .giftPromo { background:linear-gradient(135deg,#2a1f18,#2a1626 55%,#1d1733); color:#f4f0ff; }
+:global(html[data-theme="dark"]) .giftCopy p { color:#d9c6d2; }
+:global(html[data-theme="dark"]) .giftCopy .kicker { color:#ff9ccc; }
+:global(html[data-theme="dark"]) .bottomCta { background:#1d1530; border:1px solid #3a304b; }

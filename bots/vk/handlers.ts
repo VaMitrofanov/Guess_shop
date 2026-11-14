@@ -67,6 +67,8 @@ import { GAME_LINK_HOWTO, keyCreateSuccessText, keyCreateVerdict } from "../shar
 import { adminTargets, adminTargetsForNotice, replyToRootFor } from "../shared/admin-route";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
+import { tryVkCodesShop } from "./codes-shop";
+import { CODES_CB, CODES_MENU_BTN } from "../shared/codes-shop";
 import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
@@ -1079,6 +1081,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     (ctx as any).startPayload ||
     (msgPayload?.command === "start" ? msgPayload?.ref : null)
   ) as string | undefined;
+
+  // 🎟 Коды и приглашения (15.11.2026, ./codes-shop.ts): ref `r_<код>`,
+  // кнопки `codes*` и текст «коды» — до активации кода WB по ref.
+  if (await tryVkCodesShop(ctx, vkUserId, ref ?? null)) return;
 
   if (ref) {
     await handleRefActivation(ctx, vkUserId, ref.trim().toUpperCase());
@@ -5444,13 +5450,16 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
 
   /* Лимиты VK (≤10 кнопок, ≤6 рядов) — не рекомендация: превышение отдаёт
      клиенту «Произошла ошибка» без следа (P0 прямых заказов 04.07.2026).
-     Поэтому рядов здесь максимум пять. */
+     Поэтому рядов здесь максимум шесть (15.11.2026 добавлен ряд кодов). */
   const kb = Keyboard.builder();
   if (robloxNick) {
     kb.textButton({ label: `💎 Ещё на ${robloxNick}`, payload: { command: "start_direct" }, color: "positive" }).row();
   } else {
     kb.textButton({ label: "💎 Купить Robux напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
   }
+  kb.textButton({ label: CODES_MENU_BTN.codes, payload: { command: CODES_CB.open }, color: "positive" })
+    .textButton({ label: CODES_MENU_BTN.invite, payload: { command: CODES_CB.invite }, color: "secondary" })
+    .row();
   if (activeOrders.length > 0) kb.textButton({ label: "📦 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
   // Подробно показан ОДИН заказ (решение владельца О4) — к остальным кнопка.
   if (menu.othersCount > 0) {

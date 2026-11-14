@@ -3,12 +3,22 @@ import { z } from "zod";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { createCodeOrder, findCodeOrderByToken, startCodePayment } from "@/lib/codes/orders";
 import { claimReferralFromCookies, codeErrorResponse, noStore, sessionUserId } from "@/lib/codes/http";
+import { validateGift } from "@/lib/codes/gift";
 
 export const dynamic = "force-dynamic";
 
 const Schema = z.object({
   denomination: z.number().int().positive(),
   mode: z.enum(["self", "share"]),
+  /** Подарок открыткой — поля проверяет `validateGift` (длина, ссылки, дата). */
+  gift: z.object({
+    theme: z.string().max(20),
+    to: z.string().max(200).optional(),
+    from: z.string().max(200).optional(),
+    message: z.string().max(400).optional(),
+    email: z.string().max(254),
+    sendAt: z.string().max(40).nullable().optional(),
+  }).optional(),
   email: z.email().max(254).optional(),
   receiptEmail: z.email().max(254).optional(),
   agreedToTerms: z.boolean().optional(),
@@ -35,6 +45,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Нужно согласие с офертой.", code: "TERMS_REQUIRED" }, { status: 400 });
   }
 
+  let gift = null;
+  if (input.gift) {
+    const checked = validateGift(input.gift);
+    if (!checked.ok) return NextResponse.json({ error: checked.error, code: "BAD_GIFT" }, { status: 400 });
+    gift = checked.gift;
+  }
+
   const userId = await sessionUserId();
   if (userId) await claimReferralFromCookies(userId);
   try {
@@ -42,6 +59,7 @@ export async function POST(req: NextRequest) {
       denomination: input.denomination,
       userId,
       recipientEmail: userId ? null : input.email ?? null,
+      gift,
       createdVia: input.mode === "share" ? "SHARE" : "SELF",
       idempotencyKey: input.idempotencyKey,
     });

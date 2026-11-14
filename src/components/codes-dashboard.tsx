@@ -31,6 +31,8 @@ export type DashboardCodeOrder = {
   payPath: string | null;
   emailSent: boolean;
   canEmail: boolean;
+  /** Подарок открыткой: письмо уходит получателю, код виден и создателю. */
+  gift?: { to: string | null } | null;
 };
 
 const STATUS: Record<DashboardCodeOrder["status"], { label: string; tone: "wait" | "ok" | "bad" | "work" }> = {
@@ -96,6 +98,7 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
           <span className={styles.meta}>
             {order.publicId} · {new Date(order.createdAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })} · {rub(order.finalAmountKopecks)}
             {order.discountPercent > 0 ? ` · скидка ${order.discountPercent}%` : ""}
+            {order.gift ? ` · 🎁 подарок${order.gift.to ? ` для ${order.gift.to}` : ""}` : ""}
           </span>
         </div>
         <span className={`${styles.status} ${styles[status.tone]}`}><Icon size={15} /> {status.label}</span>
@@ -125,7 +128,7 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
             <a className={styles.redeem} href="https://www.roblox.com/redeem" target="_blank" rel="noopener noreferrer">Активировать на Roblox <ArrowUpRight size={15} /></a>
             {order.canEmail && (
               <button type="button" className={styles.ghost} onClick={resend} disabled={busy !== null}>
-                {busy === "resend" ? <Loader2 size={15} className={styles.spin} /> : <RotateCcw size={15} />} {order.emailSent ? "Отправить письмо ещё раз" : "Отправить на почту"}
+                {busy === "resend" ? <Loader2 size={15} className={styles.spin} /> : <RotateCcw size={15} />} {order.gift ? "Отправить открытку ещё раз" : order.emailSent ? "Отправить письмо ещё раз" : "Отправить на почту"}
               </button>
             )}
           </div>

@@ -147,4 +147,13 @@ export const securityHeaders: NonNullable<NextConfig["headers"]> = async () => [
       { key: "Cache-Control", value: "private, no-store" },
     ],
   },
+  // 🎁 Ссылка «Открыть подарок» (15.11.2026): токен в пути открывает код подарка.
+  {
+    source: "/gift/:path*",
+    headers: [
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+      { key: "Cache-Control", value: "private, no-store" },
+    ],
+  },
 ];

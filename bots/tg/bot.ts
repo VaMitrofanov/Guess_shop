@@ -40,6 +40,7 @@ import {
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
 import { registerPaBusiness } from "./pa-business";
+import { registerCodesShop } from "./codes-shop";
 import { startReviewReminderCron } from "./crons";
 import { notifyBotError } from "../shared/admin";
 import { syncTelegramActor } from "../shared/user-profile-sync";
@@ -75,6 +76,9 @@ bot.catch((err: any, ctx: any) => {
 // Сообщения аккаунта поддержки (Telegram Business) — до всех веток бота и мимо них.
 registerPaBusiness(bot);
 registerAdminHubs(bot);
+// 🎟 Коды и приглашения (15.11.2026) — до /start и текста: свои кнопки, /codes,
+// /invite и `/start r_<код>`; остальное уходит дальше через next().
+registerCodesShop(bot);
 registerStart(bot);
 registerStatus(bot);
 registerAdmin(bot);

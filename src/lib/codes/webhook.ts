@@ -3,8 +3,10 @@ import { Prisma, type PaymentAttemptStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { notificationStatus, paymentTransitionAllowed } from "@/lib/payment-notification";
 import { issueCodeForOrder } from "@/lib/codes/stock";
-import { sendCodeEmail } from "@/lib/codes/delivery";
+import { deliverIssuedCode, sendPaidAwaitingEmail } from "@/lib/codes/delivery";
 import { notifyCodeAdmins } from "@/lib/codes/admin-notify";
+import { sendPaidToChat } from "@/lib/codes/chat-notify";
+import { codesBackorderEnabled, MANUAL_ISSUE_REASON } from "@/lib/codes/fulfillment";
 
 /**
  * Уведомление Т-Банка по заказу кода (OrderId `CODE-…`).
@@ -52,7 +54,8 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
   if (duplicate) return ok;
 
   let issued = false;
-  let attention: "NO_STOCK" | "DOUBLE_PAYMENT" | null = null;
+  let attention: "NO_STOCK" | "MANUAL_ISSUE" | "DOUBLE_PAYMENT" | null = null;
+  const backorder = codesBackorderEnabled();
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -87,10 +90,11 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
               data: { status: "ISSUED", paidAt: new Date(), issuedAt: new Date(), activationCodeId: codeId, attentionReason: null },
             });
           } else {
-            attention = "NO_STOCK";
+            // Ручной режим: это не авария, а обычный заказ «выдать руками».
+            attention = backorder ? "MANUAL_ISSUE" : "NO_STOCK";
             await tx.codeOrder.update({
               where: { id: order.id },
-              data: { status: "PAID", paidAt: new Date(), attentionReason: "NO_STOCK" },
+              data: { status: "PAID", paidAt: new Date(), attentionReason: backorder ? MANUAL_ISSUE_REASON : "NO_STOCK" },
             });
           }
         }
@@ -122,7 +126,7 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
   // Письмо — после фиксации оплаты и кода. Его сбой не трогает ни деньги, ни
   // код: заказ ISSUED, письмо можно переотправить.
   if (issued) {
-    const mail = await sendCodeEmail(payment.orderId, "issued").catch(() => "failed" as const);
+    const { email: mail } = await deliverIssuedCode(payment.orderId, "issued");
     if (mail === "failed" || mail === "exhausted") {
       await notifyCodeAdmins({
         marker: "action",
@@ -134,7 +138,19 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
       });
     }
   }
-  if (attention) {
+  if (attention === "MANUAL_ISSUE") {
+    // Покупатель не должен видеть списание и тишину: письмо и (бот) сообщение.
+    await sendPaidAwaitingEmail(payment.orderId).catch(() => undefined);
+    await sendPaidToChat(payment.orderId).catch(() => undefined);
+    await notifyCodeAdmins({
+      marker: "urgent",
+      title: "оплачен — выдать код вручную",
+      orderPublicId: payment.order.publicId,
+      denomination: payment.order.denomination,
+      amountKopecks: payment.amountKopecks,
+      next: `выдать: node scripts/codes-issue.mjs ${payment.order.publicId} <код> (или попросить Claude)`,
+    });
+  } else if (attention) {
     await notifyCodeAdmins({
       marker: "urgent",
       title: attention === "NO_STOCK" ? "оплачен, а кода на складе нет" : "второй платёж по оплаченному заказу",

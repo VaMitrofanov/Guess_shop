@@ -1,17 +1,12 @@
 import {
   ArrowUpRight,
-  BadgePercent,
   CircleHelp,
   Headphones,
-  KeyRound,
   LockKeyhole,
   Mail,
   ReceiptText,
   Send,
-  ShieldCheck,
-  Users,
 } from "lucide-react";
-import { CODE_DISCOUNT_TIERS } from "@/lib/codes-pricing";
 import styles from "./codes-info.module.css";
 
 /**
@@ -36,10 +31,15 @@ const steps = [
   { title: "Нажмите «Активировать»", text: "Robux сразу появятся на балансе этого аккаунта." },
 ];
 
+const faqWhen = {
+  instant: "Сразу после того, как банк подтвердит оплату: обычно это меньше минуты. Гостю код приходит письмом, клиенту с аккаунтом — в личный кабинет (и письмом, если почта аккаунта подтверждена), покупателю в боте — в чат.",
+  manual: "После оплаты мы готовим код и присылаем его туда же: гостю — письмом, клиенту с аккаунтом — в личный кабинет (и письмом, если почта подтверждена), покупателю в боте — в чат. Ничего делать не нужно: о готовности напишем.",
+};
+
 const faq = [
   {
-    q: "Когда придёт код?",
-    a: "Сразу после того, как банк подтвердит оплату: обычно это меньше минуты. Гостю код приходит письмом, клиенту с аккаунтом — в личный кабинет (и письмом, если почта аккаунта подтверждена).",
+    q: "Можно подарить код?",
+    a: "Да. Включите «В подарок», выберите открытку, напишите пару слов и почту получателя. Он получит письмо-открытку и откроет код по кнопке. Можно выбрать день и время отправки.",
   },
   {
     q: "Оплата прошла — Robux уже на аккаунте?",
@@ -63,12 +63,12 @@ const faq = [
   },
 ];
 
-export default function CodesInfo() {
+export default function CodesInfo({ instant = true }: { instant?: boolean }) {
   return (
     <section className={styles.wrap} aria-labelledby="codes-info-title">
       <div className={styles.heading}>
         <span className={styles.kicker}>Код активации</span>
-        <h2 id="codes-info-title">Условия, скидки<br />и как активировать</h2>
+        <h2 id="codes-info-title">Условия<br />и как активировать</h2>
       </div>
 
       <div className={styles.benefits}>
@@ -79,30 +79,6 @@ export default function CodesInfo() {
             <p>{text}</p>
           </article>
         ))}
-      </div>
-
-      <div className={styles.ladderCard}>
-        <div className={styles.ladderHead}>
-          <span className={styles.ladderIcon}><BadgePercent size={22} /></span>
-          <div>
-            <h3>Накопительная скидка на коды</h3>
-            <p><b>1% — сразу после регистрации.</b> До 5% — за друзей, которых вы пригласите.</p>
-          </div>
-        </div>
-        <ol className={styles.ladder}>
-          {CODE_DISCOUNT_TIERS.map((tier, index) => (
-            <li key={tier.percent} className={index === 0 ? styles.ladderFirst : undefined}>
-              <strong>{tier.percent}%</strong>
-              <span>{tier.invited === 0 ? "Регистрация" : `${tier.invited} покупателей`}</span>
-              <i aria-hidden="true" style={{ height: `${28 + index * 16}px` }} />
-            </li>
-          ))}
-        </ol>
-        <ul className={styles.ladderRules}>
-          <li><Users size={15} /> Засчитывается друг, который зарегистрировался по вашей ссылке и впервые оплатил и получил код.</li>
-          <li><ShieldCheck size={15} /> Уровни заменяют друг друга, а не складываются. Прогресс не сгорает.</li>
-          <li><KeyRound size={15} /> Скидка действует на коды; условия геймпасса и карточек WB не меняются.</li>
-        </ul>
       </div>
 
       <div className={styles.guide}>
@@ -125,7 +101,7 @@ export default function CodesInfo() {
 
       <div className={styles.faq}>
         <h3><CircleHelp size={20} /> Вопросы</h3>
-        {faq.map((item) => (
+        {[{ q: "Когда придёт код?", a: instant ? faqWhen.instant : faqWhen.manual }, ...faq].map((item) => (
           <details key={item.q}>
             <summary>{item.q}</summary>
             <p>{item.a}</p>

@@ -84,6 +84,15 @@ export type ReferralClaimResult = "attached" | "already" | "self" | "not_new" | 
 export async function claimReferral(userId: string, cookieValue: string | undefined | null): Promise<ReferralClaimResult> {
   const parsed = parseReferralCookie(cookieValue);
   if (!parsed) return "no_cookie";
+  return claimReferralCode(userId, parsed);
+}
+
+/**
+ * То же правило без куки — для ботов (`/start r_<код>`, 15.11.2026): момент
+ * перехода — момент, когда бот получил команду, его подделать нельзя.
+ */
+export async function claimReferralCode(userId: string, parsed: { code: string; at: number }): Promise<ReferralClaimResult> {
+  if (!isReferralCodeShape(parsed.code)) return "unknown_code";
   const [user, referrer] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { id: true, referredById: true, createdAt: true, referralCode: true } }),
     prisma.user.findUnique({ where: { referralCode: parsed.code }, select: { id: true } }),

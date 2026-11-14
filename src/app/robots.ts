@@ -20,6 +20,7 @@ export default function robots(): MetadataRoute.Robots {
         "/reset-password",
         "/email",
         "/pay",
+        "/gift/",
         "/r/",
       ],
     },

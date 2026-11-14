@@ -21,6 +21,10 @@ const ROOT = path.join(__dirname, "..", "..");
 /** Публичные поверхности: витрина, вход, ЛК, чекаут, статус оплаты, инструкция, ошибки. */
 const PUBLIC_MODULES = [
   "src/app/storefront.module.css",
+  // Витрина 2.0 (15.11.2026): главная, страница подарка, экран после оплаты.
+  "src/app/storefront2.module.css",
+  "src/app/gift/[token]/gift.module.css",
+  "src/app/pay/[token]/after-payment.module.css",
   "src/app/auth-shell.module.css",
   "src/app/public-sections.module.css",
   "src/app/error-pages.module.css",

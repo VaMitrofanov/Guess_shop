@@ -254,6 +254,7 @@ export default async function DashboardPage() {
       select: {
         id: true, publicId: true, denomination: true, finalAmountKopecks: true, discountPercent: true,
         status: true, createdAt: true, offerExpiresAt: true, paidAt: true, emailSentAt: true,
+        deliveryMode: true, giftTo: true,
       },
     }),
     ensureReferralCode(userId).catch(() => null),
@@ -272,7 +273,8 @@ export default async function DashboardPage() {
     expired: offerExpired(order),
     payPath: order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING" ? `/pay/${payTokenFor(order.id)}` : null,
     emailSent: Boolean(order.emailSentAt),
-    canEmail: Boolean(user.email && user.emailVerifiedAt),
+    canEmail: order.deliveryMode === "GIFT" || Boolean(user.email && user.emailVerifiedAt),
+    gift: order.deliveryMode === "GIFT" ? { to: order.giftTo } : null,
   }));
   const referral = referralCode && codeDiscount.progress ? {
     link: `${appUrl}/r/${referralCode}`,
