@@ -73,3 +73,23 @@ export function paOrderReply(text: string, orders: PaOrder[], now: Date = new Da
     .map((o) => ({ amount: o.amount, completedAt: o.completedAt as Date, wbCode: o.wbCode }));
   return buildRobuxEtaWbChat(done, now)?.text ?? null;
 }
+
+/** Карточка «Мой заказ» в боте одной ссылкой (`/start order`). */
+export const BOT_ORDER_URL = "https://t.me/RobloxBankBot?start=order";
+
+/**
+ * 🤖 «Загляните в бота» (15.11.2026, владелец: «саппорту не надо голову
+ * ебать "где мои робуксы"»). К ответу по этапу — ссылка на карточку заказа в
+ * боте: там статус, инструкция, ник/пасс и проверка Robux. Поддержке остаётся
+ * «в боте не нашёл ответа».
+ */
+export function paBotRedirectReply(text: string, orders: PaOrder[], now: Date = new Date()): string | null {
+  const status = paOrderReply(text, orders, now);
+  if (!status) return null;
+  return [
+    status,
+    "",
+    `📦 Всё по заказу — статус, инструкция, проверка Robux — в боте: ${BOT_ORDER_URL}`,
+    "Если там не нашли ответа — напишите здесь, что именно не так, поможем.",
+  ].join("\n");
+}

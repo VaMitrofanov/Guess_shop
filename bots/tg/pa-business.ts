@@ -15,7 +15,7 @@
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
-import { paOrderReply } from "../shared/pa-business-reply";
+import { isOrderStatusQuestion, paBotRedirectReply, paOrderReply } from "../shared/pa-business-reply";
 import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "./pa-ai";
 import { registerPaGroup } from "./pa-group";
 import { registerReleaseNotes } from "./release-notes";
@@ -111,6 +111,32 @@ export function registerPaBusiness(bot: Telegraf): void {
       if (Date.now() - lastOperator < OPERATOR_QUIET_MS) {
         rememberTurn(msg.chat.id, "user", text || "[фото/файл]");
         return;
+      }
+
+      // 🤖 «Где заказ / где Robux» — сразу короткий ответ по этапу + ссылка на
+      // карточку в боте, до ИИ и до человека (15.11.2026). Повтор за 10 минут,
+      // заморозка, ошибка, несколько живых заказов — дальше штатно (ИИ/человек).
+      if (text && isOrderStatusQuestion(text)) {
+        const buyer = await db.user.findUnique({ where: { tgId: String(fromId) }, select: { id: true } });
+        const list = buyer
+          ? await db.wbOrder.findMany({
+              where: { userId: buyer.id }, orderBy: { createdAt: "desc" }, take: 10,
+              select: { wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true },
+            })
+          : [];
+        const redirect = paBotRedirectReply(text, list);
+        if (redirect && !isRepeatEtaQuestion(`pa:${fromId}`)) {
+          await api("sendMessage", {
+            business_connection_id: msg.business_connection_id, chat_id: msg.chat.id, text: redirect,
+            link_preview_options: { is_disabled: true },
+          });
+          await api("readBusinessMessage", {
+            business_connection_id: msg.business_connection_id, chat_id: msg.chat.id, message_id: msg.message_id,
+          }).catch(() => undefined);
+          rememberTurn(msg.chat.id, "user", text);
+          console.log(`[pa-business] «загляните в бота» (${list[0]?.wbCode ?? "?"})`);
+          return;
+        }
       }
 
       // ИИ-поддержка (Claude Haiku 5.5) — если включена; иначе шаблон ниже.

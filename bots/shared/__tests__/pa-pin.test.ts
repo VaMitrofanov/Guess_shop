@@ -11,7 +11,7 @@ describe("закреп заказа в чате поддержки", () => {
     const text = pinText([o({})], NOW)!;
     expect(text).toContain("<code>ZT8BW8D</code> · 500 Robux");
     expect(text).toContain("<code>Misha2010</code>");
-    expect(text).toContain("@RobloxBankBot");
+    expect(text).toContain("t.me/RobloxBankBot?start=order");
     expect(text).toContain("ждём ваш геймпасс");
   });
 
@@ -34,5 +34,22 @@ describe("закреп заказа в чате поддержки", () => {
     expect(pinWorthCreating([o({})], NOW)).toBe(true);
     expect(pinWorthCreating([o({ status: "COMPLETED", completedAt: new Date(NOW - 10 * 86_400_000) })], NOW)).toBe(false);
     expect(pinWorthCreating([o({ status: "REJECTED" })], NOW)).toBe(false);
+  });
+});
+
+import { paBotRedirectReply } from "../pa-business-reply";
+
+describe("«загляните в бота» в чате поддержки", () => {
+  const order = { wbCode: "ZT8BW8D", amount: 500, status: "PENDING", createdAt: new Date(NOW - 3600_000), completedAt: null, heldAt: null };
+  it("на «где заказ» — этап и ссылка на карточку", () => {
+    const text = paBotRedirectReply("где мой заказ?", [order], new Date(NOW))!;
+    expect(text).toContain("ZT8BW8D");
+    expect(text).toContain("t.me/RobloxBankBot?start=order");
+  });
+  it("заморожен — молчим, отвечает человек", () => {
+    expect(paBotRedirectReply("где мой заказ?", [{ ...order, heldAt: new Date(NOW) }], new Date(NOW))).toBeNull();
+  });
+  it("не вопрос о заказе — не трогаем", () => {
+    expect(paBotRedirectReply("хочу вернуть деньги", [order], new Date(NOW))).toBeNull();
   });
 });

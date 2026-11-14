@@ -637,6 +637,9 @@ async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean
 // /start [CODE]
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Диплинк на карточку «Мой заказ»: t.me/RobloxBankBot?start=order. */
+const ORDER_START = "order";
+
 const startRateLimiter = new Map<string, { attempts: number, resetAt: number }>();
 // Tracks users who recently sent /start with a code — suppresses the duplicate
 // plain /start that iOS Telegram sends right after opening a deep link.
@@ -674,6 +677,14 @@ export function registerStart(bot: Telegraf): void {
      */
     const helpMode = rawPayload.toLowerCase() === TG_HELP_START;
     if (helpMode) code = "";
+
+    // 📦 `?start=order` — сразу карточка «Мой заказ» (15.11.2026): по этой ссылке
+    // ведут закреп и автоответ в чате поддержки @RobloxBank_PA.
+    if (rawPayload.toLowerCase() === ORDER_START) {
+      const { text, keyboard } = await buildStatusMessage(tgId);
+      await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+      return;
+    }
 
     // If this /start carries a code, mark the user immediately so a concurrent
     // plain /start (iOS deep-link duplicate) is suppressed below.
@@ -2221,8 +2232,9 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
 
   // Spell out that this nick is the recipient — so the user reads it as "robux
   // land HERE", not just some technical field.
+  // <code> — копируется одним нажатием (15.11.2026).
   const nickLine = order.robloxUsername
-    ? `🎮 Робуксы придут на ник: <b>${escapeHtml(order.robloxUsername)}</b>\n`
+    ? `🎮 Робуксы придут на ник: <code>${escapeHtml(order.robloxUsername)}</code>\n`
     : ``;
 
   // PENDING shows the time-based pseudo-stage; everything else uses its label.
@@ -2231,9 +2243,9 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   // Прямые заказы идентифицируются ником+суммой (строки ниже) — без номера (C2).
   // Выполненный WB-заказ код не показывает: он отработан, дальше — только прямые.
   const codeLine = isCompletedCard
-    ? `✅ <b>Заказ выполнен</b>\n`
+    ? `✅ <b>Заказ выполнен</b>${order.completedAt ? ` · выкуплен ${new Date(order.completedAt).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow" })}` : ""}\n`
     : order.wbCode && !String(order.wbCode).startsWith("DIR-")
-    ? `🔑 Код ВБ: <b>${order.wbCode}</b>\n`
+    ? `🔑 Код ВБ: <code>${order.wbCode}</code>\n`
     : `📦 Прямой заказ\n`;
 
   const showEtaNote = order.status === "PENDING" || order.status === "IN_PROGRESS";
@@ -2292,6 +2304,9 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
     // Начислили → карточка полностью прямая (никакого WB).
     const reviewPending = !order.isDirectOrder && !user.reviewBonusGrantedAt;
     keyboard = Markup.inlineKeyboard([
+      // Проверка Robux прямо из карточки: Transactions и самопроверка «Робуксов нет».
+      [Markup.button.url("🔍 Проверить Robux — Transactions", ROBLOX_TRANSACTIONS_URL)],
+      [Markup.button.callback(NO_ROBUX_BUTTON, "rbx_chk")],
       [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
       ...(reviewPending ? [[Markup.button.callback("📸 Отзыв → бонус к покупке", CB.reviewHint)]] : []),
       refreshRow,
