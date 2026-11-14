@@ -114,6 +114,7 @@ import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { resolveWbOrderChat } from "./wb-order-chat";
 import { identityLinesFor } from "./buyer-identity";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
+import { COURIER_REPLY_WINDOW_MS, courierReplyText, isCourierQuestion } from "./wb-courier-reply";
 import {
   detectWbOperatorCommand,
   requestWbOrderCancel,
@@ -1603,6 +1604,43 @@ async function answerRobuxQuestionInChat(
   if (answeredBefore) notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id));
 }
 
+/**
+ * 🚚 «Где курьер?» (15.11.2026). Вопрос про курьера/доставку/ПВЗ, пока кода
+ * доставки у нас нет и первое приглашение уже ушло: отвечаем, что курьера не
+ * будет и нужен код. Не чаще раза в 6 ч на чат. Возвращает `true`, когда это
+ * ПЕРВЫЙ такой ответ по заказу — тогда админам увед не шлём; повторный вопрос
+ * уходит оператору как обычно. Выключатель — `WB_CHAT_COURIER_REPLY=off`.
+ */
+async function answerCourierQuestionInChat(
+  db: Db,
+  order: { id: string; chatState: string; completedAt: Date | null; cancelledAt: Date | null; cancelRequestedAt?: Date | null; isTest: boolean },
+  chatId: string,
+): Promise<boolean> {
+  if (process.env.WB_CHAT_COURIER_REPLY === "off") return false;
+  if (process.env.WB_CHAT_SEND_ENABLED !== "true") return false;
+  if (order.isTest || order.completedAt || order.cancelledAt || order.cancelRequestedAt) return false;
+  // Первое сообщение закрывает приглашение `tryAutoRequestCode` — там то же самое.
+  if (order.chatState === "WAITING_BUYER_CHAT" || order.chatState === "READY") return false;
+  const fresh = await db.wbMarketplaceOrder.findUnique({
+    where: { id: order.id },
+    include: { deliverySecret: true },
+  });
+  if (!fresh || fresh.completedAt || wbDeliverySecretIsLive(fresh.deliverySecret)) return false;
+  const chat = await db.wbBuyerChat.findUnique({ where: { chatId } });
+  if (!chat?.replySignEncrypted) return false;
+
+  const bucket = Math.floor(Date.now() / COURIER_REPLY_WINDOW_MS);
+  const key = `courier-reply:${chatId}:${bucket}`;
+  if (await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: key }, select: { id: true } })) return false;
+  const answeredBefore = await db.wbMarketplaceEvent.findFirst({
+    where: { marketplaceOrderId: order.id, type: "COURIER_QUESTION_ANSWERED" },
+    select: { id: true },
+  });
+  await sendBuyerChatMessage(decryptWbSecret(chat.replySignEncrypted, "reply-sign"), courierReplyText());
+  await audit(db, order.id, "COURIER_QUESTION_ANSWERED", key, { repeat: !!answeredBefore });
+  return !answeredBefore;
+}
+
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
   const cursor = await db.wbSyncCursor.findUnique({ where: { stream: EVENTS_STREAM } });
   const response = await fetchBuyerChatEvents(cursor?.cursor ?? undefined);
@@ -1702,7 +1740,15 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
        закрытия доставки его сообщения админам не приходили вовсе — «??» от
        PXGLH7F, ждавшего сутки, никто не увидел. Теперь молчим, только когда
        и наш выкуп по коду завершён. */
-    if (isNewEvent && isBuyerSender(event.sender) && order && rawText
+    // «Где курьер?» — автоответ; первый раз админам не шлём.
+    const courierSelfServed = isNewEvent && isBuyerSender(event.sender) && order && rawText
+      && !deliveryCode && isCourierQuestion(rawText)
+      ? await answerCourierQuestionInChat(db, order, event.chatID).catch((err) => {
+        console.warn("[WbDbsSync] ответ про курьера:", err instanceof Error ? err.message : err);
+        return false;
+      })
+      : false;
+    if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !courierSelfServed
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.cancelledAt
       && (!order.completedAt || !(await buyoutFinished(db, order.wbCodeId)))) {
       notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText, await identityLinesFor(db, order.id));
