@@ -1,4 +1,4 @@
-import { robuxWaitText } from "../robux-wait";
+import { robuxWaitShort, robuxWaitText } from "../robux-wait";
 import {
   buildRobuxEtaReply,
   buildRobuxEtaShort,
@@ -35,7 +35,7 @@ const BOUGHT = new Date("2026-10-18T09:00:00Z");
 
 /** Срок не называем нигде (26.10.2026): Roblox стал держать Pending дольше 7 дней. */
 // 15.11.2026: разрешён ровно один ориентир — фраза `robuxWaitText` («до 30 дней», у части 5–7); таймеры и даты по-прежнему нельзя.
-const stripWait = (t: string) => t.split(robuxWaitText("ty")).join("").split(robuxWaitText("vy")).join("");
+const stripWait = (t: string) => [robuxWaitText("ty"), robuxWaitText("vy"), robuxWaitShort()].reduce((acc, w) => acc.split(w).join(""), t);
 const NO_DEADLINE = /\d\s*(?:[–-]\s*\d+\s*)?(?:дн|дня|дней|сут)|ориентир|осталось|срок (?:прош|вышел)|▰|▱/i;
 
 describe("распознавание «где мои робуксы?»", () => {

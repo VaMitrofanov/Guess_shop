@@ -30,6 +30,28 @@ type SendExtra = Record<string, unknown>;
  */
 async function sendRichPost(bot: Telegraf, chatId: string | number, note: ReleaseNote, extra: SendExtra = {}): Promise<number> {
   const post = note.public!;
+  // Ответ на старый пост канала: в самом канале — по номеру, в превью «Апдейтов» —
+  // через chat_id канала. Не вышло (пост удалён, чужой чат) — публикуем без ответа.
+  const channel = process.env.TG_CHANNEL_ID;
+  if (post.replyToChannelPost && channel) {
+    const reply = {
+      reply_parameters: {
+        message_id: post.replyToChannelPost,
+        ...(String(chatId) === String(channel) ? {} : { chat_id: channel }),
+        allow_sending_without_reply: true,
+      },
+    };
+    try {
+      return await sendRichPostRaw(bot, chatId, note, { ...extra, ...reply });
+    } catch (e) {
+      console.warn("[release-notes] ответ на пост канала не вышел:", (e as Error)?.message);
+    }
+  }
+  return sendRichPostRaw(bot, chatId, note, extra);
+}
+
+async function sendRichPostRaw(bot: Telegraf, chatId: string | number, note: ReleaseNote, extra: SendExtra): Promise<number> {
+  const post = note.public!;
   const markup = post.buttons?.length
     ? { reply_markup: { inline_keyboard: post.buttons.map((row) => row.map((b) => ({ text: b.label, url: b.url }))) } }
     : {};

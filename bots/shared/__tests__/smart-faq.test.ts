@@ -40,8 +40,10 @@ describe("текст ожидания Robux", () => {
   it("ориентир есть, дат и отсчёта нет, виновата механика игры", () => {
     const t = robuxWaitText("ty");
     expect(t).toContain("до 30 дней");
-    expect(t).toContain("От нас это не зависит");
+    expect(t).toContain("внутренняя механика");
+    expect(t).toContain("перевод на проверке");
+    expect(t).toContain("твоём аккаунте");
     expect(t).not.toMatch(/осталось|до \d+ (ноября|декабря)|через \d+/);
-    expect(robuxWaitText("vy")).toContain("ваш аккаунт");
+    expect(robuxWaitText("vy")).toContain("вашем аккаунте");
   });
 });

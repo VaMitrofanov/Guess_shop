@@ -40,10 +40,12 @@ describe("release notes catalogue", () => {
     }
   });
 
+  // 15.11.2026: владелец сам назвал ориентир «до 30 дней, у части 5–7» — только эти два числа.
   test("customer posts never name a Pending deadline (owner rule 26.10.2026)", () => {
     for (const note of RELEASE_NOTES) {
       if (!note.public) continue;
-      expect(`${note.public.tgHtml} ${note.public.vkText}`).not.toMatch(/\d+\s*(дн|дня|дней|час)/i);
+      const text = `${note.public.tgHtml} ${note.public.vkText}`.replace(/до (<b>)?30 дней|в течение 30 дней|за 5–7 дней/g, "");
+      expect(text).not.toMatch(/\d+\s*(дн|дня|дней|час)/i);
     }
   });
 
