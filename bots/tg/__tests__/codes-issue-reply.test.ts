@@ -25,10 +25,11 @@ describe("алерт после выдачи", () => {
   });
 
   it("говорит, кто выдал и дошло ли письмо", () => {
-    const text = issuedAlertText({ publicId: "CODE-827TX8XJ", amountLine: amountLineFrom(plain, "CODE-827TX8XJ"), actor: "@owner", at: new Date(Date.UTC(2026, 10, 15, 18, 40)), email: "sent", chat: null });
+    const text = issuedAlertText({ publicId: "CODE-827TX8XJ", amountLine: amountLineFrom(plain, "CODE-827TX8XJ"), code: "ABCD-1234", actor: "@owner", at: new Date(Date.UTC(2026, 10, 15, 18, 40)), email: "sent", chat: null });
     expect(text).toContain("🟢 <b>САЙТ · код активации: выдан</b>");
     expect(text).toContain("✅ @owner · 21:40 · 📬 письмо ушло");
-    expect(text).not.toMatch(/ABCD/);
+    // Какой код ушёл — видно в уведе, под спойлером (16.11: не удалять, не путаться).
+    expect(text).toContain("🔑 Код: <tg-spoiler><code>ABCD-1234</code></tg-spoiler>");
   });
 
   it("письмо не ушло — это видно", () => {

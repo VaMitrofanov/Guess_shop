@@ -52,3 +52,30 @@ describe("алерт заказа кода", () => {
     for (const n of nexts) expect(n.replace(/\$\{[^}]*\}/g, "")).not.toMatch(/<[^a/]/);
   });
 });
+
+import { buildCodeEmail } from "@/lib/codes/delivery";
+jest.mock("@/lib/mailer", () => ({ sendMail: jest.fn() }));
+
+describe("письмо с кодом — подарочная карта (16.11.2026)", () => {
+  const base = { denomination: 1000, code: "ABCD-1234-EFGH", publicId: "CODE-827TX8XJ", account: false };
+
+  it("код, номинал, кнопка активации и подпись команды — в HTML и в тексте", () => {
+    const m = buildCodeEmail(base);
+    for (const part of [m.html, m.text]) {
+      expect(part).toContain("ABCD-1234-EFGH");
+      expect(part).toContain("Команда RobloxBank");
+    }
+    expect(m.html).toContain("ПОДАРОЧНЫЙ КОД");
+    expect(m.html).toContain("https://www.roblox.com/redeem");
+    expect(m.subject).toMatch(/1\s000 Robux/);
+  });
+
+  it("«спасибо за терпение» — только при ручной выдаче с ожиданием", () => {
+    expect(buildCodeEmail(base).html).not.toContain("Спасибо за терпение");
+    expect(buildCodeEmail({ ...base, waited: true }).html).toContain("Спасибо за терпение");
+  });
+
+  it("код экранируется", () => {
+    expect(buildCodeEmail({ ...base, code: "<b>X1</b>" }).html).toContain("&lt;b&gt;X1");
+  });
+});

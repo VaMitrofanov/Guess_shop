@@ -12,9 +12,10 @@ import { fetchCodesQueue, issueCodeViaWeb, type CodeIssueStatus } from "../share
    1. Под алертом «оплачен — выдать код вручную» — кнопка «🎟 Выдать код».
    2. Нажал — бот просит код (поле ответа открывается само, `force_reply`).
    3. Ответ кодом (или ответ кодом прямо на алерт, или `/issue CODE-… код`) —
-      бот СРАЗУ удаляет сообщение с кодом, выдаёт через сайт
-      (`/api/internal/codes/issue`: письмо / кабинет / чат бота) и переписывает
-      алерт в «🟢 код выдан · кто · когда · письмо ушло», кнопку снимает.
+      бот выдаёт через сайт (`/api/internal/codes/issue`: письмо / кабинет /
+      чат бота) и переписывает алерт в «🟢 код выдан · код под спойлером · кто ·
+      когда · письмо ушло», кнопку снимает. Сообщение с кодом НЕ удаляется
+      (владелец 16.11: «нужно видеть, какой именно код отправили»).
    4. `/codes` — очередь оплаченных без кода, по кнопке на заказ.
 
    Только ADMIN_IDS. Регистрируется до беседы админов (`registerPaGroup`).
@@ -62,7 +63,7 @@ export const EMAIL_WORD: Record<string, string> = {
 };
 
 /** Текст алерта после выдачи — заменяет «оплачен — выдать код вручную». */
-export function issuedAlertText(input: { publicId: string; amountLine: string | null; actor: string; at: Date; email?: string; chat?: boolean | null }): string {
+export function issuedAlertText(input: { publicId: string; amountLine: string | null; code?: string; actor: string; at: Date; email?: string; chat?: boolean | null }): string {
   const delivery = [
     input.email ? EMAIL_WORD[input.email] ?? input.email : null,
     input.chat === true ? "💬 в чат бота ✓" : input.chat === false ? "💬 в чат бота ✗" : null,
@@ -70,8 +71,9 @@ export function issuedAlertText(input: { publicId: string; amountLine: string | 
   return [
     `🟢 <b>САЙТ · код активации: выдан</b>`,
     input.amountLine ? `🎟 ${input.amountLine}` : `🎟 <code>${input.publicId}</code>`,
+    input.code ? `🔑 Код: <tg-spoiler><code>${escapeHtml(input.code)}</code></tg-spoiler>` : null,
     `✅ ${escapeHtml(input.actor)} · ${mskTime(input.at)}${delivery ? ` · ${delivery}` : ""}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 /** Строка «CODE-… · 1 000 R$ · 1 199 ₽» из простого текста алерта (Telegram отдаёт его без разметки). */
@@ -96,7 +98,7 @@ function prunePrompts(now = Date.now()): void {
 async function askForCode(ctx: Context, publicId: string, alert: { id: number; text?: string } | null, threadId?: number): Promise<void> {
   prunePrompts();
   const sent = await ctx.reply(
-    `🎟 Код для <code>${publicId}</code> — ответьте на это сообщение самим кодом.\nСообщение с кодом бот сразу удалит.`,
+    `🎟 Код для <code>${publicId}</code> — ответьте на это сообщение самим кодом.`,
     {
       parse_mode: "HTML",
       disable_notification: true,
@@ -176,19 +178,14 @@ export function registerCodesIssueReply(bot: Telegraf): void {
       if (!pending) pending = { publicId, chatId: ctx.chat.id, alertId: replyTo.message_id, amountLine: amountLineFrom(replyTo.text, publicId), at: Date.now() };
     }
 
-    // Код не должен висеть в беседе — удаляем до ответа сайта.
-    await ctx.deleteMessage(msg.message_id).catch(() => undefined);
     const result = await issueCodeViaWeb(job.publicId, job.code);
     const actor = actorOf(ctx.from);
 
     if (result.status === "issued") {
-      // Подсказка своё отработала.
-      const promptId = msg.reply_to_message && prompts.has(promptKey(ctx.chat.id, msg.reply_to_message.message_id)) ? msg.reply_to_message.message_id : null;
-      if (promptId) {
-        prompts.delete(promptKey(ctx.chat.id, promptId));
-        await ctx.telegram.deleteMessage(ctx.chat.id, promptId).catch(() => undefined);
-      }
-      const text = issuedAlertText({ publicId: job.publicId, amountLine: pending?.amountLine ?? null, actor, at: new Date(), email: result.email, chat: result.chat });
+      // Подсказка своё отработала; её и сообщение с кодом не трогаем — по ним
+      // видно, кто и какой код отправил.
+      if (msg.reply_to_message) prompts.delete(promptKey(ctx.chat.id, msg.reply_to_message.message_id));
+      const text = issuedAlertText({ publicId: job.publicId, amountLine: pending?.amountLine ?? null, code: job.code, actor, at: new Date(), email: result.email, chat: result.chat });
       const edited = pending?.alertId
         ? await ctx.telegram.editMessageText(ctx.chat.id, pending.alertId, undefined, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }).then(() => true).catch(() => false)
         : false;
@@ -198,7 +195,7 @@ export function registerCodesIssueReply(bot: Telegraf): void {
       return;
     }
 
-    await ctx.reply(`⚠️ <code>${job.publicId}</code> — код не выдан: ${REASON[result.status] ?? result.status}. Сообщение с кодом удалено.`, {
+    await ctx.reply(`⚠️ <code>${job.publicId}</code> — код не выдан: ${REASON[result.status] ?? result.status}.`, {
       parse_mode: "HTML",
       ...(msg.reply_to_message ? { reply_parameters: { message_id: msg.reply_to_message.message_id, allow_sending_without_reply: true } } : {}),
       ...(msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {}),

@@ -22,56 +22,100 @@ const MAX_EMAIL_ATTEMPTS = 8;
 export const ACTIVATION_STEPS = [
   "Откройте roblox.com/redeem — кнопка «Активировать на Roblox» в этом письме.",
   "Войдите в тот аккаунт Roblox, на который нужны Robux.",
-  "Введите код и нажмите «Активировать» (Redeem).",
-  "Robux сразу появятся на балансе этого аккаунта.",
+  "Введите код и нажмите «Активировать» (Redeem) — Robux сразу появятся на балансе.",
 ] as const;
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * Письмо с кодом — как подарочная карта (16.11.2026, владелец: «понаряднее,
+ * изюминку от нас, как будто не на отъебись»; первый клиент по кодам).
+ *
+ * Лицо карты — тёмно-фиолетовое, с номиналом и «серийной» строкой заказа;
+ * линия отрыва; под ней код, кнопка и три шага; записка от команды с подписью.
+ * `waited` — код выдавали вручную позже получаса после оплаты: благодарим за
+ * терпение (без срока и без оправданий).
+ *
+ * Только табличная вёрстка и инлайн-стили: Gmail/Яндекс/Mail.ru режут <style>.
+ * Градиент — с `bgcolor`-фолбэком; шрифты системные.
+ */
 export function buildCodeEmail(input: {
   denomination: number;
   code: string;
   publicId: string;
   account: boolean;
+  waited?: boolean;
 }): { subject: string; text: string; html: string } {
   const amount = input.denomination.toLocaleString("ru-RU");
-  const subject = `Ваш код на ${amount} Robux — заказ ${input.publicId}`;
+  const subject = `🎁 Ваш код на ${amount} Robux — заказ ${input.publicId}`;
   const cabinet = input.account ? `\nКод также сохранён в личном кабинете: ${APP_URL}/dashboard#codes\n` : "";
   const text = [
-    `Код активации Roblox на ${amount} Robux`,
+    `Ваш код на ${amount} Robux готов!`,
     "",
     `Код: ${input.code}`,
     `Заказ: ${input.publicId}`,
+    ...(input.waited ? ["", "Спасибо за терпение — этот код мы готовили для вас вручную."] : []),
     "",
     "Как активировать:",
     ...ACTIVATION_STEPS.map((step, index) => `${index + 1}. ${step}`),
     "",
     `Активировать: ${ROBLOX_REDEEM_URL}`,
     cabinet,
-    "Пароль Roblox нам не нужен и никогда не запрашивается. Не передавайте код посторонним: кто ввёл код, тот и получил Robux.",
+    "Спасибо, что выбрали нас! Если код не активируется или что-то пошло не так — напишите нам, ответит живой человек: https://t.me/RobloxBank_PA",
+    "— Команда RobloxBank",
     "",
-    `Поддержка: https://t.me/RobloxBank_PA · ${APP_URL}`,
+    "Пароль Roblox нам не нужен и никогда не запрашивается. Не передавайте код посторонним: кто ввёл код, тот и получил Robux.",
+    APP_URL,
   ].join("\n");
 
   const code = escapeHtml(input.code);
-  const steps = ACTIVATION_STEPS.map((step) => `<li style="margin:0 0 8px">${escapeHtml(step)}</li>`).join("");
-  const html = `<!doctype html><html lang="ru"><body style="margin:0;background:#f4f5fb;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#151827">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;padding:28px">
-<tr><td>
-<p style="margin:0 0 6px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#6b6f86">RobloxBank · заказ ${escapeHtml(input.publicId)}</p>
-<h1 style="margin:0 0 18px;font-size:24px;line-height:1.25">Ваш код на ${amount} Robux</h1>
-<p style="margin:0 0 8px;font-size:14px;color:#6b6f86">Код активации — нажмите и удерживайте, чтобы скопировать:</p>
-<div style="margin:0 0 20px;padding:18px;border:2px dashed #7c5cff;border-radius:14px;background:#f6f3ff;text-align:center;font-family:SFMono-Regular,Menlo,Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:.08em;user-select:all;-webkit-user-select:all">${code}</div>
-<a href="${ROBLOX_REDEEM_URL}" style="display:block;text-align:center;background:#7c5cff;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:15px 18px;border-radius:14px">Активировать на Roblox</a>
-<h2 style="margin:24px 0 10px;font-size:16px">Как активировать</h2>
-<ol style="margin:0;padding-left:20px;font-size:15px;line-height:1.5">${steps}</ol>
-${input.account ? `<p style="margin:18px 0 0;font-size:14px">Код сохранён и в <a href="${APP_URL}/dashboard#codes" style="color:#7c5cff">личном кабинете</a>.</p>` : ""}
-<p style="margin:18px 0 0;font-size:13px;color:#6b6f86;line-height:1.5">Пароль Roblox нам не нужен и никогда не запрашивается. Не передавайте код посторонним: кто ввёл код, тот и получил Robux.</p>
-<p style="margin:12px 0 0;font-size:13px;color:#6b6f86">Поддержка: <a href="https://t.me/RobloxBank_PA" style="color:#7c5cff">@RobloxBank_PA</a></p>
-</td></tr></table></td></tr></table></body></html>`;
+  const order = escapeHtml(input.publicId);
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif";
+  const mono = "SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace";
+  const steps = ACTIVATION_STEPS.map((step, index) => `
+<tr><td width="34" valign="top" style="padding:0 0 12px"><div style="width:26px;height:26px;line-height:26px;border-radius:13px;background:#ece7ff;color:#5b3fd6;font-weight:800;font-size:13px;text-align:center">${index + 1}</div></td>
+<td valign="top" style="padding:3px 0 12px;font-size:15px;line-height:1.45;color:#251b3f">${escapeHtml(step)}</td></tr>`).join("");
+
+  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0;padding:0;background:#f4f1fb;font-family:${font};color:#251b3f">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">Код на ${amount} Robux внутри — активируйте на roblox.com/redeem.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f1fb" style="background:#f4f1fb;padding:28px 12px"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px">
+
+<tr><td style="padding:0 4px 14px;font-size:13px;color:#706780">Ваш код готов — спасибо за покупку 💜</td></tr>
+
+<tr><td bgcolor="#2c1f5c" style="border-radius:22px 22px 0 0;background:#2c1f5c;background-image:linear-gradient(135deg,#251b3f 0%,#3b2a8f 55%,#7556e8 100%);padding:24px 26px 26px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+    <td style="font-size:13px;font-weight:800;letter-spacing:.14em;color:#ffffff">ROBLOX<span style="color:#c9bcff">BANK</span></td>
+    <td align="right" style="font-size:11px;font-weight:700;letter-spacing:.12em;color:#c9bcff">ПОДАРОЧНЫЙ КОД</td>
+  </tr></table>
+  <div style="margin:30px 0 4px;font-size:52px;line-height:1;font-weight:800;color:#ffffff;letter-spacing:-.02em">${amount}</div>
+  <div style="font-size:18px;font-weight:700;color:#e4dcff">Robux</div>
+  <div style="margin-top:26px;font-family:${mono};font-size:12px;letter-spacing:.18em;color:#a99ae6">№ ${order}</div>
+</td></tr>
+
+<tr><td bgcolor="#ffffff" style="background:#ffffff;padding:0 18px"><div style="border-top:2px dashed #d8cffa;height:0;line-height:0;font-size:0">&nbsp;</div></td></tr>
+
+<tr><td bgcolor="#ffffff" style="background:#ffffff;border-radius:0 0 22px 22px;padding:22px 26px 26px">
+  <div style="font-size:12px;font-weight:700;letter-spacing:.1em;color:#706780">ВАШ КОД</div>
+  <div style="margin:8px 0 6px;padding:18px 12px;border:2px dashed #7556e8;border-radius:14px;background:#f6f3ff;text-align:center;font-family:${mono};font-size:25px;font-weight:700;letter-spacing:.08em;color:#251b3f;user-select:all;-webkit-user-select:all">${code}</div>
+  <div style="font-size:12px;color:#706780;text-align:center;margin-bottom:18px">Нажмите и удерживайте, чтобы скопировать</div>
+  <a href="${ROBLOX_REDEEM_URL}" style="display:block;text-align:center;background:#7556e8;color:#ffffff;text-decoration:none;font-weight:800;font-size:16px;padding:16px 18px;border-radius:14px">Активировать на Roblox →</a>
+  ${input.waited ? `<div style="margin-top:18px;padding:12px 14px;border-radius:12px;background:#f6f3ff;font-size:14px;line-height:1.5;color:#3b2a8f">Спасибо за терпение — этот код мы готовили для вас вручную.</div>` : ""}
+  <div style="margin:24px 0 12px;font-size:16px;font-weight:800">Как активировать</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${steps}</table>
+  ${input.account ? `<p style="margin:6px 0 0;font-size:14px">Код сохранён и в <a href="${APP_URL}/dashboard#codes" style="color:#7556e8">личном кабинете</a>.</p>` : ""}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px"><tr><td style="padding:16px 18px;border-radius:14px;background:#faf8ff;border:1px solid #ece7ff">
+    <div style="font-size:15px;line-height:1.55;color:#251b3f">Спасибо, что выбрали нас! Если код не активируется или что-то пошло не так — напишите в <a href="https://t.me/RobloxBank_PA" style="color:#7556e8;font-weight:700">@RobloxBank_PA</a>, ответит живой человек.</div>
+    <div style="margin-top:10px;font-size:15px;font-style:italic;color:#5b3fd6">— Команда RobloxBank</div>
+  </td></tr></table>
+</td></tr>
+
+<tr><td style="padding:18px 8px 0;font-size:12px;line-height:1.55;color:#8a8199;text-align:center">Пароль Roblox нам не нужен и никогда не запрашивается.<br>Не передавайте код посторонним: кто ввёл код, тот и получил Robux.<br><a href="${APP_URL}" style="color:#8a8199">robloxbank.ru</a> · заказ ${order}</td></tr>
+
+</table></td></tr></table></body></html>`;
   return { subject, text, html };
 }
 
@@ -81,6 +125,7 @@ async function deliveryAddress(orderId: string) {
     where: { id: orderId },
     select: {
       id: true, publicId: true, denomination: true, status: true, deliveryMode: true, recipientEmail: true, emailAttempts: true,
+      paidAt: true, issuedAt: true,
       activationCode: { select: { encryptedValue: true } },
       creator: { select: { email: true, emailVerifiedAt: true } },
     },
@@ -116,7 +161,9 @@ export async function sendCodeEmail(orderId: string, reason: "issued" | "resend"
     console.error("[codes] cannot decrypt issued code", { orderId: order.id });
     return "failed";
   }
-  const mail = buildCodeEmail({ denomination: order.denomination, code, publicId: order.publicId, account: order.deliveryMode === "ACCOUNT" });
+  // Ручная выдача позже получаса после оплаты — благодарим за терпение.
+  const waited = Boolean(order.paidAt && order.issuedAt && order.issuedAt.getTime() - order.paidAt.getTime() > 30 * 60_000);
+  const mail = buildCodeEmail({ denomination: order.denomination, code, publicId: order.publicId, account: order.deliveryMode === "ACCOUNT", waited });
   const result = await sendMail({ to, ...mail });
   await prisma.codeOrder.update({
     where: { id: order.id },
