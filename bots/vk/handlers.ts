@@ -2488,7 +2488,9 @@ async function settleForeignCodeClaimVk(
   const claimantLabel = claimantName || `vk:${vkId}`;
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
     // Красный по одному коду — не чаще раза в час: тупик человек жмёт повторно.
-    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : adminTargets(kind === "conflict" ? "action" : "feed", { loud: kind === "conflict" }).then((targets) => Promise.allSettled(targets.map((t) => tgSend(t.chatId, xlinkAdminNotice({
+    // 15.11.2026: «перешёл на вторую площадку» и «просят открыть» админам не шлём —
+    // делать нечего, решает владелец кода. Остался только второй аккаунт.
+    (kind !== "conflict" || !allowConflictAlert(code)) ? Promise.resolve([]) : adminTargets(kind === "conflict" ? "action" : "feed", { loud: kind === "conflict" }).then((targets) => Promise.allSettled(targets.map((t) => tgSend(t.chatId, xlinkAdminNotice({
       kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
       claimantLabel: escapeHtml(claimantLabel), platform: "VK", reason,
     }), t.extra)))).catch(() => undefined);
@@ -2726,21 +2728,7 @@ async function handleRefActivation(
     console.error("[VK] Provisional order creation failed:", err);
   }
 
-  if (adoptedExistingOrder) {
-    // Единый язык и ветка заказа — см. тот же блок в TG-боте.
-    const notice = formatAdminNotice({
-      marker: "done",
-      zone: "DBS",
-      title: "покупатель нашёлся сам",
-      lines: [orderRef({ code: wbCode.code, denomination: totalAmount }, [
-        vkDialogLink(vkUserId, escapeHtml(fullName)),
-      ])],
-      next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
-    });
-    const roots = await orderThreadRoots(db, wbCode.code);
-    const targets = await adminTargetsForNotice({ marker: "done", zone: "DBS" });
-    await Promise.allSettled(targets.map((t) => tgSend(t.chatId, notice, { ...replyToRootFor(roots, t), ...t.extra })));
-  }
+  // 15.11.2026: увед «покупатель нашёлся сам» (🟢) убран — заказ перевесился сам.
 
   // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг воронки,
   // а не задача, и уходит строкой в её таймлайн вместо второго сообщения об
@@ -5578,8 +5566,10 @@ async function handleVkDeliveryCodeEntry(ctx: VkDeliveryCodeCtx, vkUserId: numbe
   const askSupport = async () => {
     await ctx.reply(
       "Похоже, это код доставки Wildberries, а не код для активации.\n\n" +
-      "Я передал его менеджеру — он найдёт ваш заказ и ответит здесь.\n\n" +
-      "🔑 Если у вас есть наш семизначный код из чата WB — пришлите его сюда, и заказ откроется сразу.",
+      // 15.11.2026: без обещания «передал менеджеру» — с первого раза админов
+      // не зовём (повтор зовёт, notifyDbsUnknownDeliveryCode). Текст один на все исходы.
+      "🔑 Нам нужен семизначный код — он пришёл вам в чат заказа на WB. Пришлите его сюда, и заказ откроется сразу.\n\n" +
+      "Не находите код — напишите менеджеру, он поможет.",
     );
   };
 

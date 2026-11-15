@@ -7,6 +7,7 @@
  * by the TG bot).
  */
 
+import { queueAdminDigest } from "./admin-digest";
 import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 import { downloadPhoto } from "./telegram-photo";
 import { db } from "./db";
@@ -535,6 +536,17 @@ interface RetailBuyoutAdminAlert {
 
 /** Notify every Telegram admin after a manual bot buyout is confirmed. */
 export async function notifyAdminsRetailBuyout(input: RetailBuyoutAdminAlert): Promise<void> {
+  // 15.11.2026: выкуп подтвердил сам админ — отдельной карточки нет, строка в
+  // суточную сводку «Ленты» (как у выкупа из TWA, `src/lib/buyout-admin-notify.ts`).
+  if (process.env.ADMIN_DIGEST !== "off") {
+    await queueAdminDigest(db as never, [
+      "✅ выкуп",
+      `<code>${escapeHtml(input.wbCode)}</code>`,
+      `−${input.chargedPrice.toLocaleString("ru-RU")} R$`,
+      "бот",
+    ].join(" · "));
+    return;
+  }
   const donorLine = input.donorName ? `\nДонор: <b>${escapeHtml(input.donorName)}</b>` : "";
   const balanceLine = Number.isFinite(input.balance)
     ? `\nОстаток: <b>${Number(input.balance).toLocaleString("ru-RU")} R$</b>`

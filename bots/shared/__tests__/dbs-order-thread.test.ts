@@ -107,7 +107,7 @@ describe("ветка", () => {
   // когда Telegram отказался редактировать). Ответ на исчезнувший корень
   // Telegram отвергает — и уведомление о деньгах потерялось бы из-за оформления.
   it("к id карточки всегда идёт allow_sending_without_reply", async () => {
-    notify.notifyDbsGateNotOpened(ref);
+    notify.notifyDbsCodeRejected(ref, true);
     await flush();
     expect(sent(0).extra).toMatchObject({ allow_sending_without_reply: true });
   });

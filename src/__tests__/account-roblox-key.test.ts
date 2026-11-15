@@ -138,17 +138,12 @@ describe("POST /api/account/roblox-key", () => {
       });
   });
 
-  test("уведомление админам уходит и НЕ содержит ключа", async () => {
+  // 15.11.2026: привязка ключа без сбоя админов не зовёт — делать нечего.
+  test("ключ привязан без живого заказа — админам тихо", async () => {
     await POST(req({ key: KEY, username: "lokomotiv_2018" }));
     // Уведомление не блокирует ответ — даём микрозадачам добежать.
     await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(mockSend).toHaveBeenCalledTimes(2); // два админа
-    const text = String(mockSend.mock.calls[0][2]);
-    expect(text).toContain("привязал ключ");
-    // Ник в уведомлении — канонический от Roblox, тот же, что сохранён.
-    expect(text).toContain("Lokomotiv_2018");
-    expect(text).not.toContain(KEY);
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   /* ── Ключ доделывает ЖИВОЙ заказ ─────────────────────────────────────────
@@ -187,17 +182,13 @@ describe("POST /api/account/roblox-key", () => {
     expect(JSON.stringify(body)).not.toContain(KEY);
   });
 
-  test("уведомление админам называет заказ, а не обещает пользу «в следующий раз»", async () => {
+  test("ключ создал пасс живому заказу — админам тихо (15.11.2026)", async () => {
     mockOrderFind.mockResolvedValue(liveOrder);
     mockCreatePasses.mockResolvedValue({ created: [{ gamePassId: 1, priceInRobux: 715 }] });
 
     await POST(req({ key: KEY, username: "lokomotiv_2018" }, "10.0.0.22"));
     await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const text = String(mockSend.mock.calls[0][2]);
-    expect(text).toContain("JS6NQB9");
-    expect(text).toContain("715 R$");
-    expect(text).not.toContain("его следующий заказ");
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   test("Roblox отказал — заказ всё равно назван, и админ видит причину", async () => {
@@ -212,6 +203,8 @@ describe("POST /api/account/roblox-key", () => {
     expect(body.applied).toMatchObject({ ref: "JS6NQB9", created: [], error: "bad_scope" });
     const text = String(mockSend.mock.calls[0][2]);
     expect(text).toContain("bad_scope");
+    expect(text).toContain("JS6NQB9");
+    expect(text).not.toContain(KEY);
   });
 
   test("ключ не принят Roblox — не сохраняем и не уведомляем", async () => {

@@ -13,11 +13,11 @@ describe("сторож срока токена WB", () => {
     expect(wbTokenExpiry(undefined)).toBeNull();
   });
 
-  it("пороги 14 / 7 / 3 / 1 и «истёк»", () => {
+  it("пороги 7 / 1 и «истёк»", () => {
     expect(wbTokenLevel(at(30), now)).toBeNull();
-    expect(wbTokenLevel(at(13), now)).toBe(14);
+    expect(wbTokenLevel(at(13), now)).toBeNull();
     expect(wbTokenLevel(at(6.5), now)).toBe(7);
-    expect(wbTokenLevel(at(2), now)).toBe(3);
+    expect(wbTokenLevel(at(2), now)).toBe(7);
     expect(wbTokenLevel(at(0.5), now)).toBe(1);
     expect(wbTokenLevel(at(-0.01), now)).toBe(0);
   });

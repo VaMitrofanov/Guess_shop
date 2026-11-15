@@ -9,7 +9,6 @@ import {
 import { wbCancelAcceptedMessage } from "./wb-gate-link";
 import {
   notifyDbsCancelRequested,
-  notifyDbsCancelResumed,
   notifyDbsCodeCaptured,
 } from "./wb-delivery-admin-notify";
 import { holdByCode, releaseByCode } from "./order-hold";
@@ -198,7 +197,7 @@ export async function resumeWbOrderCancel(
 
   const code = liveCode(order.deliverySecret);
   const ref = await dbsRef(db, order.id, order.wbOrderId);
-  notifyDbsCancelResumed(ref, input.actor);
+  // 15.11.2026: увед «отмена снята» убран — человеку делать нечего.
   // Код у нас, но окно автозакрытия прошло — закрывать будет человек, и без
   // этого сообщения код просто пролежал бы до истечения.
   if (code && order.deliverySecret && !wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)) {

@@ -273,54 +273,6 @@ function reviewWhen(at: Date | null): string | null {
   return `${day} ${mskTime(at)}`;
 }
 
-/**
- * Покупатель переписал плохой отзыв на хороший — гейт снял свою заморозку.
- *
- * Обычно это итог нашей же просьбы, поэтому сообщение — не тревога, а «можно
- * выкупать». Снимается только замок самого гейта: заявку на возврат или ручную
- * заморозку исправленный отзыв не отменяет.
- */
-export function notifyBuyoutGateReviewFixed(input: {
-  wbOrderId: string | null;
-  code: string;
-  denomination: number | null;
-  buyerName: string | null;
-  cardMessages?: Record<string, number> | null;
-  internalStatus: string | null;
-  starsBefore: number;
-  starsAfter: number;
-  text: string | null;
-  reviewedAt: Date | null;
-}): void {
-  const ref: DbsRef = {
-    wbOrderId: input.wbOrderId ?? "",
-    code: input.code,
-    denomination: input.denomination,
-    buyerName: input.buyerName,
-    cardMessages: input.cardMessages ?? null,
-  };
-  const when = reviewWhen(input.reviewedAt);
-  const text = clipReview(input.text);
-  const next = input.internalStatus === null
-    ? "покупатель ещё не вводил код — заказ пойдёт обычным путём"
-    : input.internalStatus === "PENDING"
-      ? "заказ снова в очереди «К выкупу»"
-      : input.internalStatus === "AWAITING_GAMEPASS"
-        ? "ждём геймпасс — дальше обычным путём"
-        : `заказ в статусе ${escapeHtml(input.internalStatus)} — проверить карточку`;
-  broadcast({
-    marker: "progress",
-    zone: "DBS",
-    title: "отзыв исправлен — заказ разморожен",
-    lines: [
-      refLine(ref),
-      `${starsLine(input.starsBefore)} → ${starsLine(input.starsAfter)}${when ? ` · ${when}` : ""}`,
-      text ? `💬 <i>${escapeHtml(text)}</i>` : null,
-      "🔓 Заморозку гейта снял сам гейт",
-    ],
-    next,
-  }, ref);
-}
 
 /**
  * Плохой отзыв удалён (12.11.2026). `released` — гейт снял свой замок сам;
@@ -451,6 +403,8 @@ export function notifyWbClaimResolved(input: {
     denomination: input.denomination,
     buyerName: input.buyerName,
   };
+  // 15.11.2026: зовём только когда деньги уходят покупателю.
+  if (!input.refunded) return;
   broadcast({
     marker: input.refunded ? "urgent" : "progress",
     zone: "DBS",
@@ -585,6 +539,10 @@ export function notifyDbsAutoReceiveFailed(
  * перепроверить цифры. Не «urgent» — вмешательство здесь не требуется, но знать
  * о том, что покупателю ушло сообщение, оператор обязан. */
 export function notifyDbsCodeRecheck(ref: DbsRef, askedBuyer: boolean, nextTryAt: Date | null) {
+  // 15.11.2026 (меньше уведов): повторы идут сами и покупателя попросили
+  // перепроверить — человеку делать нечего. Зовём, только если расписание
+  // кончилось или сообщение покупателю не ушло.
+  if (nextTryAt && askedBuyer) return;
   broadcast({
     marker: "action",
     zone: "DBS",
@@ -658,15 +616,6 @@ export function notifyDbsCancelCode(ref: DbsRef, deliveryCode: string) {
 }
 
 /** Отмену сняли: дальше заказ идёт обычным путём. */
-export function notifyDbsCancelResumed(ref: DbsRef, by: string) {
-  broadcast({
-    marker: "progress",
-    zone: "DBS",
-    title: "отмена снята",
-    lines: [refLine(ref), `Кто: ${cancelWho(by)}`],
-    next: "заказ идёт обычным путём: код доставки закроет доставку, гейт уйдёт сам",
-  }, ref);
-}
 
 /** WB даёт около часа на закрытие доставки с момента прихода кода. Пропущенное
  * окно не отыгрывается, поэтому это единственное сообщение, которое кричит. */
@@ -684,18 +633,6 @@ export function notifyDbsDeliveryStuck(ref: DbsRef, supplierStatus: string, code
     ],
     next: "ждать повторов не обязательно: <b>кабинет WB → «Передать в доставку»</b>, затем закрыть заказ"
       + " — или сделать это из консоли DBS. Гейт покупателю уйдёт сам, как только доставка закроется",
-  }, ref);
-}
-
-/** Э7: покупатель получил ссылку и не открыл её даже через сутки. Деньги
- * приняты, товар не выдан — дальше это работа человека, а не бота. */
-export function notifyDbsGateNotOpened(ref: DbsRef) {
-  broadcast({
-    marker: "action",
-    zone: "DBS",
-    title: "покупатель не открыл свой код",
-    lines: [refLine(ref), "Два напоминания в чат WB отправлены, ответа нет"],
-    next: "написать покупателю лично или открыть выкуп вручную из консоли DBS",
   }, ref);
 }
 
@@ -726,7 +663,14 @@ export function notifyDbsBuyerFoundLate(ref: DbsRef, who: string, hoursAgo: numb
  * Цифры в сообщении намеренно: без них оператору нечего искать, а вся власть
  * этого кода — закрыть доставку того же покупателя, что админы и делают.
  */
+const unknownCodeSeen = new Map<string, number>();
 export function notifyDbsUnknownDeliveryCode(who: string, digits: string) {
+  // 15.11.2026 (меньше уведов): с первого раза бот сам объясняет, что нужен
+  // семизначный код из чата WB. Человек нужен, только если тот же покупатель
+  // снова прислал незнакомый код доставки в течение суток.
+  const now = Date.now();
+  for (const [k, at] of unknownCodeSeen) if (now - at > 86_400_000) unknownCodeSeen.delete(k);
+  if (!unknownCodeSeen.has(who)) { unknownCodeSeen.set(who, now); return; }
   broadcast({
     marker: "action",
     zone: "DBS",

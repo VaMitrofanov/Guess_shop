@@ -107,12 +107,10 @@ export function orderRef(
   ].filter((part): part is string => Boolean(part)).join(" · ");
 }
 
-/** Деньги и номинал в одном формате во всех сообщениях. */
-function denomLine(denomination: number | null | undefined, priceKopecks?: number | null): string | null {
-  const parts: string[] = [];
-  if (denomination) parts.push(`<b>${denomination.toLocaleString("ru-RU")} R$</b>`);
-  if (priceKopecks) parts.push(`${Math.round(priceKopecks / 100).toLocaleString("ru-RU")} ₽`);
-  return parts.length ? parts.join(" · ") : null;
+/** Номинал в одном формате во всех сообщениях. 15.11.2026, владелец: рубли из
+ *  шапки убраны — «номер WB оставить, остальное убирай»; цена есть в карточке. */
+function denomLine(denomination: number | null | undefined, _priceKopecks?: number | null): string | null {
+  return denomination ? `<b>${denomination.toLocaleString("ru-RU")} R$</b>` : null;
 }
 
 const ORDER_STATUS_WORDS: Record<string, string> = {

@@ -21,7 +21,7 @@ describe("часовая сводка «Ленты»", () => {
     const db = fakeDb(["✅ выкуп · A", "🔐 вход на сайт · B"]);
     const sent: string[] = [];
     expect(await flushAdminDigest(db as never, async (t) => { sent.push(t); return true; })).toBe(2);
-    expect(sent[0]).toContain("лента за час · 2");
+    expect(sent[0]).toContain("лента за сутки · 2");
     expect(await flushAdminDigest(db as never, async () => true)).toBe(0);
   });
   it("не ушло — строки возвращаются в очередь", async () => {

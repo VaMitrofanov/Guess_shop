@@ -50,9 +50,9 @@ export const ADMIN_TOPICS: Record<AdminTopic, { title: string; icon: string; col
   action: { title: "Нужно действие", icon: "🔥", color: 0xFB6F5F, silent: false, hello: "Только то, где нужен человек: код не дошёл, возврат открыт, пасс подменили, нет плейса, обращения покупателей. Всё остальное — в «Лента заказов»." },
   buyout: { title: "К выкупу", icon: "💸", color: 0x8EEE98, silent: false, hello: "Карточки заказов WB к выкупу с кнопками «Выкупить», «ВЫКУПЛЕНО», «ОШИБКА». Прямые заказы — в «Прямые заказы»." },
   reviews: { title: "Отзывы и вопросы", icon: "⭐️", color: 0xCB86DB, silent: false, hello: "Отзывы и вопросы с Wildberries, скриншоты отзывов за бонус." },
-  feed: { title: "Лента заказов", icon: "📰", color: 0x6FB9F0, silent: true, hello: "Тихая лента: код активирован, карточки DBS (правятся на месте), покупатель нашёлся, выкуп подтверждён. Делать ничего не нужно — звук можно выключить." },
+  feed: { title: "Лента заказов", icon: "📰", color: 0x6FB9F0, silent: true, hello: "Тихая лента: живые карточки DBS (правятся на месте) и раз в сутки, в 09:00 МСК, — сводка того, где делать ничего не нужно (выкупы, пассы по ключу). Звук можно выключить." },
   system: { title: "Система", icon: "💻", color: 0xFB6F5F, silent: true, hello: "Упал бот, сервер, токены WB, кончаются карточки. Звук — только на срочном." },
-  watch: { title: "Под наблюдением", icon: "👀", color: 0xFF93B2, silent: false, hello: "Проблемные покупатели: всё, что они делают (пишут в чат WB, присылают пасс, отзывы, возвраты), приходит сюда. Поставить: /watch КОД причина · снять: /unwatch КОД · список: /watchlist" },
+  watch: { title: "Уебки", icon: "👀", color: 0xFF93B2, silent: false, hello: "Проблемные покупатели: всё, что они делают (пишут в чат WB, присылают пасс, отзывы, возвраты), приходит сюда. Поставить: /watch КОД причина · снять: /unwatch КОД · список: /watchlist" },
 };
 
 export const ADMIN_TOPIC_KEYS = Object.keys(ADMIN_TOPICS) as AdminTopic[];

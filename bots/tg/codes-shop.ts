@@ -222,12 +222,15 @@ function startCodesWorkers(): void {
   setTimeout(reviews, 2 * 60_000);
   setInterval(reviews, 60 * 60_000);
 
-  // 📰 Часовая сводка «Ленты заказов» — в начале каждого часа (проверка раз в минуту).
-  let lastHour = new Date().getUTCHours();
+  // 📰 Сводка «Ленты заказов» — раз в сутки в 09:00 МСК (15.11.2026: было каждый
+  // час, 24 сообщения в день о том, где делать нечего). Проверка раз в минуту;
+  // строки помечаются отправленными, так что перезапуск в 09:xx дубля не даст.
+  const mskDay = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+  const mskHour = () => new Date(Date.now() + 3 * 3600_000).getUTCHours();
+  let lastDay = mskHour() >= 9 ? mskDay() : "";
   setInterval(() => {
-    const hour = new Date().getUTCHours();
-    if (hour === lastHour) return;
-    lastHour = hour;
+    if (mskHour() < 9 || lastDay === mskDay()) return;
+    lastDay = mskDay();
     void flushAdminDigest(db as never, async (text) => {
       const targets = await adminTargets("feed", { loud: false });
       const results = await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, { parse_mode: "HTML", ...t.extra })));

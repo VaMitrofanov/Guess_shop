@@ -19,8 +19,9 @@ import { formatAdminNotice } from "./notify-format";
 
 const STREAM = "wb-token-expiry";
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Пороги предупреждения, в днях до истечения. */
-const WB_TOKEN_WARN_DAYS = [14, 7, 3, 1] as const;
+/** Пороги предупреждения, в днях до истечения. 15.11.2026: было 14/7/3/1 —
+ *  четыре уведа на одно дело; хватает недели на продление и последних суток. */
+const WB_TOKEN_WARN_DAYS = [7, 1] as const;
 /** Как часто напоминать, когда токен уже истёк. */
 const EXPIRED_REPEAT_MS = 12 * 60 * 60 * 1000;
 

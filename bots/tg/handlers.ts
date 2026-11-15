@@ -1095,21 +1095,7 @@ export function registerStart(bot: Telegraf): void {
     // Telegram may redeliver /start or a customer can reopen the same deep link.
     // The order is idempotent by wbCode, so the admin card must be too: notify
     // only the transaction that created the provisional order, never a replay.
-    if (adoptedExistingOrder) {
-      const who = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || `tg:${tgId}`);
-      // Единый язык и ветка заказа: сообщение о ТОМ ЖЕ заказе, что и живая
-      // карточка DBS, обязано стоять под ней, а не отдельным делом.
-      const notice = formatAdminNotice({
-        marker: "done",
-        zone: "DBS",
-        title: "покупатель нашёлся сам",
-        lines: [orderRef({ code, denomination: totalAmount }, [who])],
-        next: "заказ перевешен со служебного аккаунта — уведомления теперь дойдут",
-      });
-      const roots = await orderThreadRoots(db, code);
-      const targets = await adminTargetsForNotice({ marker: "done", zone: "DBS" });
-      await Promise.allSettled(targets.map((t) => tgSend(t.chatId, notice, { ...replyToRootFor(roots, t), ...t.extra })));
-    }
+    // 15.11.2026: увед «покупатель нашёлся сам» (🟢) убран — заказ перевесился сам.
 
     // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг
     // воронки, а не задача, и уходит строкой в её таймлайн вместо второго
@@ -4637,7 +4623,9 @@ async function settleForeignCodeClaim(
   const claimantLabel = tgClaimantLabel(ctx, tgId);
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
     // Красный по одному коду — не чаще раза в час: тупик человек жмёт повторно.
-    (kind === "conflict" && !allowConflictAlert(code)) ? Promise.resolve([]) : adminTargets(kind === "conflict" ? "action" : "feed", { loud: kind === "conflict" }).then((targets) => Promise.allSettled(targets.map((t) => tgSend(t.chatId, xlinkAdminNotice({
+    // 15.11.2026: «перешёл на вторую площадку» и «просят открыть» админам не шлём —
+    // делать нечего, решает владелец кода. Остался только второй аккаунт.
+    (kind !== "conflict" || !allowConflictAlert(code)) ? Promise.resolve([]) : adminTargets(kind === "conflict" ? "action" : "feed", { loud: kind === "conflict" }).then((targets) => Promise.allSettled(targets.map((t) => tgSend(t.chatId, xlinkAdminNotice({
       kind, code, denomination, ownerLabel: escapeHtml(verdict.ownerLabel),
       claimantLabel: escapeHtml(claimantLabel), platform: "TG", reason,
     }), t.extra)))).catch(() => undefined);
@@ -4843,8 +4831,10 @@ async function handleWbDeliveryCodeEntry(ctx: DeliveryCodeCtx, tgId: string, cod
   const askSupport = async () => {
     await ctx.reply(
       "Похоже, это код доставки Wildberries, а не код для активации.\n\n" +
-      "Я передал его менеджеру — он найдёт ваш заказ и ответит здесь.\n\n" +
-      "🔑 Если у вас есть наш семизначный код из чата WB — пришлите его сюда, и заказ откроется сразу.",
+      // 15.11.2026: без обещания «передал менеджеру» — с первого раза админов
+      // не зовём (повтор зовёт, notifyDbsUnknownDeliveryCode). Текст один на все исходы.
+      "🔑 Нам нужен семизначный код — он пришёл вам в чат заказа на WB. Пришлите его сюда, и заказ откроется сразу.\n\n" +
+      "Не находите код — напишите менеджеру, он поможет.",
       { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)]]) },
     );
   };

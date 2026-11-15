@@ -242,6 +242,9 @@ async function notifyAdmins(opts: {
   const chatIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
     .split(",").map((id) => id.trim()).filter(Boolean);
   if (!token || chatIds.length === 0) return;
+  // 15.11.2026 (меньше уведов): «привязал/обновил ключ» без сбоя — делать
+  // нечего, админам не шлём. Зовём, только если ключ не создал пасс живому заказу.
+  if (!(opts.applied && opts.applied.created.length === 0)) return;
 
   try {
     const user = await prisma.user.findUnique({

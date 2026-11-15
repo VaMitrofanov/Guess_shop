@@ -46,7 +46,7 @@ export const FLAG_META: Record<OrderFlagKind, { icon: string; label: string; ton
   PARTIAL_REFUND: { icon: "💸", label: "Частичный возврат", tone: "orange" },
   CANCEL_ASK: { icon: "✋", label: "Просит отмену", tone: "orange" },
   REVIEW_DELETED: { icon: "🗑", label: "Был плохой отзыв, удалён", tone: "yellow" },
-  WATCH: { icon: "👁", label: "Под наблюдением", tone: "red" },
+  WATCH: { icon: "👁", label: "Уебки", tone: "red" },
 };
 
 const KINDS = new Set<string>(Object.keys(FLAG_META));

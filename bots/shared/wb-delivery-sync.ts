@@ -81,13 +81,11 @@ import {
   notifyDbsCancelCode,
   notifyDbsOrderCancelled,
   notifyDbsDeliveryStuck,
-  notifyDbsGateNotOpened,
   notifyDbsGateNotIssued,
   notifyDbsGateUndelivered,
   notifyWbBuyerClaim,
   notifyWbClaimResolved,
   notifyBuyoutGateBadReview,
-  notifyBuyoutGateReviewFixed,
   notifyBuyoutGateReviewDeleted,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
@@ -142,7 +140,9 @@ const LEASE_MS = 45_000;
 const CLOSED_RECHECK_DAYS = 14;
 /** How long a held delivery code may sit unclosed before the operator is told.
  * WB's own window is about an hour, so this leaves room to act on the alert. */
-const STUCK_DELIVERY_ALERT_MS = 20 * 60_000;
+// 15.11.2026: было 20 минут — повторы идут сами до 6 ч, а алерт дёргал людей на каждом
+// медленном WB. Звать через 2 ч без закрытия.
+const STUCK_DELIVERY_ALERT_MS = 2 * 60 * 60_000;
 /** Э7: when a buyer who received a gate link still has not opened it. Two
  * nudges, then the order is the operator's problem rather than the bot's. */
 /* Напоминания по невскрытому гейту.
@@ -2323,13 +2323,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   }
   for (const r of res.released) {
     console.log(`[WbDbsSync] гейт разморозил ${r.wbCode}: отзыв ★${r.was.productValuation} → ★${r.review.productValuation}`);
-    notifyBuyoutGateReviewFixed({
-      ...refFor(r.wbCode),
-      starsBefore: Number(r.was.productValuation ?? 0),
-      starsAfter: Number(r.review.productValuation ?? 0),
-      text: reviewText(r.review),
-      reviewedAt: r.review.createdDate ? new Date(r.review.createdDate) : null,
-    });
+    // 15.11.2026: увед «отзыв исправлен — разморожен» убран — заказ пошёл дальше сам.
   }
 
   await applyDeletedReviews(db, {
@@ -2475,7 +2469,9 @@ async function applyDeletedReviews(db: Db, input: {
       refunded: Boolean(meta.cancelledAt && meta.claimOpenedAt),
     }, deleted, released ? "released" : "none", needsHuman, input.now));
     console.log(`[WbDbsSync] плохой отзыв удалён: ${code}${released ? " — гейт разморозил" : needsHuman ? " — замок не гейта, решает человек" : ""}`);
-    if (released || needsHuman) {
+    // 15.11.2026: «удалён — гейт разморозил сам» больше не шлём, зовём только
+    // когда замок чужой и снимать его решает человек.
+    if (needsHuman && !released) {
       notifyBuyoutGateReviewDeleted({
         ...input.refFor(code),
         stars: deleted.stars,
@@ -2774,13 +2770,9 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
         level: due.level,
       });
       out.gateReminders += 1;
-      /* Админам говорим на СУТКАХ, а не на последнем уровне: третье
-         напоминание уходит через неделю, и привязка алерта к «последнему»
-         молча отодвинула бы его туда же. Оператору важно узнать про молчащего
-         покупателя тогда, когда с этим ещё можно что-то сделать. */
-      if (due.level === 2) {
-        notifyDbsGateNotOpened(await dbsRef(db, order.id, order.wbOrderId));
-      }
+      /* 15.11.2026: увед «покупатель не открыл свой код» снят (владелец: «нам
+         не ебали голову»). Админ мог только написать то же, что уже пишут
+         напоминания, — третье уходит само через неделю. */
     } catch (error) {
       console.error(`[WbDbsSync] gate reminder failed for ${order.wbOrderId}:`, safeErrorCode(error));
     }

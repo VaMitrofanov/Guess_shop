@@ -52,11 +52,10 @@ describe("Сообщения о заказе встают в его ветку",
     expect(admin).toContain("const thread = { ...replyToRootFor(roots, t), ...t.extra };");
   });
 
-  it("«покупатель нашёлся сам» говорит на общем языке уведомлений", () => {
+  // 15.11.2026: увед «покупатель нашёлся сам» снят (делать нечего) — следим, чтобы не вернулся копипастой.
+  it("«покупатель нашёлся сам» админам не шлётся", () => {
     for (const file of ["bots/tg/handlers.ts", "bots/vk/handlers.ts"]) {
-      const source = read(file);
-      expect(source).toContain('title: "покупатель нашёлся сам"');
-      expect(source).toContain("tgSend(t.chatId, notice, { ...replyToRootFor(roots, t), ...t.extra })");
+      expect(read(file)).not.toContain('title: "покупатель нашёлся сам"');
     }
   });
 });
