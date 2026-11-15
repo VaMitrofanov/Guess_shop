@@ -9,10 +9,10 @@ const o = (p: Partial<PinOrder>): PinOrder => ({
 describe("закреп заказа в чате поддержки", () => {
   it("показывает код, номинал, ник и этап", () => {
     const text = pinText([o({})], NOW)!;
-    expect(text).toContain("<code>ZT8BW8D</code> · 500 Robux");
+    expect(text).toContain("500 R$ · код <code>ZT8BW8D</code>");
     expect(text).toContain("<code>Misha2010</code>");
     expect(text).toContain("t.me/RobloxBankBot?start=order");
-    expect(text).toContain("ждём ваш геймпасс");
+    expect(text).toMatch(/ждём ваш геймпасс/i);
   });
 
   it("не выдаёт клиенту заморозку и не называет срок", () => {
@@ -32,8 +32,23 @@ describe("закреп заказа в чате поддержки", () => {
 
   it("старый выкупленный — без обещания Pending", () => {
     const text = pinText([o({ status: "COMPLETED", completedAt: new Date(NOW - 200 * 86_400_000) })], NOW)!;
-    expect(text).toContain("✅ выкуплен");
+    expect(text).toContain("✅ Выкуплен");
     expect(text).not.toContain("Pending");
+  });
+
+  it("несколько заказов: одна строка на заказ, ник и общий этап — один раз, прямым — без номера", () => {
+    const done = (code: string, amount: number, day: number) => o({
+      wbCode: code, amount, status: "COMPLETED",
+      createdAt: new Date(NOW - day * 86_400_000), completedAt: new Date(NOW - day * 86_400_000),
+    });
+    const text = pinText([done("DIR-2DCA477B", 590, 3), done("DIR-8ACC6FA1", 300, 5), done("DIR-992C5BF7", 2000, 7)], NOW)!;
+    expect(text.startsWith("📌 Ваши заказы")).toBe(true);
+    expect(text).not.toContain("DIR-");
+    expect(text).not.toContain("Код WB");
+    expect(text.match(/Misha2010/g)).toHaveLength(1);
+    expect(text.match(/Pending/g)).toHaveLength(1);
+    expect(text).toMatch(/✅ 2\s000 R\$ · от /u);
+    expect(text.split("\n").length).toBeLessThanOrEqual(9);
   });
 
   it("новый закреп — по живому или выкупленному заказу", () => {

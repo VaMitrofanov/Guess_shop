@@ -36,21 +36,29 @@ const DAY = 86_400_000;
 const SHOW_DONE_DAYS = 45;
 const MAX_ORDERS = 3;
 
-function stageText(o: PinOrder, now: number): string {
-  if (o.heldAt && ACTIVE.has(o.status)) return "🔎 на проверке у поддержки — напишем здесь";
+type Stage = { icon: string; word: string };
+
+function stageOf(o: PinOrder, now: number): Stage {
+  if (o.heldAt && ACTIVE.has(o.status)) return { icon: "🔎", word: "на проверке — напишем здесь" };
   switch (o.status) {
-    case "AWAITING_GAMEPASS": return "⏳ ждём ваш геймпасс";
-    case "PENDING": return "🕐 в очереди на выкуп";
-    case "IN_PROGRESS": return "⚙️ выкупаем геймпасс";
-    case "ERROR": return "🔎 проверяем выкуп — напишем здесь";
+    case "AWAITING_GAMEPASS": return { icon: "⏳", word: "ждём ваш геймпасс" };
+    case "PENDING": return { icon: "🕐", word: "в очереди на выкуп" };
+    case "IN_PROGRESS": return { icon: "⚙️", word: "выкупаем" };
+    case "ERROR": return { icon: "🔎", word: "проверяем выкуп — напишем здесь" };
     case "COMPLETED":
       return o.completedAt && now - o.completedAt.getTime() < SHOW_DONE_DAYS * DAY
-        ? "✅ выкуплен — Robux придут после проверки Roblox (Pending)"
-        : "✅ выкуплен";
-    case "REJECTED": return "✖️ отменён";
-    default: return "в работе";
+        ? { icon: "✅", word: "выкуплен, Robux в ожидании Roblox (Pending)" }
+        : { icon: "✅", word: "выкуплен" };
+    case "REJECTED": return { icon: "✖️", word: "отменён" };
+    default: return { icon: "•", word: "в работе" };
   }
 }
+
+const isDirect = (o: PinOrder) => o.wbCode.startsWith("DIR-");
+const dayRu = (d: Date) => d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
+/** Чем клиент узнаёт заказ: код карты WB; у прямого заказа номера клиенту не показываем — дата. */
+const orderId = (o: PinOrder) => (isDirect(o) ? `от ${dayRu(o.createdAt)}` : `код <code>${esc(o.wbCode)}</code>`);
+const rub = (n: number) => `${n.toLocaleString("ru-RU")} R$`;
 
 /** Какие заказы показать: живые, потом свежие выкупленные; не больше трёх. */
 export function pinOrders(orders: PinOrder[], now = Date.now()): PinOrder[] {
@@ -67,23 +75,46 @@ export function pinWorthCreating(orders: PinOrder[], now = Date.now()): boolean 
   return orders.some((o) => ACTIVE.has(o.status) || o.status === "COMPLETED");
 }
 
+/**
+ * Компактно (15.11.2026, владелец: «уебищно выглядит, спам какой-то»): одна
+ * строка на заказ, общий ник и общий этап — один раз, ссылка в бот — одной
+ * строкой. Начало «📌 Ваш заказ / Ваши заказы» не менять: по нему бизнес-бот
+ * отличает закреп от живого ответа оператора (pa-business.ts).
+ */
 export function pinText(orders: PinOrder[], now = Date.now()): string | null {
   const shown = pinOrders(orders, now);
   if (!shown.length) return null;
-  const blocks = shown.map((o) => [
-    // <code> — копируется одним нажатием (и у клиента, и у нас).
-    `🎟 Код WB: <code>${esc(o.wbCode)}</code> · ${o.amount.toLocaleString("ru-RU")} Robux`,
-    ...(o.robloxUsername ? [`👤 Ник Roblox: <code>${esc(o.robloxUsername)}</code>`] : []),
-    `Статус: ${stageText(o, now)}`,
-  ].join("\n"));
+  const stages = shown.map((o) => stageOf(o, now));
+  const nicks = [...new Set(shown.map((o) => o.robloxUsername).filter(Boolean))] as string[];
+  const nickLine = nicks.length === 1 ? `Ник Roblox: <code>${esc(nicks[0])}</code>` : null;
+  const footer = `Подробности и инструкция — <a href="https://t.me/RobloxBankBot?start=order">в боте, «📦 Мой заказ»</a>. Не нашли ответа — пишите сюда.`;
+
+  if (shown.length === 1) {
+    const [o] = shown;
+    return [
+      `📌 Ваш заказ · ${rub(o.amount)} · ${orderId(o)}`,
+      ...(nickLine ? [nickLine] : []),
+      `${stages[0].icon} ${stages[0].word[0].toUpperCase()}${stages[0].word.slice(1)}`,
+      "",
+      footer,
+    ].join("\n");
+  }
+
+  const sameStage = stages.every((st) => st.word === stages[0].word);
+  const lines = shown.map((o, i) => {
+    const nick = nicks.length > 1 && o.robloxUsername ? ` · <code>${esc(o.robloxUsername)}</code>` : "";
+    return `${stages[i].icon} ${rub(o.amount)} · ${orderId(o)}${nick}${sameStage ? "" : ` — ${stages[i].word}`}`;
+  });
+  const common = sameStage
+    ? [`${stages[0].word.replace(/^выкуплен/, "Все выкуплены").replace(/^(.)/, (c) => c.toUpperCase())}`]
+    : [];
   return [
-    shown.length > 1 ? "📌 Ваши заказы в RobloxBank" : "📌 Ваш заказ в RobloxBank",
+    "📌 Ваши заказы",
+    ...(nickLine ? [nickLine] : []),
     "",
-    blocks.join("\n\n"),
+    ...lines,
+    ...common,
     "",
-    // Вопросы «где робуксы» и «что дальше» — в бот: там статус, инструкция и таймер
-    // Pending, а поддержке остаются настоящие проблемы (15.11.2026, владелец).
-    `Всё о заказе — что делать дальше, инструкция, где Robux — <a href="https://t.me/RobloxBankBot?start=order">в боте → «📦 Мой заказ»</a>. Там ответ сразу.`,
-    "Сюда пишите, если в боте не нашли ответа.",
+    footer,
   ].join("\n");
 }
