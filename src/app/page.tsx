@@ -60,6 +60,19 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       {/* ── Первый экран: код — главный способ ─────────────────────────── */}
       <section className={`${styles.hero} ${ny ? styles.heroNY : ""}`}>
         {ny && <div className={styles.garlandRow}><Garland /></div>}
+        {/* Сейф за первым экраном — как до витрины 2.0 (возвращён 16.11.2026). В
+            новогоднем оформлении его место у новогодней сцены. */}
+        {!ny && (
+          <>
+            <div className={styles.heroGlow} aria-hidden="true" />
+            <div className={styles.vaultBackdrop} aria-hidden="true">
+              <div className={styles.vaultDoor}>
+                <div className={styles.vaultBolts}>{Array.from({ length: 8 }).map((_, index) => <i key={index} />)}</div>
+                <div className={styles.vaultWheel}><span>R$</span></div>
+              </div>
+            </div>
+          </>
+        )}
         <div className={styles.heroCopy}>
           <div className={styles.eyebrow}><span className={styles.statusDot} /> {ny ? "🎄 Новогодние коды Roblox" : "Коды активации Roblox"}</div>
           {ny ? (
