@@ -14,3 +14,24 @@ describe("выдача кода из беседы (16.11.2026)", () => {
     expect(parseIssueCommand("/issue CODE-827TX8XJ")).toBeNull();
   });
 });
+
+import { amountLineFrom, issuedAlertText } from "../codes-issue-reply";
+
+describe("алерт после выдачи", () => {
+  const plain = "🔴 САЙТ · код активации: оплачен — выдать код вручную\n🎟 CODE-827TX8XJ · 1 000 R$ · 1 199 ₽\n📬 Код уйдёт письмом";
+
+  it("строку заказа берёт из простого текста алерта", () => {
+    expect(amountLineFrom(plain, "CODE-827TX8XJ")).toBe("<code>CODE-827TX8XJ</code> · 1 000 R$ · 1 199 ₽");
+  });
+
+  it("говорит, кто выдал и дошло ли письмо", () => {
+    const text = issuedAlertText({ publicId: "CODE-827TX8XJ", amountLine: amountLineFrom(plain, "CODE-827TX8XJ"), actor: "@owner", at: new Date(Date.UTC(2026, 10, 15, 18, 40)), email: "sent", chat: null });
+    expect(text).toContain("🟢 <b>САЙТ · код активации: выдан</b>");
+    expect(text).toContain("✅ @owner · 21:40 · 📬 письмо ушло");
+    expect(text).not.toMatch(/ABCD/);
+  });
+
+  it("письмо не ушло — это видно", () => {
+    expect(issuedAlertText({ publicId: "CODE-1", amountLine: null, actor: "a", at: new Date(), email: "failed" })).toContain("письмо НЕ ушло");
+  });
+});

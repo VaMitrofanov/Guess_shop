@@ -151,7 +151,8 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
       // Текст уходит как HTML: голое «<код>» Telegram считал неизвестным тегом и
       // отклонял сообщение целиком — алерт о ручной выдаче не дошёл ни разу
       // (CODE-827TX8XJ, 15.11.2026). Угловые скобки — только экранированные.
-      next: `ответьте на это сообщение самим кодом — бот выдаст его покупателю и удалит ваше сообщение (или /issue ${payment.order.publicId} &lt;код&gt;)`,
+      next: "нажмите «🎟 Выдать код» и пришлите код ответом — бот выдаст его покупателю и удалит ваше сообщение",
+      issueButton: true,
     });
   } else if (attention) {
     await notifyCodeAdmins({
@@ -160,7 +161,8 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
       orderPublicId: payment.order.publicId,
       denomination: payment.order.denomination,
       amountKopecks: payment.amountKopecks,
-      next: attention === "NO_STOCK" ? "загрузить код этого номинала или вернуть деньги" : "вернуть второй платёж через Т-Банк",
+      next: attention === "NO_STOCK" ? "нажмите «🎟 Выдать код» и пришлите код ответом — или верните деньги" : "вернуть второй платёж через Т-Банк",
+      issueButton: attention === "NO_STOCK",
     });
   }
   return ok;

@@ -20,7 +20,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
 const MAX_EMAIL_ATTEMPTS = 8;
 
 export const ACTIVATION_STEPS = [
-  "Откройте roblox.com/redeem — кнопка «Активировать на Roblox» ниже.",
+  "Откройте roblox.com/redeem — кнопка «Активировать на Roblox» в этом письме.",
   "Войдите в тот аккаунт Roblox, на который нужны Robux.",
   "Введите код и нажмите «Активировать» (Redeem).",
   "Robux сразу появятся на балансе этого аккаунта.",

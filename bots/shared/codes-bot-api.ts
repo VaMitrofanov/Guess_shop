@@ -109,3 +109,23 @@ export async function issueCodeViaWeb(publicId: string, code: string): Promise<{
     return { status: "error" };
   }
 }
+
+export type CodesQueueItem = {
+  publicId: string;
+  denomination: number;
+  finalAmountKopecks: number;
+  paidAt: string | null;
+  channel: string;
+  deliveryMode: string;
+  giftSendAt: string | null;
+};
+
+/** Оплаченные заказы без кода — для `/codes` в теме «Коды». Без адресов и кодов. */
+export async function fetchCodesQueue(): Promise<CodesQueueItem[] | null> {
+  try {
+    const { status, data } = await signedPost<{ waiting?: CodesQueueItem[] }>("/api/internal/codes/queue", {});
+    return status === 200 ? data.waiting ?? [] : null;
+  } catch {
+    return null;
+  }
+}

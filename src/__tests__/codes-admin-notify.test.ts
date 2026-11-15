@@ -7,11 +7,14 @@ import path from "node:path";
 
 const send = jest.fn();
 jest.mock("@/lib/telegram", () => ({ sendTelegramMessage: (...a: unknown[]) => send(...a) }));
+jest.mock("@/lib/prisma", () => ({
+  prisma: { codeOrder: { findUnique: async () => ({ deliveryMode: "EMAIL", channel: "SITE", giftSendAt: null }) } },
+}));
 jest.mock("../../bots/shared/admin-route", () => ({
   adminTargets: async () => [{ key: "g#5", chatId: "-100", extra: { message_thread_id: 5 }, group: true }],
 }));
 
-import { notifyCodeAdmins, plainForTelegram } from "@/lib/codes/admin-notify";
+import { deliveryLine, notifyCodeAdmins, plainForTelegram } from "@/lib/codes/admin-notify";
 
 describe("алерт заказа кода", () => {
   beforeEach(() => { send.mockReset(); process.env.TG_TOKEN = "t"; });
@@ -22,6 +25,20 @@ describe("алерт заказа кода", () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(String(send.mock.calls[1][2])).not.toMatch(/<[a-z]/i);
     expect(String(send.mock.calls[1][2])).toContain("CODE-1");
+  });
+
+  it("ручная выдача — кнопка «Выдать код» и куда уйдёт код, без адреса", async () => {
+    send.mockResolvedValue(true);
+    await notifyCodeAdmins({ marker: "urgent", title: "оплачен — выдать код вручную", orderPublicId: "CODE-827TX8XJ", denomination: 1000, amountKopecks: 119900, next: "x", issueButton: true });
+    const [, , text, extra] = send.mock.calls[0] as [string, string, string, { reply_markup?: { inline_keyboard: Array<Array<{ callback_data: string }>> } }];
+    expect(text).toContain("📬 Код уйдёт письмом на почту покупателя");
+    expect(text).not.toContain("@");
+    expect(extra.reply_markup?.inline_keyboard[0][0].callback_data).toBe("cdi:CODE-827TX8XJ");
+  });
+
+  it("строка доставки для бота и подарка", () => {
+    expect(deliveryLine({ deliveryMode: "ACCOUNT", channel: "TG", giftSendAt: null })).toContain("в чат бота TG");
+    expect(deliveryLine({ deliveryMode: "GIFT", channel: "SITE", giftSendAt: null })).toContain("Подарок-открытка");
   });
 
   it("plainForTelegram экранирует угловые скобки", () => {
