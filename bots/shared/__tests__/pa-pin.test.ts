@@ -23,16 +23,24 @@ describe("закреп заказа в чате поддержки", () => {
 
   it("живые заказы впереди, старый выкупленный не показывается", () => {
     const text = pinText([
-      o({ wbCode: "OLD0001", status: "COMPLETED", completedAt: new Date(NOW - 30 * 86_400_000), createdAt: new Date(NOW - 31 * 86_400_000) }),
+      o({ wbCode: "OLD0001", status: "COMPLETED", completedAt: new Date(NOW - 60 * 86_400_000), createdAt: new Date(NOW - 61 * 86_400_000) }),
       o({ wbCode: "NEW0001" }),
     ], NOW)!;
     expect(text).toContain("NEW0001");
     expect(text).not.toContain("OLD0001");
   });
 
-  it("новый закреп — только по живому или свежему заказу", () => {
+  it("старый выкупленный — без обещания Pending", () => {
+    const text = pinText([o({ status: "COMPLETED", completedAt: new Date(NOW - 200 * 86_400_000) })], NOW)!;
+    expect(text).toContain("✅ выкуплен");
+    expect(text).not.toContain("Pending");
+  });
+
+  it("новый закреп — по живому или выкупленному заказу", () => {
     expect(pinWorthCreating([o({})], NOW)).toBe(true);
-    expect(pinWorthCreating([o({ status: "COMPLETED", completedAt: new Date(NOW - 10 * 86_400_000) })], NOW)).toBe(false);
+    // «выкупили 23 октября, а робуксов нет» — закреп любому, кто пишет, с любым выкупленным.
+    expect(pinWorthCreating([o({ status: "COMPLETED", completedAt: new Date(NOW - 24 * 86_400_000) })], NOW)).toBe(true);
+    expect(pinWorthCreating([o({ status: "COMPLETED", completedAt: new Date(NOW - 200 * 86_400_000) })], NOW)).toBe(true);
     expect(pinWorthCreating([o({ status: "REJECTED" })], NOW)).toBe(false);
   });
 });

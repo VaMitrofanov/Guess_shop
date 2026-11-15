@@ -27,7 +27,8 @@ import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-rec
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
 import { adminTargets, type AdminTopic } from "../shared/admin-route";
-import { paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
+import { paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
+import { syncPaQuickReplies } from "./pa-quick-replies";
 import { startPaDigest } from "./pa-group";
 
 
@@ -244,17 +245,28 @@ export function startAutoWorkers(bot: Telegraf): void {
   const mode = paDeskMode();
   if (mode !== "off") {
     let running = false;
-    const desk = () => {
+    let tick = 0;
+    // Всё через одно подключение аккаунта и строго по очереди: параллельные
+    // запросы от пользовательского аккаунта — лишний риск флуд-лимита.
+    const desk = async () => {
       if (running) return;
       running = true;
-      runPaDeskSweep(mode)
-        .then((r) => {
-          if (r && (r.renamed || r.foldersUpdated || r.archived)) {
-            console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
-          }
-        })
-        .catch((e) => console.error("[pa-desk] tick:", e instanceof Error ? e.message : e))
-        .finally(() => { running = false; });
+      const n = tick++;
+      try {
+        const r = await runPaDeskSweep(mode);
+        if (r && (r.renamed || r.foldersUpdated || r.archived)) {
+          console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
+        }
+        // Быстрые ответы — при старте и раз в 6 ч: только недостающие ярлыки.
+        if (n % 72 === 0) {
+          const q = await syncPaQuickReplies(await paDeskClient(), mode === "dry");
+          if (q.created || q.updated) console.log(`[pa-quick] создано ${q.created}, обновлено ${q.updated}, без изменений ${q.same}`);
+        }
+      } catch (e) {
+        console.error("[pa-desk] tick:", e instanceof Error ? e.message : e);
+      } finally {
+        running = false;
+      }
     };
     setTimeout(desk, 120_000);
     setInterval(desk, 5 * 60 * 1000);

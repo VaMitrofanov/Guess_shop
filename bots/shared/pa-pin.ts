@@ -26,20 +26,27 @@ const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 const ACTIVE = new Set(["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"]);
 const DAY = 86_400_000;
-/** Выкупленный заказ держим в закрепе ещё две недели — вопросы «где робуксы» идут после. */
-const SHOW_DONE_DAYS = 14;
-/** Новый закреп ставим только по живому заказу или выкупленному за 3 дня. */
-const CREATE_DONE_DAYS = 3;
+/**
+ * Выкупленные за 45 дней показываем рядом с живыми; дальше — только последний.
+ * Новый закреп ставим ЛЮБОМУ, кто написал в поддержку и у кого есть живой или
+ * выкупленный заказ (15.11.2026, владелец: «сделай чтобы так было, если пишут» —
+ * клиентка с выкупом 22.10 закреп не получила, окно было 3 дня). Писал за
+ * сутки и не больше 5 новых за проход — это проверяет воркер.
+ */
+const SHOW_DONE_DAYS = 45;
 const MAX_ORDERS = 3;
 
-function stageText(o: PinOrder): string {
+function stageText(o: PinOrder, now: number): string {
   if (o.heldAt && ACTIVE.has(o.status)) return "🔎 на проверке у поддержки — напишем здесь";
   switch (o.status) {
     case "AWAITING_GAMEPASS": return "⏳ ждём ваш геймпасс";
     case "PENDING": return "🕐 в очереди на выкуп";
     case "IN_PROGRESS": return "⚙️ выкупаем геймпасс";
     case "ERROR": return "🔎 проверяем выкуп — напишем здесь";
-    case "COMPLETED": return "✅ выкуплен — Robux придут после проверки Roblox (Pending)";
+    case "COMPLETED":
+      return o.completedAt && now - o.completedAt.getTime() < SHOW_DONE_DAYS * DAY
+        ? "✅ выкуплен — Robux придут после проверки Roblox (Pending)"
+        : "✅ выкуплен";
     case "REJECTED": return "✖️ отменён";
     default: return "в работе";
   }
@@ -56,8 +63,8 @@ export function pinOrders(orders: PinOrder[], now = Date.now()): PinOrder[] {
 
 /** Ставить ли НОВЫЙ закреп (уже стоящий правится всегда). */
 export function pinWorthCreating(orders: PinOrder[], now = Date.now()): boolean {
-  return orders.some((o) => ACTIVE.has(o.status)
-    || (o.status === "COMPLETED" && o.completedAt && now - o.completedAt.getTime() < CREATE_DONE_DAYS * DAY));
+  void now;
+  return orders.some((o) => ACTIVE.has(o.status) || o.status === "COMPLETED");
 }
 
 export function pinText(orders: PinOrder[], now = Date.now()): string | null {
@@ -67,7 +74,7 @@ export function pinText(orders: PinOrder[], now = Date.now()): string | null {
     // <code> — копируется одним нажатием (и у клиента, и у нас).
     `🎟 Код WB: <code>${esc(o.wbCode)}</code> · ${o.amount.toLocaleString("ru-RU")} Robux`,
     ...(o.robloxUsername ? [`👤 Ник Roblox: <code>${esc(o.robloxUsername)}</code>`] : []),
-    `Статус: ${stageText(o)}`,
+    `Статус: ${stageText(o, now)}`,
   ].join("\n"));
   return [
     shown.length > 1 ? "📌 Ваши заказы в RobloxBank" : "📌 Ваш заказ в RobloxBank",
