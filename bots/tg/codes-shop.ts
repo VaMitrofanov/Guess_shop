@@ -4,6 +4,7 @@ import { ADMIN_IDS } from "../shared/admin";
 import {
   CODES_CB,
   CODES_MENU_BTN,
+  CODES_MENU_BTN_LEGACY,
   CODES_PICK_RE,
   codePickScreen,
   codesStoreScreen,
@@ -127,7 +128,7 @@ export function registerCodesShop(bot: Telegraf): void {
   bot.command("codes", (ctx) => openCodesStore(ctx));
   bot.command("invite", (ctx) => openInvite(ctx));
 
-  bot.hears(CODES_MENU_BTN.codes, (ctx) => openCodesStore(ctx));
+  bot.hears([CODES_MENU_BTN.codes, ...CODES_MENU_BTN_LEGACY], (ctx) => openCodesStore(ctx));
   bot.hears(CODES_MENU_BTN.invite, (ctx) => openInvite(ctx));
 
   bot.action(CODES_CB.open, async (ctx) => {

@@ -21,6 +21,7 @@ import { registerPaGroup } from "./pa-group";
 import { registerReleaseNotes } from "./release-notes";
 import { registerWatchList } from "./watch-list";
 import { registerWbReply } from "./wb-reply";
+import { registerCodesIssueReply } from "./codes-issue-reply";
 import { registerWbMorningDigest } from "./wb-morning-digest";
 import { registerNoticeStatsReport } from "./notice-stats-report";
 
@@ -60,6 +61,7 @@ export function registerPaBusiness(bot: Telegraf): void {
   // 👁 «Под наблюдением» (15.11.2026): /watch, /unwatch, /watchlist — тоже до защиты беседы.
   registerWatchList(bot);
   // 💬 Ответ в чат WB из Telegram и ☀️ утренняя сводка WB (15.11.2026) — до беседы админов.
+  registerCodesIssueReply(bot);
   registerWbReply(bot);
   registerWbMorningDigest(bot);
   registerNoticeStatsReport(bot);

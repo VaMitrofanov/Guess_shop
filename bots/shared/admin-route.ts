@@ -35,7 +35,8 @@ export type AdminTopic =
   | "reviews"  // ⭐ Отзывы и вопросы
   | "feed"     // 📦 Лента заказов (тихо)
   | "system"   // 🚨 Система
-  | "watch";   // 👁 Под наблюдением (15.11.2026)
+  | "watch"    // 👁 Под наблюдением (15.11.2026)
+  | "codes";   // 🎟 Коды Robux: оплаты, выдача (16.11.2026)
 
 /**
  * Название темы, иконка, цвет и звук по умолчанию. Название — БЕЗ эмодзи:
@@ -52,6 +53,9 @@ export const ADMIN_TOPICS: Record<AdminTopic, { title: string; icon: string; col
   reviews: { title: "Отзывы и вопросы", icon: "⭐️", color: 0xCB86DB, silent: false, hello: "Отзывы и вопросы с Wildberries, скриншоты отзывов за бонус." },
   feed: { title: "Лента заказов", icon: "📰", color: 0x6FB9F0, silent: true, hello: "Тихая лента: живые карточки DBS (правятся на месте) и раз в сутки, в 09:00 МСК, — сводка того, где делать ничего не нужно (выкупы, пассы по ключу). Звук можно выключить." },
   system: { title: "Система", icon: "💻", color: 0xFB6F5F, silent: true, hello: "Упал бот, сервер, токены WB, кончаются карточки. Звук — только на срочном." },
+  // 16.11.2026: алерт «оплачен — выдать код» терялся в «Нужно действие» (а потом
+  // и вовсе не доходил — CODE-827TX8XJ). У кодов — своя тема, со звуком.
+  codes: { title: "Коды", icon: "🎟", color: 0xFFD67E, silent: false, hello: "Заказы кодов Robux: оплачен — выдать код, письмо не ушло, второй платёж. Выдать код: ответьте на увед самим кодом — бот выдаст его покупателю и удалит ваше сообщение. Или /issue CODE-XXXXXXXX код." },
   watch: { title: "Уебки", icon: "👀", color: 0xFF93B2, silent: false, hello: "Проблемные покупатели: всё, что они делают (пишут в чат WB, присылают пасс, отзывы, возвраты), приходит сюда. Поставить: /watch КОД причина · снять: /unwatch КОД · список: /watchlist" },
 };
 
@@ -104,7 +108,7 @@ interface RouteConfig { chatId: string | null; topics: Partial<Record<string, nu
  * уведомления у всех. Туда — только то, где нужен человек: тихая лента и
  * системный шум в личку не идут.
  */
-const DM_TOPICS: AdminTopic[] = ["cases", "direct", "action", "buyout", "reviews"];
+const DM_TOPICS: AdminTopic[] = ["cases", "direct", "action", "buyout", "reviews", "codes"];
 
 type CursorDb = { wbSyncCursor: { findUnique(args: { where: { stream: string } }): Promise<{ cursor: string | null; metadata: unknown } | null> } };
 

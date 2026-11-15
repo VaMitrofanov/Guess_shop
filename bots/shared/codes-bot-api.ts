@@ -90,3 +90,22 @@ export function botOrderKey(platform: string, subject: string, denomination: num
   // Форма UUID v4 (сервер проверяет z.uuid()).
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex[16], 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
+
+export type CodeIssueStatus =
+  | "issued" | "not_found" | "not_paid" | "already" | "refunded"
+  | "duplicate_code" | "bad_code" | "denomination_mismatch" | "bad_request" | "error";
+
+/**
+ * Ручная выдача кода из беседы админов (16.11.2026) — тот же
+ * `/api/internal/codes/issue`, что у `scripts/codes-issue.mjs`. Код в ответе
+ * не возвращается; письмо/кабинет/чат бота сайт доставляет сам.
+ */
+export async function issueCodeViaWeb(publicId: string, code: string): Promise<{ status: CodeIssueStatus; email?: string; chat?: boolean | null }> {
+  try {
+    const { data } = await signedPost<{ ok?: boolean; status?: CodeIssueStatus; email?: string; chat?: boolean | null }>(
+      "/api/internal/codes/issue", { publicId, code, label: "tg-reply" }, 30_000);
+    return { status: data.status ?? "error", email: data.email, chat: data.chat };
+  } catch {
+    return { status: "error" };
+  }
+}

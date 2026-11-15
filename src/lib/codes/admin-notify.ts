@@ -4,7 +4,7 @@ import { formatAdminNotice } from "../../../bots/shared/notify-format";
 import { formatRubKopecks } from "@/lib/codes-pricing";
 
 /**
- * Пуш админам о заказе кода — в беседу «Уведы», тема «Нужно действие»
+ * Пуш админам о заказе кода — в беседу «Уведы», тема «Коды» (до 16.11 — «Нужно действие»)
  * (правило проекта: всё админам — через `adminTargets`, не в личку).
  * Значения кода и адреса получателя здесь не бывает никогда.
  */
@@ -26,7 +26,9 @@ export async function notifyCodeAdmins(input: {
     next: input.next,
   });
   try {
-    const targets = await adminTargets("action", { loud: input.marker === "urgent" });
+    // Своя тема «Коды» (16.11.2026). Её ещё нет (бот не перезапускался) — адресат
+    // сам упадёт в личку админов: `adminTargets` без темы шлёт в ADMIN_IDS.
+    const targets = await adminTargets("codes", { loud: true, urgent: input.marker === "urgent" });
     await Promise.allSettled(targets.map(async (target) => {
       if (await sendTelegramMessage(token, target.chatId, text, target.extra)) return;
       // Telegram отклонил разметку («can't parse entities») — алерт о деньгах не

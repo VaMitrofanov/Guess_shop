@@ -304,8 +304,13 @@ export const CODES_MENU_LINE = "🎟 <b>Код Roblox</b> — Robux сразу �
 
 /** Подписи кнопок нижнего меню TG. */
 export const CODES_MENU_BTN = {
-  codes: "🎟 Код Robux — сразу",
+  // Было «🎟 Код Robux — сразу»: при ручной выдаче (CODES_BACKORDER) читалось
+  // как «код придёт сразу», а он приходил спустя часы (16.11.2026).
+  codes: "🎟 Код Robux",
   invite: "🤝 Скидка за друзей",
 } as const;
+
+/** Старые подписи — у людей остаётся прежняя клавиатура, нажатие должно работать. */
+export const CODES_MENU_BTN_LEGACY = ["🎟 Код Robux — сразу"] as const;
 
 export { CODE_PRICES };
