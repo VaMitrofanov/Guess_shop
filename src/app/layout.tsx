@@ -12,15 +12,21 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+// Моно и «пиксельный» шрифты нужны в паре мест (инструкция, помощник
+// подключения, админка) — без предзагрузки (16.11.2026): иначе каждая страница
+// на мобильном интернете сначала тянула их вместе с основными и позже рисовала
+// первый экран. Где они используются, браузер подгрузит их сам.
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  preload: false,
 });
 
 const pressStart = Press_Start_2P({
   variable: "--font-pixel",
   weight: "400",
   subsets: ["latin", "cyrillic"],
+  preload: false,
 });
 
 const unbounded = Unbounded({
