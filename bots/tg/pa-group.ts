@@ -23,7 +23,7 @@ import { flagsOf } from "../shared/order-flags";
 import { profileText, recentBadReviewsWithBuyers, whoIs } from "../shared/buyer-identity";
 import { PA_AI_MODEL, plain } from "../shared/pa-ai-support";
 import { card, loadSettings, saveSettings, type PaTopic } from "./pa-ai";
-import { ADMIN_NOTIFY_STREAM, ADMIN_TOPICS, ADMIN_TOPIC_KEYS, loadAdminRoute, resetAdminRouteCache } from "../shared/admin-route";
+import { ADMIN_NOTIFY_STREAM, ADMIN_TOPICS, ADMIN_TOPIC_KEYS, loadAdminRoute, resetAdminRouteCache, saveTopicLook } from "../shared/admin-route";
 import { pendingPaymentDetails, pendingRejectionReason, pendingReviewRejectReason } from "./session";
 
 /* ── Беседа уведомлений (14.11.2026) ────────────────────────────────────────
@@ -163,15 +163,17 @@ async function setGroupCommands(telegram: Telegraf["telegram"]): Promise<void> {
 }
 
 async function syncTopicLooks(telegram: Telegraf["telegram"]): Promise<void> {
+  const route = await loadAdminRoute(true);
   const fix = async (chatId: number | string, thread: number | undefined, name: string, emoji: string) => {
     if (!thread) return;
+    // Тему правили руками в Telegram — это решение человека, не перетираем.
+    if (route.looks[`${chatId}#${thread}`]) return;
     const icon = await topicIconId(telegram, emoji);
     await telegram.editForumTopic(chatId, thread, { name, ...(icon ? { icon_custom_emoji_id: icon } : {}) })
       .catch((e: unknown) => { if (!/NOT_MODIFIED/i.test(String(e))) console.warn(`[topics] «${name}»:`, e instanceof Error ? e.message : e); });
   };
   const s = await loadSettings(true);
   if (s.chatId) for (const t of TOPICS) await fix(s.chatId, s.topics[t.key], t.name, t.icon);
-  const route = await loadAdminRoute(true);
   if (route.chatId) for (const key of ADMIN_TOPIC_KEYS) await fix(route.chatId, route.topics[key], ADMIN_TOPICS[key].title, ADMIN_TOPICS[key].icon);
 }
 
@@ -559,6 +561,18 @@ export function registerPaGroup(bot: Telegraf): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const u = ctx.update as any;
     if (u.chat_member || u.my_chat_member) return next();
+    // Тему переименовали или сменили иконку руками — запомнить, чтобы бот при
+    // старте не вернул вид из кода (15.11.2026). Свои правки бота не считаем.
+    const edited = u.message?.forum_topic_edited;
+    if (edited && u.message.message_thread_id && !ctx.from?.is_bot) {
+      const patch: { name?: string; iconId?: string } = {};
+      if (typeof edited.name === "string") patch.name = edited.name;
+      if (typeof edited.icon_custom_emoji_id === "string") patch.iconId = edited.icon_custom_emoji_id;
+      await saveTopicLook(db, ctx.chat!.id, u.message.message_thread_id, patch)
+        .then(() => console.log(`[topics] тему ${ctx.chat!.id}#${u.message.message_thread_id} поправили руками:`, JSON.stringify(patch)))
+        .catch((e: unknown) => console.warn("[topics] правка темы не сохранилась:", e instanceof Error ? e.message : e));
+      return;
+    }
     // 14.11.2026: беседа уведомлений. Кнопки карточек («Выкупить», «ВЫКУПЛЕНО»,
     // «Реквизиты») работают отсюда; если после кнопки бот ждёт от админа текст
     // (причину, реквизиты), этот текст тоже пропускаем. Только админы и только

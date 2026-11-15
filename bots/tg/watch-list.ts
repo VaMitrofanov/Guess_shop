@@ -1,7 +1,7 @@
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
-import { adminTargets } from "../shared/admin-route";
+import { adminTargets, adminTopicName } from "../shared/admin-route";
 import { formatAdminNotice, orderRef, orderStatusWord } from "../shared/notify-format";
 import { escapeHtml, tgEdit, tgMessageId, tgSend } from "../shared/notify";
 import { flagsOf, openFlags, type OrderFlag } from "../shared/order-flags";
@@ -80,13 +80,13 @@ function watchReason(order: WatchedOrder): string {
   return openFlags(order).find((f) => f.kind === "WATCH")?.detail ?? "";
 }
 
-function rosterText(orders: WatchedOrder[]): string {
-  if (orders.length === 0) return "👀 <b>Под наблюдением — никого</b>\nПоставить: /watch КОД причина";
+function rosterText(orders: WatchedOrder[], topic: string): string {
+  if (orders.length === 0) return `<b>${escapeHtml(topic)} — никого</b>\nПоставить: /watch КОД причина`;
   const lines = orders.map((o) => {
     const reason = watchReason(o);
     return `• <code>${escapeHtml(o.wbCode ?? "")}</code> · ${o.amount} R$ · ${orderStatusWord(o.status)}${o.heldAt ? " · ❄️ заморожен" : ""}${reason ? ` — ${escapeHtml(reason)}` : ""}`;
   });
-  return `👀 <b>Под наблюдением · ${orders.length}</b>\n${lines.join("\n")}\n\n<i>Снять: /unwatch КОД</i>`;
+  return `<b>${escapeHtml(topic)} · ${orders.length}</b>\n${lines.join("\n")}\n\n<i>Снять: /unwatch КОД</i>`;
 }
 
 const NOISE = new Set(["GUIDE_OPENED", "ORDER_PIN", "ADMIN_CARD_ROOT"]);
@@ -145,7 +145,7 @@ async function sweep(bot: Telegraf): Promise<void> {
   }
 
   // Живой список — одно закреплённое сообщение, правится на месте.
-  const roster = rosterText(orders);
+  const roster = rosterText(orders, await adminTopicName("watch"));
   let messageId = state.rosterChatKey === group.key ? state.rosterMessageId ?? null : null;
   if (!messageId || !(await tgEdit(group.chatId, messageId, roster, { parse_mode: "HTML" }))) {
     messageId = tgMessageId(await tgSend(group.chatId, roster, { parse_mode: "HTML", ...group.extra, disable_notification: true }));
@@ -165,7 +165,7 @@ export function registerWatchList(bot: Telegraf): void {
     if (!/^[A-Z0-9-]{5,20}$/.test(code)) { await ctx.reply("Формат: /watch КОД причина — например /watch Z9PZWAJ 1★ отзыв и возврат"); return; }
     const actor = ctx.from.username ? `@${ctx.from.username}` : String(ctx.from.id);
     const result = await setWatch(code, true, rest.join(" ").trim() || null, actor);
-    await ctx.reply(result === "no_order" ? `Заказа ${code} нет.` : `👁 ${code} под наблюдением — всё по нему пойдёт в тему «Под наблюдением».`);
+    await ctx.reply(result === "no_order" ? `Заказа ${code} нет.` : `👁 ${code} под наблюдением — всё по нему пойдёт в тему «${await adminTopicName("watch")}».`);
     void sweep(bot).catch(() => undefined);
   });
   bot.command("unwatch", async (ctx) => {
@@ -178,7 +178,7 @@ export function registerWatchList(bot: Telegraf): void {
   });
   bot.command("watchlist", async (ctx) => {
     if (!isAdmin(ctx.from?.id)) return;
-    await ctx.reply(rosterText(await watchedOrders()), { parse_mode: "HTML" });
+    await ctx.reply(rosterText(await watchedOrders(), await adminTopicName("watch")), { parse_mode: "HTML" });
   });
   if (process.env.NODE_ENV !== "test") {
     setTimeout(() => { void sweep(bot).catch((e) => console.warn("[watch-list]", (e as Error)?.message)); }, 90_000);

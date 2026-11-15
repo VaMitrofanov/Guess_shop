@@ -87,7 +87,16 @@ export interface AdminTarget {
   group: boolean;
 }
 
-interface RouteConfig { chatId: string | null; topics: Partial<Record<string, number>>; off: string[]; dmIds: string[] }
+/**
+ * Ручная правка темы в Telegram (15.11.2026): владелец переименовал тему и
+ * сменил иконку, а бот при старте вернул всё как в коде. Теперь бот ловит
+ * служебное `forum_topic_edited` от человека и запоминает его здесь — ключ
+ * `<chat>#<тема>`, общий для обеих бесед. Запомненное бот не трогает, а тексты
+ * про тему берут имя отсюда (`adminTopicName`).
+ */
+export type TopicLook = { name?: string; iconId?: string };
+
+interface RouteConfig { chatId: string | null; topics: Partial<Record<string, number>>; off: string[]; dmIds: string[]; looks: Record<string, TopicLook> }
 
 /**
  * Темы, которые дублируются в личку `dmIds` (14.11.2026): общий аккаунт
@@ -116,16 +125,17 @@ let cache: { at: number; cfg: RouteConfig } | null = null;
 /** Настройки беседы из базы, с минутным кэшем. Никогда не бросает. */
 export async function loadAdminRoute(force = false): Promise<RouteConfig> {
   if (!force && cache && Date.now() - cache.at < CACHE_MS) return cache.cfg;
-  let cfg: RouteConfig = { chatId: null, topics: {}, off: [], dmIds: [] };
+  let cfg: RouteConfig = { chatId: null, topics: {}, off: [], dmIds: [], looks: {} };
   if (!routeDb) return cfg;
   try {
     const row = await routeDb.wbSyncCursor.findUnique({ where: { stream: ADMIN_NOTIFY_STREAM } });
-    const meta = (row?.metadata ?? {}) as { topics?: Record<string, number>; adminRouteOff?: string[]; dmIds?: string[] };
+    const meta = (row?.metadata ?? {}) as { topics?: Record<string, number>; adminRouteOff?: string[]; dmIds?: string[]; topicLooks?: Record<string, TopicLook> };
     cfg = {
       chatId: row?.cursor && /^-?\d+$/.test(row.cursor) ? row.cursor : null,
       topics: meta.topics ?? {},
       off: Array.isArray(meta.adminRouteOff) ? meta.adminRouteOff : [],
       dmIds: Array.isArray(meta.dmIds) ? meta.dmIds.map(String).filter((id) => /^\d+$/.test(id)) : [],
+      looks: meta.topicLooks && typeof meta.topicLooks === "object" ? meta.topicLooks : {},
     };
   } catch { /* база недоступна — личка */ }
   cache = { at: Date.now(), cfg };
@@ -147,6 +157,29 @@ export async function setAdminDm(db: { wbSyncCursor: { findUnique: CursorDb["wbS
   });
   cache = null;
   return true;
+}
+
+/** Запомнить ручную правку темы (имя и/или иконку). */
+export async function saveTopicLook(db: { wbSyncCursor: { findUnique: CursorDb["wbSyncCursor"]["findUnique"]; upsert(args: unknown): Promise<unknown> } }, chatId: string | number, thread: number, patch: TopicLook): Promise<void> {
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: ADMIN_NOTIFY_STREAM } });
+  const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+  const looks = { ...((meta.topicLooks ?? {}) as Record<string, TopicLook>) };
+  const key = `${chatId}#${thread}`;
+  looks[key] = { ...looks[key], ...patch };
+  const metadata = { ...meta, topicLooks: looks };
+  await db.wbSyncCursor.upsert({
+    where: { stream: ADMIN_NOTIFY_STREAM },
+    create: { stream: ADMIN_NOTIFY_STREAM, cursor: row?.cursor ?? null, metadata },
+    update: { metadata },
+  });
+  cache = null;
+}
+
+/** Имя темы беседы уведомлений: как назвали в Telegram, иначе из кода. */
+export async function adminTopicName(topic: AdminTopic): Promise<string> {
+  const cfg = await loadAdminRoute();
+  const thread = cfg.topics[topic];
+  return (cfg.chatId && thread ? cfg.looks[`${cfg.chatId}#${thread}`]?.name : undefined) ?? ADMIN_TOPICS[topic].title;
 }
 
 /** Сбросить кэш (после создания тем). */
