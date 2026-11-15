@@ -2,6 +2,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
+import { noteDbsAdminReply } from "../shared/wb-delivery-admin-notify";
 import { parseWbReplyCallback, sendWbChatReply, wbOrderForMessage, wbReplyFailText, wbReplyTemplate } from "../shared/wb-chat-reply";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +41,9 @@ export function registerWbReply(bot: Telegraf): void {
       return;
     }
     await ctx.answerCbQuery("Ушло в чат WB ✅").catch(() => undefined);
+    // Отметка «кто ответил» — строкой в том же уведе; отдельное сообщение —
+    // только если разговора уже нет в памяти (рестарт бота).
+    if (await noteDbsAdminReply(parsed.wbOrderId, actor, KIND_LABEL[parsed.kind])) return;
     await ctx.reply(`✅ В чат WB · ${escapeHtml(actor)}: ${KIND_LABEL[parsed.kind]}`, {
       parse_mode: "HTML",
       disable_notification: true,
@@ -56,6 +60,10 @@ export function registerWbReply(bot: Telegraf): void {
     if (!wbOrderId) return next();
     const actor = actorOf(ctx.from);
     const result = await sendWbChatReply(db as never, wbOrderId, msg.text, actor);
+    if (result.sent && await noteDbsAdminReply(wbOrderId, actor, msg.text)) {
+      await ctx.react("👍").catch(() => undefined);
+      return;
+    }
     await ctx.reply(result.sent ? `✅ Ушло в чат WB · ${escapeHtml(actor)}` : `⚠️ Не ушло: ${wbReplyFailText(result.reason)}`, {
       parse_mode: "HTML",
       disable_notification: true,

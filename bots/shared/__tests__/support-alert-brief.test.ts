@@ -9,9 +9,10 @@
  * Тесты держат ровно то, ради чего справка добавлена: статус, возраст, что
  * держит заказ, и то, что справка НИКОГДА не отменяет само сообщение.
  */
-export {};
+import { resetConversations } from "../buyer-conversation-notice";
 
 const tgSend = jest.fn();
+const tgEdit = jest.fn(async () => true);
 const orderFindUnique = jest.fn();
 const orderFindFirst = jest.fn();
 const orderCount = jest.fn();
@@ -20,6 +21,8 @@ const userFindUnique = jest.fn();
 jest.mock("../notify", () => ({
   tgSend: (...args: unknown[]) => tgSend(...args),
   tgSendPhoto: jest.fn(),
+  tgEdit: (...args: unknown[]) => (tgEdit as (...a: unknown[]) => unknown)(...args),
+  tgDelete: jest.fn(async () => undefined),
   escapeHtml: (s: string) => s,
 }));
 jest.mock("../db", () => ({
@@ -78,6 +81,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  resetConversations();
   tgSend.mockReset();
   orderFindUnique.mockReset();
   orderFindFirst.mockReset();
@@ -100,11 +104,13 @@ describe("справка по заказу внутри алерта подде�
     await call();
 
     const text = sentText();
-    expect(text).toContain("📍 Причина: <b>Заказ долго в обработке</b>");
+    expect(text).toContain("📍 <b>Заказ долго в обработке</b>");
     expect(text).toContain("ждёт ссылку на геймпасс");
-    expect(text).toContain("16 дней");
+    expect(text).toContain("16 дн");
+    // Всё о заказе — одной строкой (16.11.2026).
+    expect(text.split("\n").filter((l) => l.startsWith("📦"))).toHaveLength(1);
     // Причина — то, с чем пришёл человек; справка — то, что на самом деле.
-    expect(text.indexOf("📍 Причина")).toBeLessThan(text.indexOf("📦 Заказ"));
+    expect(text.indexOf("📍")).toBeLessThan(text.indexOf("📦"));
   });
 
   it("на «ждёт ссылку» говорит, что бот уже отмолчал все напоминания", async () => {
@@ -185,7 +191,7 @@ describe("справка по заказу внутри алерта подде�
   it("повторный клиент виден числом заказов", async () => {
     orderFindUnique.mockResolvedValue(order());
     await call();
-    expect(sentText()).toContain("4-й заказ");
+    expect(sentText()).toContain("4-й заказ клиента");
   });
 
   it("без кода берёт последний тронутый заказ клиента", async () => {
@@ -210,8 +216,8 @@ describe("справка не может отменить само сообще�
 
     const text = sentText();
     expect(tgSend).toHaveBeenCalledTimes(2); // оба админа
-    expect(text).toContain("📍 Причина: <b>Заказ долго в обработке</b>");
-    expect(text).not.toContain("📦 Заказ:");
+    expect(text).toContain("📍 <b>Заказ долго в обработке</b>");
+    expect(text).not.toContain("📦");
   });
 
   it("заказа нет в базе — алерт всё равно уходит", async () => {
@@ -248,21 +254,40 @@ describe("описание проблемы в алерте", () => {
     await callWithProblem("не пришли робуксы, уже три дня");
 
     const text = sentText();
-    expect(text).toContain("💬 <b>«не пришли робуксы, уже три дня»</b>");
+    expect(text).toMatch(/💬 <i>\d\d:\d\d<\/i> не пришли робуксы, уже три дня/);
     // Сначала то, с чем пришёл человек; потом этап и справка по заказу.
-    expect(text.indexOf("💬")).toBeLessThan(text.indexOf("📍 Причина"));
-    expect(text.indexOf("💬")).toBeLessThan(text.indexOf("📦 Заказ"));
+    expect(text.indexOf("💬")).toBeLessThan(text.indexOf("📍"));
+    expect(text.indexOf("💬")).toBeLessThan(text.indexOf("📦"));
   });
 
   it("скриншот к обращению виден ссылкой", async () => {
     orderFindUnique.mockResolvedValue(order());
     await callWithProblem("вот скрин", { problemPhotoUrl: "https://vk.com/photo1" });
-    expect(sentText()).toContain("🖼 Скриншот: https://vk.com/photo1");
+    expect(sentText()).toContain("🖼 https://vk.com/photo1");
   });
 
   it("без описания алерт остаётся прежним — строка не рисуется пустой", async () => {
     orderFindUnique.mockResolvedValue(order());
     await call();
     expect(sentText()).not.toContain("💬");
+  });
+});
+
+/* ── Одна карточка на обращение (16.11.2026) ─────────────────────────────── */
+describe("второе сообщение клиента дописывается в ту же карточку", () => {
+  it("второе описание — правка, а не новая карточка", async () => {
+    orderFindUnique.mockResolvedValue(order());
+    let id = 500;
+    tgSend.mockImplementation(async () => ({ ok: true, result: { message_id: ++id } }));
+    tgEdit.mockClear();
+    const base = { platform: "TG" as const, userDisplay: "@a", tgId: "777", contextKey: "pending_long", wbCode: "VGAA3F2", denomination: 500 };
+    await sendAdminSupportAlert({ ...base, problemText: "уже месяц в очереди" });
+    await sendAdminSupportAlert({ ...base, problemText: "ау, ответьте" });
+    expect(tgSend).toHaveBeenCalledTimes(2); // по одной карточке каждому из двух админов
+    expect(tgEdit).toHaveBeenCalledTimes(2);
+    const edited = String((tgEdit.mock.calls[0] as unknown[])[2]);
+    expect(edited).toContain("уже месяц в очереди");
+    expect(edited).toContain("ау, ответьте");
+    expect(edited).toContain("обращение в поддержку · 2");
   });
 });

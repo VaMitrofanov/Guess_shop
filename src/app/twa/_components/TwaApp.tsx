@@ -90,14 +90,26 @@ const SCREEN_PARENT: Partial<Record<Screen, Screen>> = {
   system: "settings",
 };
 
+/** Код заказа, с которым открыли TWA: `?q=` (web_app-кнопка в личке),
+ *  `tgWebAppStartParam` в адресе или `start_param` (ссылка `?startapp=` из беседы). */
+function launchOrderQuery(): string {
+  const search = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const raw =
+    search.get("q") ||
+    search.get("tgWebAppStartParam") ||
+    hash.get("tgWebAppStartParam") ||
+    window.Telegram?.WebApp?.initDataUnsafe?.start_param ||
+    "";
+  return raw.trim();
+}
+
 export default function TwaApp() {
   const [auth,               setAuth]               = useState<"loading" | "ok" | "error">("loading");
   const [token,              setToken]              = useState<string | null>(null);
   const [screen,             setScreen]             = useState<Screen>(() => {
     if (typeof window === "undefined") return "dashboard";
-    const q = new URLSearchParams(window.location.search).get("q");
-    const start = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
-    return q || start ? "orders" : "dashboard";
+    return launchOrderQuery() ? "orders" : "dashboard";
   });
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
@@ -116,10 +128,28 @@ export default function TwaApp() {
   // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
   const [orderQueryPreload,  setOrderQueryPreload]  = useState<string>(() => {
     if (typeof window === "undefined") return "";
-    const fromUrl = new URLSearchParams(window.location.search).get("q") ?? "";
-    const fromStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param ?? "";
-    return (fromUrl || fromStartParam || "").trim();
+    return launchOrderQuery();
   });
+  /* Кнопка «Открыть заказ» в беседе — ссылка `t.me/<бот>?startapp=<код>`.
+     `telegram-web-app.js` грузится afterInteractive, то есть ПОСЛЕ первого
+     рендера: initializer выше `Telegram.WebApp` ещё не видит, и код терялся —
+     открывалась главная (16.11.2026). Адрес обычно уже несёт
+     `tgWebAppStartParam`; если нет — дожидаемся скрипта и докидываем код сами.
+     Экраны рисуются только после входа, так что «Заказы» ещё не смонтированы. */
+  useEffect(() => {
+    if (orderQueryPreload) return;
+    let stopped = false;
+    const deadline = Date.now() + 4000;
+    const poll = () => {
+      if (stopped) return;
+      const code = launchOrderQuery();
+      if (code) { setOrderQueryPreload(code); setScreen("orders"); return; }
+      if (!window.Telegram?.WebApp && Date.now() < deadline) window.setTimeout(poll, 60);
+    };
+    poll();
+    return () => { stopped = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Ф2: виджет «Ошибки» дашборда «Свои» открывает Заказы сразу на вкладке ERROR.
   const [ordersTabPreload,   setOrdersTabPreload]   = useState<string>("");
   // «Новый заказ» на главной раньше вёл на вкладку NEW (лента заказов, ждущих

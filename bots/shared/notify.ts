@@ -6,6 +6,7 @@
  */
 
 import { telegramRequestInit } from "./telegram-photo";
+import { countNoticeSent } from "./notice-stats";
 
 // ── Telegram ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,23 @@ export function tgDeliveryOutcome(sent: unknown): TgDeliveryOutcome {
 
 /** Send a text message to a Telegram chat. Returns the sent message object. */
 export async function tgSend(
+  chatId: string | number,
+  text: string,
+  extra: Record<string, unknown> = {}
+): Promise<Record<string, unknown>> {
+  const reply = await tgSendRaw(chatId, text, extra);
+  // Счётчик уведов админам (`notice-stats.ts`): беседы и личка админов, не клиенты.
+  if ((reply as TelegramReply)?.ok === true && isAdminChat(chatId)) countNoticeSent(chatId, extra.message_thread_id);
+  return reply;
+}
+
+function isAdminChat(chatId: string | number): boolean {
+  const id = String(chatId);
+  if (id.startsWith("-")) return true;
+  return (process.env.ADMIN_IDS ?? "").split(",").map((s) => s.trim()).includes(id);
+}
+
+async function tgSendRaw(
   chatId: string | number,
   text: string,
   extra: Record<string, unknown> = {}

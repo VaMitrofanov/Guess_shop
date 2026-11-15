@@ -22,6 +22,7 @@ import { registerReleaseNotes } from "./release-notes";
 import { registerWatchList } from "./watch-list";
 import { registerWbReply } from "./wb-reply";
 import { registerWbMorningDigest } from "./wb-morning-digest";
+import { registerNoticeStatsReport } from "./notice-stats-report";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -61,6 +62,7 @@ export function registerPaBusiness(bot: Telegraf): void {
   // 💬 Ответ в чат WB из Telegram и ☀️ утренняя сводка WB (15.11.2026) — до беседы админов.
   registerWbReply(bot);
   registerWbMorningDigest(bot);
+  registerNoticeStatsReport(bot);
   // Беседа админов: защита от ответов в группе, ассистент, темы, сводка.
   registerPaGroup(bot);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -7,7 +7,7 @@ import {
 } from "./notify-format";
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
 import { adminTargets, adminTargetsForNotice, replyToRootFor } from "./admin-route";
-import { noteBuyerMessage } from "./buyer-conversation-notice";
+import { noteAdminReply, noteBuyerMessage } from "./buyer-conversation-notice";
 import { rememberWbReplyMessage, wbReplyMarkup } from "./wb-reply-buttons";
 
 const ADMIN_IDS: string[] = [...new Set(
@@ -101,8 +101,15 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: str
         return messageId;
       },
       edit: (target, messageId, text) => tgEdit(target.chatId, messageId, text, { parse_mode: "HTML", ...markup }),
+      remove: (target, messageId) => tgDelete(target.chatId, messageId),
     },
   })).catch((err) => console.warn(`[dbs-notify] сообщение покупателя: ${err instanceof Error ? err.message : err}`));
+}
+
+/** Админ ответил в чат WB из Telegram — строкой «↩️» в увед разговора.
+ *  `false` — разговора нет в памяти, подтверждать отдельным сообщением. */
+export function noteDbsAdminReply(wbOrderId: string, actor: string, what: string): Promise<boolean> {
+  return noteAdminReply(`dbs:${wbOrderId}`, actor, what).catch(() => false);
 }
 
 /** Новые находки сверки денег WB с выдачей — одним сообщением на проход. */

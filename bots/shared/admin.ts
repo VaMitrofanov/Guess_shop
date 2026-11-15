@@ -8,7 +8,8 @@
  */
 
 import { queueAdminDigest } from "./admin-digest";
-import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
+import { tgSend, tgSendPhoto, tgEdit, tgDelete, escapeHtml } from "./notify";
+import { hiddenCount, noteBuyerMessage, type ConversationView } from "./buyer-conversation-notice";
 import { downloadPhoto } from "./telegram-photo";
 import { db } from "./db";
 import { formatOrderAge } from "./order-age";
@@ -127,11 +128,27 @@ export interface SupportAlertPayload {
 /** ❄️ Строка заморозки для алертов поддержки: человек с заморозкой должен быть
  *  отличим от обычного покупателя ДО того, как менеджер начнёт отвечать
  *  «сейчас выкупим» по заказу, который выкупать нельзя. */
-async function heldLinesFor(p: SupportAlertPayload): Promise<string[]> {
-  const held = await heldCustomerFor(db, { tgId: p.tgId, vkId: p.vkId });
-  if (!held) return [];
-  const codes = held.codes.map((c) => `<code>${escapeHtml(c)}</code>`).join(", ");
-  return [`❄️ <b>Заморожен:</b> ${escapeHtml(held.reason)}`, `❄️ Коды: ${codes}`];
+async function heldFor(p: SupportAlertPayload): Promise<{ reason: string; codes: string[] } | null> {
+  return heldCustomerFor(db, { tgId: p.tgId, vkId: p.vkId });
+}
+
+/** Одна строка заморозки (16.11.2026): коды — только те, которых нет в шапке. */
+function heldLine(held: { reason: string; codes: string[] } | null, headCode: string | null | undefined): string | null {
+  if (!held) return null;
+  const others = held.codes.filter((c) => c !== headCode).map((c) => `<code>${escapeHtml(c)}</code>`);
+  return `❄️ <b>Заморожен:</b> ${escapeHtml(held.reason)}${others.length ? ` · ещё ${others.join(", ")}` : ""}`;
+}
+
+/** Возраст коротко для справки: «12 мин», «5 ч», «🔴 47 дн». Полный формат
+ *  (`formatOrderAge`, «🔴 47 дней 3 ч · старше 2 недель») растягивал увед на две строки. */
+function shortAge(from: Date | string, now = Date.now()): string {
+  const diff = Math.max(0, now - new Date(from).getTime());
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min} мин`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} ч`;
+  const d = Math.floor(h / 24);
+  return `${d >= 7 ? "🔴 " : d >= 3 ? "🟠 " : ""}${d} дн`;
 }
 
 /* ── Что за заказ у человека, который зовёт поддержку ────────────────────────
@@ -205,7 +222,7 @@ function blockerLine(order: any): string | null {
       } else {
         parts.push("🧩 Пасса нет — выкупать нечего");
       }
-      if (order.pendingAt) parts.push(`в очереди ${formatOrderAge(order.pendingAt)}`);
+      if (order.pendingAt) parts.push(`в очереди ${shortAge(order.pendingAt)}`);
       break;
     }
     case "ERROR": {
@@ -221,11 +238,11 @@ function blockerLine(order: any): string | null {
       // Самый частый разговор «долго в обработке» — про уже выкупленный заказ:
       // робуксы у Roblox лежат в Pending, и срок решает он, а не мы.
       if (!order.completedAt) { parts.push("✅ Выкуплен"); break; }
-      parts.push(`✅ Выкуплен, прошло ${formatOrderAge(order.completedAt)}`);
+      parts.push(`✅ Выкуплен ${shortAge(order.completedAt)} назад`);
       /* Админ говорит то же, что клиент слышал от бота (26.10.2026): срока нет,
          робуксы в Pending, дальше решает Roblox. Проблема — только если в
          Pending Robux нет суммы заказа (скриншот Transactions). */
-      parts.push(`💎 в Pending у Roblox — с нашей стороны всё; проблема, только если в Pending Robux нет суммы заказа`);
+      parts.push(`💎 в Pending у Roblox — с нашей стороны всё (проблема, только если суммы нет в Pending Robux)`);
       break;
     }
     case "REJECTED":
@@ -275,14 +292,17 @@ async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBr
     // Полосу называем только у DBS: там у разговора другие сроки и другой чат.
     // У обычного WB-заказа источник совпал бы с платформой из шапки — шум.
     const lane = order.orderSource === "WB_DBS" ? " · 🚚 WB DBS" : "";
-    const lines: string[] = [
-      `📦 Заказ: <b>${status}</b> · возраст ${formatOrderAge(order.createdAt)}${lane}`,
-    ];
+    // Всё о заказе — одной строкой (16.11.2026): статус, возраст, что держит,
+    // какой по счёту. Раньше это были 3–4 строки с «старше 2 недель» дважды.
     const blocker = blockerLine(order);
-    if (blocker) lines.push(blocker);
-    if (ordersTotal > 1) lines.push(`👤 ${ordersTotal}-й заказ этого клиента`);
+    const lines: string[] = [[
+      `📦 <b>${status}</b> · ${shortAge(order.createdAt)}${lane}`,
+      blocker,
+      ordersTotal > 1 ? `${ordersTotal}-й заказ клиента` : null,
+    ].filter(Boolean).join(" · ")];
     const note = lastNoteLine(order.adminNote, Boolean(order.robloxUsername));
-    if (note) lines.push(`📝 ${escapeHtml(note)}`);
+    // Заметка о заморозке повторяет строку «❄️ Заморожен» — её не тащим.
+    if (note && !note.startsWith("[ЗАМОРОЗКА")) lines.push(`📝 ${escapeHtml(note)}`);
 
     return { lines, code: order.wbCode ?? null, denomination: order.amount ?? null };
   } catch (error) {
@@ -293,41 +313,50 @@ async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBr
 
 export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<void> {
   const label = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
-  const [heldLines, brief] = await Promise.all([heldLinesFor(p), supportOrderBrief(p)]);
-  const frozen = heldLines.length > 0;
+  const [held, brief] = await Promise.all([heldFor(p).catch(() => null), supportOrderBrief(p)]);
+  const frozen = held !== null;
   // Код в шапке — тот, по которому собрана справка: иначе строка ссылалась бы
   // на один заказ, а «📦 Заказ: …» под ней — на другой.
   const code = p.wbCode ?? brief.code;
   const denomination = p.denomination ?? brief.denomination;
 
-  const text = formatAdminNotice({
-    // Замороженный в поддержке — не «человеку нужна помощь», а «сейчас пойдёт
-    // разговор по заказу, который выкупать нельзя»: это красный, не оранжевый.
-    marker: frozen ? "urgent" : "action",
-    zone: "ПОДДЕРЖКА",
-    title: frozen ? "пишет ЗАМОРОЖЕННЫЙ клиент" : "обращение в поддержку",
-    lines: [
-      orderRef({ code, denomination }, [
-        p.userDisplay,
-        `${p.platform}`,
-        mskTime(new Date()),
-      ]),
-      ...heldLines,
-      // Слова человека — выше всего нашего: это то, с чем он пришёл. «📍
-      // Причина» под ними остаётся этапом, с которого он позвал помощь.
-      p.problemText ? `💬 <b>«${escapeHtml(p.problemText)}»</b>` : null,
-      p.problemPhotoUrl ? `🖼 Скриншот: ${escapeHtml(p.problemPhotoUrl)}` : null,
-      `📍 Причина: <b>${label}</b>`,
-      // Справка по заказу идёт ПОСЛЕ причины: сначала «с чем пришли», потом
-      // «что на самом деле с заказом». В таком порядке их и читают.
-      ...brief.lines,
-    ],
-    next: p.platform === "TG" && p.tgId
-      ? `<a href="tg://user?id=${p.tgId}">написать пользователю</a>`
-      : p.platform === "VK" && p.vkId
-        ? vkDialogLink(p.vkId, "ответить из сообщества")
-        : "ответить из чата платформы",
-  });
+  const marker = frozen ? "urgent" as const : "action" as const;
+  const next = p.platform === "TG" && p.tgId
+    ? `<a href="tg://user?id=${p.tgId}">написать пользователю</a>`
+    : p.platform === "VK" && p.vkId
+      ? vkDialogLink(p.vkId, "ответить из сообщества")
+      : "ответить из чата платформы";
+  const ref = orderRef({ code, denomination }, [p.userDisplay, `${p.platform}`, mskTime(new Date())]);
+
+  // Один увед на обращение (16.11.2026, `buyer-conversation-notice.ts`): новые
+  // сообщения клиента дописываются строками «💬» в ту же карточку, после паузы
+  // она поднимается заново. Раньше каждое описание — новая полная карточка.
+  const render = (view: ConversationView) => {
+    const hidden = hiddenCount(view);
+    const count = view.total > 1 ? ` · ${view.total}` : "";
+    return formatAdminNotice({
+      // Замороженный в поддержке — не «человеку нужна помощь», а «сейчас пойдёт
+      // разговор по заказу, который выкупать нельзя»: это красный, не оранжевый.
+      marker: view.answered ? "done" : marker,
+      zone: "ПОДДЕРЖКА",
+      title: `${frozen ? "пишет ЗАМОРОЖЕННЫЙ клиент" : "обращение в поддержку"}${count}${view.answered ? " · ответили" : ""}`,
+      lines: [
+        ref,
+        heldLine(held, code),
+        // Слова человека — выше всего нашего: это то, с чем он пришёл. «📍» под
+        // ними — этап, с которого он позвал помощь.
+        hidden > 0 ? `<i>…ещё ${hidden} раньше</i>` : null,
+        ...view.lines
+          .filter((line) => !/^<i>[^<]*<\/i> $/.test(line)) // обращение без описания
+          .map((line) => (line.startsWith("↩️") ? line : `💬 ${line}`)),
+        `📍 <b>${label}</b>`,
+        // Справка по заказу — после слов: сначала «с чем пришли», потом «что на
+        // самом деле с заказом». В таком порядке их и читают.
+        ...brief.lines,
+      ],
+      next,
+    });
+  };
 
   // Кнопка ведёт в дашборд, уже наведённый на этот заказ: последний шаг, ради
   // которого иначе пришлось бы копировать код и искать его руками.
@@ -338,9 +367,29 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
   // Обращение по заказу встаёт в ту же ветку, что и карточки этого заказа:
   // «клиент пишет» и «вот его заказ» — одно дело, а не два.
   const roots = await orderThreadRoots(db, code);
-  const targets = await adminTargetsForNotice({ marker: frozen ? "urgent" : "action", zone: "ПОДДЕРЖКА" });
-  await Promise.allSettled(targets.map((t) =>
-    tgSend(t.chatId, text, { reply_markup: groupSafeMarkup(reply_markup(t.chatId), t), ...replyToRootFor(roots, t), ...t.extra })));
+  const targets = await adminTargetsForNotice({ marker, zone: "ПОДДЕРЖКА" });
+  const said = [p.problemText?.trim(), p.problemPhotoUrl ? `🖼 ${p.problemPhotoUrl}` : null].filter(Boolean).join(" ");
+
+  await noteBuyerMessage({
+    conversationKey: `sup:${p.platform}:${p.tgId ?? p.vkId ?? p.userDisplay}`,
+    head: ref,
+    text: said,
+    openOnTrivial: true,
+    render,
+    targets: targets.map((t) => ({
+      key: t.key,
+      chatId: t.chatId,
+      extra: { reply_markup: groupSafeMarkup(reply_markup(t.chatId), t), ...replyToRootFor(roots, t), ...t.extra },
+    })),
+    io: {
+      send: async (t, text) => {
+        const sent = await tgSend(t.chatId, text, { parse_mode: "HTML", ...t.extra }) as { result?: { message_id?: number } } | null;
+        return typeof sent?.result?.message_id === "number" ? sent.result.message_id : null;
+      },
+      edit: (t, id, text) => tgEdit(t.chatId, id, text, { parse_mode: "HTML", ...(t.extra.reply_markup ? { reply_markup: t.extra.reply_markup } : {}) }),
+      remove: (t, id) => tgDelete(t.chatId, id),
+    },
+  });
 }
 
 /** Public support contact. Used as the final URL the bot hands the user after

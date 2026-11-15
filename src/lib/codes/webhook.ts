@@ -148,7 +148,10 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
       orderPublicId: payment.order.publicId,
       denomination: payment.order.denomination,
       amountKopecks: payment.amountKopecks,
-      next: `выдать: node scripts/codes-issue.mjs ${payment.order.publicId} <код> (или попросить Claude)`,
+      // Текст уходит как HTML: голое «<код>» Telegram считал неизвестным тегом и
+      // отклонял сообщение целиком — алерт о ручной выдаче не дошёл ни разу
+      // (CODE-827TX8XJ, 15.11.2026). Угловые скобки — только экранированные.
+      next: `выдать: node scripts/codes-issue.mjs issue ${payment.order.publicId} &lt;код&gt; (или попросить Claude)`,
     });
   } else if (attention) {
     await notifyCodeAdmins({

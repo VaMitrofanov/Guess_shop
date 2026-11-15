@@ -31,9 +31,9 @@ describe("identityLines", () => {
     expect(identityLines(id({ matches: [m({ level: "likely", why: "то же имя на WB" })] }))[0]).toContain("Вероятно наш клиент");
   });
 
-  it("тёзки — предупреждение, без выдачи догадки за факт", () => {
+  it("тёзки — без строки (16.11), догадку за факт не выдаём", () => {
     const lines = identityLines(id({ namesakes: 4, matches: [m({ level: "namesake" })] }));
-    expect(lines).toEqual(["👥 «Анна» — 4 разных покупателей с таким именем в базе, не путать"]);
+    expect(lines).toEqual([]);
   });
 
   it("никого — новый покупатель", () => {

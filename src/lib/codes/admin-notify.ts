@@ -27,8 +27,22 @@ export async function notifyCodeAdmins(input: {
   });
   try {
     const targets = await adminTargets("action", { loud: input.marker === "urgent" });
-    await Promise.allSettled(targets.map((target) => sendTelegramMessage(token, target.chatId, text, target.extra)));
+    await Promise.allSettled(targets.map(async (target) => {
+      if (await sendTelegramMessage(token, target.chatId, text, target.extra)) return;
+      // Telegram отклонил разметку («can't parse entities») — алерт о деньгах не
+      // имеет права потеряться из-за оформления: повтор тем же текстом без тегов
+      // (CODE-827TX8XJ, 15.11.2026: «<код>» в подсказке убил алерт целиком).
+      await sendTelegramMessage(token, target.chatId, plainForTelegram(text), target.extra);
+    }));
   } catch {
     // Уведомление не должно ломать обработку платежа.
   }
+}
+
+/** HTML уведомления → тот же текст без тегов, с экранированными символами. */
+export function plainForTelegram(html: string): string {
+  const text = html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

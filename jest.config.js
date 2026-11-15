@@ -2,6 +2,10 @@ const { createDefaultPreset } = require("ts-jest");
 
 const tsJestTransformCfg = createDefaultPreset().transform;
 
+// Ночные тихие часы уведов (`isQuietHour`, admin-route.ts) зависят от времени
+// суток: без этого тесты на звук падали бы только ночью. Воркеры наследуют env.
+process.env.ADMIN_QUIET_HOURS = process.env.ADMIN_QUIET_HOURS || "off";
+
 /** @type {import("jest").Config} **/
 module.exports = {
   testEnvironment: "node",

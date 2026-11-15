@@ -198,31 +198,47 @@ function adminIds(): string[] {
  */
 export async function adminTargets(
   topic: AdminTopic,
-  opts: { loud?: boolean } = {},
+  opts: { loud?: boolean; urgent?: boolean; now?: Date } = {},
 ): Promise<AdminTarget[]> {
   const cfg = await loadAdminRoute();
   if (cfg.off.includes(topic)) return [];
   const thread = cfg.topics[topic];
+  // Ночью звук только у 🔴 (16.11.2026): остальное приходит молча и ждёт утра.
+  const hush = !opts.urgent && isQuietHour(opts.now);
   if (cfg.chatId && thread) {
     const silent = opts.loud === undefined ? ADMIN_TOPICS[topic].silent : !opts.loud;
     const group: AdminTarget = {
       key: `${cfg.chatId}#${thread}`,
       chatId: cfg.chatId,
-      extra: { message_thread_id: thread, ...(silent ? { disable_notification: true } : {}) },
+      extra: { message_thread_id: thread, ...(silent || hush ? { disable_notification: true } : {}) },
       group: true,
     };
-    // Копия в личку общего аккаунта — только важное и только со звуком.
+    // Копия в личку общего аккаунта — только важное. Ночная тишина копию не
+    // отменяет (владелец 16.11: личку оставить), только убирает звук.
     const dm = !silent && DM_TOPICS.includes(topic)
-      ? cfg.dmIds.map((id) => ({ key: id, chatId: id, extra: {}, group: false }))
+      ? cfg.dmIds.map((id) => ({ key: id, chatId: id, extra: hush ? { disable_notification: true } : {}, group: false }))
       : [];
     return [group, ...dm];
   }
-  return adminIds().map((id) => ({ key: id, chatId: id, extra: {}, group: false }));
+  return adminIds().map((id) => ({ key: id, chatId: id, extra: hush ? { disable_notification: true } : {}, group: false }));
+}
+
+/**
+ * Тихие часы по МСК: `ADMIN_QUIET_HOURS="0-8"` (с 00:00 до 08:00, по умолчанию),
+ * `"23-7"` — через полночь, `"off"` — выключить.
+ */
+export function isQuietHour(now: Date = new Date(), spec = process.env.ADMIN_QUIET_HOURS ?? "0-8"): boolean {
+  const m = /^(\d{1,2})-(\d{1,2})$/.exec(spec.trim());
+  if (!m) return false;
+  const from = Number(m[1]);
+  const to = Number(m[2]);
+  const hour = (now.getUTCHours() + 3) % 24;
+  return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
 }
 
 /** Тема и звук по уведомлению — одна строка на месте вызова. */
-export function adminTargetsForNotice(n: { marker: Marker; zone: Zone }): Promise<AdminTarget[]> {
-  return adminTargets(topicForNotice(n), { loud: isLoud(n.marker) });
+export function adminTargetsForNotice(n: { marker: Marker; zone: Zone }, now?: Date): Promise<AdminTarget[]> {
+  return adminTargets(topicForNotice(n), { loud: isLoud(n.marker), urgent: n.marker === "urgent", now });
 }
 
 /** Chat id по ключу получателя (`<chat>#<тема>` или id админа). */

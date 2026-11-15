@@ -128,3 +128,30 @@ describe("кнопки и ветки в беседе", () => {
     expect(replyToRootFor(roots, action)).toEqual({});
   });
 });
+
+describe("тихие часы (16.11.2026)", () => {
+  const at = (mskHour: number) => new Date(Date.UTC(2026, 10, 16, (mskHour + 21) % 24, 30));
+
+  it("00–08 МСК по умолчанию, через полночь и выключение", async () => {
+    const { isQuietHour } = await import("../admin-route");
+    expect(isQuietHour(at(3), "0-8")).toBe(true);
+    expect(isQuietHour(at(8), "0-8")).toBe(false);
+    expect(isQuietHour(at(23), "23-7")).toBe(true);
+    expect(isQuietHour(at(12), "23-7")).toBe(false);
+    expect(isQuietHour(at(3), "off")).toBe(false);
+  });
+
+  it("ночью 🟠 приходит без звука, но копия в личку остаётся; 🔴 — со звуком", async () => {
+    process.env.ADMIN_QUIET_HOURS = "0-8";
+    try {
+      const mod = await load({ cursor: "-100", metadata: { topics: { action: 5 }, dmIds: ["999"] } });
+      const night = at(3);
+      const action = await mod.adminTargetsForNotice({ marker: "action", zone: "DBS" }, night);
+      expect(action.map((t) => t.extra.disable_notification)).toEqual([true, true]);
+      const urgent = await mod.adminTargetsForNotice({ marker: "urgent", zone: "DBS" }, night);
+      expect(urgent.map((t) => t.extra.disable_notification)).toEqual([undefined, undefined]);
+    } finally {
+      process.env.ADMIN_QUIET_HOURS = "off";
+    }
+  });
+});

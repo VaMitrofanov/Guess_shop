@@ -187,8 +187,8 @@ export function contactOf(m: Pick<BuyerMatch, "tgUsername" | "tgId" | "vkId">): 
 
 /**
  * Строки для карточек и уведомлений (обычный текст, без HTML).
- * Точное — одной строкой «это наш клиент», догадка — «вероятно», тёзки —
- * предупреждением, чтобы не перепутать.
+ * Точное — одной строкой «это наш клиент», догадка — «вероятно». Тёзки строкой
+ * не выводятся (16.11.2026).
  */
 export function identityLines(identity: BuyerIdentity, opts: { max?: number } = {}): string[] {
   const max = opts.max ?? 2;
@@ -199,10 +199,10 @@ export function identityLines(identity: BuyerIdentity, opts: { max?: number } = 
   const likely = identity.matches.filter((m) => m.level === "likely");
   for (const m of exact.slice(0, max)) lines.push(`👤 Наш клиент: ${describe(m)} — ${m.why}`);
   if (exact.length === 0) for (const m of likely.slice(0, 1)) lines.push(`👤 Вероятно наш клиент: ${describe(m)} — ${m.why}`);
-  if (exact.length === 0 && likely.length === 0 && identity.namesakes > 1) {
-    lines.push(`👥 «${identity.buyerName}» — ${identity.namesakes} разных покупателей с таким именем в базе, не путать`);
-  }
-  if (lines.length === 0) lines.push("🆕 Новый покупатель — у нас его ещё нет");
+  // Строку «👥 «Андрей» — 7 разных покупателей с таким именем, не путать» владелец
+  // убрал 16.11.2026: три строки в каждом уведе и ни одного действия из неё.
+  // Тёзки без совпадения — просто без строки: «новым» такого не назовёшь.
+  if (lines.length === 0 && identity.namesakes <= 1) lines.push("🆕 Новый покупатель — у нас его ещё нет");
   return lines;
 }
 

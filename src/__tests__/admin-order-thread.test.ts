@@ -39,7 +39,8 @@ describe("Сообщения о заказе встают в его ветку",
 
   it("обращение в поддержку — ответом на карточку заказа", () => {
     expect(admin).toContain("const roots = await orderThreadRoots(db, code);");
-    expect(admin).toContain("tgSend(t.chatId, text, { reply_markup: groupSafeMarkup(reply_markup(t.chatId), t), ...replyToRootFor(roots, t), ...t.extra })");
+    // 16.11.2026: отправка ушла в склейку обращений; ветка — в extra цели.
+    expect(admin).toContain("extra: { reply_markup: groupSafeMarkup(reply_markup(t.chatId), t), ...replyToRootFor(roots, t), ...t.extra }");
   });
 
   it("подтверждённый выкуп — туда же", () => {
