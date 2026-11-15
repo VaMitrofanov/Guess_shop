@@ -96,6 +96,7 @@ export async function syncPaQuickReplies(tg: TelegramClient, dry = false): Promi
 const QUICK_STREAM = "pa-quick";
 
 export type QuickPlanOp =
+  /** Новое сообщение в тот же ярлык вместо `messageId` (вложение переносится), старое удаляется. */
   | { op: "edit"; shortcut: string; messageId: number; html: string }
   | { op: "rename"; shortcut: string; to: string }
   | { op: "delete"; shortcut: string }
@@ -125,6 +126,19 @@ async function protectedShortcutIds(tg: TelegramClient): Promise<Set<number>> {
   const full = await tg.invoke(new Api.users.GetFullUser({ id: new Api.InputUserSelf() }));
   const u = full.fullUser;
   return new Set([u.businessGreetingMessage?.shortcutId, u.businessAwayMessage?.shortcutId].filter((x): x is number => x != null));
+}
+
+/** Вложение сообщения ярлыка → то же вложение для повторной отправки (без перезаливки). */
+function inputMediaOf(media: Api.TypeMessageMedia | undefined): Api.TypeInputMedia | null {
+  if (media instanceof Api.MessageMediaDocument && media.document instanceof Api.Document) {
+    const d = media.document;
+    return new Api.InputMediaDocument({ id: new Api.InputDocument({ id: d.id, accessHash: d.accessHash, fileReference: d.fileReference }) });
+  }
+  if (media instanceof Api.MessageMediaPhoto && media.photo instanceof Api.Photo) {
+    const ph = media.photo;
+    return new Api.InputMediaPhoto({ id: new Api.InputPhoto({ id: ph.id, accessHash: ph.accessHash, fileReference: ph.fileReference }) });
+  }
+  return null;
 }
 
 async function listShortcuts(tg: TelegramClient): Promise<Api.QuickReply[]> {
@@ -182,10 +196,25 @@ export async function applyPaQuickPlan(tg: TelegramClient): Promise<boolean> {
         await tg.invoke(new Api.messages.EditQuickReplyShortcut({ shortcutId: q.shortcutId, shortcut: op.to }));
         results.push(`rename /${op.shortcut} → /${op.to}: ok`);
       } else {
+        // Не EditMessage: правку Telegram на сервере принимает, но приложения
+        // оператора её не видят — список ярлыков кэшируется по последнему
+        // сообщению, а у правки его номер прежний (15.11.2026, «ответы не
+        // изменились вообще»). Поэтому: новое сообщение в тот же ярлык (с тем же
+        // вложением), старое — удалить. Номер ярлыка не меняется, и приветствие /
+        // «нет на месте», которые ссылаются на него, продолжают работать.
         const [message, entities] = HTMLParser.parse(op.html);
-        await tg.invoke(new Api.messages.EditMessage({
-          peer: new Api.InputPeerSelf(), id: op.messageId, message, entities, noWebpage: true, quickReplyShortcutId: q.shortcutId,
-        }));
+        const res = await tg.invoke(new Api.messages.GetQuickReplyMessages({ shortcutId: q.shortcutId, id: [op.messageId], hash: 0 as never }));
+        const prev = ("messages" in res ? res.messages : []).find((m): m is Api.Message => m instanceof Api.Message && m.id === op.messageId);
+        if (!prev) { results.push(`edit /${op.shortcut} #${op.messageId}: сообщения нет`); continue; }
+        const target = new Api.InputQuickReplyShortcutId({ shortcutId: q.shortcutId });
+        const media = inputMediaOf(prev.media);
+        if (prev.media && !media) { results.push(`edit /${op.shortcut} #${op.messageId}: вложение не переносится — пропущено`); continue; }
+        if (media) {
+          await tg.invoke(new Api.messages.SendMedia({ peer: new Api.InputPeerSelf(), media, message, entities, randomId: generateRandomLong(), quickReplyShortcut: target }));
+        } else {
+          await tg.invoke(new Api.messages.SendMessage({ peer: new Api.InputPeerSelf(), message, entities, randomId: generateRandomLong(), noWebpage: true, quickReplyShortcut: target }));
+        }
+        await tg.invoke(new Api.messages.DeleteQuickReplyMessages({ shortcutId: q.shortcutId, id: [op.messageId] }));
         results.push(`edit /${op.shortcut} #${op.messageId}: ok`);
       }
     } catch (error) {
