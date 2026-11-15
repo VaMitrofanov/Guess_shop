@@ -28,7 +28,7 @@ import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
 import { adminTargets, type AdminTopic } from "../shared/admin-route";
 import { paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
-import { syncPaQuickReplies } from "./pa-quick-replies";
+import { applyPaQuickPlan, dumpPaQuickReplies, syncPaQuickReplies } from "./pa-quick-replies";
 import { startPaDigest } from "./pa-group";
 
 
@@ -261,6 +261,13 @@ export function startAutoWorkers(bot: Telegraf): void {
         if (n % 72 === 0) {
           const q = await syncPaQuickReplies(await paDeskClient(), mode === "dry");
           if (q.created || q.updated) console.log(`[pa-quick] создано ${q.created}, обновлено ${q.updated}, без изменений ${q.same}`);
+        }
+        // Ревизия ярлыков оператора (15.11.2026): выгрузка при старте и раз в 6 ч,
+        // план правок из базы — проверяется каждый проход (одно чтение БД).
+        if (mode === "on") {
+          const client = await paDeskClient();
+          if (n % 72 === 0) await dumpPaQuickReplies(client);
+          await applyPaQuickPlan(client);
         }
       } catch (e) {
         console.error("[pa-desk] tick:", e instanceof Error ? e.message : e);
