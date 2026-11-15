@@ -14,8 +14,9 @@ import { fetchCodesQueue, issueCodeViaWeb, type CodeIssueStatus } from "../share
    3. Ответ кодом (или ответ кодом прямо на алерт, или `/issue CODE-… код`) —
       бот выдаёт через сайт (`/api/internal/codes/issue`: письмо / кабинет /
       чат бота) и переписывает алерт в «🟢 код выдан · код под спойлером · кто ·
-      когда · письмо ушло», кнопку снимает. Сообщение с кодом НЕ удаляется
-      (владелец 16.11: «нужно видеть, какой именно код отправили»).
+      когда · письмо ушло», кнопку снимает. Сообщение админа с кодом бот
+      заменяет своей копией с кодом под спойлером (кто, какой заказ, выдан ли)
+      — код виден, но не светится (владелец 16.11).
    4. `/codes` — очередь оплаченных без кода, по кнопке на заказ.
 
    Только ADMIN_IDS. Регистрируется до беседы админов (`registerPaGroup`).
@@ -74,6 +75,17 @@ export function issuedAlertText(input: { publicId: string; amountLine: string | 
     input.code ? `🔑 Код: <tg-spoiler><code>${escapeHtml(input.code)}</code></tg-spoiler>` : null,
     `✅ ${escapeHtml(input.actor)} · ${mskTime(input.at)}${delivery ? ` · ${delivery}` : ""}`,
   ].filter(Boolean).join("\n");
+}
+
+/** Копия сообщения админа с кодом: код под спойлером, кто прислал, выдан ли. */
+export function codeCopyText(input: { publicId: string; code: string; actor: string; at: Date; issued: boolean; reason?: string }): string {
+  return [
+    input.issued
+      ? `🔑 <b>Код выдан</b> · <code>${input.publicId}</code>`
+      : `⚠️ <b>Код НЕ выдан</b> · <code>${input.publicId}</code> — ${escapeHtml(input.reason ?? "ошибка")}`,
+    `<tg-spoiler><code>${escapeHtml(input.code)}</code></tg-spoiler>`,
+    `прислал ${escapeHtml(input.actor)} · ${mskTime(input.at)}${input.issued ? "" : " · код покупателю не ушёл, можно прислать другой"}`,
+  ].join("\n");
 }
 
 /** Строка «CODE-… · 1 000 R$ · 1 199 ₽» из простого текста алерта (Telegram отдаёт его без разметки). */
@@ -180,25 +192,39 @@ export function registerCodesIssueReply(bot: Telegraf): void {
 
     const result = await issueCodeViaWeb(job.publicId, job.code);
     const actor = actorOf(ctx.from);
+    const issued = result.status === "issued";
+    const promptId = msg.reply_to_message && prompts.has(promptKey(ctx.chat.id, msg.reply_to_message.message_id))
+      ? msg.reply_to_message.message_id : null;
+    const thread = msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {};
 
-    if (result.status === "issued") {
-      // Подсказка своё отработала; её и сообщение с кодом не трогаем — по ним
-      // видно, кто и какой код отправил.
-      if (msg.reply_to_message) prompts.delete(promptKey(ctx.chat.id, msg.reply_to_message.message_id));
-      const text = issuedAlertText({ publicId: job.publicId, amountLine: pending?.amountLine ?? null, code: job.code, actor, at: new Date(), email: result.email, chat: result.chat });
-      const edited = pending?.alertId
-        ? await ctx.telegram.editMessageText(ctx.chat.id, pending.alertId, undefined, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }).then(() => true).catch(() => false)
-        : false;
-      if (!edited) {
-        await ctx.reply(text, { parse_mode: "HTML", disable_notification: true, ...(msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {}) }).catch(() => undefined);
-      }
-      return;
-    }
-
-    await ctx.reply(`⚠️ <code>${job.publicId}</code> — код не выдан: ${REASON[result.status] ?? result.status}.`, {
+    // Сообщение админа с кодом → наше, с кодом под спойлером (владелец 16.11:
+    // «код не удаляй, его нужно видеть… просто пусть станет спойлером»). Своё
+    // сообщение бот спрятать не может — меняем его на копию от бота: кто, по
+    // какому заказу, выдан ли, и сам код под спойлером. Оригинал убираем
+    // только ПОСЛЕ того, как копия встала, — код не теряется ни при каком сбое.
+    const copy = await ctx.reply(codeCopyText({
+      publicId: job.publicId, code: job.code, actor, at: new Date(), issued,
+      reason: issued ? undefined : REASON[result.status as Exclude<CodeIssueStatus, "issued">] ?? result.status,
+    }), {
       parse_mode: "HTML",
-      ...(msg.reply_to_message ? { reply_parameters: { message_id: msg.reply_to_message.message_id, allow_sending_without_reply: true } } : {}),
-      ...(msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {}),
-    }).catch(() => undefined);
+      disable_notification: true,
+      ...(pending?.alertId ? { reply_parameters: { message_id: pending.alertId, allow_sending_without_reply: true } } : {}),
+      ...thread,
+    }).catch(() => null);
+    if (copy) {
+      await ctx.deleteMessage(msg.message_id).catch(() => undefined);
+      // Подсказка «пришлите код» своё отработала — копия встаёт на её место.
+      if (promptId && issued) await ctx.telegram.deleteMessage(ctx.chat.id, promptId).catch(() => undefined);
+    }
+    if (promptId && issued) prompts.delete(promptKey(ctx.chat.id, promptId));
+    if (!issued) return;
+
+    const text = issuedAlertText({ publicId: job.publicId, amountLine: pending?.amountLine ?? null, code: job.code, actor, at: new Date(), email: result.email, chat: result.chat });
+    const edited = pending?.alertId
+      ? await ctx.telegram.editMessageText(ctx.chat.id, pending.alertId, undefined, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }).then(() => true).catch(() => false)
+      : false;
+    if (!edited) {
+      await ctx.reply(text, { parse_mode: "HTML", disable_notification: true, ...thread }).catch(() => undefined);
+    }
   });
 }

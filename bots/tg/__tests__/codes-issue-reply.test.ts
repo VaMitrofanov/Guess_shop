@@ -36,3 +36,21 @@ describe("алерт после выдачи", () => {
     expect(issuedAlertText({ publicId: "CODE-1", amountLine: null, actor: "a", at: new Date(), email: "failed" })).toContain("письмо НЕ ушло");
   });
 });
+
+import { codeCopyText } from "../codes-issue-reply";
+
+describe("копия сообщения с кодом — под спойлером", () => {
+  const at = new Date(Date.UTC(2026, 10, 15, 18, 40));
+  it("выдан: заказ, код под спойлером, кто прислал", () => {
+    const t = codeCopyText({ publicId: "CODE-827TX8XJ", code: "ABCD-1234", actor: "@owner", at, issued: true });
+    expect(t).toContain("🔑 <b>Код выдан</b> · <code>CODE-827TX8XJ</code>");
+    expect(t).toContain("<tg-spoiler><code>ABCD-1234</code></tg-spoiler>");
+    expect(t).toContain("прислал @owner · 21:40");
+  });
+  it("не выдан: причина и что делать", () => {
+    const t = codeCopyText({ publicId: "CODE-1", code: "X1Y2Z3", actor: "a", at, issued: false, reason: "номинал не совпал с заказом" });
+    expect(t).toContain("Код НЕ выдан");
+    expect(t).toContain("номинал не совпал");
+    expect(t).toContain("<tg-spoiler>");
+  });
+});
