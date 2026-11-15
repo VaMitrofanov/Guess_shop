@@ -1,3 +1,4 @@
+import { robuxWaitText } from "../robux-wait";
 import {
   buildRobuxEtaReply,
   buildRobuxEtaShort,
@@ -33,8 +34,9 @@ const D = 24 * H;
 const BOUGHT = new Date("2026-10-18T09:00:00Z");
 
 /** Срок не называем нигде (26.10.2026): Roblox стал держать Pending дольше 7 дней. */
-// 15.11.2026: разрешён ровно один ориентир — «переводит их на баланс за 5–7 дней» (`robux-wait.ts`); таймеры и даты по-прежнему нельзя.
-const NO_DEADLINE = /(?<!баланс за )(?<!баланс за 5–)\d\s*(?:[–-]\s*\d+\s*)?(?:дн|дня|дней|сут)|ориентир|осталось|срок (?:прош|вышел)|▰|▱/i;
+// 15.11.2026: разрешён ровно один ориентир — фраза `robuxWaitText` («до 30 дней», у части 5–7); таймеры и даты по-прежнему нельзя.
+const stripWait = (t: string) => t.split(robuxWaitText("ty")).join("").split(robuxWaitText("vy")).join("");
+const NO_DEADLINE = /\d\s*(?:[–-]\s*\d+\s*)?(?:дн|дня|дней|сут)|ориентир|осталось|срок (?:прош|вышел)|▰|▱/i;
 
 describe("распознавание «где мои робуксы?»", () => {
   it.each([
@@ -76,7 +78,7 @@ describe("ответ", () => {
       expect(r.text).toContain("зависит от Roblox");
       expect(r.text).toContain("не меньше 1200");
       expect(r.text).toContain(NO_ROBUX_BUTTON);
-      expect(r.text).not.toMatch(NO_DEADLINE);
+      expect(stripWait(r.text)).not.toMatch(NO_DEADLINE);
     }
   });
 
@@ -91,7 +93,7 @@ describe("ответ", () => {
       { amount: 1200, completedAt: BOUGHT },
     ], "plain", now)!;
     expect(r.text.indexOf("1200 R$")).toBeLessThan(r.text.indexOf("500 R$"));
-    expect(r.text).not.toMatch(NO_DEADLINE);
+    expect(stripWait(r.text)).not.toMatch(NO_DEADLINE);
   });
 
   it("выкуп старше 30 дней — таймера нет", () => {
@@ -101,11 +103,11 @@ describe("ответ", () => {
   it("короткий повтор и текст для чата WB — без срока, WB без разметки", () => {
     const short = buildRobuxEtaShort([{ amount: 1200, completedAt: BOUGHT }], "plain", now)!;
     expect(short).toContain("С нашей стороны всё сделано");
-    expect(short).not.toMatch(NO_DEADLINE);
+    expect(stripWait(short)).not.toMatch(NO_DEADLINE);
     const wb = buildRobuxEtaWbChat([{ amount: 1200, completedAt: BOUGHT }], late)!;
     expect(wb.text).not.toMatch(/https?:|<b>/);
     expect(wb.text).toContain("С нашей стороны всё сделано");
-    expect(wb.text).not.toMatch(NO_DEADLINE);
+    expect(stripWait(wb.text)).not.toMatch(NO_DEADLINE);
   });
 
   it("повтор в течение 10 минут распознаётся", () => {
@@ -161,7 +163,7 @@ describe("барьер перед поддержкой", () => {
   });
 
   it("ответ «Pending есть» — без срока", () => {
-    expect(robuxPendingSeenText("plain")).not.toMatch(NO_DEADLINE);
+    expect(stripWait(robuxPendingSeenText("plain"))).not.toMatch(NO_DEADLINE);
     expect(robuxPendingSeenText("plain")).toContain("С нашей стороны всё сделано");
   });
 });
@@ -208,7 +210,7 @@ describe("опрос «пришли ли робуксы?» (26.10.2026)", () => 
     const t = robuxSurveyText("html", 800);
     expect(t).toContain("в Pending или уже на балансе");
     expect(t).toContain("800 или больше");
-    expect(t).not.toMatch(NO_DEADLINE);
+    expect(stripWait(t)).not.toMatch(NO_DEADLINE);
     expect(robuxSurveyText("plain", 800)).not.toContain("<b>");
   });
 
@@ -225,7 +227,7 @@ describe("«что на скриншоте?» (26.10.2026, YS3NU3X)", () => {
     expect(q).toContain("Отзыв на Wildberries");
     expect(q).toContain("Transactions / Pending");
     const a = pendingPhotoReplyText("html");
-    expect(a).not.toMatch(NO_DEADLINE);
+    expect(stripWait(a)).not.toMatch(NO_DEADLINE);
     expect(a).toContain(NO_ROBUX_BUTTON);
   });
 
@@ -247,6 +249,6 @@ describe("«✅ Робуксы поступили» (27.10.2026)", () => {
     expect(robuxPendingSeenText("plain")).toContain(ROBUX_CONFIRM.label);
     const t = robuxConfirmText("html", 800);
     expect(t).toContain("800 R$");
-    expect(t).not.toMatch(NO_DEADLINE);
+    expect(stripWait(t)).not.toMatch(NO_DEADLINE);
   });
 });

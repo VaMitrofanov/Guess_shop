@@ -39,7 +39,7 @@ describe("умный FAQ", () => {
 describe("текст ожидания Robux", () => {
   it("ориентир есть, дат и отсчёта нет, виновата механика игры", () => {
     const t = robuxWaitText("ty");
-    expect(t).toContain("5–7 дней");
+    expect(t).toContain("до 30 дней");
     expect(t).toContain("От нас это не зависит");
     expect(t).not.toMatch(/осталось|до \d+ (ноября|декабря)|через \d+/);
     expect(robuxWaitText("vy")).toContain("ваш аккаунт");
