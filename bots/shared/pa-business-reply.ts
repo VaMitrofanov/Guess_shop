@@ -8,7 +8,7 @@
    Чистая функция: текст сообщения + заказы покупателя → ответ или `null`.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { buildRobuxEtaWbChat } from "./robux-eta";
+import { robuxDelaySupportText } from "./robux-wait";
 
 export interface PaOrder {
   wbCode: string;
@@ -50,12 +50,16 @@ const STAGE_TEXT: Record<string, (o: PaOrder) => string> = {
 };
 
 const DAY = 86_400_000;
+/** До скольких дней после выкупа «где робуксы» — ожидание (дальше — человеку). */
+const DONE_REPLY_DAYS = 45;
 
 /**
  * Ответ на вопрос о заказе или `null` (тогда отвечает человек):
  * • вопрос не про заказ;
  * • заказа нет, он заморожен, с ошибкой или ждёт оплаты — тут нужен человек;
- * • свежий выкуп старше 30 дней — это уже не «в пути».
+ * • выкуп старше 45 дней — это уже не ожидание, а проблема: человеку.
+ * Выкупленный — текст `/задержка` (15.11.2026, владелец: «пусть бот сам
+ * отправляет это всем, кто пишет где мои робуксы»).
  */
 export function paOrderReply(text: string, orders: PaOrder[], now: Date = new Date()): string | null {
   if (!isOrderStatusQuestion(text)) return null;
@@ -68,10 +72,9 @@ export function paOrderReply(text: string, orders: PaOrder[], now: Date = new Da
     const stage = STAGE_TEXT[o.status];
     return stage ? stage(o) : null;
   }
-  const done = byNew
-    .filter((o) => o.status === "COMPLETED" && o.completedAt && now.getTime() - o.completedAt.getTime() < 30 * DAY)
-    .map((o) => ({ amount: o.amount, completedAt: o.completedAt as Date, wbCode: o.wbCode }));
-  return buildRobuxEtaWbChat(done, now)?.text ?? null;
+  const done = byNew.find((o) => o.status === "COMPLETED" && o.completedAt
+    && now.getTime() - o.completedAt.getTime() < DONE_REPLY_DAYS * DAY);
+  return done ? robuxDelaySupportText() : null;
 }
 
 /** Карточка «Мой заказ» в боте одной ссылкой (`/start order`). */
@@ -86,6 +89,8 @@ export const BOT_ORDER_URL = "https://t.me/RobloxBankBot?start=order";
 export function paBotRedirectReply(text: string, orders: PaOrder[], now: Date = new Date()): string | null {
   const status = paOrderReply(text, orders, now);
   if (!status) return null;
+  // Выкупленный — ровно текст «/задержка», без хвоста про бота.
+  if (status === robuxDelaySupportText()) return status;
   return [
     status,
     "",

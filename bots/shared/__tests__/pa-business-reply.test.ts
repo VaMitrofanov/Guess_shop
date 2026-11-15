@@ -2,7 +2,8 @@
  * Ответ «где мой заказ» в чате поддержки @RobloxBank_PA (12.11.2026).
  * Фразы — настоящие вопросы покупателей.
  */
-import { isOrderStatusQuestion, paOrderReply, type PaOrder } from "../pa-business-reply";
+import { isOrderStatusQuestion, paBotRedirectReply, paOrderReply, type PaOrder } from "../pa-business-reply";
+import { robuxDelaySupportText } from "../robux-wait";
 
 const NOW = new Date("2026-11-12T12:00:00Z");
 const o = (over: Partial<PaOrder> = {}): PaOrder => ({
@@ -18,6 +19,7 @@ describe("isOrderStatusQuestion", () => {
     "у меня не пришли робуксы спустя 8 ДНЕЙ,что мне делать??",
     "все сделала,но пасс не купили что делать?",
     "Где заказ?",
+    "мой заказ выкупили 23 октября а робуксы до сих пор не пришли",
   ])("вопрос о заказе: %s", (text) => expect(isOrderStatusQuestion(text)).toBe(true));
 
   it.each([
@@ -47,6 +49,12 @@ describe("paOrderReply", () => {
     expect(r).toContain("Pending");
   });
 
+  it("выкуплен три недели назад — текст /задержка как есть", () => {
+    const orders = [o({ status: "COMPLETED", completedAt: new Date("2026-10-22T21:00:00Z") })];
+    expect(paOrderReply("мой заказ выкупили 23 октября а робуксы до сих пор не пришли", orders, NOW)).toBe(robuxDelaySupportText());
+    expect(paBotRedirectReply("где мои робуксы", orders, NOW)).toBe(robuxDelaySupportText());
+  });
+
   it("заморожен, ошибка, оплата, несколько живых, нет заказов — молчим (человеку)", () => {
     expect(paOrderReply("где заказ?", [o({ heldAt: NOW })], NOW)).toBeNull();
     expect(paOrderReply("где заказ?", [o({ status: "ERROR" })], NOW)).toBeNull();
@@ -55,7 +63,7 @@ describe("paOrderReply", () => {
     expect(paOrderReply("где заказ?", [], NOW)).toBeNull();
   });
 
-  it("выкуп старше 30 дней — не «в пути», молчим", () => {
+  it("выкуп старше 45 дней — не ожидание, молчим (человеку)", () => {
     expect(paOrderReply("робуксы не пришли", [o({ status: "COMPLETED", completedAt: new Date("2026-09-01T10:00:00Z") })], NOW)).toBeNull();
   });
 

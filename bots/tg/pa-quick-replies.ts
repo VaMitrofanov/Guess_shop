@@ -12,7 +12,7 @@
 
 import { Api, type TelegramClient } from "telegram";
 import { generateRandomLong } from "telegram/Helpers";
-import { robuxWaitText } from "../shared/robux-wait";
+import { robuxDelaySupportText } from "../shared/robux-wait";
 
 const priceOf = (amount: number) => Math.ceil(amount / 0.7);
 const PRICE_EXAMPLES = [100, 200, 300, 500, 800, 1000, 1500, 2000];
@@ -39,11 +39,7 @@ export const PA_QUICK_REPLIES: Array<{ shortcut: string; text: string }> = [
   {
     // 15.11.2026, владелец: «заебался писать про задержки» — «выкупили N-го, а робуксов нет».
     shortcut: "задержка",
-    text:
-      "Понимаем, ждать неприятно 🙏 С нашей стороны заказ выполнен: геймпасс выкуплен, робуксы сейчас в статусе ожидания (Pending).\n\n" +
-      robuxWaitText("vy") + "\n\n" +
-      "Как проверить: roblox.com → значок Robux → «Мои транзакции» → строка «Робуксы в ожидании» (Pending Robux). Если там есть сумма — всё в порядке: Roblox сам переведёт её на баланс, ничего делать не нужно.\n\n" +
-      "Ускорить это не можем ни мы, ни поддержка Roblox, но робуксы никуда не пропадут.",
+    text: robuxDelaySupportText(),
   },
   {
     shortcut: "бот",
@@ -73,6 +69,13 @@ export async function syncPaQuickReplies(tg: TelegramClient, dry = false): Promi
       quickReplyShortcut: new Api.InputQuickReplyShortcut({ shortcut: want.shortcut }),
     }));
     await new Promise((r) => setTimeout(r, 1500));
+  }
+  if (res.created && !dry) {
+    // Проверка: Telegram мог принять запрос и не завести ярлык — смотрим список заново.
+    const after = await tg.invoke(new Api.messages.GetQuickReplies({ hash: 0 as never }));
+    const list = ("quickReplies" in after ? after.quickReplies : []).map((q) => q.shortcut);
+    const missing = PA_QUICK_REPLIES.filter((w) => !list.some((n) => n.toLowerCase() === w.shortcut.toLowerCase())).map((w) => w.shortcut);
+    console.log(`[pa-quick] теперь ярлыков ${list.length}: ${list.map((n) => `/${n}`).join(" ")}${missing.length ? ` — НЕ появились: ${missing.join(", ")}` : ""}`);
   }
   return res;
 }
