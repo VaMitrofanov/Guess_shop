@@ -22,15 +22,21 @@ function loadPulse(): Promise<StorefrontPulse | null> {
   return pulsePromise;
 }
 
-function usePulse(): StorefrontPulse | null | undefined {
-  const [pulse, setPulse] = useState<StorefrontPulse | null | undefined>(undefined);
+/** `initial` — пульс, отрендеренный сервером вместе со страницей (16.11.2026):
+ *  блок виден сразу, без скелета и без отдельного запроса из браузера. Нет его
+ *  (сервер только что стартовал) — догружаем, как раньше. */
+function usePulse(initial?: StorefrontPulse | null): StorefrontPulse | null | undefined {
+  const [pulse, setPulse] = useState<StorefrontPulse | null | undefined>(initial ?? undefined);
   useEffect(() => {
+    if (initial) return;
     let alive = true;
     void loadPulse().then((value) => { if (alive) setPulse(value); });
     return () => { alive = false; };
-  }, []);
+  }, [initial]);
   return pulse;
 }
+
+type PulseProps = { initial?: StorefrontPulse | null };
 
 function plural(n: number, forms: [string, string, string]): string {
   const mod10 = n % 10;
@@ -61,10 +67,13 @@ const VIA: Record<StorefrontPulse["feed"][number]["via"], string> = {
   roblox: "на аккаунт",
 };
 
-export function HeroPulse() {
-  const pulse = usePulse();
-  const [now, setNow] = useState(() => Date.now());
+export function HeroPulse({ initial }: PulseProps = {}) {
+  const pulse = usePulse(initial);
+  // Сервер и браузер должны нарисовать «N мин назад» одинаково: первый кадр
+  // считаем от момента расчёта пульса, живое время — уже после гидратации.
+  const [now, setNow] = useState(() => (initial ? Date.parse(initial.generatedAt) : Date.now()));
   useEffect(() => {
+    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -114,8 +123,8 @@ export function HeroPulse() {
   );
 }
 
-export function HeroProof() {
-  const pulse = usePulse();
+export function HeroProof({ initial }: PulseProps = {}) {
+  const pulse = usePulse(initial);
   const reviews = pulse ? floorTens(pulse.reviewsTotal) : 0;
   return (
     <div className={styles.proof}>
@@ -128,14 +137,14 @@ export function HeroProof() {
   );
 }
 
-export function WbReviewsLink({ className }: { className?: string }) {
-  const pulse = usePulse();
+export function WbReviewsLink({ className, initial }: { className?: string } & PulseProps) {
+  const pulse = usePulse(initial);
   if (!pulse?.wbReviewsUrl) return null;
   return <a className={className} href={pulse.wbReviewsUrl} target="_blank" rel="noopener noreferrer">Все отзывы на WB →</a>;
 }
 
-export function ReviewsMarquee() {
-  const pulse = usePulse();
+export function ReviewsMarquee({ initial }: PulseProps = {}) {
+  const pulse = usePulse(initial);
   const reviews = pulse?.reviews ?? [];
   if (pulse === undefined) return <div className={styles.reviewsSkeleton} aria-busy="true" />;
   if (reviews.length < 3) {

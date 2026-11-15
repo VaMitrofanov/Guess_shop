@@ -8,6 +8,7 @@ import CodesStore from "@/components/codes-store";
 import CodesInfo from "@/components/codes-info";
 import GiftArt from "@/components/gift-art";
 import { HeroProof, HeroPulse, ReviewsMarquee, WbReviewsLink } from "@/components/storefront-pulse";
+import { storefrontPulseCached } from "@/lib/storefront-pulse";
 import { CODE_DISCOUNT_TIERS, CODE_PRICES } from "@/lib/codes-pricing";
 import { codesInstantDelivery } from "@/lib/codes/fulfillment";
 import { Garland, NewYearScene, Snowfall } from "@/components/new-year";
@@ -37,6 +38,9 @@ const minCodePrice = Math.min(...Object.values(CODE_PRICES));
  */
 export default async function Home({ searchParams }: { searchParams: Promise<{ ny?: string }> }) {
   const instant = codesInstantDelivery();
+  // Пульс (счётчик, лента выдач, отзывы WB) — готовый из кэша, без ожидания базы:
+  // блок виден сразу вместе со страницей (16.11.2026). `null` — сразу после старта.
+  const pulse = storefrontPulseCached();
   // 🎄 Новогоднее оформление: само с 1 декабря по 14 января (МСК), предпросмотр — `/?ny=1`.
   const ny = isNewYearSeason() || (await searchParams).ny === "1";
   const trust = [
@@ -97,12 +101,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
               </>
             )}
           </div>
-          <HeroProof />
+          <HeroProof initial={pulse} />
         </div>
 
         <div className={styles.heroSide}>
           {ny && <NewYearScene />}
-          <HeroPulse />
+          <HeroPulse initial={pulse} />
           {/* Код с карточки Wildberries. Обычный `<a>`: `?source=wb` обслуживает
               инструкция, клиентский переход Next туда не нужен. */}
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- намеренно полная загрузка */}
@@ -181,9 +185,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
             <span className={styles.kicker}>Отзывы покупателей с Wildberries</span>
             <h2 id="reviews-title">Пишут покупатели</h2>
           </div>
-          <WbReviewsLink className={styles.reviewsLink} />
+          <WbReviewsLink className={styles.reviewsLink} initial={pulse} />
         </div>
-        <ReviewsMarquee />
+        <ReviewsMarquee initial={pulse} />
       </section>
 
       {/* ── Подарок ───────────────────────────────────────────────────── */}

@@ -46,10 +46,42 @@ export function moscowDayStart(now = new Date()): Date {
 }
 
 let cache: { at: number; value: StorefrontPulse } | null = null;
+let inflight: Promise<StorefrontPulse> | null = null;
 const TTL_MS = 60_000;
 
+/* Кэш «отдай старое, обнови в фоне» (16.11.2026). Раньше кэш жил минуту, и
+   первый посетитель после неё ждал 7 запросов к базе (прод в РФ, Neon в
+   Сингапуре — 0,8–1,8 с на ответ), а блок на главной висел скелетом. Теперь
+   ждёт только самый первый запрос после старта; дальше отдаём готовое сразу,
+   а пересчёт идёт в фоне (не чаще одного одновременно). */
+function refresh(now = new Date()): Promise<StorefrontPulse> {
+  if (!inflight) {
+    inflight = computePulse(now)
+      .then((value) => { cache = { at: Date.now(), value }; return value; })
+      .finally(() => { inflight = null; });
+  }
+  return inflight;
+}
+
 export async function storefrontPulse(now = new Date()): Promise<StorefrontPulse> {
-  if (cache && now.getTime() - cache.at < TTL_MS) return cache.value;
+  if (cache) {
+    if (now.getTime() - cache.at >= TTL_MS) void refresh(now).catch(() => undefined);
+    return cache.value;
+  }
+  return refresh(now);
+}
+
+/**
+ * Готовый пульс без ожидания — для серверного рендера главной: данные уходят
+ * в HTML, и блок не ждёт отдельного запроса из браузера. Кэша ещё нет (сразу
+ * после старта) — `null`, расчёт запущен, клиент догрузит сам.
+ */
+export function storefrontPulseCached(now = new Date()): StorefrontPulse | null {
+  if (!cache || now.getTime() - cache.at >= TTL_MS) void refresh(now).catch(() => undefined);
+  return cache?.value ?? null;
+}
+
+async function computePulse(now: Date): Promise<StorefrontPulse> {
   const since = moscowDayStart(now);
   const [codes, gamepasses, wbTotals, wbGross, codeTotals, reviews, reviewsTotal] = await Promise.all([
     prisma.codeOrder.findMany({
@@ -107,6 +139,5 @@ export async function storefrontPulse(now = new Date()): Promise<StorefrontPulse
     wbReviewsUrl: reviews.find((review) => review.nmId)?.nmId ? `https://www.wildberries.ru/catalog/${reviews.find((review) => review.nmId)!.nmId}/feedbacks` : null,
     generatedAt: now.toISOString(),
   };
-  cache = { at: now.getTime(), value };
   return value;
 }
