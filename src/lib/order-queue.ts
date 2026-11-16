@@ -26,6 +26,20 @@ export type FilterTab =
    рабочую ветку; `order-hold.test.ts` следит, чтобы новая вкладка его не
    забыла. «Все» намеренно показывает и замороженные — там они с бейджем ❄️. */
 
+/** «Заморожены» — только живые заказы (16.11.2026).
+ *
+ * Отмена и возврат денег на WB закрывают заказ (`REJECTED`), но заморозку
+ * оставляют как вторую защёлку: без неё «Вернуть к выкупу» одной кнопкой
+ * поставило бы в очередь заказ, за который никто не платит. Во вкладке такие
+ * заказы были мёртвым грузом — 33 из 71 на 16.11. Защёлка остаётся в базе,
+ * вкладка, счётчики и строка на главной показывают только то, что ещё ждёт
+ * решения. Выкупленный (`COMPLETED`) тоже не задача заморозки. */
+export const HELD_LIVE_SQL = `"heldAt" IS NOT NULL AND status NOT IN ('COMPLETED','REJECTED')`;
+export const HELD_LIVE: Prisma.WbOrderWhereInput = {
+  heldAt: { not: null },
+  status: { notIn: ["COMPLETED", "REJECTED"] },
+};
+
 /** Сколько часов заказ считается «новым» и не попадает в «ждут ссылку». */
 export const NEW_CUTOFF_HOURS = 40;
 /** Выкуп висит дольше — заказ уходит в «Требуют внимания». */
@@ -122,7 +136,7 @@ export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
         AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
     OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
   )`,
-  HELD: `"heldAt" IS NOT NULL`,
+  HELD: HELD_LIVE_SQL,
   FLAGGED: `"flaggedAt" IS NOT NULL AND ${NOT_HELD_SQL} AND status NOT IN ('COMPLETED','REJECTED')`,
 };
 
@@ -184,7 +198,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
       return { isFavorite: true };
     // Единственная вкладка, где замороженные ЕСТЬ и где они одни.
     case "HELD":
-      return { heldAt: { not: null } };
+      return HELD_LIVE;
     // 🏷 Пометки (11.11.2026): заказ остаётся и в своей рабочей вкладке, здесь —
     // все «возврат открыт / висит» разом, старейшая пометка сверху.
     case "FLAGGED":

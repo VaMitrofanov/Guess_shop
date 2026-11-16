@@ -3,7 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { getFeedbackSummary, getStats30d } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
 import { getBrowserSession } from "@/lib/browser-purchase";
-import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, SILENT_REMINDERS } from "@/lib/order-queue";
+import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, HELD_LIVE, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, SILENT_REMINDERS } from "@/lib/order-queue";
 import { NOT_HELD_SQL } from "@/lib/order-hold";
 import { loadFirstInLine } from "@/lib/first-in-line";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
@@ -142,9 +142,9 @@ async function loadCore() {
     // Заморозка — тихая строка, а не задача: её показывают кодами, чтобы было
     // видно, что заказ жив и намеренно выключен, а не потерян. Кодов берём
     // четыре — строка на телефоне всё равно не покажет больше.
-    prisma.wbOrder.count({ where: { isTest: false, heldAt: { not: null } } }),
+    prisma.wbOrder.count({ where: { isTest: false, ...HELD_LIVE } }),
     prisma.wbOrder.findMany({
-      where: { isTest: false, heldAt: { not: null } },
+      where: { isTest: false, ...HELD_LIVE },
       orderBy: { heldAt: "desc" },
       take: 4,
       select: { wbCode: true },

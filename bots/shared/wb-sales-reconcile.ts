@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { fetchWbSales, type WbSaleRow } from "./wb-delivery-api";
 import { holdForProblem } from "./order-hold";
+import { canAutoRejectInternalOrder } from "./wb-delivery-policy";
+import { revokeGateCode } from "./wb-code-revocation";
 import { buyerKeyOf, recordRiskEvents, type RiskEventInput } from "./risk-events";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -144,7 +146,8 @@ function riskEventFor(f: ReconcileFinding, now: Date): RiskEventInput {
   const text = {
     SALE_UNMATCHED: `WB продал карточку (srid ${f.money.srid}${rub ? `, ${rub}` : ""}), а заказа DBS у нас нет`,
     SALE_NO_CODE: "Оплачено и не возвращено, а код покупателю не выдан",
-    REFUND_OPEN: `Деньги вернулись покупателю (${f.money.refundId ?? "возврат"}), заказ не выкуплен — заморожен`,
+    REFUND_OPEN: `Деньги вернулись покупателю (${f.money.refundId ?? "возврат"}), заказ не выкуплен — ${
+      order && refundClosesOrder(order) ? "закрыт, код аннулирован" : "заморожен, выкуп в работе — решает человек"}`,
     REFUND_AFTER_DELIVERY: `Деньги вернулись покупателю (${f.money.refundId ?? "возврат"}) ПОСЛЕ выкупа`,
   }[f.kind];
   return {
@@ -232,6 +235,7 @@ export async function runWbSalesReconcile(db: Db, opts: { now?: Date; force?: bo
       detail: `возврат денег по статистике WB ${f.money.refundId ?? ""}`.trim(),
       eventAt: f.money.refundedAt,
     }).catch((e) => console.error(`[wb-reconcile] заморозка ${f.order.code} не удалась:`, e));
+    await closeRefundedOrder(db, f).catch((e) => console.error(`[wb-reconcile] закрытие ${f.order.code} не удалось:`, e));
   }
 
   // Новые — только те, чьих событий ещё не было: пуш один раз на находку.
@@ -263,10 +267,61 @@ export async function runWbSalesReconcile(db: Db, opts: { now?: Date; force?: bo
   return { skipped: false, sales: money.size, fresh, open };
 }
 
+/**
+ * Деньги вернулись, а заказ не выкуплен — закрыть его так же, как закрывает
+ * отмену WB `propagateCancellation` (16.11.2026).
+ *
+ * До этого сверка только морозила: `VV7AMZU` (2000 R$, возврат R674250746) и
+ * `AV8HDXK` остались в «Ждут ссылку»/«К выкупу» под заморозкой, код — рабочим.
+ * Статус DBS у них `receive/sold` навсегда, поэтому старая защита отмены их не
+ * увидит никогда. Закрываем только то, что нам ещё ничего не стоило
+ * (`canAutoRejectInternalOrder`): выкуп в работе или в ошибке — решение
+ * человека, такой заказ остаётся замороженным и виден во вкладке.
+ */
+export async function closeRefundedOrder(
+  db: Db,
+  f: Extract<ReconcileFinding, { kind: "REFUND_OPEN" }>,
+): Promise<"rejected" | "skipped"> {
+  const code = f.order.code;
+  if (!code) return "skipped";
+  const internal = await db.wbOrder.findUnique({
+    where: { wbCode: code },
+    select: { id: true, status: true, adminNote: true },
+  });
+  if (internal && !canAutoRejectInternalOrder(internal.status)) return "skipped";
+  const refund = f.money.refundId ?? "возврат";
+  if (internal) {
+    const mark = `[WB ВОЗВРАТ ${new Date().toISOString().slice(0, 10)}] деньги вернулись покупателю (${refund}) — выкуп закрыт автоматически`;
+    const closed = await db.wbOrder.updateMany({
+      // Условие по статусу — защита от гонки с выкупом, начатым между чтениями.
+      where: { id: internal.id, status: internal.status },
+      data: {
+        status: "REJECTED",
+        rejectionReason: `Заказ WB #${f.order.wbOrderId}: деньги вернулись покупателю (${refund})`,
+        adminNote: internal.adminNote ? `${mark}\n${internal.adminNote}`.slice(0, 2_000) : mark,
+      },
+    });
+    if (closed.count === 0) return "skipped";
+  }
+  const revoked = await revokeGateCode(db, {
+    marketplaceOrderId: f.order.id,
+    wbOrderId: f.order.wbOrderId,
+    actor: "wb-reconcile",
+    refundId: refund,
+  });
+  if (!revoked.ok) console.error(`[wb-reconcile] код ${code} не аннулирован: ${revoked.error}`);
+  return "rejected";
+}
+
+/** Закроет ли сверка такой заказ сама — то же правило, что у отмены WB. */
+export function refundClosesOrder(order: ReconcileOrder): boolean {
+  return order.internalStatus == null || canAutoRejectInternalOrder(order.internalStatus);
+}
+
 const FINDING_LABEL: Record<ReconcileFinding["kind"], string> = {
   SALE_UNMATCHED: "продажа без заказа у нас",
   SALE_NO_CODE: "оплачен, код не выдан",
-  REFUND_OPEN: "деньги вернулись — заморожен, не выкупать",
+  REFUND_OPEN: "деньги вернулись, заказ не выкуплен",
   REFUND_AFTER_DELIVERY: "деньги вернулись после выкупа",
 };
 

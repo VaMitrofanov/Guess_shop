@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { adminCache } from "@/lib/admin-cache";
 import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 import { loadOrderSlices, moscowDayStartUtc } from "@/lib/order-slices";
-import { BUYOUT_QUEUE_SQL, DIRECT_ORDER_SQL, PRIORITY_ORDER_SQL } from "@/lib/order-queue";
+import { BUYOUT_QUEUE_SQL, DIRECT_ORDER_SQL, HELD_LIVE, PRIORITY_ORDER_SQL } from "@/lib/order-queue";
 import { loadFirstInLine } from "@/lib/first-in-line";
 import { loadOverviewFeed } from "@/lib/overview-feed";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
@@ -140,9 +140,9 @@ const loadQueueHead = adminCache(
 const loadHeld = adminCache(
   async () => {
     const [count, rows] = await Promise.all([
-      prisma.wbOrder.count({ where: { isTest: false, heldAt: { not: null } } }),
+      prisma.wbOrder.count({ where: { isTest: false, ...HELD_LIVE } }),
       prisma.wbOrder.findMany({
-        where: { isTest: false, heldAt: { not: null } },
+        where: { isTest: false, ...HELD_LIVE },
         orderBy: { heldAt: "desc" },
         take: 4,
         select: { wbCode: true },

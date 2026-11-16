@@ -39,7 +39,7 @@ export async function countHoldKinds(db: {
   const rows = await db.$queryRaw<Array<{ heldBy: string | null; review: boolean; n: bigint }>>`
     SELECT "heldBy", COALESCE("heldReason", '') LIKE ${BAD_REVIEW_REASON_HEAD + "%"} AS review, COUNT(*)::bigint AS n
     FROM "WbOrder"
-    WHERE "heldAt" IS NOT NULL AND "isTest" = false
+    WHERE "heldAt" IS NOT NULL AND "isTest" = false AND status NOT IN ('COMPLETED','REJECTED')
     GROUP BY 1, 2`;
   const out: Record<HoldKind, number> = { review: 0, claim: 0, stale: 0, manual: 0 };
   for (const row of rows) {

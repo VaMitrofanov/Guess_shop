@@ -29,7 +29,7 @@ describe("границы очередей", () => {
   });
 
   it("«Заморожены» — единственная вкладка, где они есть", () => {
-    expect(buildTabWhere("HELD")).toEqual({ heldAt: { not: null } });
+    expect(buildTabWhere("HELD")).toEqual({ heldAt: { not: null }, status: { notIn: ["COMPLETED", "REJECTED"] } });
   });
 
   it("«Все» показывает замороженные — там они с бейджем ❄️", () => {
@@ -86,7 +86,7 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
   });
 
   it("счётчик «Заморожены» существует", () => {
-    expect(TAB_SQL.HELD).toBe(`"heldAt" IS NOT NULL`);
+    expect(TAB_SQL.HELD).toBe(`"heldAt" IS NOT NULL AND status NOT IN ('COMPLETED','REJECTED')`);
     expect(route).toMatch(/"HELD"/);
   });
 });

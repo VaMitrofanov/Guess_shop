@@ -104,6 +104,11 @@ export interface RevokeInput {
   wbOrderId: string;
   /** Кто аннулирует: `wb-sync` для авто, имя оператора для кнопки. */
   actor: string;
+  /** Деньги вернулись, а статус DBS промолчал (16.11.2026): возврат виден
+   * только в статистике продаж (`R…`), `cancelledAt` так и не ставится.
+   * Сверка `wb-sales-reconcile` передаёт сюда номер возврата — это то же
+   * доказательство, что и отмена. */
+  refundId?: string | null;
 }
 
 type RevokeResult =
@@ -133,7 +138,7 @@ export async function revokeGateCode(db: any, input: RevokeInput): Promise<Revok
   const code = order.wbCode.code;
   if (isRevokedCode(order.wbCode)) return { ok: true, code };
 
-  if (!order.cancelledAt) {
+  if (!order.cancelledAt && !input.refundId) {
     return { ok: false, error: "Заказ не отменён на WB — аннулировать нечего" };
   }
   if (!GATE_MINTED.has(order.gateState)) {
