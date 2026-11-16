@@ -258,6 +258,11 @@ export function replyToRootFor(roots: Record<string, number> | null | undefined,
 
 const BOT_USERNAME = "RobloxBankBot";
 
+/** Ссылка, открывающая заказ в TWA из любой переписки — беседы или лички. */
+export function twaStartappUrl(code: string | null | undefined): string | null {
+  return code && /^[A-Za-z0-9_-]{1,64}$/.test(code) ? `https://t.me/${BOT_USERNAME}?startapp=${encodeURIComponent(code)}` : null;
+}
+
 /**
  * Кнопки под беседу. `web_app` Telegram пускает только в личку — в беседе
  * сообщение с ним не уйдёт вовсе. Меняем на ссылку `t.me/<бот>?startapp=<код>`:

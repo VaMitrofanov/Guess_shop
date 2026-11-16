@@ -7,10 +7,10 @@ import { ageColor, fmtAge } from "./age";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
 import { copyText } from "./clipboard";
+import ConfirmBuyoutSheet from "./ConfirmBuyoutSheet";
 import type { Tone } from "@/lib/order-presentation";
 import type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
 import {
-  FIRST_UNDO_MS,
   firstAgeBasis,
   firstCopyableIds,
   firstCopyToast,
@@ -34,11 +34,10 @@ import {
    экрана рисуют этот компонент, а правило (группы, возраст, готовность пасса,
    что копировать) — общее с сайтом: `@/lib/first-in-line-view`.
 
-   «Выкуплено» срабатывает не сразу: FIRST_UNDO_MS строка висит с кнопкой
-   «Отменить». Клиенту уходит сообщение, и отменить его уже нельзя, поэтому
-   случайное касание обязано быть обратимым. Ушли с экрана во время отсчёта —
-   выкуп всё равно засчитывается: админ нажал «Выкуплено», значит купил, и
-   потерянная отметка означала бы второй выкуп того же заказа.
+   «Выкуплено» срабатывает только после подтверждения в шторке
+   (`ConfirmBuyoutSheet`, 16.11.2026; до этого — 5 с с кнопкой «Отменить»).
+   Клиенту уходит сообщение, и отменить его уже нельзя, поэтому случайное
+   касание при прокрутке максимум открывает шторку.
 
    01.11.2026: группа «📣 Торопят» (писали в поддержку за 48 ч) и 🛑 полоса
    просьб об отмене. Счётчики в шапке — фильтры: «Все» показывает по три
@@ -159,13 +158,8 @@ export default function FirstInLineBlock({
     onChanged?.();
   }, [post, onChanged]);
 
-  const startComplete = useCallback((order: FirstInLineOrder) => {
-    if (timers.current.has(order.id)) return;
-    haptic.impact("medium");
-    const timer = window.setTimeout(() => void commit(order), FIRST_UNDO_MS);
-    timers.current.set(order.id, { timer, order });
-    setPending(prev => ({ ...prev, [order.id]: Date.now() + FIRST_UNDO_MS }));
-  }, [commit]);
+  /** ✓ Подтверждение «Выкуплено» (16.11.2026): тап открывает шторку, второй — закрывает заказ. */
+  const [confirmFor, setConfirmFor] = useState<FirstInLineOrder | null>(null);
 
   const undoComplete = useCallback((order: FirstInLineOrder) => {
     const entry = timers.current.get(order.id);
@@ -375,7 +369,7 @@ export default function FirstInLineBlock({
                       className="twa-first-tick twa-press-sm"
                       disabled={busy.has(order.id)}
                       aria-label={`Отметить выкупленным заказ ${order.wbCode}`}
-                      onClick={() => startComplete(order)}
+                      onClick={() => { haptic.select(); setConfirmFor(order); }}
                     >
                       <Check size={17} />Выкуплено
                     </button>
@@ -400,6 +394,18 @@ export default function FirstInLineBlock({
           Вся очередь{data.queueTotal ? ` · ${robux(data.queueTotal)}` : ""} →
         </button>
       )}
+      <ConfirmBuyoutSheet
+        info={confirmFor ? {
+          code: confirmFor.wbCode,
+          nick: confirmFor.robloxUsername,
+          passIds: confirmFor.gamepassIds,
+          gross: confirmFor.gross,
+          clean: confirmFor.amount,
+        } : null}
+        busy={confirmFor ? busy.has(confirmFor.id) : false}
+        onClose={() => setConfirmFor(null)}
+        onConfirm={() => { const order = confirmFor; setConfirmFor(null); if (order) void commit(order); }}
+      />
     </section>
   );
 }

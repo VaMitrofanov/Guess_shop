@@ -129,8 +129,9 @@ describe("«Первым делом» на обеих главных", () => {
       // Группы и фильтр «Все/одна группа» — из общего правила.
       expect(src).toContain("firstVisibleGroups(visible, filter, data)");
       expect(src).toContain("firstCopyableIds(");
-      // «Выкуплено» — с отменой, а не сразу.
-      expect(src).toContain("FIRST_UNDO_MS");
+      // «Выкуплено» — не сразу: на сайте отмена за FIRST_UNDO_MS, в TWA —
+      // подтверждение в шторке (16.11.2026, промахи при прокрутке).
+      expect(src).toMatch(/FIRST_UNDO_MS|<ConfirmBuyoutSheet/);
       // Заметка из блока НЕ затирает машинный аудит.
       expect(src).toContain('action: "set-note", orderId: order.id, note: next, keepTags: true');
     }

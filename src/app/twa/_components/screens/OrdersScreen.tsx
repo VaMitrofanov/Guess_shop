@@ -60,6 +60,7 @@ import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } fr
 import type { OrderRisk } from "@/lib/order-risk-types";
 import type { OrderContactSummary } from "@/lib/order-contact";
 import { replyForOrder } from "@/lib/order-reply";
+import ConfirmBuyoutSheet from "../ConfirmBuyoutSheet";
 import { HOLD_KINDS, HOLD_KIND_META, type HoldKind } from "@/lib/hold-kinds-meta";
 import { BuyerDossierSheet, BuyerLine, ReviewPlaque } from "../RiskBits";
 import { vkCommunityDialogUrl } from "../../../../../bots/shared/vk-links";
@@ -2737,9 +2738,13 @@ function OrderCard({
         : showGpWatch ? { text: "", label: "Найти пасс по нику", hint: true }
           : null;
 
-  async function runPrimary() {
+  /* ✓ «Выкуплено» — только через шторку подтверждения (16.11.2026): случайный
+     тап при прокрутке открывает шторку, а не шлёт клиенту уведомление. */
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  async function runPrimary(confirmed = false) {
     if (!primary || primaryBusy) return;
     if (primary.kind === "contact") { haptic.impact("light"); openContact(order.user); return; }
+    if (primary.action === "complete" && !confirmed) { haptic.select(); setConfirmOpen(true); return; }
     setPrimaryBusy(true);
     haptic.impact("light");
     try { await onRunAction(primary.action!); } finally { setPrimaryBusy(false); }
@@ -3041,6 +3046,19 @@ function OrderCard({
         )}
       </div>
     </article>
+
+    <ConfirmBuyoutSheet
+      info={confirmOpen ? {
+        code: order.wbCode,
+        nick: nick,
+        passIds: splitIds.length > 0 ? splitIds : passId ? [passId] : [],
+        gross: dirtyAmount,
+        clean: order.amount,
+      } : null}
+      busy={primaryBusy}
+      onClose={() => setConfirmOpen(false)}
+      onConfirm={() => { setConfirmOpen(false); void runPrimary(true); }}
+    />
 
     {/* Меню «···» — всё, что делается с заказом и не входит в ежедневный цикл
         выкупа. Формы оно не дублирует, а ОТКРЫВАЕТ существующие: правка,

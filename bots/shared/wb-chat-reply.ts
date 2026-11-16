@@ -15,7 +15,7 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { sendBuyerChatMessage } from "./wb-delivery-api";
-import { decryptWbSecret, redactWbChatText, wbDeliveryCryptoReady } from "./wb-delivery-crypto";
+import { containsSecretToken, decryptWbSecret, redactWbChatText, wbDeliveryCryptoReady } from "./wb-delivery-crypto";
 import { resolveWbOrderChat } from "./wb-order-chat";
 import { wbChatSafeText, wbCodeRequestMessage, wbGateShortUrl, wbGuideFallbackUrl } from "./wb-gate-link";
 import { courierReplyText } from "./wb-courier-reply";
@@ -40,11 +40,15 @@ export async function wbReplyTemplate(db: Db, wbOrderId: string, kind: Exclude<W
   ].join("\n\n");
 }
 
-export type WbReplyResult = { sent: true } | { sent: false; reason: "disabled" | "no_order" | "no_chat" | "cancelled" | "send_failed" };
+export type WbReplyResult = { sent: true } | { sent: false; reason: "disabled" | "no_order" | "no_chat" | "cancelled" | "send_failed" | "secret" };
 
 /** Отправить текст в чат WB заказа и положить зеркало в ленту чата. */
 export async function sendWbChatReply(db: Db, wbOrderId: string, rawText: string, actor: string): Promise<WbReplyResult> {
   if (process.env.WB_CHAT_SEND_ENABLED !== "true" || !wbDeliveryCryptoReady()) return { sent: false, reason: "disabled" };
+  // 🔐 Ключ API в чат WB не уходит (16.11.2026): переписка WB чужая, её видят
+  // поддержка WB и все, кто откроет чат. Ключ покупателя вставляют в карточке
+  // заказа («🔑 Ключ покупателя») — пасс мы создадим сами.
+  if (containsSecretToken(rawText)) return { sent: false, reason: "secret" };
   const order = await db.wbMarketplaceOrder.findUnique({
     where: { wbOrderId },
     select: {
@@ -95,5 +99,6 @@ export function wbReplyFailText(reason: Exclude<WbReplyResult, { sent: true }>["
     no_chat: "у заказа ещё нет чата WB",
     cancelled: "заказ отменён — писать некуда",
     send_failed: "WB не принял сообщение",
+    secret: "похоже на ключ API — в чат WB его не шлём; вставьте ключ в карточке заказа «🔑 Ключ покупателя»",
   }[reason];
 }

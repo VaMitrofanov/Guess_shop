@@ -62,11 +62,14 @@ export interface ConversationView {
   lines: string[];
   total: number;
   answered: boolean;
+  /** 📤 Статус переписки: что уже ушло покупателю (16.11.2026). Готовый HTML. */
+  status?: string[] | null;
 }
 export type ConversationRender = (view: ConversationView) => string;
 
 interface Conversation {
   render: ConversationRender;
+  status: string[] | null;
   head: string;
   who: string | null;
   lines: string[];
@@ -99,7 +102,7 @@ export function hiddenCount(c: Pick<ConversationView, "lines" | "total">): numbe
   return Math.max(0, c.total - shown);
 }
 
-export function renderConversation(c: Pick<ConversationView, "head" | "who" | "lines" | "total"> & { answered?: boolean }): string {
+export function renderConversation(c: Pick<ConversationView, "head" | "who" | "lines" | "total"> & { answered?: boolean; status?: string[] | null }): string {
   const hidden = hiddenCount(c);
   const count = c.total > 1 ? ` · ${c.total}` : "";
   return formatAdminNotice({
@@ -108,6 +111,7 @@ export function renderConversation(c: Pick<ConversationView, "head" | "who" | "l
     title: `покупатель пишет${count}${c.answered ? " · ответили" : ""}`,
     lines: [
       c.who ? `${c.head} · ${c.who}` : c.head,
+      ...(c.status ?? []),
       hidden > 0 ? `<i>…ещё ${hidden} раньше</i>` : null,
       ...c.lines,
     ],
@@ -160,6 +164,8 @@ export function noteBuyerMessage(input: {
   render?: ConversationRender;
   /** Открывать увед и на пустяковом тексте (обращение в поддержку — всегда дело). */
   openOnTrivial?: boolean;
+  /** 📤 Что уже ушло покупателю — строки между шапкой и сообщениями. */
+  status?: string[] | null;
 }): Promise<"opened" | "appended" | "resurfaced" | "skipped"> {
   return serial(input.conversationKey, () => noteBuyerMessageNow(input)).then((result) => {
     countConversation(result);
@@ -182,6 +188,7 @@ async function noteBuyerMessageNow(input: Parameters<typeof noteBuyerMessage>[0]
     current.total += 1;
     current.lastAt = now;
     current.head = input.head;
+    if (input.status !== undefined) current.status = input.status;
     current.targets = input.targets;
     current.io = input.io;
     if (input.render) current.render = input.render;
@@ -199,6 +206,7 @@ async function noteBuyerMessageNow(input: Parameters<typeof noteBuyerMessage>[0]
 
   const conversation: Conversation = {
     render: input.render ?? renderConversation,
+    status: input.status ?? null,
     head: input.head,
     who: input.who ? escapeHtml(input.who) : null,
     lines: [line],

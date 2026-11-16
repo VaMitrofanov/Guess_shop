@@ -21,6 +21,7 @@ import {
   WbDeliveryApiError,
 } from "../../bots/shared/wb-delivery-api";
 import {
+  containsSecretToken,
   decryptWbSecret,
   encryptWbSecret,
   redactWbChatText,
@@ -1514,6 +1515,10 @@ export async function performWbDeliveryAction(
   }
   if (input.action === "send_message") {
     if (!input.message) throw new WbDeliveryWorkflowError("Введите сообщение", 400, "MESSAGE_REQUIRED");
+    // 🔐 Ключ API в чат WB не уходит (16.11.2026) — его вставляют в карточке заказа.
+    if (containsSecretToken(input.message)) {
+      throw new WbDeliveryWorkflowError("Похоже на ключ API — в чат WB его не шлём. Вставьте ключ в карточке заказа «🔑 Ключ покупателя».", 400, "SECRET_IN_MESSAGE");
+    }
     await sendText(order, input.message, actor, "message");
     await audit(order.id, "CHAT_MESSAGE_SENT", actor, { length: input.message.length, isTest: order.isTest });
     return { ok: true, message: "Сообщение отправлено", orderId: order.id };

@@ -115,6 +115,40 @@ export function redactWbChatText(text: string): string {
     .replace(ACTIVATION_CODE_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .replace(ACTIVATION_CODE_URL_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .replace(ACTIVATION_CODE_SHORT_URL_RE, (_whole, prefix: string) => `${prefix}•••••••`)
+    .replace(/[\s\S]*/, redactSecrets)
     .slice(0, 2_000);
+}
+
+/** Длинные куски ключа скрываются всегда; если ключ в сообщении нашёлся —
+ *  скрываются и его хвосты покороче (ключ режут на строки неровно). */
+function redactSecrets(text: string): string {
+  let found = false;
+  const first = text.replace(SECRET_TOKEN_RE, (token) => {
+    if (!looksLikeSecret(token)) return token;
+    found = true;
+    return "[ключ скрыт]";
+  });
+  if (!found) return first;
+  return first.replace(SECRET_TAIL_RE, (token) => (looksLikeSecret(token) || token.length >= 16 ? "[ключ скрыт]" : token))
+    .replace(/(\[ключ скрыт\][\s|/]*)+/g, "[ключ скрыт] ")
+    .trim();
+}
+const SECRET_TAIL_RE = /[A-Za-z0-9+/=_|-]{10,}/g;
+
+/** Есть ли в тексте кусок, похожий на ключ API (тот же признак, что у редакции). */
+export function containsSecretToken(text: string): boolean {
+  return (text.match(SECRET_TOKEN_RE) ?? []).some(looksLikeSecret);
+}
+
+/* 🔐 Ключи API в копии переписки (16.11.2026). Админ вставил покупателю в чат
+   WB его же Open Cloud-ключ Roblox, и ключ лёг в базу открытым текстом: фильтр
+   знал только коды активации. Ключ режется на строки по ~40 знаков, поэтому
+   ловим каждый длинный кусок base64 отдельно: ≥ 24 знаков без пробелов, и в
+   нём есть строчные, заглавные и цифры. Ник Roblox — до 20 знаков, код WB — 7,
+   сегменты ссылок рвутся на «/» и «-», поэтому их это не задевает. */
+const SECRET_TOKEN_RE = /[A-Za-z0-9+=_]{24,}/g;
+function looksLikeSecret(token: string): boolean {
+  if (token.includes("[")) return false;
+  return /[a-z]/.test(token) && /[A-Z]/.test(token) && /\d/.test(token);
 }
 

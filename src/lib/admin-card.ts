@@ -61,76 +61,49 @@ export function buildWebOrderCardText(
   now: Date | number = Date.now(),
   wbOrderId: string | null = null,
 ): string {
+  /* 16.11.2026 (владелец, вариант A): та же короткая карточка, что у ботов
+     (`sendAdminOrderCard`): кто/откуда/возраст — одной строкой, пасс или части
+     — одной строкой с повтором «×N», «Выкуплено» — только в TWA. */
   const passPrice = Math.ceil(order.amount / 0.7);
-  const dateStr =
-    new Date(order.createdAt).toLocaleString("ru-RU", {
-      timeZone: "Europe/Moscow",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }) + " МСК";
   const platformEmoji = order.platform === "VK" ? "📘" : "📱";
   const prev = order.previousOrderCount ?? 0;
   const loyaltyLine =
-    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` : prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` : "";
-  const creatorLine = order.creatorName
-    ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`
-    : "";
+    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>` : prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>` : null;
 
   const parts = order.splitParts ?? [];
-  // Сумма разбивки — сложение цен ЧАСТЕЙ, а не цена номинала заказа: округление
-  // вверх у каждой части даёт свой рубль, и 1000 R$ двумя частями стоят 1430, а
-  // не 1429. Админ по этой цифре набирает донора.
   const splitGross = parts.reduce((sum, part) => sum + Math.ceil(part.amount / 0.7), 0);
-  const splitLines = parts.length > 1
-    ? [
-        `🧩 <b>РАЗБИВКА: ${parts.length} ${parts.length === 1 ? "часть" : parts.length < 5 ? "части" : "частей"}</b> — каждую покупать с ОТДЕЛЬНОГО донора`,
-        ...parts.map((part, index) =>
-          `   ${index + 1}. <code>${part.gamepassId}</code> · ${part.amount} R$ · пасс ${Math.ceil(part.amount / 0.7)} R$`),
-      ]
-    : [];
+  const partIds = parts.map((part) => part.gamepassId);
+  const partGroups = [...new Set(partIds)].map((id) => {
+    const count = partIds.filter((x) => x === id).length;
+    return `<code>${id}</code>${count > 1 ? ` ×${count}` : ""}`;
+  });
+  const passId = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? null;
+  const passLine = parts.length > 1
+    ? `🧩 ${parts.length} ${parts.length < 5 ? "части" : "частей"} на ${splitGross} R$ — с разных аккаунтов · ${partGroups.join(", ")} · ${parts.map((part) => `${Math.ceil(part.amount / 0.7)} R$`).join(" + ")}`
+    : `🎫 Pass ID: <code>${passId ?? "—"}</code> · пасс ${passPrice} R$ · <a href="${order.gamepassUrl}">открыть</a>`;
+  const whoLine = [
+    `${platformEmoji} ${order.platform} (сайт)`,
+    order.userDisplay,
+    order.creatorName ? `🎮 ${escapeHtml(order.creatorName)}` : null,
+    `⏳ ${formatOrderAge(order.createdAt, now)}`,
+  ].filter(Boolean).join(" · ");
 
-  const passIdLine = (() => {
-    const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
-    return m ? `🎫 Pass ID: <code>${m[1]}</code>` : null;
-  })();
-
-  // Единый язык уведомлений админам — тот же, что у карточки из ботов
-  // (`sendAdminOrderCard`) и у сообщений DBS. Заказ готов к выкупу, это ручное
-  // действие: 🟠 «action».
   return formatAdminNotice({
     marker: "action",
     zone: "WB",
-    title: "заказ ждёт выкупа",
+    title: "ждёт выкупа",
     lines: [
-      orderRef(
-        { wbOrderId, code: order.wbCode, denomination: order.amount },
-        [parts.length > 1
-          ? `${parts.length} ${parts.length < 5 ? "пасса" : "пассов"} на ${splitGross} R$ суммарно`
-          : `геймпасс ${passPrice} R$`],
-      ),
+      orderRef({ wbOrderId, code: order.wbCode, denomination: order.amount }),
       order.viaKey
         ? `🔑 <b>ПАСС СОЗДАН ПО API-КЛЮЧУ</b> — цену и «в продаже» выставили мы`
         : order.manualLink
           ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс`
           : `🌐 <b>ONE-TAP С САЙТА</b>`,
-      loyaltyLine.trim() || null,
-      `${platformEmoji} Источник: <b>${order.platform} (сайт)</b>`,
-      `👤 Юзер: ${order.userDisplay}`,
-      creatorLine.trim() || null,
-      `📅 Время: <b>${dateStr}</b>`,
-      // Возраст — отдельной строкой: у недельного заказа это и есть тревога,
-      // и в хвосте строки с датой её глаз пропускает.
-      `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt, now)}</b>`,
-      ...splitLines,
-      `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`,
-      parts.length > 1 ? null : passIdLine,
+      loyaltyLine,
+      whoLine,
+      passLine,
     ],
-    next: parts.length > 1
-      ? "выкупить части с разных доноров (карточка заказа ведёт по одной) и нажать «ВЫКУПЛЕНО»"
-      : "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
+    next: "скопировать ID → купить в аккаунте → «Выкуплено» в TWA",
   });
 }
 
@@ -151,14 +124,17 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
   const text = buildWebOrderCardText(order, Date.now(), wbRef.wbOrderId);
 
   const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
+  // Копия ID — кнопкой Telegram (copy_text), без бота; «Открыть в TWA» в беседе
+  // становится ссылкой `t.me/<бот>?startapp=<код>` (groupSafeMarkup).
+  const parts = order.splitParts ?? [];
+  const copyIds = parts.length > 1
+    ? parts.map((part) => part.gamepassId).join("\n")
+    : order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? null;
   const reply_markup = {
-    inline_keyboard: [
-      [
-        { text: "✅ ВЫКУПЛЕНО", callback_data: `admin_ok:${order.id}` },
-        { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` },
-      ],
-      [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],
-    ],
+    inline_keyboard: [[
+      ...(copyIds ? [{ text: parts.length > 1 ? `📋 ID ×${parts.length}` : `📋 ${copyIds}`, copy_text: { text: copyIds } }] : []),
+      { text: "📱 Открыть в TWA", web_app: { url: twaUrl } },
+    ]],
   };
 
   // Ответ на корень ветки — карточка выкупа встаёт в ту же нить заказа.

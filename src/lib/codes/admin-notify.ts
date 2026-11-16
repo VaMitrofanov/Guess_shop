@@ -1,4 +1,4 @@
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
 import { adminTargets } from "../../../bots/shared/admin-route";
 import { formatAdminNotice } from "../../../bots/shared/notify-format";
 import { formatRubKopecks } from "@/lib/codes-pricing";
@@ -35,6 +35,10 @@ export async function notifyCodeAdmins(input: {
   /** Кнопка «🎟 Выдать код» (ручная выдача). */
   issueButton?: boolean;
 }): Promise<void> {
+  // «🟢 выдан» уходит ответом на алерт «выдать код» (16.11.2026): Web не умеет
+  // править сообщения (мост пропускает только отправку), а ветка «алерт → выдан»
+  // в беседе читается так же — заказ закрыт.
+  const roots = input.marker === "done" ? await alertRoots(input.orderPublicId) : {};
   const token = process.env.TG_TOKEN;
   if (!token) return;
   const order = await prisma.codeOrder.findUnique({
@@ -58,13 +62,18 @@ export async function notifyCodeAdmins(input: {
     // Своя тема «Коды» (16.11.2026). Её ещё нет (бот не перезапускался) — адресат
     // сам упадёт в личку админов: `adminTargets` без темы шлёт в ADMIN_IDS.
     const targets = await adminTargets("codes", { loud: true, urgent: input.marker === "urgent" });
+    const sent: Record<string, number> = {};
     await Promise.allSettled(targets.map(async (target) => {
-      if (await sendTelegramMessage(token, target.chatId, text, { ...target.extra, ...markup })) return;
+      const reply = roots[target.key] ? { reply_to_message_id: roots[target.key], allow_sending_without_reply: true } : {};
+      const messageId = await sendTelegramMessageId(token, target.chatId, text, { ...target.extra, ...markup, ...reply });
+      if (messageId !== null) { sent[target.key] = messageId; return; }
       // Telegram отклонил разметку («can't parse entities») — алерт о деньгах не
       // имеет права потеряться из-за оформления: повтор тем же текстом без тегов
       // (CODE-827TX8XJ, 15.11.2026: «<код>» в подсказке убил алерт целиком).
-      await sendTelegramMessage(token, target.chatId, plainForTelegram(text), { ...target.extra, ...markup });
+      await sendTelegramMessage(token, target.chatId, plainForTelegram(text), { ...target.extra, ...markup, ...reply });
     }));
+    // Алерт «выдать код» запоминаем — к нему потом прицепится «🟢 выдан».
+    if (input.issueButton && Object.keys(sent).length > 0) await rememberAlert(input.orderPublicId, sent);
   } catch {
     // Уведомление не должно ломать обработку платежа.
   }
@@ -76,4 +85,27 @@ export function plainForTelegram(html: string): string {
     .replace(/<[^>]*>/g, "")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const ALERT_EVENT = "ADMIN_ALERT_SENT";
+
+async function rememberAlert(publicId: string, messages: Record<string, number>): Promise<void> {
+  const order = await prisma.codeOrder.findUnique({ where: { publicId }, select: { id: true } }).catch(() => null);
+  if (!order) return;
+  await prisma.codeOrderEvent.create({
+    data: { orderId: order.id, type: ALERT_EVENT, idempotencyKey: `code-admin-alert:${order.id}:${Date.now()}`, payload: { messages } },
+  }).catch(() => undefined);
+}
+
+/** Где лежит последний алерт «выдать код» по заказу: `{ ключ цели: message_id }`. */
+async function alertRoots(publicId: string): Promise<Record<string, number>> {
+  const order = await prisma.codeOrder.findUnique({ where: { publicId }, select: { id: true } }).catch(() => null);
+  if (!order) return {};
+  const event = await prisma.codeOrderEvent.findFirst({
+    where: { orderId: order.id, type: ALERT_EVENT },
+    orderBy: { createdAt: "desc" },
+    select: { payload: true },
+  }).catch(() => null);
+  const messages = (event?.payload as { messages?: Record<string, unknown> } | null)?.messages ?? {};
+  return Object.fromEntries(Object.entries(messages).filter((entry): entry is [string, number] => typeof entry[1] === "number"));
 }

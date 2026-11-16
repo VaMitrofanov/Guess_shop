@@ -933,17 +933,10 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const orderSource = order.orderSource ?? wbRef.source;
   const passPrice = Math.ceil(order.amount / 0.7);
 
-  const dateStr = order.createdAt 
-    ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК" 
-    : new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК";
   const age = formatOrderAge(order.createdAt ?? new Date());
 
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
   const platformEmoji = platformEmojis[order.platform] || "📦";
-
-  const bonusLine = order.bonusApplied && order.bonusApplied > 0
-    ? `🎁 Использован бонус: <b>${order.bonusApplied} R$</b>\n`
-    : "";
 
   const prev = order.previousOrderCount ?? 0;
   const loyaltyLine =
@@ -951,7 +944,6 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
     "";
 
-  const creatorLine    = order.creatorName    ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`  : "";
   const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
 
   const webOneTapLine = order.viaWebOneTap ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
@@ -969,13 +961,6 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // Разбивка: у каждой части свой номинал, и покупать их надо с РАЗНЫХ доноров
   // (повтор одного пасса с того же аккаунта вернёт AlreadyOwned).
   const parts = order.splitParts ?? [];
-  const splitLines = parts.length > 1
-    ? [
-        `🧩 <b>РАЗБИВКА: ${parts.length} ${parts.length < 5 ? "части" : "частей"}</b> — каждую покупать с ОТДЕЛЬНОГО донора`,
-        ...parts.map((part, index) =>
-          `   ${index + 1}. <code>${part.gamepassId}</code> · ${part.amount} R$ · пасс ${Math.ceil(part.amount / 0.7)} R$`),
-      ]
-    : [];
   // Поиск по нику пасс не увидел, покупатель прислал ссылку сам — почти всегда
   // это скрытый плейс. Заказ штатный, но менеджеру стоит глянуть глазами.
   const manualLinkLine = order.viaManualLink
@@ -993,22 +978,42 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // Единая шапка: тот же значок срочности, та же зона и тот же порядок ключей,
   // что во всех остальных сообщениях админам. Заказ, готовый к выкупу, — это
   // ручное действие, поэтому «action», а не «progress».
-  const passIdLine = (() => {
-    const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
-    return m ? `🎫 Pass ID: <code>${m[1]}</code>` : null;
-  })();
+
+  /* 16.11.2026 (владелец, вариант A): карточка выкупа — три-четыре строки.
+     «Источник / Юзер / Создатель / Время / Возраст» шли пятью строками — теперь
+     одной; разбивка — одной строкой с повтором пасса «×N»; кнопки — копия ID и
+     «Открыть в TWA». «Выкуплено» — только в TWA (там проверка цены и
+     подтверждение), донорские «Выкупить»/«Скрипт» сняты: донор выключен. */
+  const passIdOf = (url: string) => url.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? null;
+  const singlePassId = passIdOf(order.gamepassUrl);
+  const partIds = parts.map((part) => part.gamepassId);
+  const partGroups = [...new Set(partIds)].map((id) => {
+    const count = partIds.filter((x) => x === id).length;
+    return `<code>${id}</code>${count > 1 ? ` ×${count}` : ""}`;
+  });
+  const sameNominal = parts.length > 1 && parts.every((part) => part.amount === parts[0].amount);
+  const passLine = parts.length > 1
+    ? `🧩 ${parts.length} ${parts.length < 5 ? "части" : "частей"}${sameNominal ? ` по ${Math.ceil(parts[0].amount / 0.7)} R$` : ""} — с разных аккаунтов · ${partGroups.join(", ")}`
+    : `🎫 <code>${singlePassId ?? "—"}</code> · пасс ${passPrice} R$ · <a href="${order.gamepassUrl}">открыть</a>`;
+  const whoLine = [
+    `${platformEmoji} ${wbOrderSourceLabel(order.platform, orderSource)}`,
+    order.userDisplay,
+    order.creatorName ? `🎮 ${escapeHtml(order.creatorName)}` : null,
+    order.bonusApplied && order.bonusApplied > 0 ? `🎁 бонус ${order.bonusApplied} R$` : null,
+    `⏳ ${age}`,
+  ].filter(Boolean).join(" · ");
 
   const text = formatAdminNotice({
     marker: order.isAgeRestricted ? "urgent" : "action",
     zone: orderSource === "WB_DBS" ? "DBS" : orderSource === "DIRECT" ? "ПРЯМОЙ" : "WB",
-    title: order.replacedGamepassUrl ? "заменён геймпасс" : "заказ ждёт выкупа",
+    title: order.replacedGamepassUrl ? "заменён геймпасс" : "ждёт выкупа",
     lines: [
       orderRef({
         wbOrderId: wbRef.wbOrderId,
         code: order.wbCode,
         denomination: order.amount,
         buyerName: null,
-      }, [parts.length > 1 ? `${parts.length} пасса на ${passPrice} R$ суммарно` : `геймпасс ${passPrice} R$`]),
+      }),
       // Плашки-исключения идут ДО полей: они меняют то, как читать всё ниже.
       replacedLine.trim() || null,
       viaKeyLine.trim() || null,
@@ -1017,39 +1022,22 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       manualLinkLine.trim() || null,
       loyaltyLine.trim() || null,
       ageRestrictLine.trim() || null,
-      `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, orderSource)}</b>`,
-      `👤 Юзер: ${order.userDisplay}`,
-      creatorLine.trim() || null,
-      bonusLine.trim() || null,
-      `📅 Время: <b>${dateStr}</b>`,
-      // Возраст — отдельной строкой: у недельного заказа это и есть тревога.
-      `⏳ Возраст заказа: <b>${age}</b>`,
-      ...splitLines,
-      `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`,
-      parts.length > 1 ? null : passIdLine,
+      whoLine,
+      passLine,
     ],
     next: order.isAgeRestricted
       ? "игра 18+ — выкупать только вручную"
-      : parts.length > 1
-        ? "выкупить части с разных доноров (карточка заказа ведёт по одной) и нажать «ВЫКУПЛЕНО»"
-        : "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
+      : "скопировать ID → купить в аккаунте → «Выкуплено» в TWA",
   });
 
-  // One-tap deep-link into the TWA Orders screen, prefocused on this order
-  // (?q=<код> — TWA search matches wbCode). web_app inline buttons launch the
-  // Web App in personal chats with the given URL — no Direct Link app name needed.
-  // U1: ссылка запуска подписывается персонально под каждого админа, поэтому
-  // клавиатура строится в цикле, а не один раз на всех.
+  // Кнопки: копия ID (Telegram копирует сам, без бота) и заказ в TWA. В беседе
+  // `web_app` превращается в ссылку `t.me/<бот>?startapp=<код>` (groupSafeMarkup).
+  const copyIds = parts.length > 1 ? partIds.join("\n") : singlePassId;
   const reply_markup = (adminId: string) => ({
     inline_keyboard: [
       [
-        { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id)  },
-        { text: "❌ ОШИБКА",    callback_data: CB.adminErr(order.id) },
-      ],
-      [
-        { text: "🛒 Выкупить",      callback_data: CB.purchaseBuy(order.id) },
-        { text: "📋 Скрипт",        callback_data: CB.purchaseScript(order.id) },
-        { text: "📊 Дашборд",       web_app: { url: twaLaunchUrl(adminId, { q: order.wbCode }) } },
+        ...(copyIds ? [{ text: parts.length > 1 ? `📋 ID ×${parts.length}` : `📋 ${copyIds}`, copy_text: { text: copyIds } }] : []),
+        { text: "📱 Открыть в TWA", web_app: { url: twaLaunchUrl(adminId, { q: order.wbCode }) } },
       ],
     ],
   });

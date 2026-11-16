@@ -6,9 +6,10 @@ import {
   type AdminNotice,
 } from "./notify-format";
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
-import { adminTargets, adminTargetsForNotice, replyToRootFor } from "./admin-route";
+import { adminTargets, adminTargetsForNotice, replyToRootFor, twaStartappUrl } from "./admin-route";
 import { noteAdminReply, noteBuyerMessage } from "./buyer-conversation-notice";
 import { rememberWbReplyMessage, wbReplyMarkup } from "./wb-reply-buttons";
+import { dbsChatMarkup, loadDbsChatStatus } from "./dbs-chat-status";
 
 const ADMIN_IDS: string[] = [...new Set(
   (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
@@ -60,7 +61,10 @@ function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
   // Провал доставки обязан быть слышен: раньше ответ Telegram не читался, и
   // потерянное уведомление не оставляло следа (разбор 27.09).
   void adminTargetsForNotice(notice).then((targets) => Promise.allSettled(targets.map(async (t) => {
-    const reply = await tgSend(t.chatId, text, { parse_mode: "HTML", ...replyToRootFor(ref?.cardMessages, t), ...t.extra });
+    // 📱 У каждого уведа о заказе — «Открыть в TWA» (16.11.2026).
+    const twaUrl = twaStartappUrl(ref?.code);
+    const markup = twaUrl ? { reply_markup: { inline_keyboard: [[{ text: "📱 Открыть в TWA", url: twaUrl }]] } } : {};
+    const reply = await tgSend(t.chatId, text, { parse_mode: "HTML", ...markup, ...replyToRootFor(ref?.cardMessages, t), ...t.extra });
     if (reply?.ok !== true) {
       console.warn(`[dbs-notify] «${notice.title}» не доставлено chat_id=${t.chatId}: ${JSON.stringify(reply).slice(0, 200)}`);
     }
@@ -82,9 +86,16 @@ function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
  */
 export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: string[] = []) {
   const notice = { marker: "action" as const, zone: "DBS" as const };
-  // 15.11.2026: под уведом — ответы в чат WB кнопками и «ответить на увед» (`wb-chat-reply.ts`).
-  const markup = { reply_markup: wbReplyMarkup(ref.wbOrderId) };
-  void adminTargetsForNotice(notice).then((targets) => noteBuyerMessage({
+  /* 16.11.2026 (владелец): вместо четырёх одинаковых кнопок — статус «что уже
+     ушло покупателю» и кнопки по этапу (`dbs-chat-status.ts`). Статус не
+     прочитался — увед уходит с прежними кнопками, без строк статуса. */
+  void Promise.all([
+    adminTargetsForNotice(notice),
+    import("./db").then(({ db }) => loadDbsChatStatus(db as never, ref.wbOrderId)).catch(() => null),
+  ]).then(([targets, status]) => {
+  const markup = { reply_markup: status ? dbsChatMarkup(ref.wbOrderId, status) : wbReplyMarkup(ref.wbOrderId) };
+  return noteBuyerMessage({
+    status: status?.lines ?? null,
     conversationKey: `dbs:${ref.wbOrderId}`,
     head: refLine(ref),
     who: who[0] ?? null,
@@ -103,7 +114,8 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: str
       edit: (target, messageId, text) => tgEdit(target.chatId, messageId, text, { parse_mode: "HTML", ...markup }),
       remove: (target, messageId) => tgDelete(target.chatId, messageId),
     },
-  })).catch((err) => console.warn(`[dbs-notify] сообщение покупателя: ${err instanceof Error ? err.message : err}`));
+  });
+  }).catch((err) => console.warn(`[dbs-notify] сообщение покупателя: ${err instanceof Error ? err.message : err}`));
 }
 
 /** Админ ответил в чат WB из Telegram — строкой «↩️» в увед разговора.

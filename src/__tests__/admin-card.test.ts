@@ -21,7 +21,7 @@ describe("web one-tap admin card", () => {
     }, new Date("2026-07-18T14:00:00.000Z"));
 
     expect(text).toContain("ONE-TAP С САЙТА");
-    expect(text).toContain("⏳ Возраст заказа: <b>🔴 7 дней 4 ч · недельный</b>");
+    expect(text).toContain("⏳ 🔴 7 дней 4 ч · недельный");
     expect(text).toContain("Pass ID: <code>1910524659</code>");
   });
 

@@ -6,9 +6,17 @@ import fs from "node:fs";
 import path from "node:path";
 
 const send = jest.fn();
-jest.mock("@/lib/telegram", () => ({ sendTelegramMessage: (...a: unknown[]) => send(...a) }));
+// С 16.11.2026 первая попытка — `sendTelegramMessageId` (id алерта запоминается,
+// к нему цепляется «🟢 выдан»), повтор простым текстом — `sendTelegramMessage`.
+jest.mock("@/lib/telegram", () => ({
+  sendTelegramMessage: (...a: unknown[]) => send(...a),
+  sendTelegramMessageId: async (...a: unknown[]) => ((await send(...a)) ? 101 : null),
+}));
 jest.mock("@/lib/prisma", () => ({
-  prisma: { codeOrder: { findUnique: async () => ({ deliveryMode: "EMAIL", channel: "SITE", giftSendAt: null }) } },
+  prisma: {
+    codeOrder: { findUnique: async () => ({ id: "o1", deliveryMode: "EMAIL", channel: "SITE", giftSendAt: null }) },
+    codeOrderEvent: { create: async () => ({}), findFirst: async () => null },
+  },
 }));
 jest.mock("../../bots/shared/admin-route", () => ({
   adminTargets: async () => [{ key: "g#5", chatId: "-100", extra: { message_thread_id: 5 }, group: true }],
