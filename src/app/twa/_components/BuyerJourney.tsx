@@ -81,8 +81,10 @@ export function JourneyTrack({ journey, labeled }: { journey: BuyerJourney; labe
 }
 
 /* ── Раздел шторки ─────────────────────────────────────────────────────── */
-export function JourneyBlock({ journey, onHistory, onNext, onOther }: {
+export function JourneyBlock({ journey, onHistory, onNext, onOther, compact = false }: {
   journey: BuyerJourney;
+  /** 16.11.2026: в карточке касания живут в «Хронологии» — здесь только «чего ждём» и «Следующий шаг». */
+  compact?: boolean;
   onHistory: () => void;
   onNext: (next: JourneyNext) => void;
   /** «Другое ›» — полное меню «📨 Инструкция». */
@@ -96,13 +98,13 @@ export function JourneyBlock({ journey, onHistory, onNext, onOther }: {
       background: C.card, border: `1px solid ${C.hairline}`, borderRadius: 14, padding: 12,
       display: "flex", flexDirection: "column", gap: 10,
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      {!compact && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <b style={{ fontSize: 15 }}>🧭 Путь покупателя</b>
         <button type="button" className="twa-press-sm" onClick={() => { haptic.select(); onHistory(); }}
           style={{ border: "none", background: "transparent", color: C.accent, fontSize: 14, fontWeight: 600, padding: 4, fontFamily: "inherit" }}>
           Вся история ›
         </button>
-      </div>
+      </div>}
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", padding: 10, borderRadius: 12, background: `${color}17` }}>
         {bigTone && since && (
@@ -116,7 +118,7 @@ export function JourneyBlock({ journey, onHistory, onNext, onOther }: {
         </div>
       </div>
 
-      {journey.touches.length > 0 && (
+      {!compact && journey.touches.length > 0 && (
         <div>
           {journey.touches.map((t, i) => <TouchRow key={`${t.at}-${i}`} item={t} first={i === 0} />)}
         </div>

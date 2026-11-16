@@ -200,7 +200,39 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
     setReport(null);
   };
 
-  const items = useMemo(() => data?.export.items ?? [], [data]);
+  const allItems = useMemo(() => data?.export.items ?? [], [data]);
+  /* 🔧 «Сначала починить» (16.11.2026): живая сверка каждого пасса с Roblox —
+     не та цена или снят с продажи. Такие заказы уходят из таблицы и из подбора
+     под баланс наверх, с причиной и переходом в заказ: выкупать их нельзя, и
+     ЦЕНА-СТОП остановил бы их уже после того, как их выбрали. */
+  const [liveBad, setLiveBad] = useState<Record<string, string>>({});
+  const [liveChecking, setLiveChecking] = useState(false);
+  useEffect(() => {
+    if (!BUYABLE_TABS.includes(tab) || allItems.length === 0) { setLiveBad({}); return; }
+    let cancelled = false;
+    setLiveChecking(true);
+    void (async () => {
+      const bad: Record<string, string> = {};
+      const ids = allItems.map((i) => i.orderId);
+      for (let k = 0; k < ids.length && !cancelled; k += 30) {
+        try {
+          const res = await fetch("/api/admin/orders", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "gp-live-check", orderIds: ids.slice(k, k + 30) }),
+          });
+          const body = await res.json().catch(() => null);
+          for (const [id, info] of Object.entries((body?.results ?? {}) as Record<string, { isForSale?: boolean | null; priceMismatch?: boolean; livePrice?: number | null; expected?: number }>)) {
+            if (info.isForSale === false) bad[id] = "пасс снят с продажи";
+            else if (info.priceMismatch && info.livePrice != null) bad[id] = `пасс стоит ${info.livePrice.toLocaleString("ru-RU")}, нужен ${Number(info.expected ?? 0).toLocaleString("ru-RU")}`;
+          }
+        } catch { /* сверка необязательна: без неё таблица та же, что раньше */ }
+      }
+      if (!cancelled) { setLiveBad(bad); setLiveChecking(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [allItems, tab]);
+  const items = useMemo(() => allItems.filter((i) => !liveBad[i.orderId]), [allItems, liveBad]);
+  const fixItems = useMemo(() => allItems.filter((i) => liveBad[i.orderId]), [allItems, liveBad]);
   const buyable = BUYABLE_TABS.includes(tab);
 
   const idList = useMemo(() => items.map((i) => i.gamepassId).join("\n"), [items]);
@@ -650,17 +682,30 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                   </div>
                 )}
 
-                {/* 🔧 Сначала починить (16.11.2026): ошибки выкупа — не в общем
-                    списке, а отдельной строкой сверху, с переходом в их вкладку. */}
-                {tab !== "ERROR" && (data?.counts?.ERROR ?? 0) > 0 && (
-                  <div className={styles.noteInfo} style={{ marginBottom: 14, borderColor: "rgba(255,159,10,.35)" }}>
-                    <TriangleAlert />
-                    <div style={{ flex: 1 }}>
-                      <b>Сначала починить · {data!.counts.ERROR}</b> — заказы с ошибкой выкупа (не та цена, снят пасс, рег. цена) в эту выгрузку не попадают.
+                {/* 🔧 Сначала починить (16.11.2026): ошибки выкупа и пассы, которые
+                    живая сверка с Roblox не пропустила, — отдельно, с причиной. */}
+                {(fixItems.length > 0 || (tab !== "ERROR" && (data?.counts?.ERROR ?? 0) > 0)) && (
+                  <div className={styles.noteInfo} style={{ marginBottom: 14, borderColor: "rgba(255,159,10,.35)", flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <TriangleAlert />
+                      <b style={{ flex: 1 }}>Сначала починить · {fixItems.length + (tab !== "ERROR" ? data?.counts?.ERROR ?? 0 : 0)}</b>
+                      {tab !== "ERROR" && (data?.counts?.ERROR ?? 0) > 0 && (
+                        <button type="button" className={styles.ghostButton} onClick={() => changeTab("ERROR")} disabled={running}>
+                          Ошибки выкупа · {data!.counts.ERROR}
+                        </button>
+                      )}
                     </div>
-                    <button type="button" className={styles.ghostButton} onClick={() => changeTab("ERROR")} disabled={running}>Открыть</button>
+                    {fixItems.map((i) => (
+                      <div key={i.orderId} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid rgba(255,255,255,.08)" }}>
+                        <b className={styles.nowrap}>{i.wbCode}</b>
+                        <span style={{ flex: 1, minWidth: 200 }}>{i.robloxUsername ?? "ник не указан"} — <b>{liveBad[i.orderId]}</b></span>
+                        <a className={styles.ghostButton} href={`/admin/orders?q=${encodeURIComponent(i.wbCode)}`}>Открыть заказ</a>
+                      </div>
+                    ))}
+                    <span style={{ color: "var(--admin-muted)", fontSize: 13 }}>Эти заказы убраны из таблицы и подбора под баланс. В заказе — «Инструкция» или «Пассы ника», чтобы получить пасс с нужной ценой.</span>
                   </div>
                 )}
+                {liveChecking && <div style={{ color: "var(--admin-muted)", fontSize: 13, marginBottom: 10 }}>Сверяю пассы с Roblox…</div>}
 
                 <div className={styles.toolbar}>
                   <button type="button" className={styles.ghostButton} onClick={selectAll} disabled={running}>Выбрать все</button>

@@ -149,6 +149,9 @@ export default function OverviewScreen({
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  /** 🎟 Какой код выдаём из блока «Коды» и что введено. */
+  const [issuing, setIssuing] = useState<{ id: string; value: string } | null>(null);
+  const [issueBusy, setIssueBusy] = useState(false);
   const showToast = useCallback((text: string, error = false) => {
     setToast({ text, error });
     window.setTimeout(() => setToast(null), 4200);
@@ -285,6 +288,22 @@ export default function OverviewScreen({
   /* Пульс синка: 6 минут — тот же порог, что у тихой строки экрана. */
   const syncStale = !dbs?.sync || dbs.sync.ageSeconds > 360 || dbs.sync.status !== "HEALTHY";
   const hot = buyout.age.overdue > 0;
+  async function issueCode(publicId: string) {
+    const value = issuing?.value.trim() ?? "";
+    if (!value || issueBusy) return;
+    setIssueBusy(true);
+    try {
+      const res = await fetch("/api/admin/codes/issue", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ publicId, code: value }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) { showToast(body?.error ?? "Код не выдан", true); return; }
+      showToast(`${publicId}: код выдан${body.delivered ? ` · ${body.delivered}` : ""}`);
+      setIssuing(null);
+      void refresh(true);
+    } catch { showToast("Ошибка сети", true); }
+    finally { setIssueBusy(false); }
+  }
   // Прямые — в своём блоке наверху; «Первым делом» их не повторяет.
   const fil = data.firstInLine ?? null;
   const directRows = fil?.rows.filter((row) => row.reason === "direct") ?? [];
@@ -335,7 +354,18 @@ export default function OverviewScreen({
                 <strong>{code.publicId} · {num(code.denomination)} R$</strong>
                 <small>оплачен {code.paidAt ? `${fmtAge(code.paidAt)} назад` : "—"} · {code.channel === "SITE" ? "сайт" : code.channel}{code.gift ? " · подарок" : ""}</small>
               </span>
-              <button type="button" onClick={() => { copyText(code.publicId); showToast(`${code.publicId} скопирован`); }}>Скопировать</button>
+              {/* 🎟 Выдача прямо отсюда (16.11.2026): то же ядро, что у бота. */}
+              {issuing?.id === code.publicId ? (
+                <form className={styles.prioIssue} onSubmit={(event) => { event.preventDefault(); void issueCode(code.publicId); }}>
+                  <input autoFocus value={issuing.value} disabled={issueBusy} spellCheck={false}
+                    onChange={(event) => setIssuing({ id: code.publicId, value: event.target.value })}
+                    placeholder={`Код на ${num(code.denomination)} R$`} aria-label={`Код для ${code.publicId}`} />
+                  <button type="submit" disabled={issueBusy || issuing.value.trim().length < 6}>{issueBusy ? "…" : "Выдать"}</button>
+                  <button type="button" className={styles.prioGhost} disabled={issueBusy} onClick={() => setIssuing(null)}>Отмена</button>
+                </form>
+              ) : (
+                <button type="button" onClick={() => setIssuing({ id: code.publicId, value: "" })}>Выдать код</button>
+              )}
             </div>
           ))}
         </section>

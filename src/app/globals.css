@@ -2452,3 +2452,24 @@ html.twa-route-active [contenteditable="true"] {
 .twa-focus-btn.is-done { flex: 1; background: #30d158; color: #04160b; font-size: 18px; font-weight: 750; }
 .twa-focus-btn.is-done:disabled { background: #2c2c2e; color: #8e8a99; }
 .twa-focus-undo-text { flex: 1; color: #6ee58d; font-size: 16px; font-weight: 600; }
+/* 🎟 Выдача кода из блока «Коды» (16.11.2026). */
+.twa-prio-row.is-col { flex-direction: column; align-items: stretch; gap: 10px; }
+.twa-prio-line { display: flex; align-items: center; gap: 12px; }
+.twa-prio-line > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.twa-prio-line > button {
+  flex: 0 0 auto; min-height: 36px; padding: 0 16px; border: 0; border-radius: 18px;
+  background: #ffd60a; color: #000; font-family: inherit; font-size: 15px; font-weight: 700;
+}
+.twa-prio-issue { display: flex; gap: 8px; }
+.twa-prio-issue > input {
+  flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 1px solid rgba(255,214,10,.45); border-radius: 12px;
+  background: rgba(0,0,0,.35); color: #fff; font: 600 16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em;
+  -webkit-appearance: none; appearance: none; outline: none;
+}
+.twa-prio-issue > button {
+  min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: #ffd60a; color: #000;
+  font-family: inherit; font-size: 15px; font-weight: 700;
+}
+.twa-prio-issue > button:disabled { opacity: .45; }
+.twa-prio-issue > button.is-ghost { background: rgba(255,255,255,.1); color: #fff; padding: 0 14px; }
+.twa-blk-link { margin-left: auto; min-height: 36px; padding: 0 4px; border: 0; background: none; color: #a78bfa; font-family: inherit; font-size: 14px; font-weight: 600; }

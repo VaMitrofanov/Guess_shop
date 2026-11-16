@@ -26,7 +26,7 @@ export function deliveryLine(order: { deliveryMode: string; channel: string; gif
  * Значения кода и адреса получателя здесь не бывает никогда.
  */
 export async function notifyCodeAdmins(input: {
-  marker: "urgent" | "action";
+  marker: "urgent" | "action" | "done";
   title: string;
   orderPublicId: string;
   denomination: number;

@@ -29,7 +29,7 @@ export interface FeedOrder {
   createdAt?: string | Date | null;
 }
 
-interface FeedEntry {
+export interface FeedEntry {
   key: string;
   text: string;
   /** Слова покупателя — единственное, что выделяется в ленте. */
@@ -192,6 +192,54 @@ export function collapseFeed(entries: readonly FeedEntry[]): FeedEntry[] {
     i = j;
   }
   return out;
+}
+
+/* ── Хронология карточки (16.11.2026, редизайн v2) ─────────────────────────
+   «Путь покупателя» (что он вводил и присылал, что ему слал бот) и «Лента»
+   (заметки людей, заморозки, пометки) были двумя блоками с двумя временными
+   шкалами. Владелец: одна лента, свежее сверху. Слова покупателя остаются
+   цитатой — единственное выделение. */
+
+/** Шаг пути в том виде, в каком его отдаёт `buyerJourney().history`. */
+export interface ChronologyJourneyItem {
+  who: "buyer" | "us" | "problem";
+  text: string;
+  sub?: string;
+  at: string;
+  by?: string;
+}
+
+const JOURNEY_WHO: Record<ChronologyJourneyItem["who"], string> = { buyer: "покупатель", us: "мы", problem: "сбой" };
+
+export function orderChronology(
+  feed: readonly FeedEntry[],
+  journey: readonly ChronologyJourneyItem[],
+  now = Date.now(),
+): FeedEntry[] {
+  const fromJourney: FeedEntry[] = journey.map((item, i) => {
+    const ts = Date.parse(item.at);
+    // Цитата покупателя — только если подпись похожа на его слова, а не на служебную деталь.
+    const quoted = item.who === "buyer" && !!item.sub && /[«"]/.test(item.sub);
+    return {
+      key: `j${i}`,
+      text: quoted || !item.sub ? item.text : `${item.text} · ${item.sub}`,
+      quote: quoted ? item.sub!.replace(/^[«"]|[»"]$/g, "") : null,
+      meta: meta(item.by ?? JOURNEY_WHO[item.who], Number.isFinite(ts) ? ts : null, now),
+      weight: item.who === "problem" ? "strong" : "dim",
+      ts: Number.isFinite(ts) ? ts : Number.NEGATIVE_INFINITY,
+    };
+  });
+  // Одинаковый текст в одну и ту же минуту — одно событие, записанное двумя путями.
+  const seen = new Set<string>();
+  const merged = [...feed, ...fromJourney]
+    .filter((entry) => {
+      const key = `${entry.text.toLowerCase()}@${Number.isFinite(entry.ts) ? Math.round(entry.ts / 60_000) : "?"}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => (Number.isFinite(b.ts) ? b.ts : -Infinity) - (Number.isFinite(a.ts) ? a.ts : -Infinity));
+  return collapseFeed(merged);
 }
 
 /* ── «Сейчас» ───────────────────────────────────────────────────────────── */

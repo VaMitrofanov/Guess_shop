@@ -13,7 +13,6 @@ import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
-import { copyText } from "../clipboard";
 import type { PendingCodeOrders } from "@/lib/code-orders-pending";
 import type { FirstInLine } from "@/types/first-in-line";
 import type { VkNeedsHuman } from "@/types/vk-needs-human";
@@ -120,6 +119,28 @@ export default function Dashboard({
   const [data, setData] = useState<DashData | null>(null);
   // «Ждут ответа в ВК» свёрнуто по умолчанию: одна строка среди дел, список — по тапу.
   const [vkOpen, setVkOpen] = useState(false);
+  /** 🎟 Какой код сейчас выдаём из блока «Коды» и что введено. */
+  const [issuing, setIssuing] = useState<{ id: string; value: string } | null>(null);
+  const [issueBusy, setIssueBusy] = useState(false);
+  async function issueCode(publicId: string) {
+    const value = issuing?.value.trim() ?? "";
+    if (!value || issueBusy) return;
+    setIssueBusy(true);
+    try {
+      const res = await fetch("/api/admin/codes/issue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ publicId, code: value }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) { haptic.notify("error"); toast(data?.error ?? "Код не выдан", "error"); return; }
+      haptic.notify("success");
+      toast(`🟢 ${publicId}: код выдан${data.delivered ? ` · ${data.delivered}` : ""}`, "success");
+      setIssuing(null);
+      void load();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setIssueBusy(false); }
+  }
   /** 🛒 Режим «Выкуп по одному» поверх главной. */
   const [focusOpen, setFocusOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -230,14 +251,32 @@ export default function Dashboard({
           </em>
         </header>
         {codeOrders?.toIssue.map(code => (
-          <div key={code.publicId} className="twa-prio-row">
-            <span>
-              <strong>{code.publicId} · {robux(code.denomination)} R$</strong>
-              <small>оплачен {code.paidAt ? `${fmtAge(code.paidAt)} назад` : "—"} · {code.channel === "SITE" ? "сайт" : code.channel}{code.gift ? " · подарок" : ""}</small>
-            </span>
-            <button type="button" className="twa-press-sm" onClick={() => { copyText(code.publicId); haptic.impact("light"); toast(`${code.publicId} скопирован`, "success"); }}>
-              Скопировать
-            </button>
+          <div key={code.publicId} className="twa-prio-row is-col">
+            <div className="twa-prio-line">
+              <span>
+                <strong>{code.publicId} · {robux(code.denomination)} R$</strong>
+                <small>оплачен {code.paidAt ? `${fmtAge(code.paidAt)} назад` : "—"} · {code.channel === "SITE" ? "сайт" : code.channel}{code.gift ? " · подарок" : ""}</small>
+              </span>
+              {issuing?.id !== code.publicId && (
+                <button type="button" className="twa-press-sm" onClick={() => { haptic.select(); setIssuing({ id: code.publicId, value: "" }); }}>
+                  Выдать
+                </button>
+              )}
+            </div>
+            {/* 🎟 Выдача прямо отсюда (16.11.2026): то же ядро, что у бота. Код
+                уходит покупателю письмом/в чат, в беседу — «🟢 выдан · кто». */}
+            {issuing?.id === code.publicId && (
+              <form className="twa-prio-issue" onSubmit={event => { event.preventDefault(); void issueCode(code.publicId); }}>
+                <input
+                  autoFocus value={issuing.value} disabled={issueBusy}
+                  onChange={event => setIssuing({ id: code.publicId, value: event.target.value })}
+                  placeholder={`Код на ${robux(code.denomination)} R$`} aria-label={`Код для ${code.publicId}`}
+                  autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="send"
+                />
+                <button type="submit" disabled={issueBusy || issuing.value.trim().length < 6}>{issueBusy ? "…" : "Выдать"}</button>
+                <button type="button" className="is-ghost" disabled={issueBusy} onClick={() => setIssuing(null)}>✕</button>
+              </form>
+            )}
           </div>
         ))}
       </section>

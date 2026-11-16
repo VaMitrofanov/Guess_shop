@@ -1,7 +1,7 @@
 "use client";
 import { basketLabel } from "@/lib/wb-basket";
 import { flagsConfirmText } from "@/lib/order-signals";
-import { collapseFeed, orderFeed, orderHeadline, orderNow, orderStateWord } from "@/lib/order-feed";
+import { collapseFeed, orderChronology, orderFeed, orderHeadline, orderNow, orderStateWord, type ChronologyJourneyItem } from "@/lib/order-feed";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type React from "react";
 import { RefreshCw } from "lucide-react";
@@ -3283,6 +3283,7 @@ function OrderCard({
             или выкуплен — шаги видны полосой в шапке, текст лишний. */}
         {!isDoneState && !readiness.ready && (
           <JourneyBlock
+            compact
             journey={journey}
             onHistory={() => setHistoryOpen(true)}
             onNext={runJourneyNext}
@@ -3292,10 +3293,15 @@ function OrderCard({
 
         {/* 3. Лента заказа (11.11.2026): заметки, заморозки, заявки и правки
             одной хроникой. Сырой текст заметки — по «Править текстом». */}
+        {/* 🕓 Хронология (16.11.2026): путь покупателя и лента заказа одной
+            лентой, свежее сверху; заметку пишут прямо здесь. */}
         <div className="twa-blk">
-          <div className="twa-blk-h"><span aria-hidden="true">🕓</span><h4>Лента</h4></div>
+          <div className="twa-blk-h">
+            <span aria-hidden="true">🕓</span><h4>Хронология</h4>
+            <button type="button" className="twa-blk-link twa-press-sm" onClick={() => { haptic.select(); setHistoryOpen(true); }}>Вся история ›</button>
+          </div>
           <div className="twa-blk-pad">
-            <OrderFeedTwa order={order} onAdd={(text) => onRunAction("add-note", text)} onSaveRaw={onSaveNote} />
+            <OrderFeedTwa order={order} journey={journey.history} onAdd={(text) => onRunAction("add-note", text)} onSaveRaw={onSaveNote} />
           </div>
         </div>
 
@@ -5910,15 +5916,19 @@ function Quote({ text, style }: { text: string; style?: React.CSSProperties }) {
 }
 
 /** Лента заказа: поле заметки и хроника. Сырой текст — за «Править текстом». */
-function OrderFeedTwa({ order, onAdd, onSaveRaw }: {
+function OrderFeedTwa({ order, journey, onAdd, onSaveRaw }: {
   order: Order;
+  /** Шаги пути покупателя — тогда это «Хронология», а не только лента заметок. */
+  journey?: ChronologyJourneyItem[];
   onAdd: (text: string) => Promise<ActionResult>;
   onSaveRaw: (note: string) => Promise<ActionResult>;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [raw, setRaw] = useState(false);
-  const entries = collapseFeed(orderFeed(order));
+  const [all, setAll] = useState(false);
+  const full = journey ? orderChronology(orderFeed(order), journey) : collapseFeed(orderFeed(order));
+  const entries = all ? full : full.slice(0, 8);
   async function submit() {
     const value = text.trim();
     if (!value || busy) return;
@@ -5951,6 +5961,12 @@ function OrderFeedTwa({ order, onAdd, onSaveRaw }: {
           {e.quote && <Quote text={e.quote} />}
         </div>
       ))}
+      {full.length > entries.length && (
+        <button onClick={() => setAll(true)}
+          style={{ alignSelf: "flex-start", padding: 0, border: "none", background: "none", color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+          Ещё {full.length - entries.length}
+        </button>
+      )}
       <button onClick={() => setRaw(v => !v)}
         style={{ alignSelf: "flex-start", padding: 0, border: "none", background: "none", color: C.textTertiary, fontSize: 14, cursor: "pointer" }}>
         {raw ? "Скрыть текст" : "Править текстом"}

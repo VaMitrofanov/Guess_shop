@@ -552,3 +552,15 @@
   flex: 0 0 auto; min-height: 32px; padding: 0 14px; border: 0; border-radius: 16px;
   background: #ffd60a; color: #000; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
 }
+.prioIssue { display: flex; gap: 8px; flex: 1 1 260px; }
+.prioIssue > input {
+  flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid rgba(255,214,10,.45); border-radius: 10px;
+  background: rgba(0,0,0,.35); color: #fff; font: 600 15px ui-monospace, SFMono-Regular, Menlo, monospace; outline: none;
+}
+.prioIssue > button {
+  min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: #ffd60a; color: #000;
+  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.prioIssue > button:disabled { opacity: .45; }
+.prioIssue > .prioGhost { background: rgba(255,255,255,.1); color: #fff; }
+.prioRow { flex-wrap: wrap; }
