@@ -186,6 +186,12 @@ export function primaryActionFor(order: PresentableOrder, live?: GpLive | null):
      предупреждение «бери с другого аккаунта», а не запрет. */
   if (live?.isForSale === false)
     return { kind: "contact", icon: "✉", label: "Написать", labelLong: "Написать за новым пассом", tone: "blue" };
+  /* Цена пасса не та (16.11.2026, редизайн v2): выкупать его нельзя — ЦЕНА-СТОП
+     всё равно остановит, а крупная зелёная «Выкуплено» в ленте звала бы
+     нажать. Главное действие — написать за пассом с правильной ценой;
+     «Выкуплено» остаётся в меню для случая «купили другой пасс». */
+  if (live?.priceMismatch)
+    return { kind: "contact", icon: "✉", label: "Написать", labelLong: "Написать за пассом с нужной ценой", tone: "blue" };
   return { kind: "action", action: "complete", icon: "✓", label: "Выкуплено", tone: "green" };
 }
 

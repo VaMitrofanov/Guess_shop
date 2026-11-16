@@ -24,6 +24,7 @@ import styles from "./orders.module.css";
 import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/lib/buyout-summary";
 import OrderRiskBlock from "@/components/admin/risks/review-plaque";
 import { NowBlock, OrderFeed } from "./order-signals";
+import { replyForOrder } from "@/lib/order-reply";
 
 const TONE_CLASS: Record<BuyoutTone, string> = {
   green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
@@ -49,6 +50,18 @@ const EVENT_LABELS: Record<string, string> = {
   WB_GATE_ISSUED: "Гейт выдан покупателю",
   REVIEW_BONUS_GRANTED: "Начислен бонус за отзыв",
 };
+
+interface BuyerInfo {
+  stats: { orders: number; completed: number; rejected: number };
+  referrals?: { invited: number; qualified: number; referredBy: string | null };
+}
+
+const CONTACT_CHANNEL: Record<string, string> = { TG: "TG", VK: "VK", WB: "чат WB" };
+const CONTACT_KIND: Record<string, string> = { rush: "Пишет в поддержку", human: "Нужен человек", cancel: "Просит вернуть деньги" };
+function timesLabel(n: number): string {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? `${n} раза` : `${n} раз`;
+}
 
 export default function OrderDossier({
   order, live, packDupIn = null, onClose, onPrimary, onHold, onAckFlag, onError, onFavorite, onPriority, onCancel, onRebuy, onSplit, onEdit, onToast, onChanged,
@@ -168,6 +181,19 @@ export default function OrderDossier({
     window.addEventListener("admin:journey-stale", onStale);
     return () => window.removeEventListener("admin:journey-stale", onStale);
   }, [order.id]);
+  /* ✅ Готов к выкупу: пасс в продаже, цена сходится, не заморожен. */
+  const readyToBuy = !order.heldAt && ["PENDING", "IN_PROGRESS"].includes(order.status)
+    && live?.isForSale === true && !live?.priceMismatch && !(order.splitGamepasses?.length);
+  /* 👤 История покупателя и рефералы — догружаются один раз на заказ. */
+  const [buyerInfo, setBuyerInfo] = useState<BuyerInfo | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setBuyerInfo(null);
+    void post({ action: "user-history" })
+      .then((d: BuyerInfo) => { if (alive && d?.stats) setBuyerInfo(d); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [order.id, post]);
   const journey = useMemo(() => buyerJourney({
     status: order.status, wbCode: order.wbCode, createdAt: order.createdAt, isDirectOrder: order.isDirectOrder,
     paidAt: order.paidAt, robloxUsername: order.robloxUsername, probableNick: order.probableNick,
@@ -383,6 +409,28 @@ export default function OrderDossier({
           </button>
         </div>
 
+        {/* ✅ Всё сходится — одна зелёная строка (16.11.2026, редизайн v2). */}
+        {readyToBuy && (
+          <div className={styles.readyLine}><span aria-hidden="true">✓</span>Всё сходится — можно выкупать</div>
+        )}
+
+        {/* 📣 Пишет в поддержку — только тогда блок и «Ответ клиенту». */}
+        {order.contact && order.status !== "REJECTED" && (
+          <div className={styles.contactBox}>
+            <div className={styles.contactHead}>
+              <b>{CONTACT_KIND[order.contact.kind]} · {timesLabel(order.contact.count)}</b>
+              <em>{fmtAge(order.contact.lastAt)} назад · {CONTACT_CHANNEL[order.contact.lastChannel] ?? order.contact.lastChannel}</em>
+            </div>
+            <div className={styles.contactBody}>
+              <i>{order.contact.lastText ? `«${order.contact.lastText}»` : "нажал «Статус заказа»"}</i>
+              <button type="button" className={styles.btn} onClick={() => {
+                void navigator.clipboard?.writeText(replyForOrder(order)).catch(() => {});
+                onToast("Ответ клиенту скопирован");
+              }}>Ответ клиенту</button>
+            </div>
+          </div>
+        )}
+
         {/* Лента заказа (11.11.2026): заметки людей, заморозки, заявки и
             правки одной хроникой. Сырой текст — по «Править текстом». */}
         <OrderFeed
@@ -426,17 +474,15 @@ export default function OrderDossier({
           <>
             {/* ✅ Выкуплен — первым: когда, кто, сколько списано, дошло ли до
                 клиента, что он ответил (тот же блок, что в TWA, 27.10.2026). */}
+            {/* 16.11.2026 (владелец: «просто выкуплен и когда»): одна строка, а
+                строки сводки — только те, что требуют внимания (уведомление не
+                дошло и т. п.). */}
             {buyout && (
-              <section className={`${styles.buyout}${buyout.attention ? ` ${styles.buyoutAttention}` : ""}`} aria-label="Заказ выкуплен">
-                <div className={styles.buyoutHead}>
-                  <span className={styles.buyoutMark} aria-hidden="true">✓</span>
-                  <span>
-                    <div className={styles.buyoutTitle}>ВЫКУПЛЕН</div>
-                    <div className={styles.buyoutWhen}>{buyout.when} <small>· {buyout.ago}</small></div>
-                  </span>
-                </div>
+              <section aria-label="Заказ выкуплен">
+                <div className={styles.readyLine}><span aria-hidden="true">✓</span>Выкуплен {buyout.when}<em>{order.purchaserUsername ?? order.completedBy ?? ""}</em></div>
+                {buyout.rows.some((row) => row.tone === "red") && (
                 <dl className={styles.buyoutGrid}>
-                  {buyout.rows.map((row) => (
+                  {buyout.rows.filter((row) => row.tone === "red").map((row) => (
                     <div key={row.key}>
                       <dt>{row.label}</dt>
                       <dd className={TONE_CLASS[row.tone]}>
@@ -446,7 +492,26 @@ export default function OrderDossier({
                     </div>
                   ))}
                 </dl>
+                )}
               </section>
+            )}
+            {/* 👤 Покупатель: история и рефералы (16.11.2026). */}
+            {buyerInfo && (
+              <div className={styles.box}>
+                <div className={styles.boxHead}>Покупатель</div>
+                <div>
+                  {buyerInfo.stats.orders} {buyerInfo.stats.orders === 1 ? "заказ" : "заказов"} · выкуплено {buyerInfo.stats.completed}
+                  {buyerInfo.stats.rejected > 0 ? ` · отмен ${buyerInfo.stats.rejected}` : ""}
+                </div>
+                {buyerInfo.referrals && (
+                  <div style={{ marginTop: 4, color: "var(--o-dim, #98989f)" }}>
+                    Рефералы: {buyerInfo.referrals.invited > 0
+                      ? `привёл ${buyerInfo.referrals.invited} · купили ${buyerInfo.referrals.qualified}`
+                      : "никого не привёл"}
+                    {buyerInfo.referrals.referredBy ? ` · сам пришёл от ${buyerInfo.referrals.referredBy}` : ""}
+                  </div>
+                )}
+              </div>
             )}
             {order.priorityAt && (
               <div className={`${styles.box} ${styles.boxPrio}`}>

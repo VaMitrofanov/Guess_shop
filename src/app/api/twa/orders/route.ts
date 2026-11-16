@@ -81,6 +81,8 @@ import { JOURNEY_EVENT_TYPES, trimJourneyPayload } from "@/lib/buyer-journey";
 import { parseExperienceRef } from "../../../../../bots/shared/roblox-owned-games";
 import { countHoldKinds } from "@/lib/hold-kinds";
 import { riskInfoForCodes, type OrderRisk } from "@/lib/order-risk";
+import { loadOrderContacts, type OrderContactSummary } from "@/lib/order-contact";
+import { countQualifiedInvites } from "@/lib/codes/referral";
 import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
 
@@ -575,7 +577,7 @@ export async function GET(req: NextRequest) {
       .filter((o) => !["COMPLETED", "REJECTED"].includes(o.status))
       .map((o) => o.id);
 
-    const [clusterOrders, codeRecords, firstOrderRows, statusEvents, journeyRows, riskByCode] = await Promise.all([
+    const [clusterOrders, codeRecords, firstOrderRows, statusEvents, journeyRows, riskByCode, contactByOrder] = await Promise.all([
       // «Заказ №N из M» у покупателя — один заход в базу, а не два.
       // Через Prisma это `findMany` с вложенным `user`, и вложенность стоит
       // ОТДЕЛЬНОГО запроса за пользователями: с базой в Сингапуре это лишние
@@ -626,9 +628,20 @@ export async function GET(req: NextRequest) {
       // Отзыв и покупатель для карточки (30.10.2026) — в той же волне.
       riskInfoForCodes(prisma as any, orders.map((o: any) => o.wbCode as string))
         .catch(() => new Map<string, OrderRisk>()),
+      /* 📣 Писал ли покупатель в поддержку (16.11.2026): карточка показывает
+         блок «Пишет в поддержку · N раз» и «Ответ клиенту» только тем, кто
+         писал. Только незакрытые и выкупленные за неделю — у отменённых не
+         о чем отвечать. Отказ чтения карточку не ломает. */
+      loadOrderContacts(prisma, orders
+        .filter((o: any) => o.status !== "REJECTED")
+        .map((o: any) => o.id as string))
+        .catch(() => new Map<string, OrderContactSummary>()),
     ]);
 
-    for (const order of orders) order.risk = riskByCode.get(order.wbCode) ?? null;
+    for (const order of orders) {
+      order.risk = riskByCode.get(order.wbCode) ?? null;
+      order.contact = contactByOrder.get(order.id) ?? null;
+    }
 
     if (journeyIds.length > 0) {
       const byOrder = new Map<string, { type: string; payload: Record<string, unknown>; createdAt: Date }[]>();
@@ -2765,13 +2778,14 @@ export async function POST(req: NextRequest) {
   if (action === "user-history") {
     const userId = order.user?.id;
     if (!userId) return NextResponse.json({ error: "У заказа нет покупателя" }, { status: 404 });
-    const [user, orders, totals] = await Promise.all([
+    const [user, orders, totals, invited, qualified] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
         select: {
           id: true, tgId: true, vkId: true, name: true, username: true, robloxUsername: true,
           robloxDisplayName: true, balance: true, bonusExpiresAt: true, rubleDiscount: true,
           reviewBonusGrantedAt: true, createdAt: true,
+          referredBy: { select: { name: true, username: true } },
         },
       }),
       prisma.wbOrder.findMany({
@@ -2790,6 +2804,10 @@ export async function POST(req: NextRequest) {
         _count: { _all: true },
         _sum: { amount: true },
       }),
+      // 👥 Рефералы (16.11.2026): сколько пришло по ссылке и сколько из них
+      // засчитано по правилам программы (купили и получили код).
+      prisma.user.count({ where: { referredById: userId } }).catch(() => 0),
+      countQualifiedInvites(userId).catch(() => 0),
     ]);
     const byStatus: Record<string, { count: number; amount: number }> = {};
     for (const row of totals as { status: string; _count: { _all: number }; _sum: { amount: number | null } }[]) {
@@ -2805,6 +2823,11 @@ export async function POST(req: NextRequest) {
         completedRobux: byStatus.COMPLETED?.amount ?? 0,
         rejected: byStatus.REJECTED?.count ?? 0,
         open: all - (byStatus.COMPLETED?.count ?? 0) - (byStatus.REJECTED?.count ?? 0),
+      },
+      referrals: {
+        invited,
+        qualified,
+        referredBy: user?.referredBy ? (user.referredBy.username ? `@${user.referredBy.username}` : user.referredBy.name ?? "по ссылке") : null,
       },
       orders,
     });

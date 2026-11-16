@@ -99,6 +99,8 @@ export interface AdminOverview {
   queueTotal: number;
   /** «Первым делом»: поднятые руками ⚡ и прямые заказы. `null` — запрос упал. */
   firstInLine: FirstInLine | null;
+  /** 🎟 Коды к выдаче (16.11.2026) — отдельный блок наверху. */
+  codeOrders?: import("@/lib/code-orders-pending").PendingCodeOrders | null;
   /** Лента смены: что происходило в окне дифа, по времени. */
   feed: OverviewFeedRow[];
   held: { count: number; codes: string[] };

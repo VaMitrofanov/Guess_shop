@@ -377,7 +377,7 @@ export default function FirstInLineBlock({
                       aria-label={`Отметить выкупленным заказ ${order.wbCode}`}
                       onClick={() => startComplete(order)}
                     >
-                      <Check size={16} />
+                      <Check size={17} />Выкуплено
                     </button>
                   </div>
                 )}

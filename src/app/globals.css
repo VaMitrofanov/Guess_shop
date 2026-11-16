@@ -1256,11 +1256,16 @@ html.twa-route-active [contenteditable="true"] {
    сообщение, а соседняя кнопка — безобидное копирование, которое жмут в
    десять раз чаще. */
 .twa-first-tick {
-  flex: 0 0 auto; width: 40px; height: 34px; margin-left: 6px;
+  flex: 0 0 auto; min-width: 132px; height: 44px; margin-left: 4px; padding: 0 14px; gap: 6px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid rgba(48,209,88,.4); border-radius: 9px;
-  background: rgba(48,209,88,.14); color: #30d158;
+  border: 0; border-radius: 12px;
+  background: #30d158; color: #04160b; font-family: inherit; font-size: 16px; font-weight: 750;
 }
+/* 16.11.2026: «Выкуплено» — крупная подписанная кнопка; заметка уходит на свою
+   строку, ID и «Выкуплено» — под ней, «Выкуплено» всегда справа. */
+.twa-first-tools { flex-wrap: wrap; }
+.twa-first-tools > .twa-first-note, .twa-first-tools > .twa-first-note-input { flex: 1 1 100%; }
+.twa-first-tools > .twa-first-copy { flex: 1 1 auto; min-height: 44px; justify-content: center; border-radius: 12px; }
 
 /* «Первым делом» v2 (01.11.2026): группы по причине в формате списка.
    Причина видна полосой слева и заголовком группы; метка в строке больше не
@@ -1976,6 +1981,17 @@ html.twa-route-active [contenteditable="true"] {
 .twa-oc-prim.is-blue { background: rgba(10,132,255,.16); color: #7ab8ff; }
 .twa-oc-prim.is-ice { background: rgba(100,210,255,.14); color: #8fdcff; }
 .twa-oc-prim:disabled { opacity: .5; }
+/* Главное действие в ленте — крупное, справа, отдельно от ID (16.11.2026):
+   «Выкуплено» шлёт уведомление клиенту, промах по нему дорогой. */
+.twa-oc-acts { gap: 8px; }
+.twa-oc-acts > .twa-oc-copy, .twa-oc-acts > .twa-oc-more { min-height: 44px; border-radius: 12px; }
+.twa-oc-prim.is-big {
+  min-height: 44px; min-width: 132px; padding: 0 16px; justify-content: center; border-radius: 12px;
+  background: #30d158; color: #04160b; font-size: 16px; font-weight: 750;
+}
+.twa-oc-prim.is-big > i { font-size: 15px; }
+.twa-oc-prim.is-big.is-blue { background: #0a84ff; color: #fff; }
+.twa-oc-prim.is-big.is-ice { background: rgba(100,210,255,.22); color: #bfeeff; }
 /* Широкая, потому что показывает сам ID: это то, что вставляется в донора. */
 .twa-oc-copy {
   flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center;
@@ -2209,6 +2225,9 @@ html.twa-route-active [contenteditable="true"] {
 .twa-os-tog.is-on { background: #30d158; }
 .twa-os-tog.is-on::after { transform: translateX(18px); }
 
+.twa-os-passport { display: flex; align-items: flex-start; gap: 12px; margin-top: 4px; }
+.twa-os-passport > strong { flex: 1; min-width: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; overflow-wrap: anywhere; }
+.twa-os-passport > .twa-os-amount { flex: 0 0 auto; align-items: flex-end; text-align: right; }
 .twa-os-foot { display: flex; align-items: center; gap: 8px; }
 .twa-os-foot > .twa-oc-prim { flex: 1; justify-content: center; min-height: 50px; border-radius: 14px; background: #30d158; color: #0d1f14; font-size: 16px; }
 .twa-os-foot > .twa-oc-prim.is-blue { background: rgba(10,132,255,.2); color: #8cc4ff; }
@@ -2326,3 +2345,110 @@ html.twa-route-active [contenteditable="true"] {
 .twa-live-row b { grid-area: b; }
 .twa-live-row small { grid-area: s; color: #8e8a99; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .twa-live-row > span:last-child, .twa-live-row > .twa-live-cta { grid-area: side; }
+/* Паспорт карточки: сумма столбиком под ником-заголовком (16.11.2026). */
+.twa-os-passport > .twa-os-amount { flex-direction: column; gap: 2px; }
+.twa-os-passport > .twa-os-amount > b { font-size: 28px; }
+
+/* ── Главная TWA v2 (16.11.2026): Коды и Прямые → Первым делом → Ориентир ──
+   Коды и прямые — свои цветные блоки наверху, чтобы их нельзя было спутать с
+   обычными заказами. Пусто — блок сжимается до заголовка. */
+.twa-prio { display: flex; flex-direction: column; gap: 4px; padding: 13px 15px; border-radius: 18px; }
+.twa-prio.is-codes { background: #2e2408; color: #ffe27a; }
+.twa-prio.is-direct { background: #0b2140; color: #8cc4ff; }
+.twa-prio > header { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.twa-prio > header > b { flex: 1; font-size: 17px; font-weight: 750; }
+.twa-prio > header > em { font-style: normal; font-size: 14px; font-weight: 600; opacity: .9; text-align: right; }
+.twa-prio-ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: 0 0 auto; }
+.twa-prio.is-codes .twa-prio-ic { background: #ffd60a; color: #000; }
+.twa-prio.is-direct .twa-prio-ic { background: #0a84ff; color: #fff; }
+.twa-prio-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 6px; padding: 10px 0 0;
+  border: 0; border-top: 1px solid rgba(255,255,255,.08); background: transparent; color: inherit;
+  font-family: inherit; text-align: left;
+}
+.twa-prio-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.twa-prio-row strong { color: #f7f5ff; font-size: 16px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-prio-row small { font-size: 14px; opacity: .85; }
+.twa-prio-row > button {
+  flex: 0 0 auto; min-height: 36px; padding: 0 14px; border: 0; border-radius: 18px;
+  background: #ffd60a; color: #000; font-family: inherit; font-size: 14px; font-weight: 700;
+}
+
+.twa-ori-label { display: flex; align-items: center; justify-content: space-between; }
+.twa-ori { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.twa-ori-till {
+  grid-column: span 2; display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 15px; border-radius: 18px; background: #10291a;
+}
+.twa-ori-till-main { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; color: #f7f5ff; font-family: inherit; text-align: left; }
+.twa-ori-till-main .twa-ori-l, .twa-ori-till-main .twa-ori-s { color: #b5d9c0; }
+.twa-ori-till-main strong { font-size: 30px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.twa-ori-till-main strong small { font-size: 16px; color: #a8f0be; }
+.twa-ori-till-main strong em { font-style: normal; font-size: 16px; font-weight: 500; color: #b5d9c0; letter-spacing: 0; }
+.twa-ori-till .twa-till-start { margin: 0; }
+.twa-ori-tile {
+  display: flex; flex-direction: column; gap: 2px; min-height: 96px; padding: 12px 14px;
+  border: 0; border-radius: 16px; background: rgba(255,255,255,.065); color: #f7f5ff;
+  font-family: inherit; text-align: left;
+}
+.twa-ori-l { font-size: 14px; color: #aaa4b8; }
+.twa-ori-tile strong { font-size: 26px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.twa-ori-s { font-size: 14px; color: #8e8a99; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.twa-ori-tile.is-red strong { color: #ff6961; }
+.twa-ori-tile.is-orange strong { color: #ffb340; }
+.twa-ori-tile.is-blue strong { color: #409cff; }
+.twa-ori-tile.is-ice strong { color: #7ddcf5; }
+.twa-ori-tile.is-loud { background: rgba(255,159,10,.12); }
+.twa-ori-tile.is-loud strong { color: #ffb340; }
+
+.twa-shift-routine { margin-top: 10px; color: #8e8a99; font-size: 14px; line-height: 1.4; }
+.twa-shift-all {
+  align-self: flex-start; margin-top: 8px; padding: 0; border: 0; background: none;
+  color: #a78bfa; font-family: inherit; font-size: 14px; font-weight: 600; min-height: 32px;
+}
+.twa-stats .twa-shift-tiles { margin-top: 10px; }
+
+/* ── 🛒 Выкуп по одному (16.11.2026) ─────────────────────────────────────── */
+.twa-focus {
+  position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+  background: #000; color: #f7f5ff; overflow-y: auto;
+}
+.twa-focus-bar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
+.twa-focus-bar > b { font-size: 17px; font-weight: 650; }
+.twa-focus-link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: #a78bfa; font-family: inherit; font-size: 17px; }
+.twa-focus-link:disabled { opacity: .4; }
+.twa-focus-balance { display: flex; gap: 8px; margin-top: 8px; overflow-x: auto; }
+.twa-focus-balance > button {
+  flex: 0 0 auto; min-height: 36px; padding: 0 14px; border: 0; border-radius: 18px;
+  background: rgba(255,255,255,.08); color: #ded9ea; font-family: inherit; font-size: 15px; font-weight: 600;
+}
+.twa-focus-balance > button.is-on { background: #a78bfa; color: #1c1430; }
+.twa-focus-progress { height: 4px; margin-top: 12px; border-radius: 2px; background: rgba(255,255,255,.1); overflow: hidden; }
+.twa-focus-progress > i { display: block; height: 100%; background: #30d158; border-radius: 2px; }
+.twa-focus-sub { margin-top: 6px; color: #8e8a99; font-size: 14px; }
+.twa-focus-empty { margin: 40px 8px; color: #aaa4b8; font-size: 16px; line-height: 1.5; text-align: center; }
+.twa-focus-empty > button { display: block; margin: 12px auto 0; min-height: 40px; padding: 0 16px; border: 0; border-radius: 12px; background: rgba(255,255,255,.1); color: #fff; font-family: inherit; font-size: 15px; }
+.twa-focus-body { display: flex; flex-direction: column; gap: 18px; margin-top: 22px; flex: 1; }
+.twa-focus-who strong { display: block; font-size: 32px; font-weight: 750; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.twa-focus-who span { display: block; margin-top: 4px; color: #98989f; font-size: 15px; }
+.twa-focus-id {
+  display: flex; flex-direction: column; gap: 10px; width: 100%; padding: 20px; border: 0; border-radius: 24px;
+  background: #1c1c1e; color: #fff; font-family: inherit; text-align: left;
+}
+.twa-focus-id-l { display: flex; justify-content: space-between; font-size: 15px; color: #98989f; }
+.twa-focus-id-l em { font-style: normal; color: #a78bfa; font-weight: 500; }
+.twa-focus-id-v { font: 600 36px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; overflow-wrap: anywhere; }
+.twa-focus-id-price { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-top: 12px; border-top: 1px solid #38383a; font-size: 15px; }
+.twa-focus-id-price b { font-size: 26px; font-weight: 750; white-space: nowrap; }
+.twa-focus-id-price b small { font-size: 15px; color: #98989f; }
+.twa-focus-next { display: flex; gap: 8px; align-items: baseline; padding: 12px 16px; border-radius: 14px; background: #111113; color: #98989f; font-size: 15px; }
+.twa-focus-next b { flex: 1; color: #fff; font-weight: 500; }
+.twa-focus-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+.twa-focus-btn {
+  min-height: 58px; padding: 0 18px; border: 0; border-radius: 16px; background: #2c2c2e; color: #fff;
+  font-family: inherit; font-size: 17px; font-weight: 650;
+}
+.twa-focus-btn.is-done { flex: 1; background: #30d158; color: #04160b; font-size: 18px; font-weight: 750; }
+.twa-focus-btn.is-done:disabled { background: #2c2c2e; color: #8e8a99; }
+.twa-focus-undo-text { flex: 1; color: #6ee58d; font-size: 16px; font-weight: 600; }

@@ -6,6 +6,7 @@ import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosyst
 import { loadOrderSlices, moscowDayStartUtc } from "@/lib/order-slices";
 import { BUYOUT_QUEUE_SQL, DIRECT_ORDER_SQL, HELD_LIVE, PRIORITY_ORDER_SQL } from "@/lib/order-queue";
 import { loadFirstInLine } from "@/lib/first-in-line";
+import { loadPendingCodeOrders } from "@/lib/code-orders-pending";
 import { loadOverviewFeed } from "@/lib/overview-feed";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
 import type {
@@ -351,7 +352,7 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
    ───────────────────────────────────────────────────────────────────────── */
 export async function getAdminOverview(since: Date | Promise<Date>): Promise<AdminOverview> {
   const sincePromise = Promise.resolve(since);
-  const [slices, dbs, queue, firstInLine, held, health, dashboard, daily, showcase30d, diff, feed] = await Promise.all([
+  const [slices, dbs, queue, firstInLine, held, health, dashboard, daily, showcase30d, diff, feed, codeOrders] = await Promise.all([
     loadOrderSlices(),
     loadWbDeliveryQueueSnapshot().catch(() => null),
     loadQueueHead(),
@@ -367,6 +368,7 @@ export async function getAdminOverview(since: Date | Promise<Date>): Promise<Adm
     // Лента не кэшируется по той же причине, что «Первым делом»: она и есть
     // ответ на «что случилось минуту назад».
     sincePromise.then((from) => loadOverviewFeed(from)).catch(() => [] as Awaited<ReturnType<typeof loadOverviewFeed>>),
+    loadPendingCodeOrders().catch(() => null),
   ]);
   const runtime = getAdminRuntimeState();
 
@@ -388,6 +390,7 @@ export async function getAdminOverview(since: Date | Promise<Date>): Promise<Adm
     queue: queue.rows,
     queueTotal: queue.total,
     firstInLine,
+    codeOrders,
     feed,
     held,
     diff,

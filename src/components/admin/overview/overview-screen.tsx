@@ -11,7 +11,9 @@ import {
   Plus,
   RefreshCw,
   Snowflake,
+  Ticket,
   TriangleAlert,
+  Zap,
 } from "lucide-react";
 import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
 import type { AdminOverview, OverviewFeedRow, OverviewQueueOrder } from "@/types/admin-overview";
@@ -283,6 +285,16 @@ export default function OverviewScreen({
   /* Пульс синка: 6 минут — тот же порог, что у тихой строки экрана. */
   const syncStale = !dbs?.sync || dbs.sync.ageSeconds > 360 || dbs.sync.status !== "HEALTHY";
   const hot = buyout.age.overdue > 0;
+  // Прямые — в своём блоке наверху; «Первым делом» их не повторяет.
+  const fil = data.firstInLine ?? null;
+  const directRows = fil?.rows.filter((row) => row.reason === "direct") ?? [];
+  const firstNoDirect = fil ? {
+    ...fil,
+    rows: fil.rows.filter((row) => row.reason !== "direct"),
+    total: Math.max(0, fil.total - fil.direct),
+    direct: 0,
+    gross: Math.max(0, fil.gross - directRows.reduce((sum, row) => sum + row.gross, 0)),
+  } : null;
 
   return (
     <div className={styles.screen}>
@@ -302,6 +314,57 @@ export default function OverviewScreen({
           <RefreshCw size={14} aria-hidden="true" /> Обновить
         </button>
       </div>
+
+      {/* ── 0. Коды и Прямые — всегда наверху, своими цветами (16.11.2026) ──
+          Владелец: «коды и прямые — всегда в приоритете, отдельно в красивых
+          блоках, чтобы не спутать с обычными заказами». Прямые поэтому не
+          повторяются в «Первым делом». */}
+      <div className={styles.prioGrid}>
+        <section className={cn(styles.prio, styles.prioCodes)} aria-label="Коды">
+          <header>
+            <span className={styles.prioIc}><Ticket size={17} aria-hidden="true" /></span>
+            <b>Коды</b>
+            <em>
+              {data.codeOrders && data.codeOrders.toIssueTotal > 0 ? `${data.codeOrders.toIssueTotal} выдать` : "выдавать нечего"}
+              {data.codeOrders && data.codeOrders.awaitingPayment > 0 ? ` · ${data.codeOrders.awaitingPayment} ждут оплату` : ""}
+            </em>
+          </header>
+          {data.codeOrders?.toIssue.map((code) => (
+            <div key={code.publicId} className={styles.prioRow}>
+              <span>
+                <strong>{code.publicId} · {num(code.denomination)} R$</strong>
+                <small>оплачен {code.paidAt ? `${fmtAge(code.paidAt)} назад` : "—"} · {code.channel === "SITE" ? "сайт" : code.channel}{code.gift ? " · подарок" : ""}</small>
+              </span>
+              <button type="button" onClick={() => { copyText(code.publicId); showToast(`${code.publicId} скопирован`); }}>Скопировать</button>
+            </div>
+          ))}
+        </section>
+        <section className={cn(styles.prio, styles.prioDirect)} aria-label="Прямые заказы">
+          <header>
+            <span className={styles.prioIc}><Zap size={17} aria-hidden="true" /></span>
+            <b>Прямые</b>
+            <em>{directRows.length > 0 ? `${data.firstInLine?.direct ?? directRows.length} к выкупу` : "прямых нет"}</em>
+          </header>
+          {directRows.map((row) => (
+            <Link key={row.id} className={styles.prioRow} href={`/admin/orders?q=${encodeURIComponent(row.wbCode)}`}>
+              <span>
+                <strong>{row.robloxUsername ?? "ник не указан"} · {num(row.amount)} R$</strong>
+                <small>{row.wbCode} · ждёт {fmtAge(row.since)}{row.gamepassIds.length === 0 ? " · пасса нет" : ""}</small>
+              </span>
+            </Link>
+          ))}
+        </section>
+      </div>
+
+      {/* ── 1.5. ⚡ Первым делом ────────────────────────────────────────────
+          Перевыкупы, поднятые руками и прямые — группами. Тот же компонент
+          стоит над лентой «Выкупить»; пусто — блока нет вовсе. */}
+      <FirstInLinePanel
+        initial={firstNoDirect}
+        queueHref="/admin/orders?slice=BUYOUT"
+        onChanged={() => void refresh(true)}
+        onToast={showToast}
+      />
 
       {/* ── 1. Ответ: сколько робуксов тратим прямо сейчас ─────────────────── */}
       <section className={styles.hero} aria-label="Очередь выкупа">
@@ -335,16 +398,6 @@ export default function OverviewScreen({
           <Link className={styles.btn} href="/admin/buyout"><Plus size={15} aria-hidden="true" /> Выкуп</Link>
         </div>
       </section>
-
-      {/* ── 1.5. ⚡ Первым делом ────────────────────────────────────────────
-          Перевыкупы, поднятые руками и прямые — группами. Тот же компонент
-          стоит над лентой «Выкупить»; пусто — блока нет вовсе. */}
-      <FirstInLinePanel
-        initial={data.firstInLine ?? null}
-        queueHref="/admin/orders?slice=BUYOUT"
-        onChanged={() => void refresh(true)}
-        onToast={showToast}
-      />
 
       {/* ── 2. Дорожки работы ──────────────────────────────────────────────── */}
       <div className={styles.sectionHead}><h2>Дорожки</h2></div>

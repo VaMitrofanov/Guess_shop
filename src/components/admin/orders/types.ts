@@ -24,6 +24,8 @@ export interface AdminOrder {
   heldReason: string | null;
   /** Отзыв и покупатель WB (30.10.2026). */
   risk?: OrderRisk | null;
+  /** 📣 Писал в поддержку за неделю (16.11.2026) — блок и «Ответ клиенту» только тогда. */
+  contact?: import("@/lib/order-contact").OrderContactSummary | null;
   heldBy: string | null;
   /** 🛡 Разморожен админом вручную (11.11.2026) — автоматика не морозит. */
   manualReleaseAt?: string | null;

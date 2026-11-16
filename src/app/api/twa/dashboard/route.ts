@@ -6,6 +6,7 @@ import { getBrowserSession } from "@/lib/browser-purchase";
 import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, HELD_LIVE, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, SILENT_REMINDERS } from "@/lib/order-queue";
 import { NOT_HELD_SQL } from "@/lib/order-hold";
 import { loadFirstInLine } from "@/lib/first-in-line";
+import { loadPendingCodeOrders } from "@/lib/code-orders-pending";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
 import { loadOverviewDiff } from "@/lib/admin-overview";
 import { loadOverviewFeed } from "@/lib/overview-feed";
@@ -90,7 +91,7 @@ let coreCache: { data: Awaited<ReturnType<typeof loadCore>>; ts: number } | null
 let coreInflight: Promise<Awaited<ReturnType<typeof loadCore>>> | null = null;
 
 async function loadCore() {
-  const [codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine] = await Promise.all([
+  const [codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine, codeOrders] = await Promise.all([
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
 
     // Очередь выкупа по происхождению. `amount` в БД — чистые робуксы (то, что
@@ -155,9 +156,10 @@ async function loadCore() {
     // «Обзора» на сайте — иначе две главные показывали бы разные списки того,
     // что «выкупать первым».
     loadFirstInLine().catch(() => null),
-
+    // 🎟 Коды к выдаче — отдельный блок наверху главной (16.11.2026).
+    loadPendingCodeOrders().catch(() => null),
   ]);
-  return { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine };
+  return { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine, codeOrders };
 }
 
 function loadCoreCached() {
@@ -217,7 +219,7 @@ export async function GET(req: NextRequest) {
     withTimeout(loadVkNeedsHuman().catch(() => null), 1_500),
   ]);
   const vkNeedsHuman = vkHumanRaw === PENDING ? null : vkHumanRaw;
-  const { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine } = core;
+  const { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine, codeOrders } = core;
 
   const statsPending = statsRaw === PENDING;
   const stats = statsRaw === PENDING ? null : statsRaw;
@@ -324,6 +326,7 @@ export async function GET(req: NextRequest) {
       codes: heldOrders.map(order => order.wbCode),
     },
     firstInLine,
+    codeOrders,
     shift,
     donorCoverage,
     inbox,

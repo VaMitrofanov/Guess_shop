@@ -5,6 +5,7 @@ import { computeEnrichment } from "@/lib/order-enrich";
 import { checkVkReachable } from "@/lib/vk-reach";
 import { JOURNEY_EVENT_TYPES, trimJourneyPayload } from "@/lib/buyer-journey";
 import { riskInfoForCodes, type OrderRisk } from "@/lib/order-risk";
+import { loadOrderContacts, type OrderContactSummary } from "@/lib/order-contact";
 
 // Заказ ещё «живой» — недостижимость клиента блокирует работу менеджера.
 const VK_CHECK_STATUSES = new Set([
@@ -53,12 +54,15 @@ export async function GET(req: NextRequest) {
     .filter((o: any) => o.user?.vkId && !o.user?.tgId && VK_CHECK_STATUSES.has(o.status))
     .map((o: any) => String(o.user.vkId));
 
-  const [enrich, reach, riskByCode] = await Promise.all([
+  const [enrich, reach, riskByCode, contactByOrder] = await Promise.all([
     computeEnrichment(orders),
     vkIds.length > 0 ? checkVkReachable(vkIds) : Promise.resolve(new Map<string, boolean>()),
     // Отзыв и покупатель для карточки (30.10.2026) — параллельно, без лишнего захода.
     riskInfoForCodes(prisma as any, orders.map((o: any) => o.wbCode as string))
       .catch(() => new Map<string, OrderRisk>()),
+    // 📣 Писал ли покупатель в поддержку за неделю (16.11.2026, редизайн v2).
+    loadOrderContacts(prisma, orders.filter((o: any) => o.status !== "REJECTED").map((o: any) => o.id as string))
+      .catch(() => new Map<string, OrderContactSummary>()),
   ]);
 
   for (const o of orders) {
@@ -85,6 +89,7 @@ export async function GET(req: NextRequest) {
   for (const o of orders) {
     const entry = (enrich as any)[o.id] ?? ((enrich as any)[o.id] = { userOrderNumber: null, userOrderTotal: null, reviewStatus: null });
     entry.risk = riskByCode.get(o.wbCode) ?? null;
+    entry.contact = contactByOrder.get(o.id) ?? null;
   }
 
   return NextResponse.json({ enrich });

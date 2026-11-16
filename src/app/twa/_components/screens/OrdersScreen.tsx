@@ -32,7 +32,7 @@ import {
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
 import { MAX_SPLIT_PARTS } from "@/lib/order-gamepass-split";
-import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/lib/buyout-summary";
+import { buildBuyoutSummary, type BuyoutOrderInput } from "@/lib/buyout-summary";
 
 /** ❄️ Цвет заморозки. Живёт в теме — здесь только короткий псевдоним. */
 const ICE = C.ice;
@@ -58,6 +58,8 @@ import type { BuyerStepKind } from "../../../../../bots/shared/buyer-step";
 import { JourneyBlock, JourneyHistorySheet, JourneyTrack } from "../BuyerJourney";
 import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 import type { OrderRisk } from "@/lib/order-risk-types";
+import type { OrderContactSummary } from "@/lib/order-contact";
+import { replyForOrder } from "@/lib/order-reply";
 import { HOLD_KINDS, HOLD_KIND_META, type HoldKind } from "@/lib/hold-kinds-meta";
 import { BuyerDossierSheet, BuyerLine, ReviewPlaque } from "../RiskBits";
 import { vkCommunityDialogUrl } from "../../../../../bots/shared/vk-links";
@@ -107,6 +109,8 @@ interface Order {
   amount: number;
   /** Отзыв и покупатель WB (30.10.2026) — приезжает с обогащением. */
   risk?: OrderRisk | null;
+  /** 📣 Писал в поддержку за неделю (16.11.2026) — тоже с обогащением. */
+  contact?: OrderContactSummary | null;
   gamepassUrl: string | null;
   /** Пусто у обычного заказа — тогда работает единственный `gamepassUrl`. */
   splitGamepasses?: SplitPart[];
@@ -228,6 +232,7 @@ interface EnrichValue {
   /** 🧭 События пути покупателя — только у незакрытых. */
   journeyEvents?: JourneyEventRow[];
   risk?: OrderRisk | null;
+  contact?: OrderContactSummary | null;
 }
 
 /** Живая проверка ГП (gp-live-check): фактическая цена vs ожидаемая по номиналу. */
@@ -568,58 +573,80 @@ type ActionResult = { ok: boolean; error?: string };
    Первое, что видно в открытом выкупленном заказе: когда, кто, сколько
    списано, дошло ли уведомление, что ответил покупатель. Строки собирает
    общий `buildBuyoutSummary` — тот же блок стоит в досье на сайте. */
-const BUYOUT_TONE: Record<BuyoutTone, string> = {
-  green: C.green, red: C.red, orange: C.orange, neutral: C.textPrimary, muted: C.textTertiary,
-};
 
-function BuyoutBlock({ order, onResend, resendBusy }: { order: Order; onResend: () => void; resendBusy: boolean }) {
+/* ✅ Выкуплен — одна строка: когда и кто (16.11.2026, владелец: «нам не надо
+   объяснять себе, что робуксы в пути»). Повтор уведомления — в «···»; здесь
+   кнопка появляется, только если уведомление клиенту НЕ дошло. */
+function BuyoutBlock({ order, by, onResend, resendBusy }: { order: Order; by: string | null; onResend: () => void; resendBusy: boolean }) {
   const sum = buildBuyoutSummary(order as unknown as BuyoutOrderInput);
   if (!sum) return null;
   const noticeFailed = sum.rows.some(r => r.key === "notice" && r.tone === "red");
   return (
-    <section className="twa-buyout" aria-label="Заказ выкуплен" style={{
-      margin: 0, padding: "14px 14px 12px", borderRadius: 16,
-      background: `${C.green}14`, border: `1px solid ${(sum.attention ? C.orange : C.green)}55`,
-    }}>
-      <header style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <span aria-hidden="true" style={{
-          width: 34, height: 34, borderRadius: 17, display: "grid", placeItems: "center",
-          background: C.green, color: "#04160b", fontSize: 18, fontWeight: 800, flex: "0 0 auto",
-        }}>✓</span>
-        <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <strong style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".04em", color: C.green }}>ВЫКУПЛЕН</strong>
-          <span style={{ fontSize: 15, color: C.textPrimary }}>
-            {sum.when} <span style={{ color: C.textTertiary }}>· {sum.ago}</span>
-          </span>
-        </span>
-      </header>
-      <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 7, margin: 0 }}>
-        {sum.rows.map(row => (
-          <div key={row.key} style={{ display: "contents" }}>
-            <dt style={{ fontSize: 14, color: C.textTertiary, paddingTop: 1 }}>{row.label}</dt>
-            <dd style={{ margin: 0, minWidth: 0 }}>
-              <span style={{ fontSize: 15, color: BUYOUT_TONE[row.tone], fontWeight: row.tone === "red" ? 700 : 500, lineHeight: 1.35 }}>
-                {row.value}
-              </span>
-              {row.sub?.map(line => (
-                <span key={line} style={{ display: "block", fontSize: 14, color: C.textSecondary, fontFamily: MONO, marginTop: 2 }}>{line}</span>
-              ))}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {/* «Клиент говорит, что ничего не получал» — ответ в один тап. */}
-      <button type="button" className="twa-press-sm" disabled={resendBusy}
-        onClick={e => { e.stopPropagation(); onResend(); }}
-        style={{
-          width: "100%", marginTop: 12, padding: "10px", borderRadius: 10,
-          border: `1px solid ${noticeFailed ? C.red + "88" : C.border}`,
-          background: noticeFailed ? `${C.red}1a` : "transparent", color: noticeFailed ? C.red : C.textSecondary,
-          fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: resendBusy ? 0.5 : 1,
-        }}>
-        {resendBusy ? "Отправляю…" : noticeFailed ? "📨 Отправить уведомление ещё раз" : "📨 Повторить уведомление о выкупе"}
-      </button>
+    <section aria-label="Заказ выкуплен" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <ReadyLineTwa text={`Выкуплен ${sum.when}`} side={by ?? undefined} />
+      {noticeFailed && (
+        <button type="button" className="twa-press-sm" disabled={resendBusy}
+          onClick={e => { e.stopPropagation(); onResend(); }}
+          style={{
+            width: "100%", minHeight: 44, borderRadius: 12, border: "none",
+            background: `${C.red}1f`, color: C.red, fontSize: 15, fontWeight: 650, cursor: "pointer", opacity: resendBusy ? 0.5 : 1,
+          }}>
+          {resendBusy ? "Отправляю…" : "Уведомление клиенту не дошло — отправить ещё раз"}
+        </button>
+      )}
     </section>
+  );
+}
+
+/** Зелёная строка «всё в порядке»: галочка, текст, справа — кто. */
+function ReadyLineTwa({ text, side }: { text: string; side?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 46, padding: "0 14px", borderRadius: 14, background: `${C.green}1a` }}>
+      <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: 10, background: C.green, color: "#04160b", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, flexShrink: 0 }}>✓</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 650, color: "#6ee58d" }}>{text}</span>
+      {side && <span style={{ fontSize: 14, color: C.textSecondary }}>{side}</span>}
+    </div>
+  );
+}
+
+function pluralTimes(n: number): string {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return `${n} раза`;
+  return `${n} раз`;
+}
+
+const CONTACT_CHANNEL: Record<string, string> = { TG: "TG", VK: "VK", WB: "чат WB" };
+const CONTACT_KIND: Record<OrderContactSummary["kind"], string> = {
+  rush: "Пишет в поддержку", human: "Нужен человек", cancel: "Просит вернуть деньги",
+};
+
+/** Строка ленты: «писал 2 раза · 18ч назад · TG». */
+function ContactLineTwa({ contact }: { contact: OrderContactSummary }) {
+  return (
+    <span style={{ display: "block", color: "#ff8a80", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      писал {pluralTimes(contact.count)} · {fmtAge(contact.lastAt)} назад · {CONTACT_CHANNEL[contact.lastChannel] ?? contact.lastChannel}
+    </span>
+  );
+}
+
+/** Блок шторки: кто пишет, сколько раз, последние слова и «Ответ клиенту». */
+function ContactBlockTwa({ contact, onReply }: { contact: OrderContactSummary; onReply: () => void }) {
+  return (
+    <div style={{ padding: "12px 14px", borderRadius: 14, background: "rgba(255,69,58,.12)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <strong style={{ flex: 1, fontSize: 15, fontWeight: 650, color: "#ff8a80" }}>{CONTACT_KIND[contact.kind]} · {pluralTimes(contact.count)}</strong>
+        <span style={{ fontSize: 14, color: "#c99a96" }}>{fmtAge(contact.lastAt)} назад · {CONTACT_CHANNEL[contact.lastChannel] ?? contact.lastChannel}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 15, lineHeight: 1.4, fontStyle: "italic", color: C.textPrimary, overflowWrap: "anywhere" }}>
+          {contact.lastText ? `«${contact.lastText}»` : "нажал «Статус заказа»"}
+        </span>
+        <button type="button" className="twa-press-sm" onClick={e => { e.stopPropagation(); onReply(); }}
+          style={{ flexShrink: 0, height: 38, padding: "0 14px", border: "none", borderRadius: 19, background: "rgba(255,255,255,.12)", color: C.textPrimary, fontSize: 14, fontWeight: 650, cursor: "pointer" }}>
+          Ответ клиенту
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2135,7 +2162,7 @@ function RejectModal({ order, onReject, onClose }: {
 type MenuAction =
   | "edit" | "key" | "link" | "nick" | "ask" | "split" | "rebind" | "move"
   | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
-  | "purchase" | "refund" | "trace" | "rebuy";
+  | "purchase" | "refund" | "trace" | "rebuy" | "resend";
 
 function OrderMenuSheet({
   open, order, passId, splitIds, grossAmount, canEdit, canRefund, canMove, canPrioritize, busy,
@@ -2215,6 +2242,9 @@ function OrderMenuSheet({
         order.priorityAt ? "сейчас первый" : "выкупать первым")}
       {/* 🔁 Выкуплен, но покупатель робуксов не получил — обратно в очередь первым. */}
       {canRebuy(order as never) && row("rebuy", "🔁", "Не дошло — выкупить снова", "первым в очередь")}
+      {/* Повтор уведомления о выкупе (16.11.2026): карточка выкупленного теперь
+          показывает только «Выкуплен, когда, кто», а действие живёт здесь. */}
+      {order.status === "COMPLETED" && row("resend", "📨", "Повторить уведомление о выкупе")}
       {["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status)
         && row("reject", "✕", "Отменить заказ", undefined, "red")}
 
@@ -2245,6 +2275,8 @@ interface BuyerHistoryData {
     bonusExpiresAt: string | null; rubleDiscount: number; createdAt: string;
   } | null;
   stats: { orders: number; completed: number; completedRobux: number; rejected: number; open: number };
+  /** 👥 Рефералы покупателя (16.11.2026). */
+  referrals?: { invited: number; qualified: number; referredBy: string | null };
   orders: {
     id: string; wbCode: string; amount: number; status: string; orderSource: string; isDirectOrder: boolean;
     createdAt: string; completedAt: string | null; robloxUsername: string | null; gamepassId: string | null;
@@ -2340,6 +2372,14 @@ function BuyerHistory({ order, token, active, platform, shortName, onContact }: 
             )}
             {user?.createdAt && (
               <div className="twa-os-row"><span className="twa-os-tx"><small>С нами с</small><b>{fmtDay(user.createdAt)}</b></span></div>
+            )}
+            {/* 👥 Рефералы (16.11.2026): сколько пришло по ссылке и сколько купили. */}
+            {data.referrals && (
+              <div className="twa-os-row"><span className="twa-os-tx"><small>Рефералы</small>
+                <b>{data.referrals.invited > 0
+                  ? `привёл ${data.referrals.invited} · купили ${data.referrals.qualified}`
+                  : "никого не привёл"}{data.referrals.referredBy ? ` · сам пришёл от ${data.referrals.referredBy}` : ""}</b>
+              </span></div>
             )}
           </div>
 
@@ -2546,7 +2586,6 @@ function OrderCard({
   const showDirty = viewTab === "BUYOUT" || viewTab === "DIRECT" || viewTab === "ERROR";
   const dirtyAmount = Math.ceil(order.amount / 0.7);
   const displayAmount = showDirty ? dirtyAmount : order.amount;
-  const showCleanHint = viewTab === "BUYOUT";
 
   /* Бейдж состояния. В ленте он нужен там, где во вкладке лежат заказы в разных
      состояниях; в своём срезе состояние называет сама вкладка, и бейдж отдан
@@ -2660,8 +2699,10 @@ function OrderCard({
      заказов её видно боковым зрением, а не по чтению строки. Зелёный флаг
      «пасс продаётся» в ленте при этом лишний — то же говорит слово «Готов». */
   // Строка пути уже говорит «пасс снят / цена не та» — флаг ниже её не повторяет.
-  const feedFlag = flag && !(readiness.ready && flag.tone === "green")
-    && !(journey.now.tone === "bad" && (flag.tone === "red" || flag.tone === "orange")) ? flag : null;
+  /* С 16.11.2026 полосы шагов в ленте нет — проблему пасса («не та цена»,
+     «снят с продажи») говорит только эта строка, поэтому она больше не
+     уступает её полосе. */
+  const feedFlag = flag && !(readiness.ready && flag.tone === "green") ? flag : null;
   /* Разбитый заказ: части отмечаются по одной с карточки, ID — следующей
      части. «Выкуплено» появится, когда отмечена последняя. */
   const canMarkPart = !order.heldAt && ["PENDING", "IN_PROGRESS"].includes(order.status) && !!nextPart;
@@ -2796,18 +2837,18 @@ function OrderCard({
             всегда на одном месте, тап копирует. */}
         {codeChip()}
       </span>
-      {/* Готовность — до ника: в очереди глаз ищет сначала «что с заказом». */}
-      {!isDoneState && <JourneyTrack journey={journey} />}
+      {/* Полоса из 5 шагов в ленте убрана (16.11.2026, редизайн v2): у очереди
+          она у всех одинаковая и повторяла возраст. Живёт в шторке. */}
       <span className="twa-oc-main">
         <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "Ник не указан"}</strong>
         <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
       </span>
       <HeadlineTwa order={order} />
+      {order.contact && !isDoneState && <ContactLineTwa contact={order.contact} />}
       <span className="twa-oc-meta">
         {/* Одиночной карточке бейдж состояния занял место источника — а полоса
             («WB DBS» против прямого заказа) для разговора с клиентом важна. */}
         {solo && sourceMeta && <span>{sourceMeta.label}</span>}
-        {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
         {orderedSplit.length > 1 && <span>{orderedSplit.length} {orderedSplit.length < 5 ? "пасса" : "пассов"}</span>}
         {nickIsGuess && <span>вероятный ник</span>}
         {order.status === "COMPLETED" && <span>выкуп: {boughtBy ?? "вручную"}</span>}
@@ -2955,18 +2996,6 @@ function OrderCard({
 
       {/* Три цели: главное действие · ID пасса · «···». Ни одной ниже 36 px. */}
       <div className="twa-oc-acts">
-        {canMarkPart && !primary && (
-          <button type="button" className="twa-oc-prim twa-press-sm" disabled={partBusy}
-            onClick={e => { e.stopPropagation(); void markNextPart(); }}>
-            <i>✓</i>{partBusy ? "…" : `Часть ${nextPartIdx + 1}`}
-          </button>
-        )}
-        {primary && (
-          <button type="button" className={`twa-oc-prim twa-press-sm${primary.tone === "blue" ? " is-blue" : primary.tone === "ice" ? " is-ice" : ""}`}
-            disabled={primaryBusy} onClick={e => { e.stopPropagation(); void runPrimary(); }}>
-            <i>{primary.icon}</i>{primaryBusy ? "…" : primary.label}
-          </button>
-        )}
         {copySlot ? (
           <button
             type="button"
@@ -2996,6 +3025,20 @@ function OrderCard({
           onClick={e => { e.stopPropagation(); haptic.select(); setMenuOpen(true); }}>
           ···
         </button>
+        {/* Главное действие — справа, крупное и отдельно от ID (16.11.2026):
+            «Выкуплено» шлёт уведомление клиенту, промах по нему дорогой. */}
+        {canMarkPart && !primary && (
+          <button type="button" className="twa-oc-prim is-big twa-press-sm" disabled={partBusy}
+            onClick={e => { e.stopPropagation(); void markNextPart(); }}>
+            <i>✓</i>{partBusy ? "…" : `Часть ${nextPartIdx + 1} из ${orderedSplit.length}`}
+          </button>
+        )}
+        {primary && (
+          <button type="button" className={`twa-oc-prim is-big twa-press-sm${primary.tone === "blue" ? " is-blue" : primary.tone === "ice" ? " is-ice" : ""}`}
+            disabled={primaryBusy} onClick={e => { e.stopPropagation(); void runPrimary(); }}>
+            <i>{primary.icon}</i>{primaryBusy ? "…" : primary.label}
+          </button>
+        )}
       </div>
     </article>
 
@@ -3048,6 +3091,7 @@ function OrderCard({
           case "error":    void onRunAction("set-error"); break;
           case "unhold":   void onRunAction("unhold"); break;
           case "purchase": void runPurchase(); break;
+          case "resend":   void resendCompletedNotice(); break;
         }
       }}
     />
@@ -3105,10 +3149,15 @@ function OrderCard({
           <em className="twa-os-buyer">{shortName}</em>
           {codeChip()}
         </span>
-        <span className="twa-os-amount">
-          <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
-          {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
-          {queueAge && <span>🛒 {queueAge} в очереди</span>}
+        {/* Паспорт (16.11.2026): ник крупно слева, сумма справа — нашли по коду
+            и сразу видим, чей заказ и на сколько. */}
+        <span className="twa-os-passport">
+          <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "ник не указан"}</strong>
+          <span className="twa-os-amount">
+            <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
+            {displayAmount !== order.amount && <span>клиенту {order.amount.toLocaleString("ru-RU")}</span>}
+            {queueAge && <span>{queueAge} в очереди</span>}
+          </span>
         </span>
         {order.status !== "REJECTED" && order.status !== "COMPLETED" && <JourneyTrack journey={journey} labeled />}
       </div>
@@ -3123,6 +3172,28 @@ function OrderCard({
         onAck={(flag) => { haptic.impact("light"); void onRunAction("ack-flag", flag); }}
       />
 
+      {/* ✅ Всё в порядке — одна зелёная строка, без объяснений (16.11.2026,
+          владелец: «достаточно галочки, если всё ок»). Проблему описывают
+          NowCard и строка «Дальше» в блоке выкупа. */}
+      {!isDoneState && !order.heldAt && readiness.ready && !orderNow(order) && (
+        <ReadyLineTwa text="Всё сходится — можно выкупать" />
+      )}
+
+      {/* 📣 Покупатель пишет в поддержку — только тогда блок и «Ответ клиенту».
+          Молчит — карточка пустая, только выкуп. */}
+      {order.contact && order.status !== "REJECTED" && (
+        <ContactBlockTwa
+          contact={order.contact}
+          onReply={() => {
+            copyText(replyForOrder(order));
+            haptic.impact("light");
+            const canOpen = (order.contact!.lastChannel === "TG" && order.user.tgId) || (order.contact!.lastChannel === "VK" && order.user.vkId);
+            toast(canOpen ? "Ответ скопирован — вставь в чат" : "Ответ скопирован", "success");
+            if (canOpen) openContact(order.user);
+          }}
+        />
+      )}
+
       {/* ★ Отзыв покупателя и досье (30.10.2026): рядом с заморозкой — «почему
           заморожен» и «что написал человек» читаются вместе. */}
       {order.risk?.review && <ReviewPlaque review={order.risk.review} />}
@@ -3133,7 +3204,7 @@ function OrderCard({
 
         {/* 0. Выкуплен — первым: когда, кто, сколько, дошло ли до клиента. */}
         {order.status === "COMPLETED" && (
-          <BuyoutBlock order={order} resendBusy={resendBusy} onResend={() => resendCompletedNotice()} />
+          <BuyoutBlock order={order} by={boughtBy} resendBusy={resendBusy} onResend={() => resendCompletedNotice()} />
         )}
 
         {/* 🛒 Выкуп (редизайн 11.11.2026, мокап «Карточка заказа — редизайн»): всё,
@@ -3208,7 +3279,9 @@ function OrderCard({
 
         {/* 🧭 Путь покупателя: чего ждём, касания, «Следующий шаг». Между
             пассом и заметками (макет «Карточка заказа v2», 28.10.2026). */}
-        {order.status !== "REJECTED" && (
+        {/* Путь со «Следующим шагом» нужен, пока ждём покупателя. Готов к выкупу
+            или выкуплен — шаги видны полосой в шапке, текст лишний. */}
+        {!isDoneState && !readiness.ready && (
           <JourneyBlock
             journey={journey}
             onHistory={() => setHistoryOpen(true)}

@@ -612,7 +612,13 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                     <button
                       key={preset} type="button" disabled={running}
                       className={cn(styles.chip, balance === preset && styles.chipActive)}
-                      onClick={() => setBalance(preset)}
+                      onClick={() => {
+                        // 16.11.2026: пресет сразу выбирает заказы под баланс —
+                        // «ввёл 2 000 → они уже отмечены», без второй кнопки.
+                        setBalance(preset);
+                        setSelected(new Set(fitToBalance(items, preset).picked.map((i) => i.orderId)));
+                        try { localStorage.setItem("rb.buyout.balance", String(preset)); } catch { /* приватный режим */ }
+                      }}
                     >{preset.toLocaleString("ru-RU")}</button>
                   ))}
                   <button type="button" className={styles.primaryButton} onClick={pickForBalance} disabled={running || !(balance > 0)}>
@@ -641,6 +647,18 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                         </>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {/* 🔧 Сначала починить (16.11.2026): ошибки выкупа — не в общем
+                    списке, а отдельной строкой сверху, с переходом в их вкладку. */}
+                {tab !== "ERROR" && (data?.counts?.ERROR ?? 0) > 0 && (
+                  <div className={styles.noteInfo} style={{ marginBottom: 14, borderColor: "rgba(255,159,10,.35)" }}>
+                    <TriangleAlert />
+                    <div style={{ flex: 1 }}>
+                      <b>Сначала починить · {data!.counts.ERROR}</b> — заказы с ошибкой выкупа (не та цена, снят пасс, рег. цена) в эту выгрузку не попадают.
+                    </div>
+                    <button type="button" className={styles.ghostButton} onClick={() => changeTab("ERROR")} disabled={running}>Открыть</button>
                   </div>
                 )}
 
@@ -707,7 +725,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
                       )}
                       <td data-label="Код">
                         <span className={cn(styles.tablePrimary, styles.nowrap)}>{i.wbCode}</span>
-                        <small className={styles.tableSecondary}>{SOURCE_SHORT[i.orderSource] ?? i.orderSource} · {statusLabel(i.status)}</small>
+                        <small className={styles.tableSecondary}>{SOURCE_SHORT[i.orderSource] ?? i.orderSource}{tab === "BUYOUT" ? "" : ` · ${statusLabel(i.status)}`}</small>
                       </td>
                       <td data-label="ID геймпасса">
                         <a className={cn(styles.orderLink, styles.nowrap)} href={i.gamepassUrl || `https://www.roblox.com/game-pass/${i.gamepassId}`} target="_blank" rel="noreferrer">
@@ -776,7 +794,7 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
 
           {/* Пачка: основное действие — закрыть заказы, выкупленные вручную */}
           {buyable && (selected.size > 0 || running) && (
-            <section className={cn(styles.panel, styles.buyPanel)}>
+            <section className={cn(styles.panel, styles.buyPanel)} style={{ position: "sticky", top: 16, zIndex: 2 }}>
               <div className={styles.panelHeader}>
                 <strong>Выбрано: {selected.size || progress?.total}</strong>
                 <span>{running ? "идёт прогон" : rbx(selectedGross)}</span>

@@ -5,20 +5,20 @@ import {
   ChevronRight,
   CircleAlert,
   ExternalLink,
-  MessageCircleQuestion,
-  MessagesSquare,
   RefreshCw,
-  Snowflake,
-  TriangleAlert,
-  Truck,
-  Clock3,
+  Ticket,
+  Zap,
 } from "lucide-react";
 import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
+import { toast } from "../Toast";
+import { copyText } from "../clipboard";
+import type { PendingCodeOrders } from "@/lib/code-orders-pending";
 import type { FirstInLine } from "@/types/first-in-line";
 import type { VkNeedsHuman } from "@/types/vk-needs-human";
 import FirstInLineBlock from "../FirstInLineBlock";
+import BuyoutFocus from "../BuyoutFocus";
 import type { OverviewDiff, OverviewFeedRow } from "@/types/admin-overview";
 import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
 import type { WbDeliveryFocus } from "./WbDeliveryScreen";
@@ -66,6 +66,8 @@ interface DashData {
   held: { count: number; codes: string[] };
   /** ⚡ Первым делом: поднятые руками и прямые заказы. */
   firstInLine: FirstInLine | null;
+  /** 🎟 Коды к выдаче (16.11.2026). `null` — не успело прочитаться. */
+  codeOrders?: PendingCodeOrders | null;
   inbox: { available: boolean; feedbacks: number; questions: number; total: number };
   /** «Ждут ответа в ВК» — обращения, где нужен человек, без ответа менеджера. `null` — ВК не успел. */
   vkNeedsHuman?: VkNeedsHuman | null;
@@ -76,26 +78,8 @@ interface DashData {
   tokenPresent?: boolean;
 }
 
-/** Полосы очереди: цвет делится с бейджем заказа, чтобы «синий» значил одно и то же. */
-const LANE_META: Record<Lane["id"], { label: string; color: string }> = {
-  WB:     { label: "Wildberries", color: C.green },
-  WB_DBS: { label: "WB DBS",      color: C.blue },
-  DIRECT: { label: "Прямые",      color: C.accent },
-};
-
 /** Как часто главная обновляется сама, пока экран на виду (решение О4). */
 const LIVE_POLL_MS = 30_000;
-
-/** Этап DBS → вкладка очереди доставки, которую открывает тап по нему. */
-/** Этапы DBS, у которых на главной своя строка — чипом их не дублируем. */
-const QUIET_STAGES = new Set(["in_bot", "stalled"]);
-
-const STAGE_FOCUS: Record<string, WbDeliveryFocus> = {
-  attention: "attention",
-  waiting_code: "waitingCode",
-  ready_receive: "readyReceive",
-  in_bot: "inBot",
-};
 
 function robux(value: number) {
   return value.toLocaleString("ru-RU");
@@ -136,6 +120,8 @@ export default function Dashboard({
   const [data, setData] = useState<DashData | null>(null);
   // «Ждут ответа в ВК» свёрнуто по умолчанию: одна строка среди дел, список — по тапу.
   const [vkOpen, setVkOpen] = useState(false);
+  /** 🛒 Режим «Выкуп по одному» поверх главной. */
+  const [focusOpen, setFocusOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   /** Когда данные последний раз пришли с сервера — из этого «живая · N с». */
@@ -194,7 +180,6 @@ export default function Dashboard({
 
   const { buyout, errors, awaitingLink, held, inbox, dbs } = data;
   const totalCodes = data.codes.reduce((sum, code) => sum + code.count, 0);
-  const activeLanes = buyout.lanes.filter(lane => lane.orders > 0);
   // «В боте» — не задача: покупатель уже с кодом идёт по нашей воронке, а
   // доставка WB к этому моменту закрыта (иначе гейт бы не ушёл). Решения
   // требует только незакрытая доставка или ход за нами.
@@ -202,11 +187,25 @@ export default function Dashboard({
   const vkHuman = data.vkNeedsHuman && data.vkNeedsHuman.total > 0 ? data.vkNeedsHuman : null;
   const dbsOldest = dbs?.unclosed ? dbs.unclosedOldestAt : dbs?.needsUsOldestAt ?? null;
 
+  /* 🔵 Прямые — свой блок наверху (16.11.2026, владелец: «коды и прямые
+     отдельно в красивых блоках, чтобы не спутать с обычными заказами»). Из
+     «Первым делом» они поэтому убраны: там остаются торопящие, поднятые и
+     «не дошло». */
+  const fil = data.firstInLine;
+  const directRows = fil?.rows.filter(row => row.reason === "direct") ?? [];
+  const firstNoDirect: FirstInLine | null = fil ? {
+    ...fil,
+    rows: fil.rows.filter(row => row.reason !== "direct"),
+    total: Math.max(0, fil.total - fil.direct),
+    direct: 0,
+    gross: Math.max(0, fil.gross - directRows.reduce((sum, row) => sum + row.gross, 0)),
+  } : null;
+  const codeOrders = data.codeOrders;
+
   function openOrders(tab: OrdersTab) {
     haptic.select();
     onOpenOrders?.(undefined, tab);
   }
-
 
   return (
     <div className="twa-liquid-dashboard twa-fade-in">
@@ -218,291 +217,196 @@ export default function Dashboard({
         </div>
       )}
 
-      {/* ── Касса выкупа ─────────────────────────────────────────────────── */}
-      <section className="twa-till">
-        <header className="twa-till-head">
-          <span>Следующее дело · к выкупу</span>
-          <div>
-            <b>{buyout.orders} {plural(buyout.orders, "заказ", "заказа", "заказов")}</b>
-            <button
-              type="button"
-              className="twa-till-refresh twa-press-sm"
-              aria-label="Обновить очереди"
-              disabled={refreshing}
-              onClick={() => { haptic.select(); void load(true); }}
-            >
-              <RefreshCw size={16} className={refreshing ? "is-spinning" : ""} />
+      {/* ── 1. Коды и Прямые: всегда наверху, своими цветами ──────────────── */}
+      <section className="twa-prio is-codes" aria-label="Коды">
+        <header>
+          <span className="twa-prio-ic"><Ticket size={17} /></span>
+          <b>Коды</b>
+          <em>
+            {codeOrders && codeOrders.toIssueTotal > 0
+              ? `${codeOrders.toIssueTotal} выдать`
+              : "выдавать нечего"}
+            {codeOrders && codeOrders.awaitingPayment > 0 ? ` · ${codeOrders.awaitingPayment} ждут оплату` : ""}
+          </em>
+        </header>
+        {codeOrders?.toIssue.map(code => (
+          <div key={code.publicId} className="twa-prio-row">
+            <span>
+              <strong>{code.publicId} · {robux(code.denomination)} R$</strong>
+              <small>оплачен {code.paidAt ? `${fmtAge(code.paidAt)} назад` : "—"} · {code.channel === "SITE" ? "сайт" : code.channel}{code.gift ? " · подарок" : ""}</small>
+            </span>
+            <button type="button" className="twa-press-sm" onClick={() => { copyText(code.publicId); haptic.impact("light"); toast(`${code.publicId} скопирован`, "success"); }}>
+              Скопировать
             </button>
           </div>
-        </header>
-
-        <button type="button" className="twa-till-figure twa-press-sm" onClick={() => openOrders("BUYOUT")}>
-          <strong>{robux(buyout.gross)}<small>R$</small></strong>
-          <span>грязными · <b>{robux(buyout.clean)} R$</b> чистыми клиенту</span>
-        </button>
-
-        {buyout.orders > 0 && (
-          <div className="twa-till-age" style={{ color: ageColor(buyout.oldestAt) }}>
-            <Clock3 size={15} />
-            <b>старейший {fmtAge(buyout.oldestAt)}</b>
-            {buyout.overdue > 0 && <span>· {buyout.overdue} {plural(buyout.overdue, "ждёт", "ждут", "ждут")} дольше 12 ч</span>}
-          </div>
-        )}
-
-        {activeLanes.length > 0 && (
-          <>
-            {/* Ширина сегмента — доля робуксов, а не заказов: шесть DBS-заказов
-                могут стоить дороже четырнадцати ВБ-шных, и полоса обязана это
-                показывать, иначе она врёт ровно там, где на неё смотрят. */}
-            <div className="twa-lane-bar" aria-hidden="true">
-              {activeLanes.map(lane => (
-                <i key={lane.id} style={{ flexGrow: Math.max(lane.gross, 1), background: LANE_META[lane.id].color }} />
-              ))}
-            </div>
-
-            <div className="twa-lane-rows">
-              {activeLanes.map(lane => (
-                <button
-                  key={lane.id}
-                  type="button"
-                  className="twa-lane-row twa-press-sm"
-                  onClick={() => { haptic.select(); onOpenOrders?.(undefined, "BUYOUT"); }}
-                >
-                  <i style={{ background: LANE_META[lane.id].color }} />
-                  <span className="twa-lane-name">{LANE_META[lane.id].label}</span>
-                  <span className="twa-lane-count">{lane.orders}</span>
-                  <span className="twa-lane-age" style={{ color: ageColor(lane.oldestAt) }}>{fmtAge(lane.oldestAt)}</span>
-                  <b className="twa-lane-sum">{robux(lane.gross)}</b>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {buyout.orders === 0 && <div className="twa-till-empty">Очередь выкупа пуста</div>}
-        {/* Одна главная кнопка экрана: открывает очередь «Выкупить». */}
-        {buyout.orders > 0 && (
-          <button type="button" className="twa-till-start twa-press" onClick={() => openOrders("BUYOUT")}>
-            Начать выкуп <span aria-hidden="true">→</span>
-          </button>
-        )}
+        ))}
       </section>
 
-      {/* ── ⚡ Первым делом ───────────────────────────────────────────────
-          Перевыкупы, поднятые кнопкой и прямые — группами. Тот же компонент
-          стоит на «Выкупах»; пусто — блока нет. */}
+      <section className="twa-prio is-direct" aria-label="Прямые заказы">
+        <header>
+          <span className="twa-prio-ic"><Zap size={17} /></span>
+          <b>Прямые</b>
+          <em>{fil && fil.direct > 0 ? `${fil.direct} к выкупу` : "прямых нет"}</em>
+        </header>
+        {directRows.map(row => (
+          <button key={row.id} type="button" className="twa-prio-row twa-press-sm" onClick={() => { haptic.select(); onOpenOrders?.(row.wbCode); }}>
+            <span>
+              <strong>{row.robloxUsername ?? "ник не указан"} · {robux(row.amount)} R$</strong>
+              <small>{row.wbCode} · ждёт {fmtAge(row.since)}{row.gamepassIds.length === 0 ? " · пасса нет" : ""}</small>
+            </span>
+            <ChevronRight size={18} />
+          </button>
+        ))}
+      </section>
+
+      {/* ── 2. ⚡ Первым делом — наше избранное ──────────────────────────── */}
       <FirstInLineBlock
         token={token}
-        initial={data.firstInLine}
+        initial={firstNoDirect}
         onOpenOrder={code => onOpenOrders?.(code)}
         onOpenQueue={() => onOpenOrders?.(undefined, "BUYOUT")}
         onChanged={() => void load()}
       />
 
-      {/* ── Требует решения ──────────────────────────────────────────────── */}
-      {(dbsNeedsDecision || errors.count > 0 || inbox.total > 0 || vkHuman) ? (
-        <>
-          <div className="twa-section-label">Ждут тебя · по срочности</div>
-          <div className="twa-inset-group twa-action-list">
-            {/* Незакрытая доставка бьёт всё остальное: там висят деньги WB.
-                Если доставка закрыта, но ход за нами (проверка, полученный код,
-                готовый гейт) — говорим об этом, а не о доставке. */}
-            {dbs && dbsNeedsDecision && (
-              /* Ведём в ту очередь, о которой строка и говорит: «наш ход» — в
-                 «Закрыть на WB», ожидание покупателя — в «Ждут код». Общий
-                 список заставлял искать те же два заказа глазами. */
-              <button
-                type="button"
-                className="twa-inset-row twa-press-sm"
-                onClick={() => { haptic.select(); onOpenDelivery?.(dbs.needsUs > 0 ? "readyReceive" : "waitingCode"); }}
-              >
-                <span className="twa-result-icon is-delivery"><Truck size={21} /></span>
-                <div>
-                  {/* Заголовок называет того, за кем ход: «закрыть на WB» в
-                      момент, когда заказ ждёт код от покупателя, звало нас на
-                      работу, которой нет. */}
-                  <strong>
-                    {dbs.needsUs > 0
-                      ? `WB Доставка · ${dbs.needsUs} ${plural(dbs.needsUs, "ждёт", "ждут", "ждут")} нашего хода`
-                      : dbs.unclosed > 0
-                        ? `WB Доставка · ${dbs.unclosed} ${plural(dbs.unclosed, "ждёт", "ждут", "ждут")} покупателя`
-                        : "WB Доставка"}
-                  </strong>
-                  <small>
-                    {dbs.stages
-                      .filter(stage => stage.stage !== "in_bot" && stage.stage !== "link_sent")
-                      .map(stage => `${stage.label} ${stage.count}`).join(" · ") || "в работе"}
-                    {/* Срок WB — не возраст заказа: по нему заказ отменяют. */}
-                    {dbs.overdue > 0 && <> · <b style={{ color: C.red }}>{dbs.overdue} просрочено по сроку WB</b></>}
-                    {dbs.overdue === 0 && dbs.dueSoon > 0 && <> · <b style={{ color: C.orange }}>{dbs.dueSoon} истекает за 4 ч</b></>}
-                    {dbsOldest && <> · старейший <b style={{ color: ageColor(dbsOldest) }}>{fmtAge(dbsOldest)}</b></>}
-                  </small>
-                </div>
-                <ChevronRight size={20} />
-              </button>
-            )}
-
-            {errors.count > 0 && (
-              <button type="button" className="twa-inset-row twa-press-sm" onClick={() => openOrders("ERROR")}>
-                <span className="twa-result-icon is-error"><TriangleAlert size={21} /></span>
-                <div>
-                  <strong>{errors.count} {plural(errors.count, "ошибка выкупа", "ошибки выкупа", "ошибок выкупа")}</strong>
-                  <small>{errors.first ?? "разобрать вручную"}{errors.oldestAt && ` · ${fmtAge(errors.oldestAt)}`}</small>
-                </div>
-                <ChevronRight size={20} />
-              </button>
-            )}
-
-            {inbox.total > 0 && (
-              <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenInbox?.(); }}>
-                <span className="twa-result-icon is-inbox"><MessageCircleQuestion size={21} /></span>
-                <div>
-                  <strong>{inbox.total} без ответа</strong>
-                  <small>{inbox.feedbacks} {plural(inbox.feedbacks, "отзыв", "отзыва", "отзывов")} · {inbox.questions} {plural(inbox.questions, "вопрос", "вопроса", "вопросов")}</small>
-                </div>
-                <ChevronRight size={20} />
-              </button>
-            )}
-
-            {/* «Нужен человек» из ВК: обращения, которые бот не решит, а
-                менеджер ещё не ответил. Одна строка; список — по тапу, ответ —
-                сразу в диалоге СООБЩЕСТВА. Уходит сама, когда менеджер ответил. */}
-            {vkHuman && (
-              <>
-                <button type="button" className="twa-inset-row twa-press-sm" aria-expanded={vkOpen}
-                  onClick={() => { haptic.select(); setVkOpen(open => !open); }}>
-                  <span className="twa-result-icon is-inbox"><MessagesSquare size={21} /></span>
-                  <div>
-                    <strong>{vkHuman.total} {plural(vkHuman.total, "ждёт", "ждут", "ждут")} ответа в ВК</strong>
-                    <small>
-                      нужен человек
-                      {vkHuman.oldestAt && <> · дольше всех <b style={{ color: ageColor(vkHuman.oldestAt) }}>{fmtAge(vkHuman.oldestAt)}</b></>}
-                    </small>
-                  </div>
-                  <ChevronRight size={20} style={{ transform: vkOpen ? "rotate(90deg)" : undefined, transition: "transform .2s" }} />
-                </button>
-                {vkOpen && vkHuman.items.map(item => (
-                  <button key={item.vkId} type="button" className="twa-inset-row twa-vk-human twa-press-sm"
-                    onClick={() => { haptic.select(); openExternal(item.dialogUrl); }}>
-                    <div>
-                      <strong>{item.name ?? `VK ${item.vkId}`} · {item.wbCode}</strong>
-                      <small>
-                        {item.quote ? `«${item.quote}»` : "без текста"} · <b style={{ color: ageColor(item.at) }}>{fmtAge(item.at)}</b>
-                      </small>
-                    </div>
-                    <ExternalLink size={17} />
-                  </button>
-                ))}
-                {vkOpen && vkHuman.total > vkHuman.items.length && (
-                  <div className="twa-inset-row twa-vk-human"><div><small>
-                    ещё {vkHuman.total - vkHuman.items.length} — в «Сообщениях» сообщества, метка «Нужен человек»
-                  </small></div></div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Этапы DBS отдельной лентой: каждый открывает ровно свою очередь.
-              «В нашем боте» и «Покупатель пропал» здесь не повторяем — у них
-              есть свои строки ниже, с подробностями (20.10: три повтора на экран). */}
-          {dbs && dbs.stages.some(stage => !QUIET_STAGES.has(stage.stage)) && (
-            <div className="twa-stage-strip twa-no-scrollbar">
-              {dbs.stages.filter(stage => !QUIET_STAGES.has(stage.stage)).map(stage => (
-                <button
-                  key={stage.stage}
-                  type="button"
-                  className="twa-stage-chip twa-press-sm"
-                  onClick={() => { haptic.select(); onOpenDelivery?.(STAGE_FOCUS[stage.stage] ?? null); }}
-                >
-                  {stage.label}
-                  <b>{stage.count}</b>
-                  {stage.oldestAt && <em style={{ color: ageColor(stage.oldestAt) }}>{fmtAge(stage.oldestAt)}</em>}
-                </button>
-              ))}
-            </div>
+      {/* ── 3. Ориентир: всё открытое — числами ─────────────────────────── */}
+      <div className="twa-section-label twa-ori-label">
+        <span>Ориентир</span>
+        <button type="button" className="twa-till-refresh twa-press-sm" aria-label="Обновить" disabled={refreshing}
+          onClick={() => { haptic.select(); void load(true); }}>
+          <RefreshCw size={15} className={refreshing ? "is-spinning" : ""} />
+        </button>
+      </div>
+      <div className="twa-ori">
+        <div className="twa-ori-till">
+          <button type="button" className="twa-ori-till-main twa-press-sm" onClick={() => openOrders("BUYOUT")}>
+            <span className="twa-ori-l">К выкупу{buyout.orders > 0 && <> · старейший <b style={{ color: ageColor(buyout.oldestAt) }}>{fmtAge(buyout.oldestAt)}</b></>}</span>
+            <strong>{robux(buyout.gross)}<small> R$</small> <em>· {buyout.orders} {plural(buyout.orders, "заказ", "заказа", "заказов")}</em></strong>
+            <span className="twa-ori-s">
+              клиентам {robux(buyout.clean)}
+              {buyout.lanes.filter(lane => lane.orders > 0).map(lane => ` · ${lane.id === "WB" ? "WB" : lane.id === "WB_DBS" ? "DBS" : "прямых"} ${lane.orders}`).join("")}
+            </span>
+          </button>
+          {buyout.orders > 0 && (
+            /* 16.11.2026: «Начать выкуп» открывает режим «по одному»; лента
+               «Выкупить» — по тапу на сумму выше. */
+            <button type="button" className="twa-till-start twa-press" onClick={() => { haptic.impact("light"); setFocusOpen(true); }}>
+              Начать выкуп <span aria-hidden="true">→</span>
+            </button>
           )}
-        </>
-      ) : null}
+        </div>
 
-      {/* ── Тихие строки: видно, что есть, но это не невыполненная задача ─── */}
-      <div className="twa-section-label">Остальное</div>
-      <div className="twa-quiet-rows">
-        {/* Код у покупателя, доставка закрыта, он идёт по нашей воронке.
-            Это ход покупателя, а не наш — в «Требует решения» ему не место. */}
+        {dbs && dbsNeedsDecision && (
+          <button type="button" className="twa-ori-tile is-loud twa-press-sm"
+            onClick={() => { haptic.select(); onOpenDelivery?.(dbs.needsUs > 0 ? "readyReceive" : "waitingCode"); }}>
+            <span className="twa-ori-l">WB Доставка</span>
+            <strong>{dbs.needsUs > 0 ? dbs.needsUs : dbs.unclosed}</strong>
+            <span className="twa-ori-s">{dbs.needsUs > 0 ? "ждут нашего хода" : "ждут покупателя"}{dbs.overdue > 0 ? ` · ${dbs.overdue} просрочено` : dbsOldest ? ` · ${fmtAge(dbsOldest)}` : ""}</span>
+          </button>
+        )}
+        {errors.count > 0 && (
+          <button type="button" className="twa-ori-tile is-red twa-press-sm" onClick={() => openOrders("ERROR")}>
+            <span className="twa-ori-l">Ошибки выкупа</span>
+            <strong>{errors.count}</strong>
+            <span className="twa-ori-s">{errors.first ?? "разобрать вручную"}</span>
+          </button>
+        )}
+        {vkHuman && (
+          <button type="button" className="twa-ori-tile is-blue twa-press-sm" aria-expanded={vkOpen}
+            onClick={() => { haptic.select(); setVkOpen(open => !open); }}>
+            <span className="twa-ori-l">Ответить в ВК</span>
+            <strong>{vkHuman.total}</strong>
+            <span className="twa-ori-s">{vkHuman.oldestAt ? `дольше всех ${fmtAge(vkHuman.oldestAt)}` : "нужен человек"}</span>
+          </button>
+        )}
+        {inbox.total > 0 && (
+          <button type="button" className="twa-ori-tile twa-press-sm" onClick={() => { haptic.select(); onOpenInbox?.(); }}>
+            <span className="twa-ori-l">Без ответа на WB</span>
+            <strong>{inbox.total}</strong>
+            <span className="twa-ori-s">{inbox.feedbacks} отз. · {inbox.questions} вопр.</span>
+          </button>
+        )}
+        <button type="button" className="twa-ori-tile twa-press-sm" onClick={() => openOrders(awaitingLink.stale > 0 ? "STALE_LINK" : "AWAITING_LINK")}>
+          <span className="twa-ori-l">Ждут пасс</span>
+          <strong>{awaitingLink.total}</strong>
+          <span className="twa-ori-s">{awaitingLink.stale > 0 ? `молчат ${awaitingLink.stale} · пишет ${awaitingLink.total - awaitingLink.stale}` : `старейший ${fmtAge(awaitingLink.oldestAt)}`}</span>
+        </button>
         {dbs && dbs.inBot > 0 && (
-          <button type="button" className="twa-quiet-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("inBot"); }}>
-            <Truck size={16} />
-            <span>
-              {dbs.inBot} в боте · код выдан, доставка закрыта
-              {dbs.funnel.readyBuyout > 0 && ` · ${dbs.funnel.readyBuyout} уже в очереди выкупа`}
-            </span>
-            <ChevronRight size={17} />
+          <button type="button" className="twa-ori-tile twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("inBot"); }}>
+            <span className="twa-ori-l">В боте доставки</span>
+            <strong>{dbs.inBot}</strong>
+            <span className="twa-ori-s">код выдан{dbs.funnel.readyBuyout > 0 ? ` · ${dbs.funnel.readyBuyout} в очереди` : ""}</span>
           </button>
         )}
-
-        {/* Гейт ушёл, код не открыт: сам такой заказ не сдвинется никогда —
-            напоминания бота кончились. Внутри «в боте» это было незаметно. */}
         {dbs && dbs.funnel.notActivated > 0 && (
-          <button type="button" className="twa-quiet-row is-loud twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("notActivated"); }}>
-            <CircleAlert size={16} />
-            <span>
-              <b>{dbs.funnel.notActivated} {plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")}</b> покупателями
-              <small>
-                {dbs.funnel.notActivatedNudged > 0 && `напоминания кончились у ${dbs.funnel.notActivatedNudged}`}
-                {dbs.funnel.notActivatedOldestAt && ` · старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}`}
-              </small>
-            </span>
-            <ChevronRight size={17} />
+          <button type="button" className="twa-ori-tile is-orange twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("notActivated"); }}>
+            <span className="twa-ori-l">Коды не открыты</span>
+            <strong>{dbs.funnel.notActivated}</strong>
+            <span className="twa-ori-s">{dbs.funnel.notActivatedOldestAt ? `старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}` : "напоминания кончились"}</span>
           </button>
         )}
-
-        {awaitingLink.stale > 0 && (
-          <button type="button" className="twa-quiet-row is-loud twa-press-sm" onClick={() => openOrders("STALE_LINK")}>
-            <Clock3 size={16} />
-            <span>
-              <b>{awaitingLink.stale} {plural(awaitingLink.stale, "молчит", "молчат", "молчат")}</b> — дожать вручную
-              <small>бот отправил 3 из 3 напоминаний · старейшему {fmtAge(awaitingLink.staleOldestAt)}</small>
-            </span>
-            <ChevronRight size={17} />
-          </button>
-        )}
-
-        {/* Когда висяки вынесены наверх, здесь остаётся живая часть очереди:
-            повторять «из них N висяков» второй строкой подряд незачем. */}
-        {awaitingLink.total > 0 && (
-          <button type="button" className="twa-quiet-row twa-press-sm" onClick={() => openOrders("AWAITING_LINK")}>
-            <Clock3 size={16} />
-            <span>
-              {awaitingLink.stale > 0
-                ? `Ещё ${awaitingLink.total - awaitingLink.stale} ждут ссылку, бот ещё пишет · всего ${awaitingLink.total}`
-                : `${awaitingLink.total} ждут ссылку · старейшая ${fmtAge(awaitingLink.oldestAt)}`}
-            </span>
-            <ChevronRight size={17} />
-          </button>
-        )}
-
         {held.count > 0 && (
-          <button type="button" className="twa-quiet-row is-ice twa-press-sm" onClick={() => openOrders("HELD")}>
-            <Snowflake size={16} />
-            {/* Кодов приходит не больше четырёх — строка на телефоне всё равно
-                не покажет больше. Хвост называем числом, а не молча режем. */}
-            <span>
-              {held.count} {plural(held.count, "заказ заморожен", "заказа заморожены", "заказов заморожены")} · {held.codes.join(", ")}
-              {held.count > held.codes.length && ` и ещё ${held.count - held.codes.length}`}
-            </span>
-            <ChevronRight size={17} />
+          <button type="button" className="twa-ori-tile is-ice twa-press-sm" onClick={() => openOrders("HELD")}>
+            <span className="twa-ori-l">Заморожены</span>
+            <strong>{held.count}</strong>
+            <span className="twa-ori-s">не выкупать</span>
           </button>
         )}
       </div>
 
-      {/* ── Пока вас не было ──────────────────────────────────────────────
-          Тот же блок, что на сайте, в формате телефона: две вкладки вместо
-          трёх (нити на 390 px читаются хуже ленты) и никаких таблиц. Окно —
-          от прошлого захода ЭТОГО админа, общее с сайтом: заход с ноутбука и
-          с телефона — одна смена одного человека. */}
+      {/* «Нужен человек» из ВК: список — по тапу на плитку, ответ — сразу в
+          диалоге СООБЩЕСТВА. Уходит сам, когда менеджер ответил. */}
+      {vkHuman && vkOpen && (
+        <div className="twa-inset-group twa-action-list">
+          {vkHuman.items.map(item => (
+            <button key={item.vkId} type="button" className="twa-inset-row twa-vk-human twa-press-sm"
+              onClick={() => { haptic.select(); openExternal(item.dialogUrl); }}>
+              <div>
+                <strong>{item.name ?? `VK ${item.vkId}`} · {item.wbCode}</strong>
+                <small>
+                  {item.quote ? `«${item.quote}»` : "без текста"} · <b style={{ color: ageColor(item.at) }}>{fmtAge(item.at)}</b>
+                </small>
+              </div>
+              <ExternalLink size={17} />
+            </button>
+          ))}
+          {vkHuman.total > vkHuman.items.length && (
+            <div className="twa-inset-row twa-vk-human"><div><small>
+              ещё {vkHuman.total - vkHuman.items.length} — в «Сообщениях» сообщества, метка «Нужен человек»
+            </small></div></div>
+          )}
+        </div>
+      )}
+
+      {/* ── 4. Пока вас не было — только важное ───────────────────────────── */}
       {data.shift && <ShiftBlock shift={data.shift} liveAge={liveAge} />}
 
-      {/* «Новый заказ» — в центральной «＋» нижней панели. */}
+      {/* ── 5. Статистика — ниже скролла ─────────────────────────────────── */}
+      {data.shift && (
+        <section className="twa-shift twa-stats">
+          <div className="twa-shift-head"><span>За смену</span></div>
+          <div className="twa-shift-tiles">
+            <div>
+              <span>Очередь</span>
+              <strong>{robux(data.shift.diff.queueBefore)} → {robux(data.shift.diff.queueNow)}</strong>
+            </div>
+            <div>
+              <span>Ушло на выкуп</span>
+              <strong>{robux(data.shift.diff.doneGross)}<small>R$</small></strong>
+            </div>
+            <div>
+              <span>Пришло</span>
+              <strong>{robux(data.shift.diff.paymentsRubles)}<small>₽</small></strong>
+            </div>
+          </div>
+        </section>
+      )}
+      <BuyoutFocus
+        token={token}
+        open={focusOpen}
+        onClose={() => { setFocusOpen(false); void load(); }}
+        onOpenOrder={code => { setFocusOpen(false); onOpenOrders?.(code); }}
+        onChanged={() => void load()}
+      />
       <div className="twa-home-footer">
         Неделя · {rub(data.week.sum)} · {data.week.orders} {plural(data.week.orders, "заказ", "заказа", "заказов")} · {totalCodes} WB-{plural(totalCodes, "код", "кода", "кодов")} на складе
       </div>
@@ -532,6 +436,16 @@ const ACTOR: Record<OverviewFeedRow["actor"], { mark: string; color: string }> =
   wb:    { mark: "WB", color: C.yellow },
 };
 
+/* Рутина воронки: покупатель сам довёл заказ до очереди — смотреть не на что.
+   Важное — слова покупателя, события WB (отмены, отзывы) и прямые заказы. */
+const ROUTINE_FEED_RE = /(прислал геймпасс|назвал ник|ввёл ник|ввёл код|signed in|^заказ создан|выкуплен|выкуплено|статус →)/i;
+function isImportantFeedRow(row: OverviewFeedRow): boolean {
+  if (row.group) return false;
+  if (/прямой заказ/i.test(row.text)) return true;
+  if (row.actor !== "buyer" && row.actor !== "wb" && row.actor !== "bot") return false;
+  return !ROUTINE_FEED_RE.test(row.text);
+}
+
 /* ── «Пока вас не было» на телефоне ───────────────────────────────────────
    Главная TWA отвечала только на «что выкупать сейчас». Второй вопрос смены —
    «что случилось, пока меня не было» — жил только на сайте, и админ с телефона
@@ -543,10 +457,20 @@ function ShiftBlock({
   shift: NonNullable<DashData["shift"]>;
   liveAge: number;
 }) {
-  const [tab, setTab] = useState<"sum" | "feed">("sum");
+  const [all, setAll] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const { diff, feed } = shift;
-  const queueDelta = diff.queueBefore - diff.queueNow;
+  /* 16.11.2026 (владелец: «сократить мусорную инфу, оставить важное»): в ленте
+     по умолчанию — только ходы покупателей и WB. Наши выкупы, ники и пассы,
+     которые воронка собрала сама, — одной строкой-итогом; вся лента — по тапу. */
+  const important = feed.filter(isImportantFeedRow);
+  const shown = all ? feed : important.slice(0, 6);
+  const routine = [
+    diff.done > 0 ? `выкуплено ${diff.done}` : null,
+    diff.arrived > 0 ? `пришло ${diff.arrived}` : null,
+    diff.funnelNicks > 0 ? `${diff.funnelNicks} ${plural(diff.funnelNicks, "ник", "ника", "ников")}` : null,
+    diff.funnelPasses > 0 ? `${diff.funnelPasses} ${plural(diff.funnelPasses, "пасс", "пасса", "пассов")}` : null,
+  ].filter(Boolean).join(" · ");
 
   return (
     <section className="twa-shift">
@@ -556,119 +480,55 @@ function ShiftBlock({
         <b className="twa-shift-live">● {liveAge < 60 ? `${liveAge} с` : `${Math.floor(liveAge / 60)} мин`}</b>
       </div>
 
-      <div className="twa-shift-tabs">
-        <button type="button" className={tab === "sum" ? "is-on" : ""} onClick={() => { haptic.select(); setTab("sum"); }}>Сводка</button>
-        <button type="button" className={tab === "feed" ? "is-on" : ""} onClick={() => { haptic.select(); setTab("feed"); }}>Лента</button>
-      </div>
-
-      {tab === "sum" ? (
-        <>
-          <div className="twa-shift-tiles">
-            <div>
-              <span>Очередь</span>
-              <strong>
-                {robux(diff.queueBefore)} → {robux(diff.queueNow)}
-                {queueDelta !== 0 && (
-                  <i style={{ color: queueDelta > 0 ? C.green : C.orange }}>
-                    {queueDelta > 0 ? `−${queueDelta}` : `+${-queueDelta}`}
-                  </i>
-                )}
-              </strong>
-            </div>
-            <div>
-              <span>Ушло на выкуп</span>
-              <strong>{robux(diff.doneGross)}<small>R$</small></strong>
-            </div>
-            <div>
-              <span>Пришло</span>
-              <strong>{robux(diff.paymentsRubles)}<small>₽</small></strong>
-            </div>
-          </div>
-
-          {diff.done > 0 && (
-            <div className="twa-shift-row">
-              <i style={{ color: C.green }}>✓</i>
-              <span>
-                <b>{diff.done} {plural(diff.done, "заказ выкуплен", "заказа выкуплено", "заказов выкуплено")}</b> · {robux(diff.doneClean)} R$ клиентам
-                <small>{diff.doneCodes.slice(0, 4).join(" · ")}{diff.doneCodes.length > 4 ? ` и ещё ${diff.doneCodes.length - 4}` : ""}</small>
-              </span>
-              {diff.doneFirstAt && diff.doneLastAt && <time>{hhmm(diff.doneFirstAt)}→{hhmm(diff.doneLastAt)}</time>}
-            </div>
-          )}
-
-          {diff.arrived > 0 && (
-            <div className="twa-shift-row">
-              <i style={{ color: C.blue }}>+</i>
-              <span>
-                <b>{diff.arrived} {plural(diff.arrived, "заказ", "заказа", "заказов")}</b> пришло
-                <small>
-                  {[diff.arrivedDbs > 0 ? `DBS ${diff.arrivedDbs}` : null, diff.arrivedDirect > 0 ? `прямых ${diff.arrivedDirect}` : null]
-                    .filter(Boolean).join(" · ") || "в работе"}
-                  {diff.queued > 0 && ` · в очередь встали ${diff.queued}`}
-                </small>
-              </span>
-            </div>
-          )}
-
-          {diff.funnelEvents > 0 && (
-            <div className="twa-shift-row">
-              <i style={{ color: C.textTertiary }}>⚙</i>
-              <span>
-                <b>{[
-                  diff.funnelNicks > 0 ? `${diff.funnelNicks} ${plural(diff.funnelNicks, "ник", "ника", "ников")}` : null,
-                  diff.funnelPasses > 0 ? `${diff.funnelPasses} ${plural(diff.funnelPasses, "пасс", "пасса", "пассов")}` : null,
-                ].filter(Boolean).join(" и ")}</b> прислали покупатели
-                <small>воронка прошла сама</small>
-              </span>
-            </div>
-          )}
-
-          {/* «Не сдвинулось» убрано 20.10: оно повторяло строки «Требует
-              решения» выше; сводка смены показывает только то, что изменилось. */}
-          {diff.errors === 0 && diff.wbCancelled === 0 && (
-            <div className="twa-shift-row">
-              <i style={{ color: C.green }}>✓</i>
-              <span>Ошибок выкупа нет · отмен WB нет</span>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="twa-shift-feed">
-          {feed.length === 0 && <div className="twa-shift-empty">За окно не случилось ничего</div>}
-          {feed.map(row => {
-            const actor = ACTOR[row.actor];
-            if (row.group) {
-              const open = openGroup === row.id;
-              return (
-                <div key={row.id}>
-                  <button type="button" className="twa-shift-fold twa-press-sm" onClick={() => { haptic.select(); setOpenGroup(open ? null : row.id); }}>
-                    <span>{open ? "▾" : "▸"}</span>
-                    <b>{row.text}</b>
-                    <time>{hhmm(row.group.items[row.group.items.length - 1].at)}→{hhmm(row.group.items[0].at)}</time>
-                  </button>
-                  {open && (
-                    <div className="twa-shift-group">
-                      {row.group.items.map(item => (
-                        <span key={`${row.id}:${item.code}:${item.at}`}><b>{hhmm(item.at)}</b> {item.code}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-            return (
-              <div className="twa-shift-event" key={row.id}>
-                <time>{hhmm(row.at)}</time>
-                <i style={{ background: `${actor.color}26`, color: actor.color }}>{actor.mark}</i>
-                <span>
-                  {row.code && <b>{row.code}</b>} {row.text}
-                  {row.sub && <small>{row.sub}</small>}
-                </span>
-              </div>
-            );
-          })}
+      {(diff.errors > 0 || diff.wbCancelled > 0) && (
+        <div className="twa-shift-row">
+          <i style={{ color: C.red }}>!</i>
+          <span><b>{[diff.errors > 0 ? `${diff.errors} ${plural(diff.errors, "ошибка", "ошибки", "ошибок")} выкупа` : null, diff.wbCancelled > 0 ? `${diff.wbCancelled} ${plural(diff.wbCancelled, "отмена", "отмены", "отмен")} WB` : null].filter(Boolean).join(" · ")}</b></span>
         </div>
       )}
+
+      <div className="twa-shift-feed">
+        {shown.length === 0 && <div className="twa-shift-empty">{all ? "За окно не случилось ничего" : "Покупатели и WB ничего не писали"}</div>}
+        {shown.map(row => {
+          const actor = ACTOR[row.actor];
+          if (row.group) {
+            const open = openGroup === row.id;
+            return (
+              <div key={row.id}>
+                <button type="button" className="twa-shift-fold twa-press-sm" onClick={() => { haptic.select(); setOpenGroup(open ? null : row.id); }}>
+                  <span>{open ? "▾" : "▸"}</span>
+                  <b>{row.text}</b>
+                  <time>{hhmm(row.group.items[row.group.items.length - 1].at)}→{hhmm(row.group.items[0].at)}</time>
+                </button>
+                {open && (
+                  <div className="twa-shift-group">
+                    {row.group.items.map(item => (
+                      <span key={`${row.id}:${item.code}:${item.at}`}><b>{hhmm(item.at)}</b> {item.code}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+          return (
+            <div className="twa-shift-event" key={row.id}>
+              <time>{hhmm(row.at)}</time>
+              <i style={{ background: `${actor.color}26`, color: actor.color }}>{actor.mark}</i>
+              <span>
+                {row.code && <b>{row.code}</b>} {row.text}
+                {row.sub && <small>{row.sub}</small>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {routine && <div className="twa-shift-routine">Само, без вас: {routine}{diff.errors === 0 && diff.wbCancelled === 0 ? " · ошибок и отмен нет" : ""}</div>}
+      {feed.length > shown.length || all ? (
+        <button type="button" className="twa-shift-all twa-press-sm" onClick={() => { haptic.select(); setAll(v => !v); }}>
+          {all ? "Только важное" : `Вся лента · ${feed.length}`}
+        </button>
+      ) : null}
     </section>
   );
 }
