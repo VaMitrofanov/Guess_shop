@@ -10,6 +10,7 @@
  */
 
 import type { MessageContext } from "vk-io";
+import { handleContactPayloadVk, offerInBotVk } from "./order-contacts-vk";
 import { orderPinText, recordOrderPin } from "../shared/order-pin";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
@@ -1095,6 +1096,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (ref) {
     await handleRefActivation(ctx, vkUserId, ref.trim().toUpperCase());
     return;
+  }
+
+  // ── 🔗 Контакты заказа: «да / не мой / убрать» (17.11.2026) ──────────────
+  if (typeof msgPayload?.command === "string" && msgPayload.command.startsWith("oc_")) {
+    const name = msgPayload.command === "oc_add" ? await vkGetName(vkUserId).catch(() => "") : "";
+    if (await handleContactPayloadVk(ctx, vkUserId, msgPayload, name)) return;
   }
 
   // ── Б1: владелец кода подтверждает свою вторую площадку ──────────────────
@@ -2496,6 +2503,11 @@ async function settleForeignCodeClaimVk(
     }), t.extra)))).catch(() => undefined);
 
   if (verdict.kind === "conflict") {
+    // 🔗 Второй аккаунт на этой площадке (17.11.2026) — предложить подключить его к заказу.
+    if (await offerInBotVk(ctx, vkUserId, code).catch((error) => {
+      console.warn("[VK] контакты заказа:", (error as Error)?.message ?? error);
+      return false;
+    })) return "handled";
     await ctx.reply(stripHtml(xlinkConflictText()) + "\nhttps://t.me/RobloxBank_PA");
     void notifyAdmins("conflict", verdict.reason);
     return "handled";

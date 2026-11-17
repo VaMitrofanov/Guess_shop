@@ -2278,12 +2278,25 @@ interface BuyerHistoryData {
   stats: { orders: number; completed: number; completedRobux: number; rejected: number; open: number };
   /** 👥 Рефералы покупателя (16.11.2026). */
   referrals?: { invited: number; qualified: number; referredBy: string | null };
+  /** 🔗 Другие аккаунты этого заказа (17.11.2026). */
+  contacts?: {
+    id: string; via: string; evidence: string | null; createdAt: string; removedAt: string | null;
+    user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null } | null;
+  }[];
   orders: {
     id: string; wbCode: string; amount: number; status: string; orderSource: string; isDirectOrder: boolean;
     createdAt: string; completedAt: string | null; robloxUsername: string | null; gamepassId: string | null;
     heldAt: string | null; rejectionReason: string | null;
   }[];
 }
+
+const CONTACT_VIA: Record<string, string> = {
+  support_code: "поддержка, по коду",
+  support_pass: "поддержка, по пассу",
+  support_nick: "поддержка, по нику",
+  bot_code: "бот, по коду",
+  admin: "добавил админ",
+};
 
 const HISTORY_STATUS: Record<string, { label: string; color: string }> = {
   COMPLETED: { label: "Выкуплен", color: C.green },
@@ -2383,6 +2396,41 @@ function BuyerHistory({ order, token, active, platform, shortName, onContact }: 
               </span></div>
             )}
           </div>
+
+          {/* 🔗 Другие аккаунты заказа (17.11.2026): кто ещё получает уведомления. */}
+          {(data.contacts ?? []).some((c) => !c.removedAt) && (
+            <>
+              <p className="twa-bh-label">Ещё получают уведомления</p>
+              <div className="twa-os-group" style={{ margin: "0 0 12px" }}>
+                {(data.contacts ?? []).filter((c) => !c.removedAt).map((c) => {
+                  const u = c.user;
+                  const label = u?.name?.trim() || (u?.username ? `@${u.username}` : u?.tgId ? `tg ${u.tgId}` : `vk ${u?.vkId ?? "?"}`);
+                  return (
+                    <div key={c.id} className="twa-os-row">
+                      <span className="twa-os-tx">
+                        <small>{u?.tgId ? "Telegram" : "VK"} · {CONTACT_VIA[c.via] ?? c.via} · {fmtDay(c.createdAt)}</small>
+                        <b>{label}{u?.username && u?.name ? ` · @${u.username}` : ""}</b>
+                      </span>
+                      <button type="button" className="twa-bh-write twa-press-sm" onClick={async () => {
+                        try {
+                          const r = await fetch("/api/twa/orders", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ action: "remove-contact", orderId: order.id, contactId: c.id }),
+                          });
+                          const d = await r.json().catch(() => null);
+                          if (!r.ok || !d?.ok) { toast(d?.error ?? "Не получилось", "error"); return; }
+                          setData((prev) => prev ? { ...prev, contacts: d.contacts } : prev);
+                          haptic.impact("light");
+                          toast("Контакт убран", "success");
+                        } catch { toast("Ошибка сети", "error"); }
+                      }}>Убрать</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           <p className="twa-bh-label">Заказы покупателя{data.stats.orders > data.orders.length ? ` · последние ${data.orders.length}` : ""}</p>
           <div className="twa-os-group" style={{ margin: 0 }}>

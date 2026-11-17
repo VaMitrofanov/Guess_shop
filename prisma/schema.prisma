@@ -85,6 +85,8 @@ model User {
   codeOrders              CodeOrder[]
   wbCodes                 WbCode[]
   wbOrders                WbOrder[]
+  /// Чужие заказы, к которым этот аккаунт подключён (`OrderContact`, 17.11.2026).
+  orderContacts           OrderContact[]
   directIntents           DirectIntent[]
   identities              UserIdentity[]
   bonusLedgerEntries      BonusLedger[]
@@ -441,6 +443,8 @@ model WbOrder {
   platform               Platform
   userId                 String
   user                   User              @relation(fields: [userId], references: [id])
+  /// Дополнительные аккаунты заказа (владелец — по-прежнему `userId`).
+  contacts               OrderContact[]
   wbCode                 String            @unique
   /// Canonical web-checkout fields. Nullable for historical WB/bot orders.
   priceQuoteId           String?           @unique
@@ -1629,4 +1633,31 @@ model AdminDigestItem {
   sentAt    DateTime?
 
   @@index([sentAt, createdAt])
+}
+
+/// Дополнительный аккаунт заказа (17.11.2026).
+///
+/// Покупатель пишет в поддержку или в бота НЕ с того аккаунта, на который
+/// оформлен заказ, и называет код, ник или пасс. Склеить профили нельзя (у
+/// профиля один TG и один VK, Б1 упирается в «конфликт»), поэтому второй
+/// аккаунт подключается к заказу: видит статус и получает копии уведомлений.
+/// Владелец заказа остаётся один — `WbOrder.userId`; здесь только добавленные.
+/// Снятие — мягкое (`removedAt`), чтобы в карточке было видно, кто и когда убрал.
+model OrderContact {
+  id        String    @id @default(cuid())
+  orderId   String
+  order     WbOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Откуда пришёл: support_code | support_nick | support_pass | bot_code | admin.
+  via       String
+  /// Что человек прислал, чтобы его узнали (код, ник, ID пасса). Ключей здесь не бывает.
+  evidence  String?
+  createdAt DateTime  @default(now())
+  removedAt DateTime?
+  /// owner | self | admin:<имя>
+  removedBy String?
+
+  @@unique([orderId, userId])
+  @@index([userId])
 }

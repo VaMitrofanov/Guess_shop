@@ -20,6 +20,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
+import { CODE_VIAS } from "../shared/order-contacts";
 import {
   CATEGORY_RU, HANDOFF_TEXT, PA_AI_MODEL, PA_AI_SYSTEM, PaAiDecisionSchema,
   customerContext, guardDecision, type PaAiDecision,
@@ -195,7 +196,10 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   const user = await db.user.findUnique({ where: { tgId: String(m.fromId) }, select: { id: true, name: true } });
   const orders = user
     ? await db.wbOrder.findMany({
-        where: { userId: user.id },
+        // + заказы, к которым аккаунт подключён с другого по коду (OrderContact,
+        // 17.11.2026). Подключённые по нику или пассу в контекст не идут: модель
+        // назвала бы код заказа, а ник публичный.
+        where: { OR: [{ userId: user.id }, { contacts: { some: { userId: user.id, removedAt: null, via: { in: CODE_VIAS } } } }] },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {

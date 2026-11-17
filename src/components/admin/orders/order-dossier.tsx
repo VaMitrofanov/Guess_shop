@@ -16,6 +16,8 @@ import {
 import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { AskBuyerBox, GamepassToolRows, KeyCreateBox } from "./gamepass-tools";
 import { buyerStepEventText, type BuyerStepKind } from "../../../../bots/shared/buyer-step";
+import { contactEventText } from "../../../../bots/shared/order-contacts";
+import { OrderContactsBlock, type OrderContactRow } from "./order-contacts-block";
 import { buyerJourney, type JourneyEventRow, type JourneyNext } from "@/lib/buyer-journey";
 import { BuyerJourneyPanel, JourneySteps } from "./buyer-journey-panel";
 import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
@@ -54,6 +56,7 @@ const EVENT_LABELS: Record<string, string> = {
 interface BuyerInfo {
   stats: { orders: number; completed: number; rejected: number };
   referrals?: { invited: number; qualified: number; referredBy: string | null };
+  contacts?: OrderContactRow[];
 }
 
 const CONTACT_CHANNEL: Record<string, string> = { TG: "TG", VK: "VK", WB: "чат WB" };
@@ -513,6 +516,10 @@ export default function OrderDossier({
                 )}
               </div>
             )}
+            {/* 🔗 Другие аккаунты заказа (17.11.2026). */}
+            {buyerInfo && (
+              <OrderContactsBlock key={order.id} initial={buyerInfo.contacts ?? []} post={post} onToast={onToast} />
+            )}
             {order.priorityAt && (
               <div className={`${styles.box} ${styles.boxPrio}`}>
                 <div className={styles.boxHead}>⚡ Выкупать первым<em>{order.priorityBy ?? ""}</em></div>
@@ -672,7 +679,7 @@ export default function OrderDossier({
                 <div key={event.id} className={`${styles.event} ${index === 0 ? styles.eventAccent : ""}`}>
                   <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
                   <span className={styles.eventDot}><i /></span>
-                  <span className={styles.eventText}>{EVENT_LABELS[event.type] ?? buyerStepEventText(event.type, event.payload) ?? event.type}</span>
+                  <span className={styles.eventText}>{EVENT_LABELS[event.type] ?? buyerStepEventText(event.type, event.payload) ?? contactEventText(event.type, event.payload) ?? event.type}</span>
                 </div>
               ))}
               {noteLines.map(line => (
@@ -717,7 +724,7 @@ export default function OrderDossier({
                       <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
                       <span className={styles.eventDot}><i /></span>
                       <span className={styles.eventText}>
-                        {EVENT_LABELS[event.type] ?? buyerStepEventText(event.type, event.payload) ?? event.type}
+                        {EVENT_LABELS[event.type] ?? buyerStepEventText(event.type, event.payload) ?? contactEventText(event.type, event.payload) ?? event.type}
                         {typeof event.payload === "object" && event.payload
                           ? <em> · {Object.entries(event.payload as Record<string, unknown>).slice(0, 4).map(([key, value]) => `${key}: ${String(value)}`).join(", ")}</em>
                           : null}

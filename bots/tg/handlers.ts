@@ -5,6 +5,8 @@
  * generic fallback so Telegraf's middleware chain routes correctly.
  */
 
+import { offerInBot } from "./order-contacts-tg";
+import { CODE_VIAS, notifyOrderWatchers, statusWord } from "../shared/order-contacts";
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
@@ -2181,6 +2183,30 @@ async function buildFaqMenu(tgId: string, all: boolean): Promise<{ text: string;
 }
 
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
+/** Заказы, к которым аккаунт подключён с другого (`OrderContact`). Код — только если подключён по коду. */
+async function buildWatchedStatus(userId: string, refreshRow: any[], menuRow: any[]): Promise<StatusMessage | null> {
+  const fresh = new Date(Date.now() - 30 * 24 * 3600_000);
+  const rows = await db.orderContact.findMany({
+    where: { userId, removedAt: null, order: { OR: [{ status: { not: "COMPLETED" } }, { completedAt: { gte: fresh } }] } },
+    orderBy: { createdAt: "desc" },
+    take: 3,
+    select: { via: true, order: { select: { wbCode: true, amount: true, status: true, robloxUsername: true, probableNick: true } } },
+  }).catch(() => []);
+  if (!rows.length) return null;
+  const lines = rows.map(({ via, order: o }: any) => {
+    const ref = CODE_VIAS.includes(via) ? `<b>${o.wbCode}</b> · ` : "";
+    const nick = o.robloxUsername ?? o.probableNick;
+    return `📦 ${ref}${o.amount} R$${nick ? ` → <code>${escapeHtml(nick)}</code>` : ""}\nСтатус: ${statusWord(o.status)}`;
+  });
+  return {
+    text:
+      `${rows.length > 1 ? "Заказы, к которым подключён этот аккаунт" : "Заказ, к которому подключён этот аккаунт"}:\n\n` +
+      lines.join("\n\n") +
+      `\n\nНапишем сюда, как только робуксы будут у вас. Ничего делать не нужно 💛`,
+    keyboard: Markup.inlineKeyboard([refreshRow, menuRow]),
+  };
+}
+
 async function buildStatusMessage(tgId: string, focusCode?: string): Promise<StatusMessage> {
   const refreshRow = [Markup.button.callback("🔄 Обновить", CB.refreshStatus)];
   // Back to the buyer's home hub — always offered so the user never dead-ends.
@@ -2212,6 +2238,13 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   const otherOrdersRow = siblingCount
     ? [[Markup.button.callback(`📦 Другие заказы (${siblingCount - 1})`, CB.ordersList)]]
     : [];
+
+  // 🔗 Своих живых заказов нет, но аккаунт подключён к чужому (17.11.2026):
+  // показываем его — только смотреть, без кнопок смены ника.
+  if (!activeOrders.length) {
+    const watched = await buildWatchedStatus(user.id, refreshRow, menuRow);
+    if (watched) return watched;
+  }
 
   const order = focused ?? (activeOrders.length === 1 ? activeOrders[0] : await findRelevantOrder(user.id));
 
@@ -4631,6 +4664,14 @@ async function settleForeignCodeClaim(
     }), t.extra)))).catch(() => undefined);
 
   if (verdict.kind === "conflict") {
+    // 🔗 Второй аккаунт на той же площадке (17.11.2026): склеить профили нельзя,
+    // но подключить этот аккаунт к заказу — можно, если человек подтвердит.
+    // Красный алерт админам больше не нужен: владелец сам получит уведомление
+    // с кнопкой «Убрать».
+    if (await offerInBot(ctx, code).catch((error) => {
+      console.warn("[TG] контакты заказа:", error?.message ?? error);
+      return false;
+    })) return "handled";
     await ctx.reply(xlinkConflictText(), {
       parse_mode: "HTML",
       ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx),
@@ -8040,6 +8081,14 @@ export async function notifyUserCompleted(
     });
     bonusDelivered = Boolean(await vkSend(user.vkId, m.vkMsg2, { keyboard: vkKb }));
   }
+
+  // 🔗 Копия «выкуплен» аккаунтам, подключённым к заказу (17.11.2026).
+  await notifyOrderWatchers(db, { orderId }, { kind: "completed" }, {
+    tg: async (chatId, html) => {
+      try { await bot.telegram.sendMessage(chatId, html, { parse_mode: "HTML" }); return true; } catch { return false; }
+    },
+    vk: async (vkId, text) => Boolean(await vkSend(vkId, text)),
+  });
 
   await recordCompletedNotice(db as never, {
     orderId,

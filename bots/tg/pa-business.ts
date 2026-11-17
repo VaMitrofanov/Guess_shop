@@ -24,6 +24,8 @@ import { registerWbReply } from "./wb-reply";
 import { registerCodesIssueReply } from "./codes-issue-reply";
 import { registerWbMorningDigest } from "./wb-morning-digest";
 import { registerNoticeStatsReport } from "./notice-stats-report";
+import { offerFromSupport, registerOrderContactActions } from "./order-contacts-tg";
+import { CODE_VIAS } from "../shared/order-contacts";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
 
@@ -53,6 +55,9 @@ export function paBusinessReplyEnabled(env: NodeJS.ProcessEnv = process.env): bo
 export function registerPaBusiness(bot: Telegraf): void {
   // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
   registerPaAiAdmin(bot);
+  // 🔗 Контакты заказа (17.11.2026): «да / не мой / убрать» — и из чата
+  // поддержки, и из бота, и у владельца. До защиты беседы админов.
+  registerOrderContactActions(bot);
   // Тема «Апдейты» + публикация клиентам по кнопке (14.11.2026). ДО защиты
   // беседы: она пропускает нажатия кнопок только из «Уведов», а «Апдейты»
   // живут в беседе админов — «Опубликовать» молча отбрасывалось (15.11.2026).
@@ -116,6 +121,25 @@ export function registerPaBusiness(bot: Telegraf): void {
       if (!paBusinessReplyEnabled()) return;
       const text = (msg.text ?? msg.caption ?? "").trim();
       const hasMedia = Boolean(msg.photo || msg.document || msg.video || msg.voice);
+      // 🔗 Назвал заказ, оформленный с другого аккаунта (код, ссылка, пасс,
+      // ник) — спрашиваем, добавить ли этот аккаунт к заказу (17.11.2026).
+      // Раньше живого разговора: это не болтовня, а действие, и оператору
+      // тоже удобнее, когда заказ уже привязан к чату.
+      if (text) {
+        const offered = await offerFromSupport(bot, api, {
+          connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
+          from: { id: fromId, first_name: msg.from?.first_name, last_name: msg.from?.last_name, username: msg.from?.username },
+          text,
+        }).catch((error) => {
+          console.warn(`[order-contacts] поддержка: ${error instanceof Error ? error.message : error}`);
+          return false;
+        });
+        if (offered) {
+          rememberTurn(msg.chat.id, "user", text);
+          return;
+        }
+      }
+
       const lastOperator = operatorAt.get(msg.chat.id) ?? 0;
       if (Date.now() - lastOperator < OPERATOR_QUIET_MS) {
         rememberTurn(msg.chat.id, "user", text || "[фото/файл]");
@@ -129,7 +153,7 @@ export function registerPaBusiness(bot: Telegraf): void {
         const buyer = await db.user.findUnique({ where: { tgId: String(fromId) }, select: { id: true } });
         const list = buyer
           ? await db.wbOrder.findMany({
-              where: { userId: buyer.id }, orderBy: { createdAt: "desc" }, take: 10,
+              where: { OR: [{ userId: buyer.id }, { contacts: { some: { userId: buyer.id, removedAt: null, via: { in: CODE_VIAS } } } }] }, orderBy: { createdAt: "desc" }, take: 10,
               select: { wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true },
             })
           : [];
@@ -165,7 +189,7 @@ export function registerPaBusiness(bot: Telegraf): void {
       const user = await db.user.findUnique({ where: { tgId: String(fromId) }, select: { id: true } });
       if (!user) return;
       const orders = await db.wbOrder.findMany({
-        where: { userId: user.id },
+        where: { OR: [{ userId: user.id }, { contacts: { some: { userId: user.id, removedAt: null, via: { in: CODE_VIAS } } } }] },
         orderBy: { createdAt: "desc" },
         take: 10,
         select: { wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true },

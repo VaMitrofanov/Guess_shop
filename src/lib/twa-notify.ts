@@ -11,6 +11,7 @@ import {
   type BuyerStepKind,
   type BuyerStepOrder,
 } from "../../bots/shared/buyer-step";
+import { notifyOrderWatchers, type WatcherEvent } from "../../bots/shared/order-contacts";
 
 interface UserRef {
   id: string;
@@ -81,6 +82,18 @@ async function vkPost(vkUserId: string, message: string, extra: Record<string, s
     console.warn("[twa-notify] vk error:", e?.message);
     return false;
   }
+}
+
+/**
+ * 🔗 Копия события аккаунтам, подключённым к заказу с другого TG/VK
+ * (`OrderContact`, 17.11.2026). Короткая, без кнопок и без кода ВБ; владелец
+ * получает полное сообщение, как раньше. Ошибки не бросает.
+ */
+function copyToWatchers(ref: { orderId?: string | null; wbCode?: string | null }, ev: WatcherEvent): Promise<number> {
+  return notifyOrderWatchers(prisma, ref, ev, {
+    tg: (chatId, html) => tgPost(chatId, html),
+    vk: (vkId, text) => vkPost(vkId, text),
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,6 +321,7 @@ export async function notifyOrderCompleted(
   // Живая карточка DBS — единственное место, где виден весь заказ целиком;
   // «выкуплен» обязан появиться и в ней, а не только в чате с покупателем.
   await refreshDbsCardByCode(prisma, order?.wbCode ?? null).catch(() => {});
+  await copyToWatchers({ orderId }, { kind: "completed" });
 
   return { delivered, bonusDelivered, kind: m.kind, channel };
 }
@@ -325,6 +339,7 @@ export async function notifyRegionalPriceNeeded(
   const plainText =
     `⚠️ Нужен новый геймпасс\n\nRoblox включил региональную цену для текущего пасса заказа ${wbCode}, ` +
     `поэтому мы безопасно остановили выкуп. Создай новый геймпасс за ${expectedPrice} R$ без Managed/Regional Pricing и пришли ссылку в бот — заказ продолжится.`;
+  await copyToWatchers({ wbCode }, { kind: "new_pass_needed", price: expectedPrice });
   if (user.tgId) return tgPost(user.tgId, tgText);
   if (user.vkId) return vkPost(user.vkId, plainText);
   return false;
@@ -440,6 +455,7 @@ export async function notifyBuyerStep(
   customText?: string,
 ): Promise<"tg" | "vk" | null> {
   const msg = buyerStepMessage(kind, order, customText);
+  await copyToWatchers({ wbCode: order.wbCode }, { kind: "buyer_step" });
   if (user.tgId) {
     const inline_keyboard = msg.buttons.map((row) => row.map((b) =>
       "url" in b ? { text: b.label, url: b.url } : { text: b.label, callback_data: BUYER_STEP_COMMANDS.tg[b.action] },
@@ -464,6 +480,7 @@ export async function notifyBuyerStep(
  * Возвращает канал реальной доставки — TWA показывает менеджеру честный статус.
  */
 export async function notifyGamepassAttached(user: UserRef, wbCode: string): Promise<"tg" | "vk" | null> {
+  await copyToWatchers({ wbCode }, { kind: "pass_accepted" });
   // Без «номера заявки» — идентификатор для клиента всегда код ВБ
   // (номера заказов убраны из клиентских сообщений 2026-06-24, de7d7fd).
   const tgMsg =
@@ -492,6 +509,7 @@ export async function notifyGamepassCreatedForBuyer(
   wbCode: string,
   opts: { nick: string; prices: number[] },
 ): Promise<"tg" | "vk" | null> {
+  await copyToWatchers({ wbCode }, { kind: "pass_accepted" });
   const passLine = opts.prices.length > 1
     ? `Создали геймпассы: ${opts.prices.map((price) => `${price} R$`).join(" + ")}`
     : `Создали геймпасс на ${opts.prices[0] ?? 0} R$`;
@@ -535,4 +553,5 @@ export async function notifyOrderRejected(
 
   if (user.tgId) await tgPost(user.tgId, tgMsg);
   else if (user.vkId) await vkPost(user.vkId, vkMsg);
+  await copyToWatchers({ wbCode }, { kind: "rejected", reason: reason && reason !== "не указана" ? reason : null });
 }

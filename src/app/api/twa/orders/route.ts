@@ -75,6 +75,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { notifyAdminsKeyCreated, passNeedsHands } from "@/lib/gamepass-key-admin-notify";
 import { notifyBuyerStep, notifyGamepassCreatedForBuyer } from "@/lib/twa-notify";
 import { BUYER_STEP_EVENT, buyerStepEventText, isBuyerStepKind } from "../../../../../bots/shared/buyer-step";
+import { addOrderContact, listOrderContacts, removeOrderContact } from "../../../../../bots/shared/order-contacts";
 import { PLACE_HELP_EVENT } from "../../../../../bots/shared/no-place";
 import { BUYER_STEP_STATUSES } from "@/lib/gamepass-tools";
 import { JOURNEY_EVENT_TYPES, trimJourneyPayload } from "@/lib/buyer-journey";
@@ -2775,9 +2776,45 @@ export async function POST(req: NextRequest) {
      Раздел «История» шторки заказа. Грузится по запросу: в ленту это не
      нужно, а в шторке отвечает на «он у нас впервые?», «сколько уже взял?»,
      «не было ли с ним отмен». Тестовые заказы не считаются. */
+  /* ── 🔗 Контакты заказа (17.11.2026): кто ещё, кроме владельца, получает
+     уведомления. Добавить — по @нику, tg:ID или vk:ID; убрать — мягко. */
+  if (action === "add-contact" || action === "remove-contact") {
+    if (action === "remove-contact") {
+      const contactId = typeof body.contactId === "string" ? body.contactId : "";
+      const res = await removeOrderContact(prisma, { contactId, pressedByUserId: null, by: `admin:${actor.displayName}` });
+      if (!res.ok) return NextResponse.json({ error: res.reason === "already" ? "Уже убран" : "Контакт не найден" }, { status: 400 });
+      return NextResponse.json({ ok: true, contacts: await listOrderContacts(prisma, orderId) });
+    }
+    const raw = typeof body.who === "string" ? body.who.trim() : "";
+    const tg = raw.match(/^(?:tg[:\s]*)?(\d{5,15})$/i);
+    const vk = raw.match(/^(?:vk[:\s]*|id)(\d{1,15})$/i);
+    const handle = raw.replace(/^@/, "");
+    let target: { id: string; tgId: string | null; vkId: string | null; name: string | null; username: string | null } | null = null;
+    const pick = { id: true, tgId: true, vkId: true, name: true, username: true } as const;
+    if (vk) target = await prisma.user.upsert({ where: { vkId: vk[1] }, create: { vkId: vk[1] }, update: {}, select: pick });
+    else if (tg) target = await prisma.user.upsert({ where: { tgId: tg[1] }, create: { tgId: tg[1] }, update: {}, select: pick });
+    else if (/^[A-Za-z0-9_]{4,32}$/.test(handle)) {
+      target = await prisma.user.findFirst({ where: { username: { equals: handle, mode: "insensitive" } }, select: pick });
+      if (!target) return NextResponse.json({ error: `@${handle} нет в базе — он ещё не писал боту. Введите tg:ID или vk:ID` }, { status: 404 });
+    } else {
+      return NextResponse.json({ error: "Укажите @ник Telegram, tg:ID или vk:ID" }, { status: 400 });
+    }
+    const label = target.username ? `@${target.username}` : target.name ?? (target.tgId ? `tg:${target.tgId}` : `vk:${target.vkId}`);
+    const res = await addOrderContact(prisma, {
+      orderId, userId: target.id, via: "admin", evidence: null,
+      platform: target.tgId ? "TG" : "VK", label,
+    });
+    if (!res.ok) {
+      const why = { own: "Это владелец заказа", held: "Заказ заморожен", revoked: "По коду возврат WB", limit: "У заказа уже 5 аккаунтов", no_order: "Заказ не найден" }[res.reason];
+      return NextResponse.json({ error: why }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true, contacts: await listOrderContacts(prisma, orderId) });
+  }
+
   if (action === "user-history") {
     const userId = order.user?.id;
     if (!userId) return NextResponse.json({ error: "У заказа нет покупателя" }, { status: 404 });
+    const contactsPromise = listOrderContacts(prisma, orderId);
     const [user, orders, totals, invited, qualified] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
@@ -2830,6 +2867,8 @@ export async function POST(req: NextRequest) {
         referredBy: user?.referredBy ? (user.referredBy.username ? `@${user.referredBy.username}` : user.referredBy.name ?? "по ссылке") : null,
       },
       orders,
+      // 🔗 Другие аккаунты этого заказа (`OrderContact`), включая убранных — с отметкой.
+      contacts: await contactsPromise,
     });
   }
 
