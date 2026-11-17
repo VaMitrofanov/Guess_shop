@@ -11,6 +11,11 @@
      диалог TG/VK), а в WB — только своим текстом;
    • `closed`      — отменён/возвращён: только «Свой ответ».
    «✍️ Свой ответ» и «📱 Открыть в TWA» есть всегда.
+
+   17.11.2026 (владелец: «слишком громоздко… если заказ выкуплен — нахуй нам
+   знать, ушёл ли гейт»): статус сжат до ОДНОЙ фразы о заказе, а кружок
+   заголовка красится по состоянию заказа (`tone`). История чата WB («что
+   уже ушло») показывается только пока покупатель не дошёл до бота.
    ───────────────────────────────────────────────────────────────────────── */
 
 import { WB_REPLY_CB, type WbReplyKind } from "./wb-reply-buttons";
@@ -19,9 +24,16 @@ import { twaStartappUrl } from "./admin-route";
 
 export type DbsChatStage = "before_code" | "gate_sent" | "activated" | "closed";
 
+/** Цвет кружка в уведе = состояние ЗАКАЗА (17.11.2026, владелец), а не срочность:
+ *  ⚪ мяч у покупателя · 🟡 в работе у нас · 🟢 выкуплено · 🔴 стоп · ⚫ мёртв. */
+export type DbsChatTone = "idle" | "work" | "done" | "stop" | "closed";
+
 export interface DbsChatStatus {
   stage: DbsChatStage;
-  /** Строки «что уже было», готовые для HTML-уведа (без кодов и адресов). */
+  tone: DbsChatTone;
+  /** Одной фразой, где заказ сейчас: «ждёт выкупа 23 ч», «выкуплено 15.11». HTML. */
+  state: string;
+  /** Доп. строки — только пока заказ не дошёл до бота (что ушло в чат WB). HTML. */
   lines: string[];
   code: string | null;
   contact: { tgUsername?: string | null; vkId?: string | null } | null;
@@ -40,8 +52,45 @@ function moscowTime(at: Date, now: Date): string {
   return day(at) === day(now) ? time : `${day(at)} ${time}`;
 }
 
+function moscowDay(at: Date): string {
+  return at.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit" });
+}
+
+/** «40 мин», «23 ч», «3 сут». */
+export function ageText(from: Date, now: Date): string {
+  const min = Math.max(0, Math.round((now.getTime() - from.getTime()) / 60_000));
+  if (min < 60) return `${min} мин`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h} ч` : `${Math.round(h / 24)} сут`;
+}
+
 const GATE_SENT = new Set(["GATE_LINK_SENT", "AUTO_GATE_ISSUED_AND_SENT", "GATE_MANUALLY_MARKED_SENT", "GATE_SERVED_EXTERNALLY"]);
-const HUMAN_REPLY = new Set(["TG_REPLY_SENT", "CHAT_MESSAGE_SENT"]);
+
+type Internal = {
+  status: string;
+  robloxUsername: string | null;
+  gamepassUrl: string | null;
+  pendingAt?: Date | null;
+  completedAt?: Date | null;
+  heldAt?: Date | null;
+};
+
+/** Заказ уже у нас в боте: где он. История чата WB здесь больше не нужна. */
+function internalState(i: Internal, now: Date): { tone: DbsChatTone; state: string } {
+  if (i.heldAt) return { tone: "stop", state: "❄️ заморожен" };
+  switch (i.status) {
+    case "COMPLETED": return { tone: "done", state: i.completedAt ? `выкуплено ${moscowDay(i.completedAt)}` : "выкуплено" };
+    case "IN_PROGRESS": return { tone: "work", state: "выкупается" };
+    case "PENDING": return { tone: "work", state: i.pendingAt ? `ждёт выкупа <b>${ageText(i.pendingAt, now)}</b>` : "ждёт выкупа" };
+    case "ERROR": return { tone: "stop", state: "ошибка выкупа" };
+    case "REJECTED": return { tone: "closed", state: "отклонён" };
+  }
+  const missing = [!i.robloxUsername && "ника", !i.gamepassUrl && "пасса"].filter(Boolean);
+  return {
+    tone: "work",
+    state: missing.length > 0 ? `в боте, нет ${missing.join(" и ")}` : `в боте · ${escapeHtml(i.status)}`,
+  };
+}
 
 /** Чистая сборка статуса — без базы, ради тестов. */
 export function buildDbsChatStatus(input: {
@@ -50,34 +99,19 @@ export function buildDbsChatStatus(input: {
   gateState: string | null;
   chatState: string | null;
   code: string | null;
-  internal: { status: string; robloxUsername: string | null; gamepassUrl: string | null } | null;
+  internal: Internal | null;
   contact: DbsChatStatus["contact"];
   events: { type: string; createdAt: Date; actor?: string | null }[];
   lastSeller: { text: string | null; at: Date } | null;
 }): DbsChatStatus {
   const { now, events } = input;
-  const first = (types: Set<string> | string) => {
+  const pick = (types: Set<string> | string) => {
     const match = events
       .filter((e) => (typeof types === "string" ? e.type === types : types.has(e.type)))
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     return { first: match[0] ?? null, last: match[match.length - 1] ?? null, count: match.length };
   };
-  const steps: string[] = [];
-  const askedCode = first("DELIVERY_CODE_REQUESTED");
-  if (askedCode.first) steps.push(`попросили код получения ${moscowTime(askedCode.first.createdAt, now)}`);
-  const gate = first(GATE_SENT);
-  if (gate.first) steps.push(`гейт с кодом ${moscowTime(gate.first.createdAt, now)}`);
-  const reminders = first("GATE_REMINDER_SENT");
-  if (reminders.count > 0) steps.push(`напоминание${reminders.count > 1 ? ` ×${reminders.count}` : ""} ${moscowTime(reminders.last!.createdAt, now)}`);
-  const human = first(HUMAN_REPLY);
-  if (human.count > 0) steps.push(`ответы людей ×${human.count}, последний ${moscowTime(human.last!.createdAt, now)}${human.last!.actor ? ` (${human.last!.actor})` : ""}`);
-
-  const lines: string[] = [];
-  if (steps.length > 0) lines.push(`📤 Уже было: ${steps.map(escapeHtml).join(" → ")}`);
-  if (input.lastSeller?.text) {
-    const preview = input.lastSeller.text.replace(/\s+/g, " ").trim();
-    lines.push(`↪️ Последнее от нас ${moscowTime(input.lastSeller.at, now)}: <i>${escapeHtml(preview.length > 90 ? `${preview.slice(0, 89)}…` : preview)}</i>`);
-  }
+  const gate = pick(GATE_SENT);
 
   let stage: DbsChatStage;
   if (input.cancelled) stage = "closed";
@@ -85,17 +119,28 @@ export function buildDbsChatStatus(input: {
   else if (input.gateState === "SENT" || input.gateState === "SEND_UNKNOWN" || gate.count > 0) stage = "gate_sent";
   else stage = "before_code";
 
-  if (stage === "activated" && input.internal) {
-    const has = [input.internal.robloxUsername ? "ник есть" : "ника нет", input.internal.gamepassUrl ? "пасс есть" : "пасса нет"].join(", ");
-    lines.unshift(`🧭 Код открыт в боте · ${has} · статус ${escapeHtml(input.internal.status)}`);
-  } else if (stage === "gate_sent") {
-    lines.unshift("🧭 Гейт ушёл, код покупатель ещё не открыл");
-  } else if (stage === "before_code") {
-    lines.unshift(input.chatState === "CODE_RECEIVED" ? "🧭 Код получения есть, гейт ещё не ушёл" : "🧭 Ждём код получения");
+  const base = { stage, code: input.code, contact: input.contact };
+  if (stage === "closed") return { ...base, tone: "closed", state: "отменён на WB", lines: [] };
+  if (stage === "activated" && input.internal) return { ...base, ...internalState(input.internal, now), lines: [] };
+
+  // До бота: что уже ушло в чат WB — чтобы не повторять покупателю то же самое.
+  let state: string;
+  if (stage === "gate_sent") {
+    const reminders = pick("GATE_REMINDER_SENT");
+    state = `гейт ушёл${gate.first ? ` ${moscowTime(gate.first.createdAt, now)}` : ""}, не открыт`
+      + (reminders.count > 0 ? ` · напомнили${reminders.count > 1 ? ` ×${reminders.count}` : ""}` : "");
+  } else if (input.chatState === "CODE_RECEIVED") {
+    state = "код получения есть, гейт не ушёл";
   } else {
-    lines.unshift("🧭 Заказ отменён на WB");
+    const asked = pick("DELIVERY_CODE_REQUESTED");
+    state = `ждём код получения${asked.first ? ` · попросили ${moscowTime(asked.first.createdAt, now)}` : ""}`;
   }
-  return { stage, lines, code: input.code, contact: input.contact };
+  const lines: string[] = [];
+  if (input.lastSeller?.text) {
+    const preview = input.lastSeller.text.replace(/\s+/g, " ").trim();
+    lines.push(`↪️ от нас ${moscowTime(input.lastSeller.at, now)}: <i>${escapeHtml(preview.length > 70 ? `${preview.slice(0, 69)}…` : preview)}</i>`);
+  }
+  return { ...base, tone: "idle", state, lines };
 }
 
 /** Кнопки под уведом «покупатель пишет» — по этапу. */
@@ -152,8 +197,11 @@ export async function loadDbsChatStatus(db: Db, wbOrderId: string, now = new Dat
       code
         ? db.wbOrder.findUnique({
             where: { wbCode: code },
-            select: { status: true, robloxUsername: true, gamepassUrl: true, user: { select: { username: true, tgId: true, vkId: true } } },
-          }) as Promise<{ status: string; robloxUsername: string | null; gamepassUrl: string | null; user: { username: string | null; tgId: string | null; vkId: string | null } | null } | null>
+            select: {
+              status: true, robloxUsername: true, gamepassUrl: true, pendingAt: true, completedAt: true, heldAt: true,
+              user: { select: { username: true, tgId: true, vkId: true } },
+            },
+          }) as Promise<(Internal & { user: { username: string | null; tgId: string | null; vkId: string | null } | null }) | null>
         : Promise.resolve(null),
       db.wbBuyerChatEvent.findFirst({
         where: { marketplaceOrderId: order.id, sender: "seller" },
@@ -167,7 +215,12 @@ export async function loadDbsChatStatus(db: Db, wbOrderId: string, now = new Dat
       gateState: order.gateState,
       chatState: order.chatState,
       code,
-      internal: internal ? { status: internal.status, robloxUsername: internal.robloxUsername, gamepassUrl: internal.gamepassUrl } : null,
+      internal: internal
+        ? {
+            status: internal.status, robloxUsername: internal.robloxUsername, gamepassUrl: internal.gamepassUrl,
+            pendingAt: internal.pendingAt, completedAt: internal.completedAt, heldAt: internal.heldAt,
+          }
+        : null,
       contact: internal?.user ? { tgUsername: internal.user.tgId ? internal.user.username : null, vkId: internal.user.vkId } : null,
       events: order.events,
       lastSeller: lastSeller ? { text: lastSeller.textRedacted, at: lastSeller.sentAt } : null,

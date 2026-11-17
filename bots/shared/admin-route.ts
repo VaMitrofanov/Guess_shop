@@ -61,7 +61,7 @@ export const ADMIN_TOPICS: Record<AdminTopic, { title: string; icon: string; col
 
 export const ADMIN_TOPIC_KEYS = Object.keys(ADMIN_TOPICS) as AdminTopic[];
 
-type Marker = "progress" | "waiting" | "action" | "urgent" | "done" | "cancelled";
+type Marker = "progress" | "waiting" | "action" | "urgent" | "done" | "cancelled" | "idle";
 type Zone = "DBS" | "ПРЯМОЙ" | "WB" | "САЙТ" | "ВЫКУП" | "ОТЗЫВ" | "ПОДДЕРЖКА" | "СИСТЕМА";
 
 /** Срочность, при которой нужен человек — и звук. */

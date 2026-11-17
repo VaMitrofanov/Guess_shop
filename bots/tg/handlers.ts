@@ -74,6 +74,7 @@ import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
+import { clearGamepassFails, reportGamepassFail, type GamepassFailReason } from "../shared/gamepass-stuck-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 import { escapeReviewReason, normalizeCustomReviewReason, REVIEW_REJECT_REASONS, reviewRejectReasonText } from "../shared/review-reject";
 
@@ -1112,10 +1113,6 @@ export function registerStart(bot: Telegraf): void {
     if (provisionalCreated && !foldedIntoDbsCard && provisionalOrder?.status === "AWAITING_GAMEPASS") {
       try {
         const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
-        const dateStr = new Date().toLocaleString("ru-RU", {
-          timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-          year: "numeric", hour: "2-digit", minute: "2-digit",
-        }) + " МСК";
         // Единый язык уведомлений админам. Мяч на стороне покупателя — он ушёл
         // создавать геймпасс, делать нечего: 🟡 «waiting».
         const notifyText = formatAdminNotice({
@@ -1126,9 +1123,7 @@ export function registerStart(bot: Telegraf): void {
             orderRef({ code, denomination: totalAmount }, [`геймпасс ${passPrice} R$`]),
             wbDbsBadgeLine(provisionalOrder?.orderSource).trim() || null,
             isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
-            `📱 Источник: <b>TG</b>`,
-            `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})`,
-            `📅 ${dateStr}`,
+            `📱 TG · <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a>`,
           ],
           next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
         });
@@ -3965,25 +3960,27 @@ async function processGamepassSubmission(
         void noteProbableNick({ nick: gamepassInfo.creatorName, source: "gp-validation", wbCode: state.wbCode });
       }
 
-      /** Notify admins about a validation rejection so they're aware. Non-fatal. */
-      const notifyAdminValidationFail = async (reason: string) => {
-        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
-        const alertText =
-          `⚠️ <b>НЕВЕРНЫЙ ГЕЙМПАСС</b>\n` +
-          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
-          `🔑 Код ВБ: <code>${state.wbCode}</code>\n` +
-          `🔗 Pass ID: <code>${passId}</code>\n` +
-          `❌ Причина: ${reason}`;
-        for (const t of await adminTargets("feed", { loud: false })) {
-          try { await bot.telegram.sendMessage(t.chatId, alertText, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...t.extra }); } catch {}
-        }
+      /* 17.11.2026: вместо `⚠️ НЕВЕРНЫЙ ГЕЙМПАСС` на первую ошибку — строка в
+         ленту заказа, а в беседу «застрял на геймпассе» на третьей попытке
+         (`gamepass-stuck-notice.ts`). Бот сам объясняет покупателю, что
+         исправить, — первые ошибки обычное дело. */
+      const notifyAdminValidationFail = (reason: GamepassFailReason, detail: string) => {
+        const tgDisplay = ctx.from.username ? `@${escapeHtml(ctx.from.username)}` : escapeHtml(ctx.from.first_name || "Пользователь");
+        void reportGamepassFail(db as unknown as BuyerStepClient, {
+          via: "tg-bot",
+          userKey: `tg:${ctx.from.id}:${state.wbCode}`,
+          wbCode: state.wbCode,
+          denomination: state.denomination,
+          buyerHtml: `<a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a>`,
+          fail: { reason, detail, passId },
+        });
       };
 
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
         if (gamepassInfo.isNotInCatalog) {
-          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не найден в каталоге — скорее всего закрытая игра");
+          notifyAdminValidationFail("pass_not_in_catalog", "нет в каталоге");
           await showResult(
             `❌ <b>Геймпасс недоступен</b> — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
             `Два варианта:\n` +
@@ -3995,7 +3992,7 @@ async function processGamepassSubmission(
             ]) }
           );
         } else if (gamepassInfo.isGamePrivate) {
-          if (fc.notActive === 1) await notifyAdminValidationFail("Игра закрыта (private) — геймпасс не продаётся");
+          notifyAdminValidationFail("pass_private", "закрытая игра");
           await showResult(
             `❌ <b>Геймпасс в закрытой игре</b> — выкупить невозможно.\n\n` +
             `Как открыть игру:\n` +
@@ -4010,7 +4007,7 @@ async function processGamepassSubmission(
             ]) }
           );
         } else {
-          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
+          notifyAdminValidationFail("pass_not_for_sale", "не в продаже");
           const notActiveText =
             passChecklist({ forSale: false, price: gamepassInfo.price, expected: expectedPrice, owner: gamepassInfo.creatorName }) + `\n\n` +
             `⚠️ Геймпасс не выставлен на продажу.\n\n` +
@@ -4034,10 +4031,9 @@ async function processGamepassSubmission(
         // Check if the mismatch is caused by Managed pricing
         const prodInfo = await getGamepassProductInfo(passId).catch(() => null);
         const isManaged = prodInfo?.isManagedPricing ?? false;
-        const reasonTag = isManaged
-          ? `Managed pricing: ${prodInfo!.priceInRobux} R$ (база ${prodInfo!.userBasePriceInRobux} R$), ожидалось ${expectedPrice} R$`
-          : `Неверная цена: ${gamepassInfo.price} R$ (ожидалось ${expectedPrice} R$)`;
-        if (fc.priceMismatch === 1) await notifyAdminValidationFail(reasonTag);
+        notifyAdminValidationFail("pass_price", isManaged
+          ? `Managed pricing ${prodInfo!.priceInRobux} вместо ${expectedPrice}`
+          : `цена ${gamepassInfo.price} вместо ${expectedPrice}`);
 
         // Текст и порядок причин — общий модуль (`priceMismatchMessage`):
         // Managed pricing называем только когда product-info его ПОДТВЕРДИЛ,
@@ -4062,6 +4058,7 @@ async function processGamepassSubmission(
 
       // Store creator/price for the merged confirmation message below
       validatedCreator = gamepassInfo.creatorName ?? null;
+      clearGamepassFails(`tg:${ctx.from.id}:${state.wbCode}`);
       validatedPrice = gamepassInfo.price;
     } else {
       // Network-down fallback — Roblox API unreachable, proceed without validation
@@ -4433,10 +4430,6 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     REJECTED: "❌ Отклонён",
   };
 
-  const dateStr = order.createdAt
-    ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК"
-    : "";
-
   // User profile link — prefer @username (clickable) over display name.
   // See HANDOFF item 4: @SunriseSword/@username should win over ":D misak¡ti".
   let userLabel = "Неизвестен";
@@ -4550,14 +4543,15 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
       directTag.trim() || null,
       loyaltyLine.trim() || null,
       ageRestrictLine.trim() || null,
-      `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, order.orderSource)}</b>`,
-      `👤 Юзер: ${userLabel}`,
+      // 17.11.2026 (владелец: «повторяющаяся из раза в раз инфа»): источник и
+      // юзер — одной строкой, время оформления ушло (возраст его заменяет),
+      // статус — только если заголовок его не говорит.
+      [`${platformEmoji} ${wbOrderSourceLabel(order.platform, order.orderSource)}`, userLabel,
+        order.createdAt ? `⏳ ${formatOrderAge(order.createdAt)}` : null].filter(Boolean).join(" · "),
       gpCreatorLine.trim() || null,
       bonusLine.trim() || null,
       order.isDirectOrder ? null : (reviewLine.trim() || null),
-      dateStr ? `📅 Время: <b>${dateStr}</b>` : null,
-      order.createdAt ? `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt)}</b>` : null,
-      `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}`,
+      waitingBuyout && !reasonLine ? null : `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}`,
       ...splitLines,
       order.gamepassUrl ? `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : null,
     ],
@@ -5034,10 +5028,6 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   if (provisionalCreated) {
     try {
       const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
-      const dateStr = new Date().toLocaleString("ru-RU", {
-        timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-        year: "numeric", hour: "2-digit", minute: "2-digit",
-      }) + " МСК";
       const notifySource = await resolveWbOrderSource(db, wbCode.code);
       const notifyText = formatAdminNotice({
         marker: "waiting",
@@ -5046,9 +5036,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
         lines: [
           orderRef({ code: codeInput, denomination: totalAmount }, [`геймпасс ${passPrice} R$`]),
           wbDbsBadgeLine(notifySource).trim() || null,
-          `📱 Источник: <b>TG</b>`,
-          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})`,
-          `📅 ${dateStr}`,
+          `📱 TG · <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a>`,
         ],
         next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
       });

@@ -385,10 +385,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               if (isActiveActivation && !foldedIntoDbsCard) {
                 const denomination = wbCodeRecord?.denomination ?? 0;
                 const passPrice    = denomination > 0 ? Math.ceil(denomination / 0.7) : null;
-                const dateStr = new Date().toLocaleString("ru-RU", {
-                  timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-                  year: "numeric", hour: "2-digit", minute: "2-digit",
-                }) + " МСК";
                 // Единый язык уведомлений админам. Мяч на стороне покупателя —
                 // он ушёл создавать геймпасс, делать нечего: 🟡 «waiting».
                 msg = formatAdminNotice({
@@ -399,9 +395,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     orderRef({ code: wbCode, denomination: denomination > 0 ? denomination : null },
                       passPrice ? [`геймпасс ${passPrice} R$`] : []),
                     isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
-                    `📘 Источник: <b>VK (сайт)</b>`,
-                    `👤 Юзер: ${vkDialogLink(vkId, escapeHtml(name))}`,
-                    `📅 ${dateStr}`,
+                    `📘 VK (сайт) · ${vkDialogLink(vkId, escapeHtml(name))}`,
                   ],
                   next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
                 });

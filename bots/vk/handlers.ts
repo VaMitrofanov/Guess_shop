@@ -73,6 +73,7 @@ import { CODES_CB, CODES_MENU_BTN } from "../shared/codes-shop";
 import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
+import { clearGamepassFails, reportGamepassFail, type GamepassFailReason } from "../shared/gamepass-stuck-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 
 /** Узкие представления `db` для шага геймпасса — без `any`. */
@@ -2755,10 +2756,6 @@ async function handleRefActivation(
 
   if (provisionalCreated && !foldedIntoDbsCard) {
     try {
-      const dateStr = new Date().toLocaleString("ru-RU", {
-        timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-        year: "numeric", hour: "2-digit", minute: "2-digit",
-      }) + " МСК";
       const notifySource = await resolveWbOrderSource(db, wbCode.code);
       // Единый язык уведомлений админам. Мяч на стороне покупателя: 🟡 «waiting».
       const notifyText = formatAdminNotice({
@@ -2769,9 +2766,7 @@ async function handleRefActivation(
           orderRef({ code, denomination: totalAmount }, [`геймпасс ${passPrice} R$`]),
           wbDbsBadgeLine(notifySource).trim() || null,
           isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
-          `📘 Источник: <b>VK</b>`,
-          `👤 Юзер: ${vkDialogLink(vkUserId, escapeHtml(fullName))} (VK ID: ${vkUserId})`,
-          `📅 ${dateStr}`,
+          `📘 VK · ${vkDialogLink(vkUserId, escapeHtml(fullName))}`,
         ],
         next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
       });
@@ -2932,6 +2927,19 @@ async function handleGamepassLink(
   let validatedCreator: string | null = null;
   let validatedPrice: number | null = null;
   if (!gamepassInfo.validationSkipped) {
+    // 17.11.2026: ошибка пасса — в ленту заказа, на третьей попытке —
+    // «застрял на геймпассе» админам (`gamepass-stuck-notice.ts`).
+    const stuckKey = `vk:${vkUserId}:${wbCode}`;
+    const reportFail = (reason: GamepassFailReason, detail: string) => {
+      void reportGamepassFail(db as unknown as BuyerStepClient, {
+        via: "vk-bot",
+        userKey: stuckKey,
+        wbCode,
+        denomination,
+        buyerHtml: async () => vkDialogLink(vkUserId, escapeHtml(await vkGetName(vkUserId))),
+        fail: { reason, detail, passId },
+      });
+    };
     // Normal validation — only runs when Roblox API was reachable
 
     // Early nick capture: Roblox already told us the creator — note it (в заметку
@@ -2943,6 +2951,7 @@ async function handleGamepassLink(
 
     if (!gamepassInfo.isActive) {
       if (gamepassInfo.isNotInCatalog) {
+        reportFail("pass_not_in_catalog", "нет в каталоге");
         await showResult({
           message:
             `❌ Геймпасс недоступен — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
@@ -2956,6 +2965,7 @@ async function handleGamepassLink(
             .inline(),
         });
       } else if (gamepassInfo.isGamePrivate) {
+        reportFail("pass_private", "закрытая игра");
         await showResult({
           message:
             `❌ Геймпасс в закрытой игре — выкупить невозможно.\n\n` +
@@ -2971,6 +2981,7 @@ async function handleGamepassLink(
             .inline(),
         });
       } else {
+        reportFail("pass_not_for_sale", "не в продаже");
         await showResult({
           message:
             passChecklist({ forSale: false, price: gamepassInfo.price, expected: expectedPrice, owner: gamepassInfo.creatorName, html: false }) + `\n\n` +
@@ -2990,6 +3001,9 @@ async function handleGamepassLink(
       // на Managed pricing всегда. Теперь ветка выбирается по факту, а слова —
       // общие с TG (`priceMismatchMessage`).
       const prodInfo = await getGamepassProductInfo(passId).catch(() => null);
+      reportFail("pass_price", prodInfo?.isManagedPricing
+        ? `Managed pricing ${prodInfo.priceInRobux} вместо ${expectedPrice}`
+        : `цена ${gamepassInfo.price} вместо ${expectedPrice}`);
       await showResult({
         message:
           passChecklist({ forSale: true, price: gamepassInfo.price, expected: expectedPrice, managed: prodInfo ? Boolean(prodInfo.isManagedPricing) : null, owner: gamepassInfo.creatorName, html: false }) + `\n\n` +
@@ -3012,6 +3026,7 @@ async function handleGamepassLink(
     // Store validated info for the merged confirmation message below
     validatedCreator = gamepassInfo.creatorName ?? null;
     validatedPrice = gamepassInfo.price;
+    clearGamepassFails(stuckKey);
   } else {
     // Network-down fallback — Roblox API unreachable
     console.warn(

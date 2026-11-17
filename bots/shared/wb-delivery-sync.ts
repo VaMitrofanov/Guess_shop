@@ -1601,7 +1601,7 @@ async function answerRobuxQuestionInChat(
     await audit(db, order.id, "ROBUX_ETA_ANSWERED", key, { repeat: !!answeredBefore });
   }
   // Барьер: первый вопрос закрывает автоответ; повторный — раз на окно оператору.
-  if (answeredBefore) notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id));
+  if (answeredBefore) notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id, { short: true }));
 }
 
 /**
@@ -1751,7 +1751,7 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !courierSelfServed
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.cancelledAt
       && (!order.completedAt || !(await buyoutFinished(db, order.wbCodeId)))) {
-      notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText, await identityLinesFor(db, order.id));
+      notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText, await identityLinesFor(db, order.id, { short: true }));
     }
 
     if (order && order.chatState === "WAITING_BUYER_CHAT") {

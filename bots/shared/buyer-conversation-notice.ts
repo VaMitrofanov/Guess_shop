@@ -25,7 +25,7 @@
    Состояние в памяти процесса: после рестарта разговор начнётся новым уведом.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { formatAdminNotice, mskTime } from "./notify-format";
+import { formatAdminNotice, mskTime, type NoticeMarker } from "./notify-format";
 import { escapeHtml } from "./notify";
 import { countConversation } from "./notice-stats";
 
@@ -64,12 +64,18 @@ export interface ConversationView {
   answered: boolean;
   /** 📤 Статус переписки: что уже ушло покупателю (16.11.2026). Готовый HTML. */
   status?: string[] | null;
+  /** Кружок по состоянию ЗАКАЗА (17.11.2026); без него — 🟠/🟢 по ответу. */
+  marker?: NoticeMarker | null;
+  /** 📦 Строка заказа вместо `head` — ключ, номинал, где заказ сейчас. HTML. */
+  order?: string | null;
 }
 export type ConversationRender = (view: ConversationView) => string;
 
 interface Conversation {
   render: ConversationRender;
   status: string[] | null;
+  marker: NoticeMarker | null;
+  order: string | null;
   head: string;
   who: string | null;
   lines: string[];
@@ -102,20 +108,29 @@ export function hiddenCount(c: Pick<ConversationView, "lines" | "total">): numbe
   return Math.max(0, c.total - shown);
 }
 
-export function renderConversation(c: Pick<ConversationView, "head" | "who" | "lines" | "total"> & { answered?: boolean; status?: string[] | null }): string {
+/**
+ * 17.11.2026 (владелец, вариант B): тезисами — кто, заказ, и отдельно сам текст.
+ *   🟡 DBS · покупатель пишет
+ *   👤 Сеня Римушка · ВК · первый заказ
+ *   📦 HZ8AJ72 · 1 000 R$ · ждёт выкупа 23 ч
+ *
+ *   12:26 После оплаты…
+ */
+export function renderConversation(c: Pick<ConversationView, "head" | "who" | "lines" | "total"> & {
+  answered?: boolean; status?: string[] | null; marker?: NoticeMarker | null; order?: string | null;
+}): string {
   const hidden = hiddenCount(c);
   const count = c.total > 1 ? ` · ${c.total}` : "";
-  return formatAdminNotice({
-    marker: c.answered ? "done" : "action",
+  const top = formatAdminNotice({
+    marker: c.marker ?? (c.answered ? "done" : "action"),
     zone: "DBS",
     title: `покупатель пишет${count}${c.answered ? " · ответили" : ""}`,
-    lines: [
-      c.who ? `${c.head} · ${c.who}` : c.head,
-      ...(c.status ?? []),
-      hidden > 0 ? `<i>…ещё ${hidden} раньше</i>` : null,
-      ...c.lines,
-    ],
+    lines: c.order
+      ? [c.who, c.order, ...(c.status ?? [])]
+      : [c.who ? `${c.head} · ${c.who}` : c.head, ...(c.status ?? [])],
   });
+  const messages = [hidden > 0 ? `<i>…ещё ${hidden} раньше</i>` : null, ...c.lines].filter(Boolean);
+  return `${top}\n\n${messages.join("\n")}`;
 }
 
 function prune(now: number): void {
@@ -166,6 +181,10 @@ export function noteBuyerMessage(input: {
   openOnTrivial?: boolean;
   /** 📤 Что уже ушло покупателю — строки между шапкой и сообщениями. */
   status?: string[] | null;
+  /** Кружок по состоянию заказа (`dbs-chat-status.ts`). */
+  marker?: NoticeMarker | null;
+  /** 📦 Строка заказа — заменяет `head` в уведе. */
+  order?: string | null;
 }): Promise<"opened" | "appended" | "resurfaced" | "skipped"> {
   return serial(input.conversationKey, () => noteBuyerMessageNow(input)).then((result) => {
     countConversation(result);
@@ -189,6 +208,8 @@ async function noteBuyerMessageNow(input: Parameters<typeof noteBuyerMessage>[0]
     current.lastAt = now;
     current.head = input.head;
     if (input.status !== undefined) current.status = input.status;
+    if (input.marker !== undefined) current.marker = input.marker;
+    if (input.order !== undefined) current.order = input.order;
     current.targets = input.targets;
     current.io = input.io;
     if (input.render) current.render = input.render;
@@ -207,6 +228,8 @@ async function noteBuyerMessageNow(input: Parameters<typeof noteBuyerMessage>[0]
   const conversation: Conversation = {
     render: input.render ?? renderConversation,
     status: input.status ?? null,
+    marker: input.marker ?? null,
+    order: input.order ?? null,
     head: input.head,
     who: input.who ? escapeHtml(input.who) : null,
     lines: [line],

@@ -1,4 +1,4 @@
-import { isTrivialBuyerText, noteAdminReply, noteBuyerMessage, resetConversations } from "../buyer-conversation-notice";
+import { isTrivialBuyerText, noteAdminReply, noteBuyerMessage, renderConversation, resetConversations } from "../buyer-conversation-notice";
 
 function io() {
   const sent: string[] = [];
@@ -86,5 +86,22 @@ describe("сообщения покупателя — один увед на р�
   it("пустяковые тексты распознаются, вопросы — нет", () => {
     for (const t of ["Спасибо", "спасибо большое!", "Здравствуйте", "ок", "??", "👍"]) expect(isTrivialBuyerText(t)).toBe(true);
     for (const t of ["Когда придут?", "Спасибо, а где код?", "123456"]) expect(isTrivialBuyerText(t)).toBe(false);
+  });
+});
+
+describe("вид уведа «покупатель пишет» — вариант B (17.11)", () => {
+  it("кружок по заказу, кто/заказ тезисами, текст отдельно", () => {
+    const text = renderConversation({
+      head: "WB #1 · <code>HZ8AJ72</code>", who: "👤 Сеня Римушка · ВК · первый заказ",
+      order: "📦 <code>HZ8AJ72</code> · <b>1 000 R$</b> · ждёт выкупа <b>23 ч</b>",
+      marker: "waiting", status: [], lines: ["<i>12:26</i> почти сутки прошли"], total: 1, answered: true,
+    });
+    expect(text).toBe([
+      "🟡 <b>DBS · покупатель пишет · ответили</b>",
+      "👤 Сеня Римушка · ВК · первый заказ",
+      "📦 <code>HZ8AJ72</code> · <b>1 000 R$</b> · ждёт выкупа <b>23 ч</b>",
+      "",
+      "<i>12:26</i> почти сутки прошли",
+    ].join("\n"));
   });
 });

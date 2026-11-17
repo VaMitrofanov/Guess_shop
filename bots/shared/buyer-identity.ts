@@ -31,6 +31,8 @@ export interface BuyerMatch {
   orders: number;
   bought: number;
   lastCode: string | null;
+  /** Этот заказ уже среди `orders` (активирован этим человеком). */
+  hasCurrent?: boolean;
   level: IdentityLevel;
   why: string;
 }
@@ -170,6 +172,7 @@ export async function identifyWbBuyer(db: Db, marketplaceOrderId: string): Promi
       userId: u.id, name: u.name, tgUsername: u.username, tgId: u.tgId, vkId: u.vkId,
       orders: own.length, bought: own.filter((o: { status: string }) => o.status === "COMPLETED").length,
       lastCode: own[0]?.wbCode ?? null, level: w.level, why: w.why,
+      hasCurrent: Boolean(mo.wbCode?.code) && own.some((o: { wbCode: string }) => o.wbCode === mo.wbCode?.code),
     };
   });
   const rank = { exact: 0, likely: 1, namesake: 2 } as const;
@@ -206,10 +209,38 @@ export function identityLines(identity: BuyerIdentity, opts: { max?: number } = 
   return lines;
 }
 
-/** Готовые строки по id заказа DBS; ошибка — пусто (не ломаем уведомление). */
-export async function identityLinesFor(db: Db, marketplaceOrderId: string): Promise<string[]> {
+/**
+ * Одна короткая строка «кто это» для «покупатель пишет» (17.11.2026, владелец:
+ * «тезисно»): «👤 Сеня Римушка · ВК · первый заказ». Без «почему» и без
+ * последнего кода — он почти всегда этот же заказ.
+ */
+export function identityShortLine(identity: BuyerIdentity): string | null {
+  const m = identity.matches.find((x) => x.level === "exact")
+    ?? identity.matches.find((x) => x.level === "likely");
+  if (!m) {
+    const name = identity.buyerName?.trim() || null;
+    if (identity.namesakes > 1) return name ? `👤 ${name}` : null;
+    return `🆕 ${name ? `${name} · ` : ""}новый покупатель`;
+  }
+  const channel = [
+    m.tgId ? (m.tgUsername ? `@${m.tgUsername}` : "TG") : null,
+    m.vkId ? "ВК" : null,
+  ].filter(Boolean).join(" · ") || "сайт";
+  const total = m.orders + (m.hasCurrent ? 0 : 1);
+  const history = total <= 1 ? "первый заказ" : `${total}-й заказ · выкуплено ${m.bought}`;
+  return `👤 ${m.level === "likely" ? "вероятно " : ""}${m.name ?? "без имени"} · ${channel} · ${history}`;
+}
+
+/** Готовые строки по id заказа DBS; ошибка — пусто (не ломаем уведомление).
+ *  `short` — одна строка `identityShortLine` (увед «покупатель пишет»). */
+export async function identityLinesFor(db: Db, marketplaceOrderId: string, opts: { short?: boolean } = {}): Promise<string[]> {
   try {
-    return identityLines(await identifyWbBuyer(db, marketplaceOrderId));
+    const identity = await identifyWbBuyer(db, marketplaceOrderId);
+    if (opts.short) {
+      const line = identityShortLine(identity);
+      return line ? [line] : [];
+    }
+    return identityLines(identity);
   } catch {
     return [];
   }

@@ -17,7 +17,8 @@ describe("увед «покупатель пишет»: что уже ушло �
   it("гейт ушёл, код не открыт — статус шагов и «Инструкция»", () => {
     const status = buildDbsChatStatus(base);
     expect(status.stage).toBe("gate_sent");
-    expect(status.lines.join("\n")).toMatch(/попросили код получения 15\.11 07:51 → гейт с кодом 15\.11 10:37 → напоминание 15\.11 13:42/);
+    expect(status.tone).toBe("idle");
+    expect(status.state).toBe("гейт ушёл 15.11 10:37, не открыт · напомнили");
     expect(texts(dbsChatMarkup("1", status))).toEqual(["📖 Инструкция", "✍️ Ответ в WB", "📱 Открыть в TWA"]);
   });
 
@@ -29,8 +30,9 @@ describe("увед «покупатель пишет»: что уже ушло �
       lastSeller: { text: "какой вопрос ?", at: at("2026-11-16T06:58:00Z") },
     });
     expect(status.stage).toBe("activated");
-    expect(status.lines[0]).toMatch(/Код открыт в боте · ника нет, пасса нет/);
-    expect(status.lines.join("\n")).toMatch(/Последнее от нас 09:58: <i>какой вопрос \?<\/i>/);
+    expect(status.state).toBe("в боте, нет ника и пасса");
+    // Покупатель уже в боте — история чата WB не нужна.
+    expect(status.lines).toEqual([]);
     const markup = dbsChatMarkup("1", status);
     expect(texts(markup)).toEqual(["💬 Написать в TG @ianaavi", "✍️ Ответ в WB", "📱 Открыть в TWA"]);
     expect(markup.inline_keyboard[0][0].url).toBe("https://t.me/ianaavi");
@@ -45,5 +47,27 @@ describe("увед «покупатель пишет»: что уже ушло �
   it("отменён — только свой ответ и TWA", () => {
     const status = buildDbsChatStatus({ ...base, cancelled: true });
     expect(texts(dbsChatMarkup("1", status))).toEqual(["✍️ Ответ в WB", "📱 Открыть в TWA"]);
+  });
+
+  it("17.11: одна фраза о заказе и цвет по его состоянию", () => {
+    const inBot = (internal: Record<string, unknown>) => buildDbsChatStatus({
+      ...base,
+      internal: { status: "PENDING", robloxUsername: "nick", gamepassUrl: "https://x", ...internal } as never,
+    });
+    expect(inBot({ pendingAt: at("2026-11-15T15:10:00Z") })).toMatchObject({ tone: "work", state: "ждёт выкупа <b>23 ч</b>", lines: [] });
+    expect(inBot({ status: "COMPLETED", completedAt: at("2026-11-15T15:10:00Z") })).toMatchObject({ tone: "done", state: "выкуплено 15.11" });
+    expect(inBot({ heldAt: at("2026-11-16T10:00:00Z") })).toMatchObject({ tone: "stop", state: "❄️ заморожен" });
+    expect(inBot({ status: "AWAITING_GAMEPASS", gamepassUrl: null })).toMatchObject({ tone: "work", state: "в боте, нет пасса" });
+    expect(buildDbsChatStatus({ ...base, cancelled: true })).toMatchObject({ tone: "closed", state: "отменён на WB" });
+  });
+
+  it("до бота — что ушло в чат WB, коротко", () => {
+    const status = buildDbsChatStatus({
+      ...base, gateState: "NOT_ISSUED", chatState: "WAITING_CODE",
+      events: [{ type: "DELIVERY_CODE_REQUESTED", createdAt: at("2026-11-16T12:00:00Z") }],
+      lastSeller: { text: "Пришлите, пожалуйста, код получения", at: at("2026-11-16T12:00:00Z") },
+    });
+    expect(status.state).toBe("ждём код получения · попросили 15:00");
+    expect(status.lines).toEqual(["↪️ от нас 15:00: <i>Пришлите, пожалуйста, код получения</i>"]);
   });
 });

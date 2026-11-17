@@ -4,12 +4,13 @@ import {
   mskTime,
   orderRef,
   type AdminNotice,
+  type NoticeMarker,
 } from "./notify-format";
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
 import { adminTargets, adminTargetsForNotice, replyToRootFor, twaStartappUrl } from "./admin-route";
 import { noteAdminReply, noteBuyerMessage } from "./buyer-conversation-notice";
 import { rememberWbReplyMessage, wbReplyMarkup } from "./wb-reply-buttons";
-import { dbsChatMarkup, loadDbsChatStatus } from "./dbs-chat-status";
+import { dbsChatMarkup, loadDbsChatStatus, type DbsChatStatus, type DbsChatTone } from "./dbs-chat-status";
 
 const ADMIN_IDS: string[] = [...new Set(
   (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
@@ -78,6 +79,17 @@ function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
 // (`pushDbsCard`), которая переписывает саму себя. Отдельным сообщением уходит
 // только то, что требует человека — редактирование в Telegram не даёт звука.
 
+/** Кружок «покупатель пишет» = состояние заказа (17.11.2026, владелец). */
+const TONE_MARKER: Record<DbsChatTone, NoticeMarker> = {
+  idle: "idle", work: "waiting", done: "done", stop: "urgent", closed: "cancelled",
+};
+
+/** «📦 HZ8AJ72 · 1 000 R$ · ждёт выкупа 23 ч». Номер WB — только пока нет кода,
+ *  имя с WB — в строке «кто», здесь оно лишнее. */
+function dbsOrderLine(ref: DbsRef, status: Pick<DbsChatStatus, "state">): string {
+  return `📦 ${orderRef({ wbOrderId: ref.code ? null : ref.wbOrderId, code: ref.code, denomination: ref.denomination }, [status.state])}`;
+}
+
 /**
  * Сообщение покупателя — один увед на разговор (15.11.2026,
  * `buyer-conversation-notice.ts`): следующие сообщения в течение 10 минут
@@ -96,6 +108,8 @@ export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string, who: str
   const markup = { reply_markup: status ? dbsChatMarkup(ref.wbOrderId, status) : wbReplyMarkup(ref.wbOrderId) };
   return noteBuyerMessage({
     status: status?.lines ?? null,
+    marker: status ? TONE_MARKER[status.tone] : null,
+    order: status ? dbsOrderLine(ref, status) : null,
     conversationKey: `dbs:${ref.wbOrderId}`,
     head: refLine(ref),
     who: who[0] ?? null,
@@ -145,9 +159,9 @@ export function notifyDbsGateNotIssued(ref: DbsRef) {
     title: "заказ закрыт, а код не выдан",
     lines: [
       refLine(ref),
-      "WB закрыл доставку, деньги у нас, но ссылку с кодом бот отправить не смог — нет чата покупателя",
+      "Доставка закрыта, а чата покупателя нет — ссылку не отправить",
     ],
-    next: "выдать код из консоли DBS и отправить ссылку в чат покупки из кабинета WB",
+    next: "выдать код в консоли DBS и отправить ссылку из кабинета WB",
   }, ref);
 }
 
@@ -218,9 +232,8 @@ export function notifyWbBuyerClaim(input: {
       refLine(ref),
       input.reason ? `💬 <i>${escapeHtml(input.reason)}</i>` : null,
       claimHoldLine(input.hold),
-      "🔕 Напоминания по гейту для этого заказа остановлены",
     ],
-    next: "ответить в чате WB и решить заявку в кабинете — статус заказа про неё не знает",
+    next: "ответить в чате WB и решить заявку в кабинете",
   }, ref);
   return Promise.resolve();
 }
@@ -271,9 +284,8 @@ export function notifyBuyoutGateBadReview(input: {
       `${starsLine(input.stars)}${when ? ` · ${when}` : ""}`,
       text ? `💬 <i>${escapeHtml(text)}</i>` : null,
       claimHoldLine(outcome),
-      "🔕 Напоминания по гейту для этого заказа остановлены",
     ],
-    next: "ответить на отзыв и в чате WB. Совпадение по имени и товару — если это другой покупатель, снять заморозку в карточке",
+    next: "совпадение по имени — если это не он, снять заморозку в карточке",
   }, ref);
 }
 
@@ -430,7 +442,7 @@ export function notifyWbClaimResolved(input: {
     title: input.refunded ? "заявка решена в пользу покупателя" : "заявка на возврат закрыта",
     lines: [refLine(ref)],
     next: input.refunded
-      ? "деньги возвращаются — отмена заказа придёт следом, отдельно делать ничего не нужно"
+      ? "деньги уходят покупателю, отмена придёт следом"
       : "деньги остаются у нас; заказ остаётся замороженным — если покупатель ждёт робуксы, снять заморозку в карточке",
   }, ref);
 }
@@ -450,12 +462,12 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   already_closed: { marker: "action", text: "заказ уже закрыт на WB — проверить кабинет" },
   too_many_attempts: {
     marker: "urgent",
-    text: "WB отклонял код все 6 часов расписания — <b>закрыть доставку вручную в кабинете WB</b>, гейт покупателю ещё не ушёл",
+    text: "WB отклонял код 6 ч — <b>закрыть доставку вручную</b>",
   },
   // Запасной текст: обычный путь для этого пропуска — ветка с самим кодом ниже.
   order_too_old: {
     marker: "urgent",
-    text: "заказ старше четырёх часов — <b>решение за оператором</b>: закрыть доставку в кабинете WB или отклонить",
+    text: "заказ старше 4 ч — <b>закрыть доставку вручную</b> или отклонить",
   },
   wb_not_in_delivery: {
     marker: "action",
@@ -463,7 +475,7 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   },
   wb_rejected: {
     marker: "urgent",
-    text: "WB отклонил код — повторяем по расписанию до 6 ч (1–2–3–5 мин, дальше 10–20–30 мин и час); гейт покупателю не уйдёт, пока доставка не закрыта",
+    text: "WB отклонил код — повторяем сами до 6 ч",
   },
   wb_unknown: {
     marker: "urgent",
@@ -472,7 +484,7 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   // Обычный путь — отдельные сообщения режима отмены; это запасной текст.
   cancel_requested: {
     marker: "urgent",
-    text: "заказ в режиме отмены — доставку бот не закрывает, отклонить заказ в кабинете WB кодом из консоли DBS",
+    text: "заказ в режиме отмены — отклонить в кабинете WB кодом из консоли DBS",
   },
   grace: {
     marker: "action",
@@ -500,14 +512,14 @@ export function notifyDbsCodeCaptured(
     broadcast({
       marker: "urgent",
       zone: "DBS",
-      title: "код доставки получен — решение за вами",
+      // 17.11.2026 (владелец): «автозакрытие не применяется», «гейт уйдёт сам»
+      // и куда идти закрывать админы знают — осталось только то, что меняется.
+      title: "код доставки — закрыть вручную",
       lines: [
-        refLine(ref),
-        `Код доставки: <code>${escapeHtml(held.deliveryCode)}</code>`,
-        `Заказ оформлен <b>${ageLabel(held.ageHours)}</b> назад — автозакрытие не применяется`,
+        refLine(ref, [`заказу ${ageLabel(held.ageHours)}`]),
+        `🔑 <code>${escapeHtml(held.deliveryCode)}</code>`,
       ],
-      next: "закрыть доставку этим кодом (кабинет WB или консоль DBS) — или отклонить. " +
-        "Гейт покупателю уйдёт сам, как только доставка закроется",
+      next: null,
     }, ref);
     return;
   }
@@ -543,14 +555,12 @@ export function notifyDbsAutoReceiveFailed(
     title: "WB не принял код доставки",
     lines: [refLine(ref, [providerCode ? `ответ WB: <code>${escapeHtml(providerCode)}</code>` : null])],
     next: outcomeUnknown
-      ? "<b>сверить кабинет WB перед повтором</b> — исход неизвестен, повторять вслепую нельзя"
+      ? "<b>исход неизвестен — сверить кабинет WB</b>"
       // Гейт больше не уходит вперёд закрытия: покупателю ничего не обещано, и
       // он получит свой код сам, как только доставка закроется. Срок следующей
       // попытки — чтобы «повторим» не читалось как «когда-нибудь»: расписание
       // тянется до шести часов, и вмешиваться руками раньше времени не нужно.
-      : `повторяем по расписанию${nextTryAt ? `, следующая попытка ~${mskTime(nextTryAt)} МСК` : ""}`
-        + " — до 6 ч с прихода кода. Гейт покупателю не отправлен;"
-        + " закрыть доставку вручную в кабинете WB можно в любой момент, гейт уйдёт сам",
+      : `повторяем сами до 6 ч${nextTryAt ? `, следующая ~${mskTime(nextTryAt)}` : ""}`,
   }, ref);
 }
 
@@ -585,7 +595,7 @@ export function notifyDbsCodeRejected(ref: DbsRef, askedBuyer: boolean) {
     title: "код доставки не подошёл",
     lines: [refLine(ref)],
     next: askedBuyer
-      ? "покупателя попросили прислать код заново — гейт придержан до закрытия доставки"
+      ? "покупателя попросили прислать код заново"
       : "<b>разобраться вручную</b>: просить код заново больше не будем, покупатель без выдачи",
   }, ref);
 }
@@ -612,11 +622,11 @@ export function notifyDbsCancelRequested(ref: DbsRef, input: {
     lines: [
       refLine(ref),
       `Кто: ${cancelWho(input.by)}`,
-      input.deliveryCode ? `Код доставки: <code>${escapeHtml(input.deliveryCode)}</code>` : null,
+      input.deliveryCode ? `🔑 <code>${escapeHtml(input.deliveryCode)}</code>` : null,
       input.buyoutDone ? "<b>Выкуп уже сделан — робуксы ушли</b>" : null,
     ].filter((line): line is string => Boolean(line)),
     next: input.deliveryCode
-      ? "отклонить заказ в кабинете WB этим кодом. Доставку бот НЕ закроет, гейт заморожен"
+      ? "отклонить заказ в кабинете WB этим кодом"
       : input.askedBuyer
         ? "покупателя попросили прислать код доставки — придёт сюда же, доставку бот НЕ закроет"
         : "<b>сообщение покупателю не ушло</b> — попросить код доставки вручную",
@@ -629,8 +639,8 @@ export function notifyDbsCancelCode(ref: DbsRef, deliveryCode: string) {
     marker: "urgent",
     zone: "DBS",
     title: "код для отмены получен",
-    lines: [refLine(ref), `Код доставки: <code>${escapeHtml(deliveryCode)}</code>`],
-    next: "отклонить заказ в кабинете WB этим кодом — доставку бот не закрывал",
+    lines: [refLine(ref), `🔑 <code>${escapeHtml(deliveryCode)}</code>`],
+    next: "отклонить заказ в кабинете WB этим кодом",
   }, ref);
 }
 
@@ -648,10 +658,9 @@ export function notifyDbsDeliveryStuck(ref: DbsRef, supplierStatus: string, code
       // Про «окно примерно до +1 ч» здесь больше не пишем: 22.08 заказ
       // 5550714937 закрылся тем же кодом через 3 ч 56 мин, и ложный дедлайн
       // толкал закрывать наугад там, где достаточно подождать.
-      `Код у нас с <b>${mskTime(codeReceivedAt)}</b> МСК, повторы идут сами до 6 ч`,
+      `Код у нас с <b>${mskTime(codeReceivedAt)}</b>, повторы идут сами`,
     ],
-    next: "ждать повторов не обязательно: <b>кабинет WB → «Передать в доставку»</b>, затем закрыть заказ"
-      + " — или сделать это из консоли DBS. Гейт покупателю уйдёт сам, как только доставка закроется",
+    next: "можно не ждать: <b>кабинет WB → «Передать в доставку»</b> → закрыть",
   }, ref);
 }
 
@@ -696,8 +705,7 @@ export function notifyDbsUnknownDeliveryCode(who: string, digits: string) {
     title: "покупатель в боте прислал незнакомый код доставки",
     lines: [
       `👤 ${escapeHtml(who)}`,
-      `🔢 Код: <code>${escapeHtml(digits)}</code>`,
-      "Совпадения в базе нет — скорее всего код не приходил в чат WB.",
+      `🔢 <code>${escapeHtml(digits)}</code> — в базе нет`,
     ],
     next: "найти заказ по коду в кабинете WB и привязать покупателя в консоли DBS",
   });
@@ -722,14 +730,9 @@ export function notifyDbsChatGamepassAttached(
     // создал его сам, как кнопка в консоли DBS (31.10.2026, PXGLH7F).
     title: info.created ? "заказ создан из геймпасса в чате WB" : "геймпасс из чата WB подставлен в заказ",
     lines: [
-      refLine(ref),
-      `🔑 Код: <code>${escapeHtml(info.wbCode)}</code>`,
-      `🎫 Pass ID: <code>${escapeHtml(info.gamepassId)}</code> · <b>${info.price} R$</b>`,
-      `🎮 Владелец пасса: <b>${escapeHtml(info.nick)}</b> — робуксы уйдут сюда`,
-      `💎 Номинал заказа: <b>${info.amount} R$</b>`,
-      info.created
-        ? "Покупатель не заходил на сайт — прислал пасс в переписку WB. Цену и владельца сверили у Roblox, заказ поставлен в «К выкупу», покупателю ответили в чате."
-        : "Покупатель прислал пасс в переписку WB; цену и владельца сверили у Roblox.",
+      // 17.11.2026: код и номинал уже в шапке, «сверили у Roblox» — всегда.
+      refLine({ ...ref, code: ref.code ?? info.wbCode, denomination: ref.denomination ?? info.amount }),
+      `🎫 <code>${escapeHtml(info.gamepassId)}</code> · <b>${info.price} R$</b> · 🎮 <b>${escapeHtml(info.nick)}</b>`,
     ],
     next: "карточка выкупа придёт следом — выкупить и нажать «ВЫКУПЛЕНО»",
   }, ref);
@@ -753,9 +756,9 @@ export function notifyDbsChatGamepassRejected(
       refLine(ref),
       `🎫 Pass ID: <code>${escapeHtml(info.gamepassId)}</code>`,
       `❌ ${escapeHtml(info.reason)}`,
-      `💰 Ждём пасс за <b>${info.expectedPrice} R$</b>`,
+      `💰 Нужен пасс за <b>${info.expectedPrice} R$</b>`,
     ],
-    next: "ответить покупателю в чате WB — он уже прислал пасс и ждёт",
+    next: "ответить покупателю в чате WB",
   }, ref);
 }
 

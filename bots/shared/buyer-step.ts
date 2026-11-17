@@ -279,6 +279,11 @@ export const DEAD_END_REASONS = {
   nick_format: "ник не похож на ник Roblox",
   link_format: "бот не разобрал ссылку на геймпасс",
   key_no_nick: "прислал ключ, но ника в заказе нет",
+  // 17.11.2026: пасс не прошёл проверку (`gamepass-stuck-notice.ts`).
+  pass_price: "прислал геймпасс не той цены",
+  pass_not_for_sale: "геймпасс не выставлен на продажу",
+  pass_private: "геймпасс в закрытой игре",
+  pass_not_in_catalog: "геймпасса нет в каталоге — закрытая игра?",
 } as const;
 
 type DeadEndReason = keyof typeof DEAD_END_REASONS;

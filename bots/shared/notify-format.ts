@@ -18,7 +18,7 @@ import { escapeHtml } from "./notify";
  * её человек ищет в первую очередь.
  */
 
-type NoticeMarker =
+export type NoticeMarker =
   /** Автоматика работает, промежуточный этап. Делать нечего. */
   | "progress"
   /** Мяч на стороне клиента. Делать нечего, но ждём. */
@@ -30,7 +30,9 @@ type NoticeMarker =
   /** Этап закрыт успешно. */
   | "done"
   /** Заказ умер: отмена, возврат, отказ. */
-  | "cancelled";
+  | "cancelled"
+  /** Только «покупатель пишет»: заказ ещё не начат, мяч у покупателя (17.11.2026). */
+  | "idle";
 
 const MARKER: Record<NoticeMarker, string> = {
   progress: "🔵",
@@ -39,6 +41,7 @@ const MARKER: Record<NoticeMarker, string> = {
   urgent: "🔴",
   done: "🟢",
   cancelled: "⚫️",
+  idle: "⚪️",
 };
 
 /** Продуктовая область. Позволяет отфильтровать глазами за долю секунды. */

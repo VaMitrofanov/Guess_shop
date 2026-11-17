@@ -1,5 +1,5 @@
 /** Кто этот покупатель WB у нас (12.11.2026). */
-import { contactOf, extractRobloxRefs, identityLines, type BuyerIdentity, type BuyerMatch } from "../buyer-identity";
+import { contactOf, extractRobloxRefs, identityLines, identityShortLine, type BuyerIdentity, type BuyerMatch } from "../buyer-identity";
 
 const m = (over: Partial<BuyerMatch> = {}): BuyerMatch => ({
   userId: "u1", name: "Анна", tgUsername: "anna", tgId: "1", vkId: null, orders: 3, bought: 2, lastCode: "ZT8BW8D",
@@ -42,5 +42,23 @@ describe("identityLines", () => {
 
   it("контакты TG и VK", () => {
     expect(contactOf({ tgUsername: null, tgId: "5", vkId: "77" })).toBe("TG id 5 · vk.com/id77");
+  });
+});
+
+describe("identityShortLine — строка «кто» в «покупатель пишет» (17.11)", () => {
+  it("наш клиент: имя · канал · какой по счёту заказ", () => {
+    expect(identityShortLine(id({ matches: [m({ hasCurrent: true })] }))).toBe("👤 Анна · @anna · 3-й заказ · выкуплено 2");
+    expect(identityShortLine(id({ matches: [m({ tgId: null, tgUsername: null, vkId: "865", orders: 1, bought: 0, hasCurrent: true })] })))
+      .toBe("👤 Анна · ВК · первый заказ");
+  });
+
+  it("заказ ещё не активирован им — считается следующим", () => {
+    expect(identityShortLine(id({ matches: [m({ orders: 1, bought: 1, hasCurrent: false, level: "likely" })] })))
+      .toBe("👤 вероятно Анна · @anna · 2-й заказ · выкуплено 1");
+  });
+
+  it("никого — новый, с именем с WB; тёзки — только имя", () => {
+    expect(identityShortLine(id())).toBe("🆕 Анна · новый покупатель");
+    expect(identityShortLine(id({ namesakes: 3 }))).toBe("👤 Анна");
   });
 });
