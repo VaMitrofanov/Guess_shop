@@ -24,7 +24,17 @@ export interface PinOrder {
 
 const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const ACTIVE = new Set(["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"]);
+/**
+ * Заказ кода Robux (17.11.2026) идёт в закреп рядом с WB-заказами под своими
+ * статусами: `CODE_PAID` — оплачен, код готовим; `CODE_ISSUED` — выдан
+ * (`completedAt` = момент выдачи). `wbCode` у него — номер `CODE-…`, но клиенту
+ * этот номер НЕ показываем: он длинный и технический, заказ узнаётся по
+ * номиналу и дате («код Robux от 17 ноября»).
+ */
+export const CODE_PIN_STATUS = { PAID: "CODE_PAID", ISSUED: "CODE_ISSUED" } as const;
+
+const ACTIVE = new Set(["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", CODE_PIN_STATUS.PAID]);
+const DONE = new Set(["COMPLETED", CODE_PIN_STATUS.ISSUED]);
 const DAY = 86_400_000;
 /**
  * Выкупленные за 45 дней показываем рядом с живыми; дальше — только последний.
@@ -50,21 +60,25 @@ function stageOf(o: PinOrder, now: number): Stage {
         ? { icon: "✅", word: "выкуплен, Robux в ожидании Roblox (Pending)" }
         : { icon: "✅", word: "выкуплен" };
     case "REJECTED": return { icon: "✖️", word: "отменён" };
+    case CODE_PIN_STATUS.PAID: return { icon: "🎟", word: "оплачен, готовим код и пришлём, как только он будет готов" };
+    case CODE_PIN_STATUS.ISSUED: return { icon: "✅", word: "код выдан, он в кабинете на сайте" };
     default: return { icon: "•", word: "в работе" };
   }
 }
 
 const isDirect = (o: PinOrder) => o.wbCode.startsWith("DIR-");
+const isCode = (o: PinOrder) => o.status === CODE_PIN_STATUS.PAID || o.status === CODE_PIN_STATUS.ISSUED;
 const dayRu = (d: Date) => d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
 /** Чем клиент узнаёт заказ: код карты WB; у прямого заказа номера клиенту не показываем — дата. */
-const orderId = (o: PinOrder) => (isDirect(o) ? `от ${dayRu(o.createdAt)}` : `код <code>${esc(o.wbCode)}</code>`);
+const orderId = (o: PinOrder) => (isCode(o) ? `код Robux от ${dayRu(o.createdAt)}`
+  : isDirect(o) ? `от ${dayRu(o.createdAt)}` : `код <code>${esc(o.wbCode)}</code>`);
 const rub = (n: number) => `${n.toLocaleString("ru-RU")} R$`;
 
 /** Какие заказы показать: живые, потом свежие выкупленные; не больше трёх. */
 export function pinOrders(orders: PinOrder[], now = Date.now()): PinOrder[] {
   const byNew = [...orders].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   const active = byNew.filter((o) => ACTIVE.has(o.status));
-  const recentDone = byNew.filter((o) => o.status === "COMPLETED" && o.completedAt && now - o.completedAt.getTime() < SHOW_DONE_DAYS * DAY);
+  const recentDone = byNew.filter((o) => DONE.has(o.status) && o.completedAt && now - o.completedAt.getTime() < SHOW_DONE_DAYS * DAY);
   const shown = [...active, ...recentDone].slice(0, MAX_ORDERS);
   return shown.length ? shown : byNew.slice(0, 1);
 }
@@ -72,7 +86,7 @@ export function pinOrders(orders: PinOrder[], now = Date.now()): PinOrder[] {
 /** Ставить ли НОВЫЙ закреп (уже стоящий правится всегда). */
 export function pinWorthCreating(orders: PinOrder[], now = Date.now()): boolean {
   void now;
-  return orders.some((o) => ACTIVE.has(o.status) || o.status === "COMPLETED");
+  return orders.some((o) => ACTIVE.has(o.status) || DONE.has(o.status));
 }
 
 /**

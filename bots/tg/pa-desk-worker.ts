@@ -25,9 +25,9 @@ import type { Dialog } from "telegram/tl/custom/dialog";
 import { db } from "../shared/db";
 import { setAdminDm } from "../shared/admin-route";
 import { openFlags } from "../shared/order-flags";
-import { DESK_FOLDERS, badReviewMark, deskDecision, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
+import { DESK_FOLDERS, answeredByReaction, badReviewMark, deskDecision, heartTarget, isThanksLike, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
 import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
-import { pinText, pinWorthCreating, type PinOrder } from "../shared/pa-pin";
+import { CODE_PIN_STATUS, pinText, pinWorthCreating, type PinOrder } from "../shared/pa-pin";
 import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type ResponseStats } from "./pa-response-stats";
 import { CODE_VIAS } from "../shared/order-contacts";
 import { ocrImageBufferText } from "../shared/pending-ocr";
@@ -244,6 +244,12 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
 
   await askRatings(tg, dialogs, mode).catch((e) => console.warn("[pa-rating]", e instanceof Error ? e.message : e));
 
+  // ❤️ на финальное «спасибо» — до папок: такой чат уже не «без ответа».
+  const hearted = await autoHearts(tg, dialogs, mode).catch((e) => {
+    console.warn("[pa-heart]", e instanceof Error ? e.message : e);
+    return new Set<string>();
+  });
+
   // Папки: пересобираем свои, только если состав (или цвет) поменялся.
   const existing = await tg.invoke(new Api.messages.GetDialogFilters());
   const list = "filters" in existing ? existing.filters : (existing as unknown as Api.TypeDialogFilter[]);
@@ -254,7 +260,10 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
   }
   const waiting = dialogs.filter((d) => {
     const age = now - (d.date ?? 0);
-    return d.message && !d.message.out && age >= WAIT_MIN * 60 && age < WAIT_MAX_H * 3600;
+    return d.message && !d.message.out && age >= WAIT_MIN * 60 && age < WAIT_MAX_H * 3600
+      // Наша реакция на последнее сообщение клиента — тоже ответ.
+      && !answeredByReaction(d.message.reactions as never)
+      && !hearted.has(String((d.entity as Api.User).id));
   }).slice(0, FOLDER_CAP);
   result.waiting = waiting.length;
   if (await syncFolder(tg, list, WAIT_FOLDER, waiting, mode)) result.foldersUpdated++;
@@ -278,6 +287,57 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
   return result;
 }
 
+/* ── ❤️ Авто-реакция на финальное «спасибо» (17.11.2026) ───────────────────── */
+
+/** Реакций за проход: каждая видна клиенту, не устраиваем лавину после простоя. */
+const HEART_CAP = 10;
+/** Старше трёх суток — разговор уже остыл, ❤️ на древнее «спасибо» выглядит странно. */
+const HEART_MAX_AGE_S = WAIT_MAX_H * 3600;
+
+/**
+ * Ставит ❤️ на короткую благодарность клиента после нашего ответа (правило —
+ * `heartTarget` в `bots/shared/pa-desk.ts`). Возвращает tgId чатов, где ❤️ встала:
+ * их в этом же проходе не кладём в «⏰ Без ответа». Env `PA_HEART=off` выключает.
+ */
+async function autoHearts(tg: TelegramClient, dialogs: Dialog[], mode: Mode): Promise<Set<string>> {
+  const done = new Set<string>();
+  if ((process.env.PA_HEART ?? "").trim().toLowerCase() === "off") return done;
+  const nowS = Math.floor(Date.now() / 1000);
+  const candidates = dialogs.filter((d) => d.message && !d.message.out
+    && nowS - (d.date ?? 0) < HEART_MAX_AGE_S
+    && !answeredByReaction(d.message.reactions as never)
+    && isThanksLike(d.message.message) !== null);
+  for (const d of candidates) {
+    if (done.size >= HEART_CAP) break;
+    const u = d.entity as Api.User;
+    const msgs = await tg.getMessages(u, { limit: 6 }).catch(() => []);
+    const view = msgs.map((m) => ({
+      out: Boolean(m.out),
+      text: m.message ?? null,
+      ourReaction: answeredByReaction(m.reactions as never),
+      // Превью ссылки — это текст; фото, стикер, голос — нет.
+      media: Boolean(m.media) && !(m.media instanceof Api.MessageMediaWebPage),
+    }));
+    const at = heartTarget(view);
+    if (at === null) continue;
+    const key = String(u.id);
+    if (mode === "dry") { console.log(`[pa-heart] (dry) ❤️ в чате ${key}: «${(msgs[at].message ?? "").slice(0, 60)}»`); done.add(key); continue; }
+    try {
+      await tg.invoke(new Api.messages.SendReaction({
+        peer: await tg.getInputEntity(u),
+        msgId: msgs[at].id,
+        reaction: [new Api.ReactionEmoji({ emoticon: "❤" })],
+      }));
+      done.add(key);
+      await sleep(1500);
+    } catch (error) {
+      console.warn(`[pa-heart] реакция не встала: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  if (done.size) console.log(`[pa-heart] ❤️ поставлено: ${done.size}`);
+  return done;
+}
+
 /* ── 📌 Закреп заказа в диалоге (15.11.2026) ─────────────────────────────── */
 
 /**
@@ -292,7 +352,31 @@ async function chatOrders(userIds: string[]) {
     where: { userId: { in: userIds }, removedAt: null, via: { in: CODE_VIAS } },
     select: { userId: true, order: { select } },
   }).catch(() => [] as Array<{ userId: string; order: typeof own[number] }>);
-  return [...own, ...links.map((l) => ({ ...l.order, userId: l.userId }))];
+  return [...own, ...links.map((l) => ({ ...l.order, userId: l.userId })), ...await codeChatOrders(userIds)];
+}
+
+/**
+ * Заказы кодов Robux (17.11.2026) — в метку и закреп рядом с WB-заказами.
+ * Только оплаченные: неоплаченная корзина — не заказ, возврат — не наша забота
+ * в диалоге. Вместо `CODE-JKTTGD5S` метка несёт `JKTTGD5S`, клиент в закрепе
+ * номера не видит вовсе (`pa-pin.ts`).
+ */
+async function codeChatOrders(userIds: string[]) {
+  const rows = await db.codeOrder.findMany({
+    where: { creatorUserId: { in: userIds }, status: { in: ["PAID", "ISSUED"] } },
+    select: { creatorUserId: true, publicId: true, denomination: true, status: true, createdAt: true, issuedAt: true },
+  }).catch(() => []);
+  return rows.map((o) => ({
+    userId: o.creatorUserId as string,
+    wbCode: o.publicId.replace(/^CODE-/, ""),
+    amount: o.denomination,
+    status: o.status === "ISSUED" ? CODE_PIN_STATUS.ISSUED : CODE_PIN_STATUS.PAID,
+    createdAt: o.createdAt,
+    heldAt: null,
+    flags: null,
+    completedAt: o.issuedAt,
+    robloxUsername: null,
+  }));
 }
 
 /**

@@ -192,7 +192,7 @@ export function codePickScreen(input: {
     : "📩 Код пришлём сюда, в чат, после оплаты — и сохраним в кабинете на сайте.");
   lines.push("🧾 Картой или СБП на странице Т-Банка · чек на почту");
   lines.push("");
-  lines.push(`<i>Платит родитель? Перешли ему ссылку — он оплатит без входа, а код придёт тебе. Заказ ${input.publicId}.</i>`);
+  lines.push(`<i>Платит родитель? Перешли ему ссылку — он оплатит без входа, а код придёт тебе.</i>`);
   const html = lines.join("\n");
   const shareText = `Оплати, пожалуйста, код Roblox на ${robux(input.denomination)} Robux — ${rub(quote.finalAmountKopecks)}. Вход не нужен:`;
   return {
@@ -268,7 +268,7 @@ export function codeChatIssuedText(input: { denomination: number; code: string; 
     "2. Войди в аккаунт, куда нужны Robux",
     "3. Вставь код и нажми «Активировать»",
     "",
-    `Код сохранён и в кабинете на сайте · заказ ${input.publicId}`,
+    "Код сохранён и в кабинете на сайте.",
     "⚠️ Никому не показывай код: кто ввёл, тот и получил Robux.",
   ].join("\n");
   const plain = [
@@ -282,7 +282,7 @@ export function codeChatIssuedText(input: { denomination: number; code: string; 
     "2. Войди в аккаунт, куда нужны Robux",
     "3. Вставь код и нажми «Активировать»",
     "",
-    `Код сохранён и в кабинете на сайте · заказ ${input.publicId}`,
+    "Код сохранён и в кабинете на сайте.",
     "⚠️ Никому не показывай код: кто ввёл, тот и получил Robux.",
   ].join("\n");
   return { html, plain };
@@ -294,7 +294,7 @@ export function codeChatPaidText(input: { denomination: number; publicId: string
     "",
     `Готовим код на <b>${robux(input.denomination)} Robux</b> — пришлём его сюда же, в этот чат. Ничего делать не нужно.`,
     "",
-    `Заказ ${input.publicId} · вопросы — @RobloxBank_PA`,
+    "Вопросы — @RobloxBank_PA",
   ].join("\n");
   return { html, plain: stripTags(html) };
 }

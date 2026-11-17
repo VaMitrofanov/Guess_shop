@@ -1,7 +1,7 @@
 /**
  * Разметка чатов поддержки @RobloxBank_PA (12.11.2026).
  */
-import { badReviewMark, deskDecision, isDeskLabel, nextContactName, type DeskOrder } from "../pa-desk";
+import { answeredByReaction, badReviewMark, deskDecision, heartTarget, isThanksLike, type HeartMsg, isDeskLabel, nextContactName, type DeskOrder } from "../pa-desk";
 
 const o = (over: Partial<DeskOrder> = {}): DeskOrder => ({
   wbCode: "ZT8BW8D", amount: 500, status: "COMPLETED", createdAt: new Date("2026-11-10T10:00:00Z"),
@@ -75,5 +75,67 @@ describe("имя контакта", () => {
   it("длинное имя не выходит за 64 символа", () => {
     const n = nextContactName({ isContact: false, currentName: "А".repeat(80), fallbackName: "x", tag: "ZT8BW8D · 2000 · выкупается · +12" })!;
     expect(n.length).toBeLessThanOrEqual(64);
+  });
+});
+
+describe("реакция поддержки = ответ (17.11.2026)", () => {
+  it("наша реакция (chosenOrder) закрывает «без ответа»", () => {
+    expect(answeredByReaction({ results: [{ chosenOrder: 0 }] })).toBe(true);
+    expect(answeredByReaction({ results: [{}], recentReactions: [{ my: true }] })).toBe(true);
+  });
+  it("реакция клиента на своё же сообщение — не ответ; без реакций — не ответ", () => {
+    expect(answeredByReaction({ results: [{ chosenOrder: null }], recentReactions: [{ my: false }] })).toBe(false);
+    expect(answeredByReaction(undefined)).toBe(false);
+  });
+});
+
+describe("заказ кода в метке чата", () => {
+  it("оплаченный код — «к выкупу», в метке короткий номер без CODE-", () => {
+    const d = deskDecision([{ wbCode: "JKTTGD5S", amount: 1000, status: "CODE_PAID", createdAt: new Date(), heldAt: null, openFlags: false }]);
+    expect(d).toEqual({ folder: "QUEUE", tag: "JKTTGD5S · 1000 · код: выдать" });
+    expect(isDeskLabel(`Тайота · ${d.tag}`)).toBe(true);
+  });
+});
+
+describe("авто-❤️ на финальное «спасибо» (17.11.2026)", () => {
+  const ours = { out: true, text: "Вот логин и пароль", ourReaction: false };
+  const c = (text: string, extra: Partial<HeartMsg> = {}): HeartMsg => ({ out: false, text, ourReaction: false, ...extra });
+
+  it.each([
+    "Спасибо!",
+    "спс",
+    "Огромное спасибо 🙏",
+    "Всё пришло, спасибо большое",
+    "А поняла,спасибо,все вошла,извините... реально просто не догоняю как и что здесь надо делать,спасибо за помощь",
+    "Благодарю за помощь",
+  ])("благодарность: %s", (text) => {
+    expect(isThanksLike(text)).toBe("thanks");
+  });
+
+  it.each([
+    "спасибо, а когда придут робуксы?",
+    "Спасибо, но робуксы не пришли",
+    "спасибо, жду",
+    "спасибо, ещё не зачислили",
+    "Спасибо, верните деньги",
+    "Здравствуйте",
+    "Мой ник Misha2010",
+  ])("не финал: %s", (text) => {
+    expect(isThanksLike(text)).toBeNull();
+  });
+
+  it("❤️ — когда последним отвечали мы, а хвост клиента — благодарность", () => {
+    expect(heartTarget([c("спасибо за помощь"), ours])).toBe(0);
+    expect(heartTarget([c("спасибо"), c("всё пришло"), ours])).toBe(0);
+  });
+
+  it("не ставим: нет нашего ответа, только «ок», уже стоит реакция, стикер, длинный хвост", () => {
+    expect(heartTarget([c("спасибо")])).toBeNull();
+    expect(heartTarget([c("ок"), ours])).toBeNull();
+    expect(heartTarget([c("спасибо", { ourReaction: true }), ours])).toBeNull();
+    expect(heartTarget([c("", { media: true }), c("спасибо"), ours])).toBeNull();
+    expect(heartTarget([c("спасибо"), c("спасибо"), c("спасибо"), c("спасибо"), ours])).toBeNull();
+    expect(heartTarget([c("спасибо"), c("а когда придут?"), ours])).toBeNull();
+    expect(heartTarget([c("спасибо"), { out: true, text: "📌 Ваш заказ · 500 R$", ourReaction: false }, c("где робуксы")])).toBeNull();
   });
 });

@@ -52,6 +52,8 @@ export async function notifyCodeAdmins(input: {
     lines: [
       `🎟 <code>${input.orderPublicId}</code> · ${input.denomination.toLocaleString("ru-RU")} R$ · ${formatRubKopecks(input.amountKopecks)}`,
       order ? deliveryLine(order) : null,
+      // У 🟠 формат прячет `next`, а для ручной выдачи подсказка про «ответом» нужна.
+      input.marker !== "urgent" && input.issueButton ? `👉 ${input.next}` : null,
     ],
     next: input.next,
   });
@@ -61,7 +63,8 @@ export async function notifyCodeAdmins(input: {
   try {
     // Своя тема «Коды» (16.11.2026). Её ещё нет (бот не перезапускался) — адресат
     // сам упадёт в личку админов: `adminTargets` без темы шлёт в ADMIN_IDS.
-    const targets = await adminTargets("codes", { loud: true, urgent: input.marker === "urgent" });
+    // Покупатель уже заплатил и ждёт код — ручная выдача будит и ночью, хоть и 🟠.
+    const targets = await adminTargets("codes", { loud: true, urgent: input.marker === "urgent" || Boolean(input.issueButton) });
     const sent: Record<string, number> = {};
     await Promise.allSettled(targets.map(async (target) => {
       const reply = roots[target.key] ? { reply_to_message_id: roots[target.key], allow_sending_without_reply: true } : {};

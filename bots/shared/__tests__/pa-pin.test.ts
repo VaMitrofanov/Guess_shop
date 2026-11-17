@@ -76,3 +76,26 @@ describe("«загляните в бота» в чате поддержки", ()
     expect(paBotRedirectReply("хочу вернуть деньги", [order], new Date(NOW))).toBeNull();
   });
 });
+
+describe("заказы кодов Robux в закрепе (17.11.2026)", () => {
+  const code = (p: Partial<PinOrder>): PinOrder => o({ wbCode: "JKTTGD5S", amount: 1000, status: "CODE_PAID", robloxUsername: null, ...p });
+
+  it("клиент не видит номер CODE-…, заказ узнаётся по номиналу и дате", () => {
+    const text = pinText([code({})], NOW)!;
+    expect(text).toMatch(/^📌 Ваш заказ · 1\s000 R\$ · код Robux от \d+ ноября/);
+    expect(text).not.toMatch(/JKTTGD5S|CODE-/);
+    expect(text).toMatch(/готовим код/);
+  });
+
+  it("два кода рядом: отличаются номиналом, этап общий одной строкой не врёт", () => {
+    const text = pinText([code({}), code({ wbCode: "5WHYH8DF", amount: 200, status: "CODE_ISSUED", completedAt: new Date(NOW) })], NOW)!;
+    expect(text).toContain("📌 Ваши заказы");
+    expect(text).toMatch(/🎟 1\s000 R\$ · код Robux от .* — оплачен, готовим код/);
+    expect(text).toMatch(/✅ 200 R\$ · код Robux от .* — код выдан/);
+    expect(text).not.toMatch(/Все выкуплены/);
+  });
+
+  it("выданный код — повод для нового закрепа, как выкупленный заказ", () => {
+    expect(pinWorthCreating([code({ status: "CODE_ISSUED", completedAt: new Date(NOW) })], NOW)).toBe(true);
+  });
+});

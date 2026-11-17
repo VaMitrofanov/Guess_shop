@@ -2,6 +2,7 @@ import {
   CODES_PICK_RE,
   bestValueDenomination,
   codeChatIssuedText,
+  codeChatPaidText,
   codePickScreen,
   codesHitDenomination,
   codesStoreScreen,
@@ -113,5 +114,17 @@ describe("лента отзывов WB", () => {
     const row = toReviewRow({ ...good, productValuation: 1, text: "Не пришло" });
     expect(row?.eligible).toBe(false);
     expect(row?.rating).toBe(1);
+  });
+});
+
+describe("номер CODE-… клиенту не показываем (17.11.2026)", () => {
+  it("ни в выдаче, ни в «оплата прошла», ни на экране заказа", () => {
+    const texts = [
+      codeChatIssuedText({ denomination: 800, code: "X", publicId: "CODE-AAAA2222" }).html,
+      codeChatIssuedText({ denomination: 800, code: "X", publicId: "CODE-AAAA2222" }).plain,
+      codeChatPaidText({ denomination: 800, publicId: "CODE-AAAA2222" }).html,
+      codePickScreen({ denomination: 800, discountPercent: 1, instant: false, payUrl: "https://x/pay/t", shareUrl: "https://x/pay/t", publicId: "CODE-AAAA2222" }).html,
+    ];
+    for (const text of texts) expect(text).not.toMatch(/CODE-|AAAA2222/);
   });
 });

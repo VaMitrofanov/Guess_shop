@@ -142,8 +142,11 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
     // Покупатель не должен видеть списание и тишину: письмо и (бот) сообщение.
     await sendPaidAwaitingEmail(payment.orderId).catch(() => undefined);
     await sendPaidToChat(payment.orderId).catch(() => undefined);
+    // 🟠, а не 🔴 (17.11.2026, владелец): оплата прошла, всё в порядке — это
+    // обычная работа «выдать код», а красный значок оставлен для аварий
+    // (NO_STOCK, двойной платёж ниже).
     await notifyCodeAdmins({
-      marker: "urgent",
+      marker: "action",
       title: "оплачен — выдать код вручную",
       orderPublicId: payment.order.publicId,
       denomination: payment.order.denomination,
