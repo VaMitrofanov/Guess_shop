@@ -26,6 +26,8 @@ import { registerWbMorningDigest } from "./wb-morning-digest";
 import { registerNoticeStatsReport } from "./notice-stats-report";
 import { OPERATOR_LINK_RE, offerFromSupport, operatorLinkCommand, registerOrderContactActions } from "./order-contacts-tg";
 import { attachPassFromSupport } from "./pa-gamepass";
+import { setPaRatingSender } from "./pa-desk-worker";
+import { RATING_KEYBOARD, RATING_TEXT, ratingThanks, recordRatingVote } from "../shared/pa-rating";
 import { CODE_VIAS } from "../shared/order-contacts";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
@@ -34,6 +36,36 @@ const OPERATOR_QUIET_MS = 30 * 60_000;
 const operatorAt = new Map<number, number>();
 /** Подключение → id владельца аккаунта (оператор = он). */
 const ownerOf = new Map<string, number>();
+
+/**
+ * 🪪 Профиль каждому, кто написал в поддержку (17.11.2026).
+ *
+ * У многих покупателей нет @username («Ви💗чка»): найти их потом можно только
+ * по числовому Telegram ID, а он приходил нам лишь в самом сообщении и нигде не
+ * оставался. Теперь первое же сообщение в @RobloxBank_PA заводит профиль
+ * (`User.tgId` + имя), а смена @username подхватывается. Заказов это не создаёт;
+ * воркер разметки обращается с профилем без заказов так же, как с «нет в базе».
+ * Реферальное правило «не новый» с этого дня смотрит на заказы, а не на дату
+ * профиля (`src/lib/codes/referral.ts`).
+ */
+const profiled = new Set<string>();
+/** Последнее подключение Business — по нему бот пишет в чаты аккаунта по своей инициативе (оценка). */
+let lastConnId: string | null = null;
+async function ensurePaProfile(from: BusinessMessage["from"]): Promise<void> {
+  if (!from?.id || from.is_bot) return;
+  const tgId = String(from.id);
+  if (profiled.has(tgId)) return;
+  const name = [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || null;
+  const row = await db.user.findUnique({ where: { tgId }, select: { id: true, username: true } });
+  if (!row) {
+    await db.user.create({ data: { tgId, name, username: from.username ?? null } }).catch(() => undefined);
+    console.log("[pa-business] новый профиль из поддержки");
+  } else if (from.username && row.username !== from.username) {
+    await db.user.update({ where: { id: row.id }, data: { username: from.username } }).catch(() => undefined);
+  }
+  profiled.add(tgId);
+  if (profiled.size > 20_000) profiled.clear();
+}
 
 interface BusinessMessage {
   business_connection_id: string;
@@ -76,6 +108,36 @@ export function registerPaBusiness(bot: Telegraf): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (method: string, payload: Record<string, unknown>) => (bot.telegram as any).callApi(method, payload);
 
+  // ⭐ Тихая оценка поддержки (17.11.2026): воркер решает «когда», бот — отправляет.
+  setPaRatingSender(async (tgId: string) => {
+    if (!lastConnId) return false;
+    try {
+      await api("sendMessage", {
+        business_connection_id: lastConnId, chat_id: Number(tgId), text: RATING_TEXT,
+        disable_notification: true, reply_markup: { inline_keyboard: RATING_KEYBOARD },
+      });
+      return true;
+    } catch (error) {
+      console.warn(`[pa-rating] вопрос не ушёл: ${error instanceof Error ? error.message : error}`);
+      return false;
+    }
+  });
+  bot.action(/^pr:(up|dn)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cq = ctx.callbackQuery as any;
+    const vote = cq?.data === "pr:up" ? "up" : "down";
+    const msg = cq?.message;
+    await recordRatingVote(db, vote).catch(() => undefined);
+    if (msg?.message_id) {
+      await api("editMessageText", {
+        ...(msg.business_connection_id ? { business_connection_id: msg.business_connection_id } : {}),
+        chat_id: msg.chat?.id, message_id: msg.message_id, text: ratingThanks(vote),
+      }).catch(() => undefined);
+    }
+    console.log(`[pa-rating] оценка ${vote === "up" ? "👍" : "👎"}`);
+  });
+
   async function ownerId(connId: string): Promise<number | null> {
     const cached = ownerOf.get(connId);
     if (cached) return cached;
@@ -98,12 +160,14 @@ export function registerPaBusiness(bot: Telegraf): void {
     if (update.business_connection) {
       const c = update.business_connection;
       if (c?.id && c?.user?.id) ownerOf.set(c.id, Number(c.user.id));
+      if (c?.id && c?.is_enabled !== false) lastConnId = c.id;
       console.log(`[pa-business] подключение обновлено: enabled=${c?.is_enabled}, ответы ${c?.rights?.can_reply ? "разрешены" : "запрещены"}`);
       return;
     }
     if (update.edited_business_message || update.deleted_business_messages) return;
     const msg: BusinessMessage | undefined = update.business_message;
     if (!msg) return next();
+    lastConnId = msg.business_connection_id;
 
     try {
       const owner = await ownerId(msg.business_connection_id);
@@ -130,6 +194,7 @@ export function registerPaBusiness(bot: Telegraf): void {
         }
         return;
       }
+      await ensurePaProfile(msg.from).catch(() => undefined);
       if (!paBusinessReplyEnabled()) return;
       const text = (msg.text ?? msg.caption ?? "").trim();
       const hasMedia = Boolean(msg.photo || msg.document || msg.video || msg.voice);

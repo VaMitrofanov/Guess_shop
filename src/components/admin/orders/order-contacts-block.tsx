@@ -11,6 +11,7 @@
 import { useState } from "react";
 import styles from "./orders.module.css";
 import { VIA_WORD } from "../../../../bots/shared/order-contacts";
+import { vkCommunityDialogUrl } from "../../../../bots/shared/vk-links";
 
 export interface OrderContactRow {
   id: string;
@@ -27,6 +28,15 @@ function who(u: OrderContactRow["user"]): { channel: string; label: string } {
   const channel = u.tgId ? "TG" : u.vkId ? "VK" : "—";
   const label = u.name?.trim() || (u.username ? `@${u.username}` : u.tgId ? `tg ${u.tgId}` : `vk ${u.vkId}`);
   return { channel, label: u.username && u.name ? `${label} · @${u.username}` : label };
+}
+
+/** Telegram без @username открывается по ID (`tg://user?id=`) — у того, кто уже с ним переписывался. */
+function writeHref(u: OrderContactRow["user"]): string | null {
+  if (!u) return null;
+  if (u.username) return `https://t.me/${u.username}`;
+  if (u.tgId) return `tg://user?id=${u.tgId}`;
+  if (u.vkId) return vkCommunityDialogUrl(u.vkId);
+  return null;
 }
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
@@ -79,6 +89,9 @@ export function OrderContactsBlock({ initial, post, onToast }: {
                 {VIA_WORD[r.via] ?? r.via}{r.evidence && r.via !== "support_code" && r.via !== "bot_code" ? ` (${r.evidence})` : ""} · {fmt(r.createdAt)}
               </div>
             </span>
+            {writeHref(r.user) && (
+              <a className={styles.btn} href={writeHref(r.user)!} target="_blank" rel="noreferrer">Написать</a>
+            )}
             <button type="button" className={styles.btn} disabled={busy}
               onClick={() => run({ action: "remove-contact", contactId: r.id }, "Контакт убран")}>Убрать</button>
           </div>

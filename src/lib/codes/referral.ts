@@ -102,7 +102,13 @@ export async function claimReferralCode(userId: string, parsed: { code: string; 
   if (user.referredById) return "already";
   if (!referrer) return "unknown_code";
   if (referrer.id === user.id || user.referralCode === parsed.code) return "self";
-  if (user.createdAt.getTime() < parsed.at - ACCOUNT_AGE_TOLERANCE_MS) return "not_new";
+  // Профиль старше перехода — «не новый», только если человек уже покупал. С
+  // 17.11.2026 профиль заводится и тому, кто просто написал в поддержку
+  // @RobloxBank_PA (чтобы знать его Telegram ID) — такой человек всё ещё новый.
+  if (user.createdAt.getTime() < parsed.at - ACCOUNT_AGE_TOLERANCE_MS) {
+    const ordersBefore = await prisma.wbOrder.count({ where: { userId } });
+    if (ordersBefore > 0) return "not_new";
+  }
   // Уже покупал коды до привязки — это не «первая покупка по приглашению».
   const paidBefore = await prisma.codeOrder.count({ where: { creatorUserId: userId, paidAt: { not: null } } });
   if (paidBefore > 0) return "not_new";

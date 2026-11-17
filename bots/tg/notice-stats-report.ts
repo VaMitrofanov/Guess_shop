@@ -4,6 +4,7 @@ import { ADMIN_TOPIC_KEYS, adminTargets, adminTopicName, loadAdminRoute } from "
 import { formatAdminNotice } from "../shared/notify-format";
 import { tgSend } from "../shared/notify";
 import { NOTICE_STATS_STREAM, flushNoticeStats, mskDay, type NoticeDay } from "../shared/notice-stats";
+import { ratingDayLine } from "../shared/pa-rating";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    📊 Сводка «сколько уведов ушло вчера» — в 09:00 МСК в тему «Система»
@@ -19,6 +20,7 @@ export function noticeStatsText(
   d: NoticeDay,
   names: Array<{ key: string; name: string }>,
   dmKeys: string[],
+  extra: Array<string | null> = [],
 ): string {
   const rows = names
     .map(({ key, name }) => ({ name, n: d.sent[key] ?? 0 }))
@@ -36,6 +38,7 @@ export function noticeStatsText(
       d.merged || d.resurfaced
         ? `💬 Склейка: ${d.merged} сообщ. покупателей легли правкой в открытый увед${d.resurfaced ? `, ${d.resurfaced} уведов поднято заново` : ""}`
         : null,
+      ...extra,
     ],
   });
 }
@@ -64,7 +67,9 @@ async function tick(): Promise<void> {
     name: await adminTopicName(topic),
   })));
   const label = new Date(`${yesterday}T12:00:00Z`).toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "UTC" });
-  const text = noticeStatsText(label, d, names, cfg.dmIds);
+  // ⭐ Оценки поддержки за вчера — только здесь, без отдельных уведов (17.11.2026).
+  const rating = await ratingDayLine(db, yesterday).catch(() => null);
+  const text = noticeStatsText(label, d, names, cfg.dmIds, [rating]);
   for (const t of await adminTargets("system", { loud: false })) {
     await tgSend(t.chatId, text, { parse_mode: "HTML", ...t.extra }).catch(() => undefined);
   }

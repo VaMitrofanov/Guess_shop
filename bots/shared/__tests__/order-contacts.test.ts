@@ -1,5 +1,5 @@
 import {
-  addedText, cluesFromOcr, contactEventText, extractOrderClues, ocrLooksUseful, maskName, offerText, parseContactCallback,
+  addedText, blockedText, declinedText, STALE_OFFER_TEXT, cluesFromOcr, contactEventText, extractOrderClues, ocrLooksUseful, maskName, offerText, parseContactCallback,
   planContactOffer, rememberOffer, takeOffer, offerKey, type FoundOrder,
 } from "../order-contacts";
 
@@ -141,5 +141,12 @@ describe("скриншот (OCR)", () => {
   it("признак полезного текста", () => {
     expect(ocrLooksUseful("https://robloxbank.ru/wb/")).toBe(true);
     expect(ocrLooksUseful("Pending Robux 500")).toBe(false);
+  });
+});
+
+describe("голос поддержки", () => {
+  it("тексты для клиента — от команды, без рода", () => {
+    const all = [offerText([base()], "TG"), offerText([base(), base({ id: "ord_bbbbbbbbbbbb" })], "TG"), declinedText(), blockedText("held"), blockedText("ambiguous"), STALE_OFFER_TEXT];
+    for (const t of all) expect(t).not.toMatch(/(нашла|поняла|передала|проверила|сама|найду|добавлю)\b/i);
   });
 });

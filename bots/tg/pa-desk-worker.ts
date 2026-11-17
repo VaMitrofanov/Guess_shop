@@ -31,6 +31,44 @@ import { pinText, pinWorthCreating, type PinOrder } from "../shared/pa-pin";
 import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type ResponseStats } from "./pa-response-stats";
 import { CODE_VIAS } from "../shared/order-contacts";
 import { ocrImageBufferText } from "../shared/pending-ocr";
+import { RATING_CAP, loadAskedMap, ratingDue, recordRatingAsked } from "../shared/pa-rating";
+
+/** Кто отправляет вопрос об оценке — регистрирует обработчик Business (у него подключение). */
+let ratingSender: ((tgId: string) => Promise<boolean>) | null = null;
+export function setPaRatingSender(fn: (tgId: string) => Promise<boolean>): void {
+  ratingSender = fn;
+}
+
+/**
+ * ⭐ Тихая оценка (17.11.2026): чаты, где последним ответили мы больше часа
+ * назад, а покупатель писал в течение суток до этого. Правило — `ratingDue`.
+ */
+async function askRatings(tg: TelegramClient, dialogs: Dialog[], mode: Mode): Promise<void> {
+  if ((process.env.PA_RATING ?? "").trim().toLowerCase() === "off" || !ratingSender) return;
+  const asked = await loadAskedMap(db);
+  const nowS = Math.floor(Date.now() / 1000);
+  const sent: string[] = [];
+  for (const d of [...dialogs].sort((a, b) => (b.date ?? 0) - (a.date ?? 0))) {
+    if (sent.length >= RATING_CAP) break;
+    const last = d.message;
+    if (!last || !last.out) continue;
+    const tgId = String((d.entity as Api.User).id);
+    const quick = { last: { out: true, date: last.date, text: last.message ?? "", viaBot: false }, lastIncoming: last.date };
+    if (!ratingDue(quick, asked[tgId], nowS)) continue;
+    // Было ли обращение: последнее входящее среди свежих сообщений.
+    const msgs = await tg.getMessages(d.entity as Api.User, { limit: 15 }).catch(() => []);
+    const incoming = msgs.find((m) => !m.out);
+    const tail = { last: quick.last, lastIncoming: incoming?.date ?? null };
+    if (!ratingDue(tail, asked[tgId], nowS)) continue;
+    if (mode === "dry") { console.log(`[pa-rating] (dry) спросили бы оценку в чате ${tgId}`); continue; }
+    if (await ratingSender(tgId)) sent.push(tgId);
+    await sleep(1500);
+  }
+  if (sent.length) {
+    await recordRatingAsked(db, sent);
+    console.log(`[pa-rating] спросили оценку: ${sent.length}`);
+  }
+}
 
 const WINDOW_DAYS = 30;
 /** «Новые» — только те, кто писал за неделю: старый незнакомец уже не новый. */
@@ -203,6 +241,8 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
     const buyer = userByTg.get(tgId);
     return buyer ? pinOrdersBy.get(buyer.id) ?? [] : [];
   }, mode, result).catch((e) => console.warn("[pa-pin]", e instanceof Error ? e.message : e));
+
+  await askRatings(tg, dialogs, mode).catch((e) => console.warn("[pa-rating]", e instanceof Error ? e.message : e));
 
   // Папки: пересобираем свои, только если состав (или цвет) поменялся.
   const existing = await tg.invoke(new Api.messages.GetDialogFilters());

@@ -58,9 +58,9 @@ export async function attachPassFromSupport(bot: Telegraf, api: Api, m: {
   if (res.kind === "rejected") {
     if (res.toBuyer) {
       await send(
-        `Проверила геймпасс: ${escapeHtml(res.reason)}.\n\n` +
+        `Проверили геймпасс: ${escapeHtml(res.reason)}.\n\n` +
         `Нужен пасс за <b>${res.expectedPrice} R$</b>, выставленный на продажу, без региональных цен (Managed pricing выключен). ` +
-        `Исправьте и пришлите ссылку ещё раз — проверю сразу.`,
+        `Исправьте и пришлите ссылку ещё раз — проверим сразу.`,
       );
       await read();
     }

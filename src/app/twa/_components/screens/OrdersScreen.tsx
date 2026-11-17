@@ -2411,6 +2411,10 @@ function BuyerHistory({ order, token, active, platform, shortName, onContact }: 
                         <small>{u?.tgId ? "Telegram" : "VK"} · {CONTACT_VIA[c.via] ?? c.via} · {fmtDay(c.createdAt)}</small>
                         <b>{label}{u?.username && u?.name ? ` · @${u.username}` : ""}</b>
                       </span>
+                      {u && (u.tgId || u.vkId || u.username) && (
+                        <button type="button" className="twa-bh-write twa-press-sm" style={{ marginRight: 6 }}
+                          onClick={() => { haptic.impact("light"); openContact({ ...order.user, ...u } as Order["user"]); }}>Написать</button>
+                      )}
                       <button type="button" className="twa-bh-write twa-press-sm" onClick={async () => {
                         try {
                           const r = await fetch("/api/twa/orders", {
