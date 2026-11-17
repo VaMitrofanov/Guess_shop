@@ -18,12 +18,13 @@ import { escapeHtml } from "../shared/notify";
 import { notifyContactOwner } from "../shared/order-contacts-notify";
 import {
   CONTACT_CB, DECLINE_LABEL, STALE_OFFER_TEXT,
-  addOrderContact, addedText, blockedText, declinedText, extractOrderClues, findOrdersByClues, hasClues,
+  addOrderContact, addedText, blockedText, cluesFromOcr, declinedText, extractOrderClues, findOrdersByClues, hasClues, ocrLooksUseful,
   offerButtonLabel, offerKey, offerText, parseContactCallback, planContactOffer,
   recordContactDeclined, rememberOffer, removeOrderContact, supportVia, takeOffer, dropOffer,
   type FoundOrder,
 } from "../shared/order-contacts";
 import { card } from "./pa-ai";
+import { ocrImageText } from "../shared/pending-ocr";
 
 const BOT_URL = "https://t.me/RobloxBankBot?start=order";
 
@@ -53,13 +54,27 @@ function offerKeyboard(orders: FoundOrder[]) {
  */
 export async function offerFromSupport(bot: Telegraf, api: Api, m: {
   connId: string; chatId: number; messageId: number; from: Who; text: string;
+  /** file_id фото, если прислали скриншот (17.11.2026: код часто только на скрине чата WB). */
+  photoFileId?: string | null;
 }): Promise<boolean> {
-  if (!m.text) return false;
-  const clues = extractOrderClues(m.text);
+  let clues = m.text ? extractOrderClues(m.text) : { codes: [], passIds: [], nicks: [] };
+  const sender = await db.user.findUnique({ where: { tgId: String(m.from.id) }, select: { id: true } });
+
+  // 📸 Улик в тексте нет, но есть скриншот — читаем его Tesseract'ом. Только
+  // для тех, у кого своих заказов нет: свои скрины (Pending, пасс) разбирает ИИ,
+  // и держать его ответ ради OCR незачем.
+  if (!hasClues(clues) && m.photoFileId) {
+    const own = sender ? await db.wbOrder.count({ where: { userId: sender.id } }) : 0;
+    if (own > 0) return false;
+    const url = await bot.telegram.getFileLink(m.photoFileId).then(String).catch(() => null);
+    const text = url ? await ocrImageText(url, ocrLooksUseful) : null;
+    clues = text ? cluesFromOcr(text) : clues;
+    console.log(`[order-contacts] скрин: ${text ? `${text.length} симв., кандидатов кода ${clues.codes.length}` : "не прочитался"}`);
+  }
+
   if (!hasClues(clues)) return false;
   const orders = await findOrdersByClues(db, clues);
   if (!orders.length) return false;
-  const sender = await db.user.findUnique({ where: { tgId: String(m.from.id) }, select: { id: true } });
   const plan = await planContactOffer(db, { senderUserId: sender?.id ?? null, orders });
 
   const send = (text: string, keyboard?: unknown[][]) => api("sendMessage", {

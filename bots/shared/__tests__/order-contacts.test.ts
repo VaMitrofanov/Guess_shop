@@ -1,5 +1,5 @@
 import {
-  addedText, contactEventText, extractOrderClues, maskName, offerText, parseContactCallback,
+  addedText, cluesFromOcr, contactEventText, extractOrderClues, ocrLooksUseful, maskName, offerText, parseContactCallback,
   planContactOffer, rememberOffer, takeOffer, offerKey, type FoundOrder,
 } from "../order-contacts";
 
@@ -122,5 +122,24 @@ describe("кнопки", () => {
     expect(takeOffer(offerKey("TG", 42), "ord_aaaaaaaaaaaa")).toEqual({ clue: "code", evidence: "9SQJ2WP" });
     expect(takeOffer(offerKey("TG", 43), "ord_aaaaaaaaaaaa")).toBeNull();
     expect(takeOffer(offerKey("TG", 42), "ord_zzzzzzzzzzzz")).toBeNull();
+  });
+});
+
+describe("скриншот (OCR)", () => {
+  it("код из текста скрина чата WB, ссылка разорвана переносом строки", () => {
+    const text = "Kog Bawero 3aka3a: 9SQJ2WP\nhttps://robloxbank.ru/wb/\n9SQJ2WP\nЕсли ссылка не открылась";
+    expect(cluesFromOcr(text).codes).toContain("9SQJ2WP");
+  });
+  it("OCR перепутал 2 и Z, O и 0 — нужный вариант всё равно среди кандидатов", () => {
+    expect(cluesFromOcr("code 9SQJZWP").codes).toContain("9SQJ2WP");
+    expect(cluesFromOcr("AB0C1D7").codes).toContain("ABOCID7");
+  });
+  it("ник со скрина не берём, число вариантов ограничено", () => {
+    expect(cluesFromOcr("krasotka_123106").nicks).toEqual([]);
+    expect(cluesFromOcr("OOOOOOO IIIIIII").codes.length).toBeLessThanOrEqual(400);
+  });
+  it("признак полезного текста", () => {
+    expect(ocrLooksUseful("https://robloxbank.ru/wb/")).toBe(true);
+    expect(ocrLooksUseful("Pending Robux 500")).toBe(false);
   });
 });

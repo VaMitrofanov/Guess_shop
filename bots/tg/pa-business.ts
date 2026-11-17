@@ -125,17 +125,20 @@ export function registerPaBusiness(bot: Telegraf): void {
       // ник) — спрашиваем, добавить ли этот аккаунт к заказу (17.11.2026).
       // Раньше живого разговора: это не болтовня, а действие, и оператору
       // тоже удобнее, когда заказ уже привязан к чату.
-      if (text) {
+      const photoFileId = Array.isArray(msg.photo) && msg.photo.length
+        ? (msg.photo[msg.photo.length - 1] as { file_id?: string }).file_id ?? null
+        : null;
+      if (text || photoFileId) {
         const offered = await offerFromSupport(bot, api, {
           connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
           from: { id: fromId, first_name: msg.from?.first_name, last_name: msg.from?.last_name, username: msg.from?.username },
-          text,
+          text, photoFileId,
         }).catch((error) => {
           console.warn(`[order-contacts] поддержка: ${error instanceof Error ? error.message : error}`);
           return false;
         });
         if (offered) {
-          rememberTurn(msg.chat.id, "user", text);
+          rememberTurn(msg.chat.id, "user", text || "[скриншот с кодом заказа]");
           return;
         }
       }

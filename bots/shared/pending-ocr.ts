@@ -182,6 +182,24 @@ async function fetchImage(url: string, attempt = 1): Promise<Buffer | null> {
   }
 }
 
+/**
+ * Текст картинки по ссылке — для чего угодно, кроме Pending (17.11.2026:
+ * скриншот чата WB в поддержке, `order-contacts`). Режимы разметки по очереди,
+ * пока `enough(text)` не скажет «хватит». `null` — не скачалось / не прочиталось.
+ */
+export async function ocrImageText(url: string, enough: (text: string) => boolean = () => true): Promise<string | null> {
+  const img = await fetchImage(url);
+  if (!img) return null;
+  let all = "";
+  for (const psm of [6, 11]) {
+    const text = await ocrImage(img, psm);
+    if (!text) continue;
+    all += `\n${text}`;
+    if (enough(text)) break;
+  }
+  return all.trim() || null;
+}
+
 export interface PendingCheck {
   verdict: PendingVerdict;
   read: PendingRead;

@@ -117,6 +117,57 @@ export function extractOrderClues(raw: string): OrderClues {
   return { codes: [...codes], passIds: [...passIds], nicks: [...nicks] };
 }
 
+/* ── 1б. Улики со скриншота (Tesseract) ───────────────────────────────────
+   Коды генерируются из всего алфавита A–Z0–9, а OCR путает O/0, I/1/L, S/5,
+   B/8, Z/2. Поэтому каждое слово из 7 символов превращается в набор вариантов,
+   и в базе ищутся все сразу: ложное совпадение возможно, только если такой код
+   действительно существует. Ссылка `/wb/КОД` на скрине — самая надёжная улика,
+   её варианты идут первыми.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const OCR_CONFUSABLE: Record<string, string[]> = {
+  O: ["O", "0"], "0": ["0", "O"], Q: ["Q", "O", "0"], D: ["D", "0", "O"],
+  I: ["I", "1", "L"], "1": ["1", "I", "L"], L: ["L", "1", "I"], "|": ["1", "I", "L"],
+  S: ["S", "5"], "5": ["5", "S"], B: ["B", "8"], "8": ["8", "B"], Z: ["Z", "2"], "2": ["2", "Z"],
+  G: ["G", "6"], "6": ["6", "G"],
+};
+/** Больше четырёх неоднозначных символов — слишком много вариантов, слово пропускаем. */
+const OCR_MAX_AMBIGUOUS = 4;
+const OCR_MAX_CANDIDATES = 400;
+
+function codeVariants(word: string): string[] {
+  const chars = word.toUpperCase().split("");
+  const ambiguous = chars.filter((c) => OCR_CONFUSABLE[c]).length;
+  if (ambiguous > OCR_MAX_AMBIGUOUS) return [word.toUpperCase().replace(/\|/g, "1")].filter((w) => /^[A-Z0-9]{7}$/.test(w));
+  let out = [""];
+  for (const c of chars) {
+    const opts = OCR_CONFUSABLE[c] ?? [c];
+    out = out.flatMap((prefix) => opts.map((o) => prefix + o));
+  }
+  return out.filter((w) => /^[A-Z0-9]{7}$/.test(w));
+}
+
+/** Улики из текста, распознанного со скриншота. Ник со скрина не берём — слишком шумно. */
+export function cluesFromOcr(text: string): OrderClues {
+  const src = String(text ?? "");
+  const fromLinks = [...src.matchAll(/(?:\/wb\/|[?&]code=)\s*([A-Za-z0-9|]{7})(?![A-Za-z0-9])/g)].map((m) => m[1]);
+  const words = src.split(/[^A-Za-z0-9|]+/).filter((w) => w.length === 7);
+  const codes = new Set<string>();
+  for (const w of [...fromLinks, ...words]) {
+    for (const v of codeVariants(w)) {
+      if (codes.size >= OCR_MAX_CANDIDATES) break;
+      codes.add(v);
+    }
+  }
+  const passIds = [...new Set([...src.matchAll(/game-pass(?:es)?\/(\d{5,15})/gi)].map((m) => m[1]))];
+  return { codes: [...codes], passIds, nicks: [] };
+}
+
+/** Похоже ли, что на скрине есть код или ссылка — чтобы не гонять второй режим OCR зря. */
+export function ocrLooksUseful(text: string): boolean {
+  return /\/wb\/|code=|game-pass|[Кк]од/.test(text);
+}
+
 export function hasClues(c: OrderClues): boolean {
   return c.codes.length + c.passIds.length + c.nicks.length > 0;
 }
