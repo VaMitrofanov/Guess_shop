@@ -21,6 +21,7 @@
 import { WB_REPLY_CB, type WbReplyKind } from "./wb-reply-buttons";
 import { vkCommunityDialogUrl } from "./vk-links";
 import { twaStartappUrl } from "./admin-route";
+import { heldLabel } from "./notify-format";
 
 export type DbsChatStage = "before_code" | "gate_sent" | "activated" | "closed";
 
@@ -73,17 +74,28 @@ type Internal = {
   pendingAt?: Date | null;
   completedAt?: Date | null;
   heldAt?: Date | null;
+  heldReason?: string | null;
+  /** Код ошибки выкупа (`ERROR`) и причина отказа (`REJECTED`) — тоже не голым словом. */
+  buyoutErrorCode?: string | null;
+  rejectionReason?: string | null;
 };
+
+/** «ошибка выкупа: REGIONAL_PRICE» — причина рядом со словом, если она есть. */
+function withWhy(word: string, why: string | null | undefined): string {
+  const t = (why ?? "").replace(/\s+/g, " ").trim();
+  if (!t || t === "не указана") return word;
+  return `${word}: ${escapeHtml(t.length > 90 ? `${t.slice(0, 89).trimEnd()}…` : t)}`;
+}
 
 /** Заказ уже у нас в боте: где он. История чата WB здесь больше не нужна. */
 function internalState(i: Internal, now: Date): { tone: DbsChatTone; state: string } {
-  if (i.heldAt) return { tone: "stop", state: "❄️ заморожен" };
+  if (i.heldAt) return { tone: "stop", state: heldLabel(i.heldReason) };
   switch (i.status) {
     case "COMPLETED": return { tone: "done", state: i.completedAt ? `выкуплено ${moscowDay(i.completedAt)}` : "выкуплено" };
     case "IN_PROGRESS": return { tone: "work", state: "выкупается" };
     case "PENDING": return { tone: "work", state: i.pendingAt ? `ждёт выкупа <b>${ageText(i.pendingAt, now)}</b>` : "ждёт выкупа" };
-    case "ERROR": return { tone: "stop", state: "ошибка выкупа" };
-    case "REJECTED": return { tone: "closed", state: "отклонён" };
+    case "ERROR": return { tone: "stop", state: withWhy("ошибка выкупа", i.buyoutErrorCode) };
+    case "REJECTED": return { tone: "closed", state: withWhy("отклонён", i.rejectionReason) };
   }
   const missing = [!i.robloxUsername && "ника", !i.gamepassUrl && "пасса"].filter(Boolean);
   return {
@@ -198,7 +210,8 @@ export async function loadDbsChatStatus(db: Db, wbOrderId: string, now = new Dat
         ? db.wbOrder.findUnique({
             where: { wbCode: code },
             select: {
-              status: true, robloxUsername: true, gamepassUrl: true, pendingAt: true, completedAt: true, heldAt: true,
+              status: true, robloxUsername: true, gamepassUrl: true, pendingAt: true, completedAt: true, heldAt: true, heldReason: true,
+              buyoutErrorCode: true, rejectionReason: true,
               user: { select: { username: true, tgId: true, vkId: true } },
             },
           }) as Promise<(Internal & { user: { username: string | null; tgId: string | null; vkId: string | null } | null }) | null>
@@ -218,7 +231,8 @@ export async function loadDbsChatStatus(db: Db, wbOrderId: string, now = new Dat
       internal: internal
         ? {
             status: internal.status, robloxUsername: internal.robloxUsername, gamepassUrl: internal.gamepassUrl,
-            pendingAt: internal.pendingAt, completedAt: internal.completedAt, heldAt: internal.heldAt,
+            pendingAt: internal.pendingAt, completedAt: internal.completedAt, heldAt: internal.heldAt, heldReason: internal.heldReason,
+            buyoutErrorCode: internal.buyoutErrorCode, rejectionReason: internal.rejectionReason,
           }
         : null,
       contact: internal?.user ? { tgUsername: internal.user.tgId ? internal.user.username : null, vkId: internal.user.vkId } : null,

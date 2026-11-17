@@ -2,7 +2,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { adminTargets, adminTopicName } from "../shared/admin-route";
-import { formatAdminNotice, orderRef, orderStatusWord } from "../shared/notify-format";
+import { formatAdminNotice, heldLabel, orderRef, orderStatusWord } from "../shared/notify-format";
 import { escapeHtml, tgEdit, tgMessageId, tgSend } from "../shared/notify";
 import { flagsOf, openFlags, type OrderFlag } from "../shared/order-flags";
 
@@ -63,14 +63,14 @@ async function setWatch(code: string, on: boolean, reason: string | null, actor:
 }
 
 type WatchedOrder = {
-  id: string; wbCode: string | null; amount: number; status: string; heldAt: Date | null; flags: unknown; createdAt: Date;
+  id: string; wbCode: string | null; amount: number; status: string; heldAt: Date | null; heldReason: string | null; flags: unknown; createdAt: Date;
   robloxUsername: string | null;
 };
 
 async function watchedOrders(): Promise<WatchedOrder[]> {
   const rows = await db.wbOrder.findMany({
     where: { flaggedAt: { not: null } },
-    select: { id: true, wbCode: true, amount: true, status: true, heldAt: true, flags: true, createdAt: true, robloxUsername: true },
+    select: { id: true, wbCode: true, amount: true, status: true, heldAt: true, heldReason: true, flags: true, createdAt: true, robloxUsername: true },
     take: 500,
   }) as WatchedOrder[];
   return rows.filter((o) => openFlags(o).some((f) => f.kind === "WATCH"));
@@ -84,7 +84,7 @@ function rosterText(orders: WatchedOrder[], topic: string): string {
   if (orders.length === 0) return `<b>${escapeHtml(topic)} — никого</b>\nПоставить: /watch КОД причина`;
   const lines = orders.map((o) => {
     const reason = watchReason(o);
-    return `• <code>${escapeHtml(o.wbCode ?? "")}</code> · ${o.amount} R$ · ${orderStatusWord(o.status)}${o.heldAt ? " · ❄️ заморожен" : ""}${reason ? ` — ${escapeHtml(reason)}` : ""}`;
+    return `• <code>${escapeHtml(o.wbCode ?? "")}</code> · ${o.amount} R$ · ${orderStatusWord(o.status)}${o.heldAt ? ` · ${heldLabel(o.heldReason, 60)}` : ""}${reason ? ` — ${escapeHtml(reason)}` : ""}`;
   });
   return `<b>${escapeHtml(topic)} · ${orders.length}</b>\n${lines.join("\n")}\n\n<i>Снять: /unwatch КОД</i>`;
 }
@@ -139,7 +139,7 @@ async function sweep(bot: Telegraf): Promise<void> {
       marker: "waiting",
       zone: "ПОДДЕРЖКА",
       title: "под наблюдением — новое",
-      lines: [orderRef({ code: order.wbCode, denomination: order.amount }, [order.heldAt ? "❄️ заморожен" : orderStatusWord(order.status)]), ...lines.map((l) => l.text)],
+      lines: [orderRef({ code: order.wbCode, denomination: order.amount }, [order.heldAt ? heldLabel(order.heldReason) : orderStatusWord(order.status)]), ...lines.map((l) => l.text)],
     });
     await tgSend(group.chatId, text, { parse_mode: "HTML", ...group.extra });
   }

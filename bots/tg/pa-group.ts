@@ -260,7 +260,7 @@ async function findOrders(query: string) {
     },
     orderBy: { createdAt: "desc" },
     take: 10,
-    select: { wbCode: true, amount: true, status: true, createdAt: true, robloxUsername: true, heldAt: true, user: { select: { name: true } } },
+    select: { wbCode: true, amount: true, status: true, createdAt: true, robloxUsername: true, heldAt: true, heldReason: true, user: { select: { name: true } } },
   });
   const dbs = await db.wbMarketplaceOrder.findMany({
     where: { OR: [{ buyerName: { equals: q, mode: "insensitive" } }, { wbOrderId: q }] },
@@ -269,7 +269,7 @@ async function findOrders(query: string) {
     select: { wbOrderId: true, buyerName: true, createdAt: true, cancelledAt: true, wbCode: { select: { code: true } } },
   });
   return {
-    orders: rows.map((r) => ({ code: r.wbCode, robux: r.amount, status: r.heldAt ? "заморожен" : STATUS_RU[r.status] ?? r.status, created: r.createdAt, nick: r.robloxUsername, buyer: r.user?.name })),
+    orders: rows.map((r) => ({ code: r.wbCode, robux: r.amount, status: r.heldAt ? `заморожен: ${r.heldReason ?? "причина не указана"}` : STATUS_RU[r.status] ?? r.status, created: r.createdAt, nick: r.robloxUsername, buyer: r.user?.name })),
     wbByBuyerName: dbs.map((d) => ({ wbOrderId: d.wbOrderId, buyer: d.buyerName, code: d.wbCode?.code ?? null, created: d.createdAt, cancelled: Boolean(d.cancelledAt) })),
   };
 }

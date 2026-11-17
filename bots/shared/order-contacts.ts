@@ -176,7 +176,7 @@ export function hasClues(c: OrderClues): boolean {
 
 const ORDER_SELECT = {
   id: true, wbCode: true, amount: true, status: true, createdAt: true, completedAt: true,
-  heldAt: true, robloxUsername: true, probableNick: true, userId: true, isTest: true,
+  heldAt: true, heldReason: true, robloxUsername: true, probableNick: true, userId: true, isTest: true,
   user: { select: { id: true, tgId: true, vkId: true, name: true, username: true } },
 } as const;
 
@@ -188,6 +188,7 @@ export interface FoundOrder {
   createdAt: Date;
   completedAt: Date | null;
   heldAt: Date | null;
+  heldReason?: string | null;
   robloxUsername: string | null;
   probableNick: string | null;
   userId: string;

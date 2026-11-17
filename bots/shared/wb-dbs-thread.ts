@@ -13,6 +13,7 @@ import {
   type DbsRef,
 } from "./wb-delivery-admin-notify";
 import { mskTime } from "./notify-format";
+import { escapeHtml } from "./notify";
 import { identityLinesFor } from "./buyer-identity";
 
 /**
@@ -337,6 +338,8 @@ type BuyoutState = {
   status: string;
   heldAt: Date | null;
   heldReason: string | null;
+  buyoutErrorCode?: string | null;
+  rejectionReason?: string | null;
   hasGamepass: boolean;
   pendingAt: Date | null;
   completedAt: Date | null;
@@ -348,6 +351,7 @@ async function buyoutStateOf(db: Db, code: string): Promise<BuyoutState | null> 
       where: { wbCode: code },
       select: {
         status: true, heldAt: true, heldReason: true, gamepassUrl: true,
+        buyoutErrorCode: true, rejectionReason: true,
         pendingAt: true, completedAt: true,
         splitGamepasses: { select: { id: true }, take: 1 },
       },
@@ -357,6 +361,8 @@ async function buyoutStateOf(db: Db, code: string): Promise<BuyoutState | null> 
       status: row.status,
       heldAt: row.heldAt,
       heldReason: row.heldReason,
+      buyoutErrorCode: row.buyoutErrorCode,
+      rejectionReason: row.rejectionReason,
       hasGamepass: Boolean(row.gamepassUrl) || row.splitGamepasses.length > 0,
       pendingAt: row.pendingAt,
       completedAt: row.completedAt,
@@ -475,7 +481,7 @@ function buyoutHeadline(buyout: BuyoutState): Pick<DbsCardState, "marker" | "tit
     return {
       marker: "urgent",
       title: "заморожен — не выкупать",
-      next: buyout.heldReason ? `причина: ${buyout.heldReason}` : "разморозить в админке, если причина снята",
+      next: buyout.heldReason ? `причина: ${escapeHtml(buyout.heldReason)}` : "разморозить в админке, если причина снята",
     };
   }
   switch (buyout.status) {
@@ -491,9 +497,16 @@ function buyoutHeadline(buyout: BuyoutState): Pick<DbsCardState, "marker" | "tit
       return { marker: "done", title: "выкуплен", next: "робуксы в Pending у Roblox — ждём отзыв" };
     }
     case "ERROR":
-      return { marker: "urgent", title: "ошибка выкупа", next: "разобрать во вкладке «Заказы»" };
+      return { marker: "urgent", title: "ошибка выкупа", next: buyout.buyoutErrorCode ? `код ошибки ${buyout.buyoutErrorCode} — разобрать во вкладке «Заказы»` : "разобрать во вкладке «Заказы»" };
     case "REJECTED":
-      return { marker: "cancelled", title: "заказ отменён", next: "деньги за карту остаются у WB — сверить с покупателем" };
+      // У ⚫ строку «что дальше» формат не показывает — причина идёт в заголовок.
+      return {
+        marker: "cancelled",
+        title: buyout.rejectionReason && buyout.rejectionReason !== "не указана"
+          ? `заказ отменён: ${escapeHtml(buyout.rejectionReason.slice(0, 90))}`
+          : "заказ отменён",
+        next: "деньги за карту остаются у WB — сверить с покупателем",
+      };
     default:
       return { marker: "progress", title: "код активирован", next: "покупатель проходит инструкцию" };
   }

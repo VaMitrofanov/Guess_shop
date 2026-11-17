@@ -20,6 +20,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
+import { heldLabel } from "../shared/notify-format";
 import { CODE_VIAS } from "../shared/order-contacts";
 import {
   CATEGORY_RU, HANDOFF_TEXT, PA_AI_MODEL, PA_AI_SYSTEM, PaAiDecisionSchema,
@@ -203,7 +204,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
-          wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true,
+          wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true, heldReason: true,
           robloxUsername: true, gamepassUrl: true, isDirectOrder: true,
         },
       })
@@ -232,7 +233,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   if (!raw) return false;
   const d = guardDecision(raw, text);
   const order = orders[0];
-  const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? " · ❄️" : ""}` : "📦 заказов в базе нет";
+  const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason, 60)}` : ""}` : "📦 заказов в базе нет";
   const who = `👤 <b>${escapeHtml(m.fromName)}</b>${m.username ? ` @${escapeHtml(m.username)}` : ""}`;
   const quote = `💬 «${escapeHtml(text.slice(0, 600))}»`;
 

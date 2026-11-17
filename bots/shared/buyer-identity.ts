@@ -257,7 +257,7 @@ export async function buyerProfile(db: Db, userId: string) {
     where: { userId, isTest: false },
     orderBy: { createdAt: "desc" },
     take: 30,
-    select: { wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true, robloxUsername: true, isDirectOrder: true },
+    select: { wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true, heldReason: true, robloxUsername: true, isDirectOrder: true },
   });
   const codes = orders.map((o: { wbCode: string }) => o.wbCode);
   const [wb, risks] = await Promise.all([
@@ -282,8 +282,9 @@ export async function buyerProfile(db: Db, userId: string) {
     since: user.createdAt,
     robloxNicks: [...new Set([user.robloxUsername, ...orders.map((o: { robloxUsername: string | null }) => o.robloxUsername)].filter(Boolean))],
     wbBuyerNames: [...new Set(wb.map((w: { buyerName: string | null }) => w.buyerName).filter(Boolean))],
-    orders: orders.map((o: { wbCode: string; amount: number; status: string; createdAt: Date; completedAt: Date | null; heldAt: Date | null; isDirectOrder: boolean }) => ({
+    orders: orders.map((o: { wbCode: string; amount: number; status: string; createdAt: Date; completedAt: Date | null; heldAt: Date | null; heldReason: string | null; isDirectOrder: boolean }) => ({
       code: o.wbCode, robux: o.amount, status: o.heldAt ? "заморожен" : o.status, created: o.createdAt, bought: o.completedAt,
+      heldReason: o.heldAt ? (o.heldReason?.trim() || "причина не указана") : null,
       source: o.isDirectOrder ? "прямой" : "WB",
     })),
     wbClaims: wb.filter((w: { claimOpenedAt: Date | null }) => w.claimOpenedAt)
@@ -379,7 +380,7 @@ export async function recentBadReviewsWithBuyers(db: Db, limit = 10) {
 }
 
 /** Текст профиля для команды `/who` (обычный текст). */
-type ProfileOrder = { code: string; robux: number; status: string };
+type ProfileOrder = { code: string; robux: number; status: string; heldReason?: string | null };
 type ProfileFootprint = { kind: string; code: string | null; stars: number | null; starsBefore: number | null; text: string | undefined; at: Date };
 type ProfileClaim = { code: string | undefined; reason: string | undefined; refunded: boolean };
 
@@ -389,6 +390,8 @@ export function profileText(p: NonNullable<Awaited<ReturnType<typeof buyerProfil
     p.robloxNicks.length ? `🎮 Ник Roblox: ${p.robloxNicks.join(", ")}` : null,
     p.wbBuyerNames.length ? `🛍 Имя на WB: ${p.wbBuyerNames.join(", ")}` : null,
     `📦 Заказы (${p.orders.length}): ${p.orders.slice(0, 6).map((o: ProfileOrder) => `${o.code} ${o.robux} R$ ${o.status === "COMPLETED" ? "✅" : o.status === "заморожен" ? "❄️" : "⏳"}`).join(" · ")}${p.orders.length > 6 ? " …" : ""}`,
+    // Заморозка без причины читается как «забыли снять» (17.11.2026) — причина строкой.
+    ...p.orders.filter((o: ProfileOrder) => o.heldReason).slice(0, 3).map((o: ProfileOrder) => `❄️ ${o.code} заморожен: ${(o.heldReason ?? "").slice(0, 120)}`),
     ...p.wbFootprint.slice(0, 4).map((f: ProfileFootprint) => `⚠️ ${f.kind === "BAD_REVIEW" ? `отзыв ★${f.stars}` : f.kind === "REVIEW_FIXED" ? `отзыв исправлен ★${f.starsBefore}→★${f.stars}` : f.kind} · ${f.code} · ${f.at.toISOString().slice(0, 10)}${f.text ? ` · «${f.text.slice(0, 80)}»` : ""}`),
     ...p.wbClaims.slice(0, 2).map((c: ProfileClaim) => `↩ заявка на возврат · ${c.code}${c.refunded ? " · деньги вернули" : ""}${c.reason ? ` · «${c.reason.slice(0, 80)}»` : ""}`),
   ];

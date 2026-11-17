@@ -15,6 +15,7 @@
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { escapeHtml } from "../shared/notify";
+import { heldLabel } from "../shared/notify-format";
 import { notifyContactOwner } from "../shared/order-contacts-notify";
 import {
   CONTACT_CB, DECLINE_LABEL, STALE_OFFER_TEXT,
@@ -102,7 +103,7 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
       const o = plan.orders[0];
       await card(bot,
         `🔗 <b>${escapeHtml(tgLabel(m.from))}</b> пишет в поддержку с другого аккаунта и назвал заказ <b>${o.wbCode}</b> (${o.amount} R$).\n` +
-        `Подключить сам бот не смог: ${plan.reason === "held" ? "заказ заморожен" : plan.reason === "revoked" ? "по коду возврат WB" : "у заказа уже 5 аккаунтов"}.\n` +
+        `Подключить сам бот не смог: ${plan.reason === "held" ? heldLabel(o.heldReason) : plan.reason === "revoked" ? "по коду возврат WB" : "у заказа уже 5 аккаунтов"}.\n` +
         (m.text ? `💬 «${escapeHtml(m.text.slice(0, 300))}»` : "📸 по скриншоту"),
       ).catch(() => undefined);
     }

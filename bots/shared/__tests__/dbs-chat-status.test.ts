@@ -56,7 +56,11 @@ describe("увед «покупатель пишет»: что уже ушло �
     });
     expect(inBot({ pendingAt: at("2026-11-15T15:10:00Z") })).toMatchObject({ tone: "work", state: "ждёт выкупа <b>23 ч</b>", lines: [] });
     expect(inBot({ status: "COMPLETED", completedAt: at("2026-11-15T15:10:00Z") })).toMatchObject({ tone: "done", state: "выкуплено 15.11" });
-    expect(inBot({ heldAt: at("2026-11-16T10:00:00Z") })).toMatchObject({ tone: "stop", state: "❄️ заморожен" });
+    expect(inBot({ heldAt: at("2026-11-16T10:00:00Z") })).toMatchObject({ tone: "stop", state: "❄️ заморожен: причина не указана" });
+    // VTJV24S, 17.11.2026: без причины «покупатель пишет» выглядел как забытая заморозка.
+    expect(inBot({ heldAt: at("2026-11-16T10:00:00Z"), heldReason: "Возврат на WB одобрен — деньги уходят покупателю" }))
+      .toMatchObject({ tone: "stop", state: "❄️ заморожен: Возврат на WB одобрен — деньги уходят покупателю" });
+    expect(inBot({ heldAt: at("2026-11-16T10:00:00Z"), heldReason: "<b>x</b>" }).state).toBe("❄️ заморожен: &lt;b&gt;x&lt;/b&gt;");
     expect(inBot({ status: "AWAITING_GAMEPASS", gamepassUrl: null })).toMatchObject({ tone: "work", state: "в боте, нет пасса" });
     expect(buildDbsChatStatus({ ...base, cancelled: true })).toMatchObject({ tone: "closed", state: "отменён на WB" });
   });

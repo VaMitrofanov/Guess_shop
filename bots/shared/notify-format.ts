@@ -140,3 +140,17 @@ export function mskTime(date: Date): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * «❄️ заморожен: причина» — единая строка заморозки для уведомлений (17.11.2026).
+ *
+ * Голое «❄️ заморожен» скрывало главное: VTJV24S пришёл в «покупатель пишет»
+ * с «Всё сделал, проверяйте», а причина — «Возврат на WB одобрен, деньги уходят
+ * покупателю». Без неё заказ выглядит как «забыли разморозить». Причина
+ * экранируется и режется до `max` символов; пустая — «причина не указана».
+ */
+export function heldLabel(reason: string | null | undefined, max = 90): string {
+  const why = (reason ?? "").replace(/\s+/g, " ").trim();
+  const short = why.length > max ? `${why.slice(0, max - 1).trimEnd()}…` : why;
+  return `❄️ заморожен: ${short ? escapeHtml(short) : "причина не указана"}`;
+}
