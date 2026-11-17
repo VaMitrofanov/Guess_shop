@@ -190,6 +190,12 @@ async function fetchImage(url: string, attempt = 1): Promise<Buffer | null> {
 export async function ocrImageText(url: string, enough: (text: string) => boolean = () => true): Promise<string | null> {
   const img = await fetchImage(url);
   if (!img) return null;
+  return ocrImageBufferText(img, enough);
+}
+
+/** То же, но картинка уже в памяти (скачана через аккаунт поддержки). */
+export async function ocrImageBufferText(img: Buffer, enough: (text: string) => boolean = () => true): Promise<string | null> {
+  if (!img.length || img.length > MAX_IMAGE_BYTES) return null;
   let all = "";
   for (const psm of [6, 11]) {
     const text = await ocrImage(img, psm);

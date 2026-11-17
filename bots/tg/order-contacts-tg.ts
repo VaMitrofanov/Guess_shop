@@ -25,6 +25,7 @@ import {
 } from "../shared/order-contacts";
 import { card } from "./pa-ai";
 import { ocrImageText } from "../shared/pending-ocr";
+import { paRecentCustomerText, pinPaOrdersNow } from "./pa-desk-worker";
 
 const BOT_URL = "https://t.me/RobloxBankBot?start=order";
 
@@ -56,14 +57,20 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
   connId: string; chatId: number; messageId: number; from: Who; text: string;
   /** file_id фото, если прислали скриншот (17.11.2026: код часто только на скрине чата WB). */
   photoFileId?: string | null;
+  /** Запустил оператор командой `/привязать`: улики уже собраны, отчёт — в беседу админов. */
+  operator?: { clues: ReturnType<typeof extractOrderClues> };
 }): Promise<boolean> {
-  let clues = m.text ? extractOrderClues(m.text) : { codes: [], passIds: [], nicks: [] };
+  let clues = m.operator?.clues ?? (m.text ? extractOrderClues(m.text) : { codes: [], passIds: [], nicks: [] });
   const sender = await db.user.findUnique({ where: { tgId: String(m.from.id) }, select: { id: true } });
+  const miss = async (why: string) => {
+    if (m.operator) await card(bot, `🔗 /привязать в чате <b>${escapeHtml(tgLabel(m.from))}</b>: ${why}.`).catch(() => undefined);
+    return false;
+  };
 
   // 📸 Улик в тексте нет, но есть скриншот — читаем его Tesseract'ом. Только
   // для тех, у кого своих заказов нет: свои скрины (Pending, пасс) разбирает ИИ,
   // и держать его ответ ради OCR незачем.
-  if (!hasClues(clues) && m.photoFileId) {
+  if (!m.operator && !hasClues(clues) && m.photoFileId) {
     const own = sender ? await db.wbOrder.count({ where: { userId: sender.id } }) : 0;
     if (own > 0) return false;
     const url = await bot.telegram.getFileLink(m.photoFileId).then(String).catch(() => null);
@@ -72,9 +79,9 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
     console.log(`[order-contacts] скрин: ${text ? `${text.length} симв., кандидатов кода ${clues.codes.length}` : "не прочитался"}`);
   }
 
-  if (!hasClues(clues)) return false;
+  if (!hasClues(clues)) return miss("в переписке нет ни кода, ни ссылки, ни пасса, ни ника");
   const orders = await findOrdersByClues(db, clues);
-  if (!orders.length) return false;
+  if (!orders.length) return miss("по тому, что прислал клиент, заказ не найден");
   const plan = await planContactOffer(db, { senderUserId: sender?.id ?? null, orders });
 
   const send = (text: string, keyboard?: unknown[][]) => api("sendMessage", {
@@ -84,7 +91,9 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
   });
   const read = () => api("readBusinessMessage", { business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId }).catch(() => undefined);
 
-  if (plan.kind === "none" || plan.kind === "known" || plan.kind === "old") return false;
+  if (plan.kind === "none") return miss("заказ не найден");
+  if (plan.kind === "known") return miss(`заказ ${orders[0].wbCode} уже привязан к этому аккаунту`);
+  if (plan.kind === "old") return miss(`заказ ${orders[0].wbCode} выкуплен больше месяца назад — подключать незачем`);
 
   if (plan.kind === "blocked") {
     await send(blockedText(plan.reason));
@@ -94,7 +103,7 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
       await card(bot,
         `🔗 <b>${escapeHtml(tgLabel(m.from))}</b> пишет в поддержку с другого аккаунта и назвал заказ <b>${o.wbCode}</b> (${o.amount} R$).\n` +
         `Подключить сам бот не смог: ${plan.reason === "held" ? "заказ заморожен" : plan.reason === "revoked" ? "по коду возврат WB" : "у заказа уже 5 аккаунтов"}.\n` +
-        `💬 «${escapeHtml(m.text.slice(0, 300))}»`,
+        (m.text ? `💬 «${escapeHtml(m.text.slice(0, 300))}»` : "📸 по скриншоту"),
       ).catch(() => undefined);
     }
     console.log(`[order-contacts] поддержка: не подключаем (${plan.reason})`);
@@ -219,10 +228,49 @@ export function registerOrderContactActions(bot: Telegraf): void {
       if (res.created) {
         await notifyContactOwner(res.order.user, res.order, res.contactId, { platform: "TG", label: from.first_name || label });
       }
+      // 📌 Закреп заказа в чате поддержки — сразу, как у своих заказов (17.11.2026).
+      // Только по коду: в закрепе виден код, а по нику его не показываем.
+      if (connId && res.order.clue === "code") {
+        void pinPaOrdersNow(tgId).catch((e) => console.warn("[pa-pin] сразу после привязки:", e instanceof Error ? e.message : e));
+      }
       console.log(`[order-contacts] подключён TG-аккаунт к заказу ${res.order.wbCode} (${connId ? "поддержка" : "бот"}, ${offer.clue})`);
     } catch (err) {
       console.warn("[order-contacts] кнопка упала:", err instanceof Error ? err.message : err);
       await reply("Не получилось — менеджер посмотрит и ответит здесь.").catch(() => undefined);
     }
+  });
+}
+
+/* ── /привязать — оператор в чате с клиентом (17.11.2026) ──────────────────
+   Оператор пишет в чате с клиентом `/привязать` (можно с кодом/ником после
+   пробела). Бот удаляет команду и задаёт клиенту тот же вопрос с кнопками. Без
+   аргумента — сам читает последние 30 сообщений клиента и его свежий скриншот
+   (через аккаунт поддержки, `paRecentCustomerText`). Итог, если вопрос не ушёл, —
+   строкой в тему поддержки беседы админов.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export const OPERATOR_LINK_RE = /^\/(?:привязать|link)(?:@\w+)?(?:\s+([\s\S]*))?$/i;
+
+export async function operatorLinkCommand(bot: Telegraf, api: Api, m: {
+  connId: string; chatId: number; messageId: number; customer: Who; arg: string;
+}): Promise<void> {
+  await api("deleteBusinessMessages", { business_connection_id: m.connId, message_ids: [m.messageId] })
+    .catch((e: unknown) => console.warn("[order-contacts] /привязать не удалилась:", e instanceof Error ? e.message : e));
+  let clues = extractOrderClues(m.arg);
+  if (!m.arg.trim()) {
+    const recent = await paRecentCustomerText(String(m.customer.id)).catch(() => ({ text: "", ocr: null }));
+    const fromText = extractOrderClues(recent.text);
+    // Ник из «одного слова» работает построчно — склейка всех строк его теряет.
+    const perLine = recent.text.split("\n").map(extractOrderClues);
+    const fromOcr = recent.ocr ? cluesFromOcr(recent.ocr) : { codes: [], passIds: [], nicks: [] };
+    clues = {
+      codes: [...new Set([...fromText.codes, ...perLine.flatMap((c) => c.codes), ...fromOcr.codes])],
+      passIds: [...new Set([...fromText.passIds, ...perLine.flatMap((c) => c.passIds), ...fromOcr.passIds])],
+      nicks: [...new Set(perLine.flatMap((c) => c.nicks))],
+    };
+    console.log(`[order-contacts] /привязать: прочитано ${recent.text.length} симв.${recent.ocr ? " + скрин" : ""}, кодов-кандидатов ${clues.codes.length}, ников ${clues.nicks.length}`);
+  }
+  await offerFromSupport(bot, api, {
+    connId: m.connId, chatId: m.chatId, messageId: m.messageId, from: m.customer, text: m.arg, operator: { clues },
   });
 }

@@ -423,6 +423,7 @@ async function sendBuyoutCard(
   order: ChatOrderRow,
   gamepassUrl: string,
   creatorName: string,
+  via: true | "support" = true,
 ): Promise<void> {
   const [user, previousOrderCount] = await Promise.all([
     db.user.findUnique({
@@ -453,6 +454,96 @@ async function sendBuyoutCard(
     createdAt: order.createdAt,
     previousOrderCount,
     creatorName,
-    viaChat: true,
+    viaChat: via,
   });
+}
+
+/* ── Пасс, присланный в поддержку @RobloxBank_PA (17.11.2026) ───────────────
+   Владелец: «нужно сделать автоматическую привязку id gamepass, если её в
+   саппорт кинут, чтобы вручную не привязывать». Правила те же, что для чата
+   WB (проверка у Roblox, цена ±2, ник = владелец пасса, заморозка), но заказ
+   выбирается из заказов САМОГО ОТПРАВИТЕЛЯ (свои + подключённые), ждущих пасс.
+   Несколько таких заказов — решает цена пасса; не решает — к оператору.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type SupportPassOutcome =
+  | { kind: "skipped"; why: "no_orders" | "not_a_pass" | "roblox_down" | "ambiguous" | "race" }
+  | { kind: "attached"; order: ChatOrderRow; gamepassId: string; price: number; nick: string }
+  /** `toBuyer` — причину можно сказать покупателю (цена, не в продаже); иначе только оператору. */
+  | { kind: "rejected"; order: ChatOrderRow; gamepassId: string; reason: string; expectedPrice: number; toBuyer: boolean };
+
+export async function attachGamepassFromSupport(
+  db: ChatGamepassDb & { wbOrder: ChatGamepassDb["wbOrder"] & { findMany: (args: Args) => Promise<ChatOrderRow[]> } },
+  input: { orderIds: string[]; gamepassId: string },
+): Promise<SupportPassOutcome> {
+  if (!input.orderIds.length) return { kind: "skipped", why: "no_orders" };
+  const rows = await db.wbOrder.findMany({
+    where: { id: { in: input.orderIds }, status: "AWAITING_GAMEPASS", heldAt: null, isTest: false },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true, amount: true, status: true, platform: true, orderSource: true,
+      wbCode: true, robloxUsername: true, gamepassUrl: true, userId: true,
+      createdAt: true, heldAt: true,
+    },
+  }).catch(() => [] as ChatOrderRow[]);
+  const open: ChatOrderRow[] = [];
+  for (const o of rows) {
+    const hold = await db.orderHold.findUnique({ where: { wbCode: o.wbCode }, select: { releasedAt: true } }).catch(() => null);
+    if (!hold || hold.releasedAt) open.push(o);
+  }
+  if (!open.length) return { kind: "skipped", why: "no_orders" };
+
+  const details = await getGamepassDetails(input.gamepassId).catch(() => null);
+  if (!details) return { kind: "skipped", why: "not_a_pass" };
+  if (details.validationSkipped) return { kind: "skipped", why: "roblox_down" };
+
+  // Какой заказ: тот, чьей цене пасс соответствует. Один заказ — он и есть.
+  const fits = open.filter((o) => Math.abs(details.price - Math.ceil(o.amount / 0.7)) <= PRICE_TOLERANCE);
+  if (fits.length > 1) return { kind: "skipped", why: "ambiguous" };
+  const order = fits[0] ?? (open.length === 1 ? open[0] : null);
+  if (!order) {
+    const prices = open.map((o) => Math.ceil(o.amount / 0.7));
+    return {
+      kind: "rejected", order: open[0], gamepassId: input.gamepassId, toBuyer: true,
+      reason: `цена ${details.price} R$ не подходит ни к одному заказу (нужно ${prices.join(" или ")} R$)`,
+      expectedPrice: prices[0],
+    };
+  }
+
+  const expectedPrice = Math.ceil(order.amount / 0.7);
+  const verdict = checkChatPass(details, expectedPrice);
+  if (!verdict.ok) {
+    return { kind: "rejected", order, gamepassId: input.gamepassId, reason: verdict.reason, expectedPrice, toBuyer: verdict.reason !== "Roblox не отдал владельца пасса" };
+  }
+  const creator = verdict.creator;
+  if (order.robloxUsername && order.robloxUsername.toLowerCase() !== creator.toLowerCase()) {
+    return {
+      kind: "rejected", order, gamepassId: input.gamepassId, expectedPrice, toBuyer: false,
+      reason: `пасс принадлежит ${creator}, а в заказе ник ${order.robloxUsername}`,
+    };
+  }
+  const busy = await db.wbOrder.count({ where: { gamepassId: input.gamepassId, status: { in: LIVE_ORDER_STATUSES }, id: { not: order.id } } }).catch(() => 0);
+  if (busy > 0) {
+    return { kind: "rejected", order, gamepassId: input.gamepassId, expectedPrice, toBuyer: false, reason: "этот пасс уже стоит в другом живом заказе" };
+  }
+
+  const gamepassUrl = `https://www.roblox.com/game-pass/${input.gamepassId}`;
+  const updated = await db.wbOrder.updateMany({
+    where: { id: order.id, status: "AWAITING_GAMEPASS" },
+    data: { gamepassUrl, gamepassId: input.gamepassId, robloxUsername: creator, status: "PENDING", pendingAt: new Date(), rejectionReason: null },
+  }).catch(() => ({ count: 0 }));
+  if (updated.count !== 1) return { kind: "skipped", why: "race" };
+
+  await db.wbCode.updateMany({
+    where: { code: { equals: order.wbCode, mode: "insensitive" }, isUsed: false },
+    data: { isUsed: true, usedAt: new Date(), status: "CLAIMED" },
+  }).catch(() => {});
+  void auditGamepassSubmitted(db as unknown as OrderAuditClient, {
+    gamepassId: input.gamepassId, via: "pa-support", orderId: order.id, wbCode: order.wbCode,
+    creatorName: creator, price: details.price,
+  });
+  await sendBuyoutCard(db, order, gamepassUrl, creator, "support").catch((err: unknown) => {
+    console.warn("[pa-gamepass] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
+  });
+  return { kind: "attached", order: { ...order, robloxUsername: creator, gamepassUrl }, gamepassId: input.gamepassId, price: details.price, nick: creator };
 }

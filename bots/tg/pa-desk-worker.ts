@@ -29,6 +29,8 @@ import { DESK_FOLDERS, badReviewMark, deskDecision, nextContactName, type DeskFo
 import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
 import { pinText, pinWorthCreating, type PinOrder } from "../shared/pa-pin";
 import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type ResponseStats } from "./pa-response-stats";
+import { CODE_VIAS } from "../shared/order-contacts";
+import { ocrImageBufferText } from "../shared/pending-ocr";
 
 const WINDOW_DAYS = 30;
 /** «Новые» — только те, кто писал за неделю: старый незнакомец уже не новый. */
@@ -131,12 +133,7 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
   const ids = dialogs.map((d) => String((d.entity as Api.User).id));
   const users = await db.user.findMany({ where: { tgId: { in: ids } }, select: { id: true, tgId: true, name: true } });
   const userByTg = new Map(users.map((u) => [u.tgId as string, u]));
-  const orders = users.length
-    ? await db.wbOrder.findMany({
-        where: { userId: { in: users.map((u) => u.id) } },
-        select: { userId: true, wbCode: true, amount: true, status: true, createdAt: true, heldAt: true, flags: true, completedAt: true, robloxUsername: true },
-      })
-    : [];
+  const orders = users.length ? await chatOrders(users.map((u) => u.id)) : [];
   const ordersBy = new Map<string, DeskOrder[]>();
   const pinOrdersBy = new Map<string, PinOrder[]>();
   for (const o of orders) {
@@ -242,6 +239,65 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
 }
 
 /* ── 📌 Закреп заказа в диалоге (15.11.2026) ─────────────────────────────── */
+
+/**
+ * Заказы для меток и закрепа: свои + подключённые с другого аккаунта по коду
+ * (`OrderContact`, 17.11.2026). Подключённые по нику/пассу не берём: в закрепе
+ * виден код заказа. Подключённый заказ приходит строкой с `userId` контакта.
+ */
+async function chatOrders(userIds: string[]) {
+  const select = { userId: true, wbCode: true, amount: true, status: true, createdAt: true, heldAt: true, flags: true, completedAt: true, robloxUsername: true } as const;
+  const own = await db.wbOrder.findMany({ where: { userId: { in: userIds } }, select });
+  const links = await db.orderContact.findMany({
+    where: { userId: { in: userIds }, removedAt: null, via: { in: CODE_VIAS } },
+    select: { userId: true, order: { select } },
+  }).catch(() => [] as Array<{ userId: string; order: typeof own[number] }>);
+  return [...own, ...links.map((l) => ({ ...l.order, userId: l.userId }))];
+}
+
+/**
+ * Закреп заказа в одном чате — сразу, не дожидаясь прохода (17.11.2026): аккаунт
+ * только что подключили к заказу кнопкой в поддержке. Те же правила и та же
+ * запись в `pa-pin`, что у обычного прохода.
+ */
+export async function pinPaOrdersNow(tgId: string): Promise<void> {
+  const mode = paDeskMode();
+  if (mode === "off") return;
+  const tg = await getClient();
+  const dialogs = (await tg.getDialogs({ limit: 200 })).filter((d: Dialog) =>
+    d.isUser && d.entity instanceof Api.User && String(d.entity.id) === tgId);
+  if (!dialogs.length) return;
+  const user = await db.user.findUnique({ where: { tgId }, select: { id: true } });
+  if (!user) return;
+  const pins: PinOrder[] = (await chatOrders([user.id])).map((o) => ({
+    wbCode: o.wbCode, amount: o.amount, status: o.status, createdAt: o.createdAt, completedAt: o.completedAt, heldAt: o.heldAt, robloxUsername: o.robloxUsername,
+  }));
+  const result = { pinsCreated: 0, pinsUpdated: 0 } as PaDeskResult;
+  await syncOrderPins(tg, dialogs, () => pins, mode, result);
+}
+
+/**
+ * Последние сообщения клиента в чате поддержки — для `/привязать` без кода
+ * (17.11.2026): оператор не перепечатывает код, бот сам читает переписку.
+ * Текст — последние 30 сообщений клиента; картинка — самая свежая его фотография,
+ * прочитанная Tesseract'ом.
+ */
+export async function paRecentCustomerText(tgId: string): Promise<{ text: string; ocr: string | null }> {
+  if (paDeskMode() === "off") return { text: "", ocr: null };
+  const tg = await getClient();
+  const dialog = (await tg.getDialogs({ limit: 200 })).find((d: Dialog) =>
+    d.isUser && d.entity instanceof Api.User && String(d.entity.id) === tgId);
+  if (!dialog) return { text: "", ocr: null };
+  const msgs = (await tg.getMessages(dialog.entity as Api.User, { limit: 30 })).filter((m) => !m.out);
+  const text = msgs.map((m) => m.message ?? "").filter(Boolean).reverse().join("\n");
+  const photo = msgs.find((m) => m.photo);
+  let ocr: string | null = null;
+  if (photo) {
+    const buf = await tg.downloadMedia(photo, {}).catch(() => null);
+    if (buf && Buffer.isBuffer(buf)) ocr = await ocrImageBufferText(buf);
+  }
+  return { text, ocr };
+}
 
 const PIN_STREAM = "pa-pin";
 /** Новых закрепов за проход: каждый — сообщение клиенту от аккаунта, не спамим. */

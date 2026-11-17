@@ -875,8 +875,9 @@ interface OrderCardPayload {
   replacedGamepassUrl?: string;
   /** Пасс(ы) создал наш бот по Open Cloud-ключу покупателя — цену и «в продаже» выставили мы. */
   viaKey?:             boolean;
-  /** Покупатель прислал пасс в чат Wildberries, автоматика подставила его сама. */
-  viaChat?:            boolean;
+  /** Покупатель прислал пасс в чат Wildberries (`true`) или в поддержку @RobloxBank_PA
+   *  (`"support"`, 17.11.2026), автоматика подставила его сама. */
+  viaChat?:            boolean | "support";
   /** Заказ закрывается несколькими пассами: каждую часть покупает ОТДЕЛЬНЫЙ донор. */
   splitParts?:         { gamepassId: string; amount: number }[];
 }
@@ -955,9 +956,11 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // Пасс приехал из переписки WB, а не из бота и не с сайта: покупатель туда
   // его и прислал, а мы разобрали и подставили. Плашка идёт вместе с прочими
   // исключениями — она меняет то, как читать ник и цену ниже.
-  const viaChatLine = order.viaChat
-    ? `📨 <b>ПАСС ИЗ ЧАТА WB</b> — прислан покупателем в переписку, подставлен автоматически\n`
-    : "";
+  const viaChatLine = order.viaChat === "support"
+    ? `📨 <b>ПАСС ИЗ ПОДДЕРЖКИ</b> — прислан в @RobloxBank_PA, подставлен автоматически\n`
+    : order.viaChat
+      ? `📨 <b>ПАСС ИЗ ЧАТА WB</b> — прислан покупателем в переписку, подставлен автоматически\n`
+      : "";
   // Разбивка: у каждой части свой номинал, и покупать их надо с РАЗНЫХ доноров
   // (повтор одного пасса с того же аккаунта вернёт AlreadyOwned).
   const parts = order.splitParts ?? [];

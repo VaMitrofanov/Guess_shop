@@ -24,7 +24,8 @@ import { registerWbReply } from "./wb-reply";
 import { registerCodesIssueReply } from "./codes-issue-reply";
 import { registerWbMorningDigest } from "./wb-morning-digest";
 import { registerNoticeStatsReport } from "./notice-stats-report";
-import { offerFromSupport, registerOrderContactActions } from "./order-contacts-tg";
+import { OPERATOR_LINK_RE, offerFromSupport, operatorLinkCommand, registerOrderContactActions } from "./order-contacts-tg";
+import { attachPassFromSupport } from "./pa-gamepass";
 import { CODE_VIAS } from "../shared/order-contacts";
 
 const OPERATOR_QUIET_MS = 30 * 60_000;
@@ -37,7 +38,7 @@ const ownerOf = new Map<string, number>();
 interface BusinessMessage {
   business_connection_id: string;
   message_id: number;
-  chat: { id: number };
+  chat: { id: number; first_name?: string; last_name?: string; username?: string };
   from?: { id: number; is_bot?: boolean; first_name?: string; last_name?: string; username?: string };
   text?: string;
   caption?: string;
@@ -109,6 +110,17 @@ export function registerPaBusiness(bot: Telegraf): void {
       const fromId = msg.from?.id ?? 0;
       // Пишет сам аккаунт (оператор) или бот от его имени — это не вопрос.
       if (msg.sender_business_bot || (owner && fromId === owner)) {
+        // 🔗 `/привязать [код|ник]` — оператор просит бота подключить клиента к
+        // заказу (17.11.2026). Команду бот удаляет, клиенту уходит вопрос с кнопками.
+        const linkCmd = !msg.sender_business_bot ? (msg.text ?? "").trim().match(OPERATOR_LINK_RE) : null;
+        if (linkCmd) {
+          await operatorLinkCommand(bot, api, {
+            connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
+            customer: { id: msg.chat.id, first_name: msg.chat.first_name, last_name: msg.chat.last_name, username: msg.chat.username },
+            arg: linkCmd[1] ?? "",
+          }).catch((e) => console.warn("[order-contacts] /привязать:", e instanceof Error ? e.message : e));
+          return;
+        }
         // 📌 Закреп заказа ставит воркер от имени аккаунта — это не живой ответ оператора.
         const isOrderPin = /^📌 Ваш(и)? заказ/.test(msg.text ?? "");
         if (!msg.sender_business_bot && !isOrderPin) {
@@ -128,6 +140,20 @@ export function registerPaBusiness(bot: Telegraf): void {
       const photoFileId = Array.isArray(msg.photo) && msg.photo.length
         ? (msg.photo[msg.photo.length - 1] as { file_id?: string }).file_id ?? null
         : null;
+      // 🎟 Пасс в поддержку → сам в заказ, если заказ ждёт пасс (17.11.2026).
+      if (text) {
+        const attached = await attachPassFromSupport(bot, api, {
+          connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
+          fromId, fromName: [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "Покупатель", text,
+        }).catch((error) => {
+          console.warn(`[pa-gamepass] ${error instanceof Error ? error.message : error}`);
+          return false;
+        });
+        if (attached) {
+          rememberTurn(msg.chat.id, "user", text);
+          return;
+        }
+      }
       if (text || photoFileId) {
         const offered = await offerFromSupport(bot, api, {
           connId: msg.business_connection_id, chatId: msg.chat.id, messageId: msg.message_id,
