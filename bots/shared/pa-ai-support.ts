@@ -139,12 +139,14 @@ export function customerContext(input: {
   orders: PaAiOrder[];
   /** След на WB по его заказам: отзывы, заявки на возврат (`buyer-identity`). */
   wbNotes?: string[];
+  /** Покупки кодов Robux на сайте — готовые строки (`codeOrderContextLine`), свои и подключённые. */
+  codeOrders?: string[];
   now?: Date;
 }): string {
   const now = input.now ?? new Date();
   if (!input.known) return `ДАННЫЕ ПОКУПАТЕЛЯ: в нашей базе этого Telegram-аккаунта нет (заказов не найдено). Сейчас ${fmt(now)}.`;
   const lines = [`ДАННЫЕ ПОКУПАТЕЛЯ (из нашей базы; сейчас ${fmt(now)}):`, `Имя: ${input.name ?? "—"}`];
-  if (input.orders.length === 0) lines.push("Заказов нет.");
+  if (input.orders.length === 0 && !input.codeOrders?.length) lines.push("Заказов нет.");
   for (const o of input.orders.slice(0, 5)) {
     const days = o.completedAt ? Math.floor((now.getTime() - o.completedAt.getTime()) / 86_400_000) : null;
     lines.push([
@@ -156,6 +158,7 @@ export function customerContext(input: {
       o.isDirectOrder ? "прямой заказ" : "заказ с Wildberries",
     ].filter(Boolean).join("; "));
   }
+  for (const c of (input.codeOrders ?? []).slice(0, 3)) lines.push(c);
   if (input.wbNotes?.length) {
     lines.push("На Wildberries (по его заказам; не пересказывай дословно, учитывай тон — если был плохой отзыв или заявка на возврат, будь особенно внимателен и при любой проблеме — escalate):");
     for (const n of input.wbNotes.slice(0, 5)) lines.push(`• ${n}`);

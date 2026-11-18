@@ -119,7 +119,7 @@ describe("кнопки", () => {
   });
   it("«да» засчитывается только для предложенного этому аккаунту заказа", () => {
     rememberOffer(offerKey("TG", 42), [base()]);
-    expect(takeOffer(offerKey("TG", 42), "ord_aaaaaaaaaaaa")).toEqual({ clue: "code", evidence: "9SQJ2WP" });
+    expect(takeOffer(offerKey("TG", 42), "ord_aaaaaaaaaaaa")).toEqual({ clue: "code", evidence: "9SQJ2WP", kind: "wb" });
     expect(takeOffer(offerKey("TG", 43), "ord_aaaaaaaaaaaa")).toBeNull();
     expect(takeOffer(offerKey("TG", 42), "ord_zzzzzzzzzzzz")).toBeNull();
   });

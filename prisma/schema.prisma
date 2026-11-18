@@ -87,6 +87,7 @@ model User {
   wbOrders                WbOrder[]
   /// Чужие заказы, к которым этот аккаунт подключён (`OrderContact`, 17.11.2026).
   orderContacts           OrderContact[]
+  codeOrderContacts       CodeOrderContact[]
   directIntents           DirectIntent[]
   identities              UserIdentity[]
   bonusLedgerEntries      BonusLedger[]
@@ -1478,43 +1479,43 @@ enum ActivationCodeStatus {
 }
 
 model CodeOrder {
-  id                 String           @id @default(cuid())
+  id                 String             @id @default(cuid())
   /// Номер заказа для покупателя и поддержки: `CODE-XXXXXXXX`.
-  publicId           String           @unique
+  publicId           String             @unique
   denomination       Int
   pricingVersion     String
   baseAmountKopecks  Int
-  discountPercent    Int              @default(0)
-  discountKopecks    Int              @default(0)
+  discountPercent    Int                @default(0)
+  discountKopecks    Int                @default(0)
   finalAmountKopecks Int
   creatorUserId      String?
-  creator            User?            @relation(fields: [creatorUserId], references: [id], onDelete: Restrict)
+  creator            User?              @relation(fields: [creatorUserId], references: [id], onDelete: Restrict)
   deliveryMode       CodeDeliveryMode
   /// Адрес получения кода. У гостя обязателен; email для чека хранится в платеже.
   recipientEmail     String?
   /// sha256 токена платёжной ссылки. Сам токен в базе не лежит.
-  payTokenHash       String           @unique
-  status             CodeOrderStatus  @default(AWAITING_PAYMENT)
+  payTokenHash       String             @unique
+  status             CodeOrderStatus    @default(AWAITING_PAYMENT)
   /// SELF — оплачивает создатель, SHARE — ссылка ушла другому человеку.
   createdVia         String
   offerExpiresAt     DateTime
   termsAcceptedAt    DateTime?
   termsVersion       String?
-  idempotencyKey     String           @unique
-  activationCodeId   String?          @unique
-  activationCode     ActivationCode?  @relation(fields: [activationCodeId], references: [id])
+  idempotencyKey     String             @unique
+  activationCodeId   String?            @unique
+  activationCode     ActivationCode?    @relation(fields: [activationCodeId], references: [id])
   paidAt             DateTime?
   issuedAt           DateTime?
   revealedAt         DateTime?
   refundedAt         DateTime?
   emailSentAt        DateTime?
-  emailAttempts      Int              @default(0)
+  emailAttempts      Int                @default(0)
   emailLastError     String?
   /// Почему заказу нужен человек (нет кода после оплаты и т.п.).
   attentionReason    String?
   /// Где оформлен заказ: SITE | TG | VK. У TG/VK код дополнительно приходит
   /// сообщением в чат бота (`src/lib/codes/chat-notify.ts`).
-  channel            String           @default("SITE")
+  channel            String             @default("SITE")
   chatDeliveredAt    DateTime?
   /// 🎁 Подарок открыткой: тема BIRTHDAY | NEW_YEAR | JUST, кому, от кого,
   /// пожелание (≤140, без ссылок), когда отправить. Код в письме не виден —
@@ -1525,17 +1526,18 @@ model CodeOrder {
   giftMessage        String?
   giftSendAt         DateTime?
   giftSentAt         DateTime?
-  giftOpenTokenHash  String?          @unique
+  giftOpenTokenHash  String?            @unique
   giftOpenedAt       DateTime?
   /// Оценка «Всё прошло нормально?» с экрана после оплаты, 1–5.
   rating             Int?
   ratedAt            DateTime?
   /// Напоминание о неоплаченном заказе ушло (одно на заказ).
   payReminderSentAt  DateTime?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
   payments           CodePayment[]
   events             CodeOrderEvent[]
+  contacts           CodeOrderContact[]
 
   @@index([creatorUserId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
@@ -1659,5 +1661,26 @@ model OrderContact {
   removedBy String?
 
   @@unique([orderId, userId])
+  @@index([userId])
+}
+
+/// Дополнительные аккаунты заказа кода Robux (18.11.2026). Код купили на сайте
+/// через ВК, а пишут в поддержку из Telegram — без этой связи закреп и ИИ
+/// видели «заказов нет». Подключённый видит только статус: сам код ему
+/// не показываем никогда (он у владельца в кабинете/письме).
+model CodeOrderContact {
+  id          String    @id @default(cuid())
+  codeOrderId String
+  codeOrder   CodeOrder @relation(fields: [codeOrderId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// support_code — прислал номер CODE-…; support_name — совпало имя профиля; admin.
+  via         String
+  evidence    String?
+  createdAt   DateTime  @default(now())
+  removedAt   DateTime?
+  removedBy   String?
+
+  @@unique([codeOrderId, userId])
   @@index([userId])
 }

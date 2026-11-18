@@ -362,12 +362,19 @@ async function chatOrders(userIds: string[]) {
  * номера не видит вовсе (`pa-pin.ts`).
  */
 async function codeChatOrders(userIds: string[]) {
-  const rows = await db.codeOrder.findMany({
-    where: { creatorUserId: { in: userIds }, status: { in: ["PAID", "ISSUED"] } },
-    select: { creatorUserId: true, publicId: true, denomination: true, status: true, createdAt: true, issuedAt: true },
+  const select = { creatorUserId: true, publicId: true, denomination: true, status: true, createdAt: true, issuedAt: true } as const;
+  const own = await db.codeOrder.findMany({
+    where: { creatorUserId: { in: userIds }, status: { in: ["PAID", "ISSUED"] }, refundedAt: null },
+    select,
   }).catch(() => []);
+  // + подключённые из поддержки (18.11.2026: купила на сайте через ВК, пишет из Telegram).
+  const linked = await db.codeOrderContact.findMany({
+    where: { userId: { in: userIds }, removedAt: null, codeOrder: { status: { in: ["PAID", "ISSUED"] }, refundedAt: null } },
+    select: { userId: true, codeOrder: { select } },
+  }).catch(() => []);
+  const rows = [...own.map((o) => ({ ...o, userId: o.creatorUserId as string })), ...linked.map((l) => ({ ...l.codeOrder, userId: l.userId }))];
   return rows.map((o) => ({
-    userId: o.creatorUserId as string,
+    userId: o.userId,
     wbCode: o.publicId.replace(/^CODE-/, ""),
     amount: o.denomination,
     status: o.status === "ISSUED" ? CODE_PIN_STATUS.ISSUED : CODE_PIN_STATUS.PAID,

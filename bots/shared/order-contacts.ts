@@ -47,7 +47,7 @@ export const CONTACT_EVENT = {
 } as const;
 
 export type ContactVia = "support_code" | "support_nick" | "support_pass" | "bot_code" | "admin";
-type ClueKind = "code" | "pass" | "nick";
+type ClueKind = "code" | "pass" | "nick" | "name";
 
 /** По какой улике подключён — от этого зависит, можно ли называть ему код. */
 export function clueOfVia(via: string): ClueKind {
@@ -68,6 +68,8 @@ export interface OrderClues {
   codes: string[];
   passIds: string[];
   nicks: string[];
+  /** Номера заказов кодов Robux без `CODE-` (18.11.2026) — ищутся отдельно, `findCodeOrders`. */
+  codeOrders?: string[];
 }
 
 const CODE_IN_LINK = /(?:\/wb\/|[?&]code=)([A-Za-z0-9]{7})(?![A-Za-z0-9])/g;
@@ -93,7 +95,7 @@ export function extractOrderClues(raw: string): OrderClues {
   const codes = new Set<string>();
   const passIds = new Set<string>();
   const nicks = new Set<string>();
-  if (!text) return { codes: [], passIds: [], nicks: [] };
+  if (!text) return { codes: [], passIds: [], nicks: [], codeOrders: [] };
 
   for (const m of text.matchAll(CODE_IN_LINK)) codes.add(m[1].toUpperCase());
   for (const m of text.matchAll(PASS_IN_LINK)) passIds.add(m[1]);
@@ -114,7 +116,7 @@ export function extractOrderClues(raw: string): OrderClues {
     const w = words[0].replace(/^@/, "");
     if (NICK_TOKEN.test(w) && !codes.has(w.toUpperCase()) && !NOT_A_NICK.has(w.toLowerCase())) nicks.add(w);
   }
-  return { codes: [...codes], passIds: [...passIds], nicks: [...nicks] };
+  return { codes: [...codes], passIds: [...passIds], nicks: [...nicks], codeOrders: extractCodeOrderIds(text) };
 }
 
 /* ── 1б. Улики со скриншота (Tesseract) ───────────────────────────────────
@@ -160,12 +162,12 @@ export function cluesFromOcr(text: string): OrderClues {
     }
   }
   const passIds = [...new Set([...src.matchAll(/game-pass(?:es)?\/(\d{5,15})/gi)].map((m) => m[1]))];
-  return { codes: [...codes], passIds, nicks: [] };
+  return { codes: [...codes], passIds, nicks: [], codeOrders: extractCodeOrderIds(src, true) };
 }
 
 /** Похоже ли, что на скрине есть код или ссылка — чтобы не гонять второй режим OCR зря. */
 export function ocrLooksUseful(text: string): boolean {
-  return /\/wb\/|code=|game-pass|[Кк]од/.test(text);
+  return /\/wb\/|code=|game-pass|[Кк]од|CODE/i.test(text);
 }
 
 export function hasClues(c: OrderClues): boolean {
@@ -639,14 +641,16 @@ function stripLite(s: string): string { return s.replace(/<[^>]+>/g, "").replace
    ───────────────────────────────────────────────────────────────────────── */
 
 const OFFER_TTL_MS = 24 * 3600_000;
-const offers = new Map<string, { orderIds: Map<string, { clue: ClueKind; evidence: string }>; at: number }>();
+type OfferEntry = { clue: ClueKind; evidence: string; kind?: "wb" | "code" };
+const offers = new Map<string, { orderIds: Map<string, OfferEntry>; at: number }>();
 
-export function rememberOffer(subjectKey: string, orders: FoundOrder[]): void {
-  offers.set(subjectKey, { orderIds: new Map(orders.map((o) => [o.id, { clue: o.clue, evidence: o.evidence }])), at: Date.now() });
+/** `kind: "code"` — в вопросе заказы кодов Robux (`FoundCodeOrder`), кнопка ведёт в `addCodeOrderContact`. */
+export function rememberOffer(subjectKey: string, orders: Array<{ id: string; clue: ClueKind; evidence: string }>, kind: "wb" | "code" = "wb"): void {
+  offers.set(subjectKey, { orderIds: new Map(orders.map((o) => [o.id, { clue: o.clue, evidence: o.evidence, kind }])), at: Date.now() });
   if (offers.size > 5000) offers.delete(offers.keys().next().value as string);
 }
 
-export function takeOffer(subjectKey: string, orderId: string): { clue: ClueKind; evidence: string } | null {
+export function takeOffer(subjectKey: string, orderId: string): OfferEntry | null {
   const o = offers.get(subjectKey);
   if (!o || Date.now() - o.at > OFFER_TTL_MS) return null;
   return o.orderIds.get(orderId) ?? null;
@@ -658,3 +662,196 @@ export function dropOffer(subjectKey: string): void {
 
 export const offerKey = (platform: "TG" | "VK", subject: string | number) => `${platform}:${subject}`;
 export const STALE_OFFER_TEXT = "Этот вопрос устарел. Пришлите, пожалуйста, код из чата WB ещё раз — найдём заказ заново.";
+
+
+/* ── 9. Заказы кодов Robux (18.11.2026) ──────────────────────────────────────
+   @NikitinaEO, 17.11: купила код на сайте, войдя через ВКонтакте, а написала в
+   поддержку из Telegram. Два профиля, у телеграмного заказов нет — ни закрепа,
+   ни ответа ИИ по делу. Номер `CODE-XXXXXXXX` парсер не узнавал (8 знаков, не
+   7), а искал он только в заказах WB.
+
+   Теперь заказ кода узнаётся:
+     • по номеру `CODE-…` (и голым 8 знакам из алфавита номера) — в тексте и на
+       скриншоте страницы оплаты/письма;
+     • по совпадению имени профиля (порядок слов не важен) с покупателем кода,
+       оплаченного за последние 3 дня, у которого Telegram не привязан.
+   В обоих случаях человек подтверждает кнопкой. Подключённый видит ТОЛЬКО статус
+   («оплачен», «код выдан, он в кабинете») — сам код остаётся у владельца:
+   номер заказа и имя — не ключ от кода.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/** Алфавит номера заказа кода (`newCodeOrderPublicId`): без 0/O/1/I. */
+const CODE_ORDER_PREFIXED = /CODE[\s\-–—_]*([2-9A-HJ-NP-Z]{8})(?![A-Z0-9])/gi;
+const CODE_ORDER_BARE = /^(?=[2-9A-HJ-NP-Z]*\d)(?=[2-9A-HJ-NP-Z]*[A-HJ-NP-Z])[2-9A-HJ-NP-Z]{8}$/;
+/** Совпадение по имени — только у свежих оплат: дальше тёзки опаснее пользы. */
+const NAME_MATCH_WINDOW_MS = 3 * 24 * 3600_000;
+const CODE_ORDER_LIVE = ["PAID", "ISSUED"];
+
+/** Номера заказов кодов из текста (без `CODE-`, в верхнем регистре). */
+export function extractCodeOrderIds(raw: string, fromOcr = false): string[] {
+  const text = String(raw ?? "").normalize("NFKC").toUpperCase();
+  const out = new Set<string>();
+  for (const m of text.matchAll(CODE_ORDER_PREFIXED)) out.add(m[1]);
+  // Голые 8 знаков — только из набранного текста: на скриншоте их слишком много.
+  if (!fromOcr) for (const t of text.split(/[^A-Z0-9]+/)) if (CODE_ORDER_BARE.test(t)) out.add(t);
+  return [...out].slice(0, 10);
+}
+
+/** «Екатерина Никитина» = «Никитина Екатерина»: слова без регистра, ё = е. */
+export function nameKey(name: string | null | undefined): string | null {
+  const words = String(name ?? "").toLowerCase().replace(/ё/g, "е").replace(/[^\p{L}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 2);
+  if (words.length < 2) return null;
+  return [...new Set(words)].sort().join(" ");
+}
+
+export interface FoundCodeOrder {
+  id: string;
+  publicId: string;
+  amount: number;
+  status: "PAID" | "ISSUED";
+  createdAt: Date;
+  issuedAt: Date | null;
+  creatorUserId: string | null;
+  user: { id: string; tgId: string | null; vkId: string | null; name: string | null; username: string | null } | null;
+  clue: "code" | "name";
+  evidence: string;
+}
+
+const CODE_ORDER_SELECT = {
+  id: true, publicId: true, denomination: true, status: true, createdAt: true, issuedAt: true, creatorUserId: true, refundedAt: true,
+  creator: { select: { id: true, tgId: true, vkId: true, name: true, username: true } },
+} as const;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const toFoundCode = (o: any, clue: "code" | "name", evidence: string): FoundCodeOrder => ({
+  id: o.id, publicId: o.publicId, amount: o.denomination, status: o.status, createdAt: o.createdAt, issuedAt: o.issuedAt,
+  creatorUserId: o.creatorUserId, user: o.creator ?? null, clue, evidence,
+});
+
+/** Оплаченные заказы кодов по номерам и/или по имени профиля отправителя. */
+export async function findCodeOrders(db: Db, input: { ids?: string[]; senderName?: string | null; now?: number }): Promise<FoundCodeOrder[]> {
+  const found = new Map<string, FoundCodeOrder>();
+  const ids = [...new Set((input.ids ?? []).map((i) => `CODE-${i.toUpperCase()}`))];
+  if (ids.length) {
+    const rows = await db.codeOrder.findMany({ where: { publicId: { in: ids }, status: { in: CODE_ORDER_LIVE }, refundedAt: null }, select: CODE_ORDER_SELECT }).catch(() => []);
+    for (const o of rows) found.set(o.id, toFoundCode(o, "code", o.publicId));
+  }
+  const key = nameKey(input.senderName);
+  if (!found.size && key) {
+    const since = new Date((input.now ?? Date.now()) - NAME_MATCH_WINDOW_MS);
+    const rows = await db.codeOrder.findMany({
+      where: { paidAt: { gte: since }, status: { in: CODE_ORDER_LIVE }, refundedAt: null, creator: { is: { tgId: null, name: { not: null } } } },
+      orderBy: { createdAt: "desc" }, take: 50, select: CODE_ORDER_SELECT,
+    }).catch(() => []);
+    const same = rows.filter((o: { creator: { name: string | null } | null }) => nameKey(o.creator?.name) === key);
+    // Под одним именем разные покупатели — угадывать не будем.
+    if (new Set(same.map((o: { creatorUserId: string | null }) => o.creatorUserId)).size === 1) {
+      for (const o of same.slice(0, MAX_OFFER)) found.set(o.id, toFoundCode(o, "name", "имя профиля"));
+    }
+  }
+  return [...found.values()];
+}
+
+/** Что делать с найденными заказами кодов для этого отправителя. */
+export async function planCodeContact(db: Db, input: { senderUserId: string | null; orders: FoundCodeOrder[] }): Promise<{ kind: "none" } | { kind: "known"; orders: FoundCodeOrder[] } | { kind: "offer"; orders: FoundCodeOrder[] }> {
+  if (!input.orders.length) return { kind: "none" };
+  let linked = new Set<string>();
+  if (input.senderUserId) {
+    const rows = await db.codeOrderContact.findMany({
+      where: { userId: input.senderUserId, codeOrderId: { in: input.orders.map((o) => o.id) }, removedAt: null }, select: { codeOrderId: true },
+    }).catch(() => []);
+    linked = new Set(rows.map((r: { codeOrderId: string }) => r.codeOrderId));
+  }
+  const foreign = input.orders.filter((o) => o.creatorUserId !== input.senderUserId && !linked.has(o.id));
+  if (!foreign.length) return { kind: "known", orders: input.orders };
+  return { kind: "offer", orders: foreign.slice(0, MAX_OFFER) };
+}
+
+export type AddCodeResult =
+  | { ok: true; contactId: string; created: boolean; order: FoundCodeOrder }
+  | { ok: false; reason: "no_order" | "own" | "limit" };
+
+/** Подключить аккаунт к заказу кода. Повторное нажатие — тот же контакт. */
+export async function addCodeOrderContact(db: Db, input: {
+  codeOrderId: string; userId: string; via: "support_code" | "support_name" | "admin"; evidence?: string | null; platform: "TG" | "VK"; label: string;
+}): Promise<AddCodeResult> {
+  const o = await db.codeOrder.findUnique({ where: { id: input.codeOrderId }, select: CODE_ORDER_SELECT });
+  if (!o || !CODE_ORDER_LIVE.includes(o.status) || o.refundedAt) return { ok: false, reason: "no_order" };
+  if (o.creatorUserId === input.userId) return { ok: false, reason: "own" };
+  const clue = input.via === "support_name" ? "name" : "code";
+  const order = toFoundCode(o, clue, input.evidence ?? "");
+  const existing = await db.codeOrderContact.findUnique({ where: { codeOrderId_userId: { codeOrderId: o.id, userId: input.userId } } });
+  if (existing && !existing.removedAt) return { ok: true, contactId: existing.id, created: false, order };
+  const active = await db.codeOrderContact.count({ where: { codeOrderId: o.id, removedAt: null } });
+  if (active >= CONTACT_LIMIT) return { ok: false, reason: "limit" };
+  const evidence = input.evidence ? String(input.evidence).slice(0, 64) : null;
+  const row = existing
+    ? await db.codeOrderContact.update({ where: { id: existing.id }, data: { via: input.via, evidence, removedAt: null, removedBy: null, createdAt: new Date() } })
+    : await db.codeOrderContact.create({ data: { codeOrderId: o.id, userId: input.userId, via: input.via, evidence } });
+  await recordCodeContactEvent(db, o.id, CONTACT_EVENT.ADDED, `${row.id}:${Date.now()}`, { via: input.via, platform: input.platform, who: input.label.slice(0, 80) });
+  return { ok: true, contactId: row.id, created: true, order };
+}
+
+export async function recordCodeContactDeclined(db: Db, codeOrderId: string, input: { platform: "TG" | "VK"; label: string; clue?: string }): Promise<void> {
+  const bucket = Math.floor(Date.now() / 3600_000);
+  await recordCodeContactEvent(db, codeOrderId, CONTACT_EVENT.DECLINED, `${codeOrderId}:${input.label}:${bucket}`, {
+    platform: input.platform, who: input.label.slice(0, 80), via: input.clue ?? null,
+  });
+}
+
+async function recordCodeContactEvent(db: Db, orderId: string, type: string, key: string, payload: Record<string, unknown>): Promise<void> {
+  try {
+    await db.codeOrderEvent.create({ data: { orderId, type, idempotencyKey: `contact:${key}`, payload: { ...payload, at: new Date().toISOString() } } });
+  } catch (err: unknown) {
+    if ((err as { code?: string } | null)?.code === "P2002") return;
+    console.warn("[order-contacts] событие кода не записано:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** Заказ кода по-человечески: номер клиенту не называем — номинал и дата. */
+export function codeOrderTitle(o: Pick<FoundCodeOrder, "amount" | "createdAt">, html = true): string {
+  const b = (s: string) => (html ? `<b>${s}</b>` : s);
+  return `покупку кода Robux на ${b(`${o.amount} R$`)} от ${fmtDay(o.createdAt)}`;
+}
+
+const codeStatusWord = (o: Pick<FoundCodeOrder, "status">) =>
+  o.status === "ISSUED" ? "код выдан — он в кабинете на сайте и в письме, если указывали почту" : "оплачен, код готовим — пришлём, как только будет готов";
+
+/** Вопрос «это ваш заказ кода?». */
+export function codeOfferText(orders: FoundCodeOrder[], platform: "TG" | "VK", html = true): string {
+  const here = PLATFORM_WORD[platform];
+  if (orders.length === 1) {
+    const o = orders[0];
+    const owner = maskName(o.user?.name ?? o.user?.username);
+    const where = o.user?.vkId ? "на сайте через ВКонтакте" : "на сайте";
+    return (
+      `${o.clue === "name" ? "Похоже, это вы оформили" : "Нашли"} ${codeOrderTitle(o, html)}.\n\n` +
+      `Заказ оформлен ${where}${owner ? ` (${owner})` : ""}, а вы пишете из ${here}. ` +
+      `Добавить этот аккаунт к заказу? Тогда статус будет виден и здесь.`
+    );
+  }
+  return `Нашли покупки кодов Robux:\n${orders.map((o) => `• ${codeOrderTitle(o, html)}`).join("\n")}\n\nКакая из них ваша? Добавим этот аккаунт к ней — статус будет виден и здесь.`;
+}
+
+export function codeOfferButtonLabel(o: FoundCodeOrder, many: boolean): string {
+  return many ? `✅ ${o.amount} R$ · ${fmtDay(o.createdAt)}`.slice(0, 40) : "✅ Да, это мой заказ";
+}
+
+export function codeAddedText(o: FoundCodeOrder, html = true): string {
+  return `Готово, аккаунт добавлен к заказу — ${codeOrderTitle(o, html)}.\n\nСейчас: ${codeStatusWord(o)}.`;
+}
+
+/** Владельцу — без кнопки: убрать подключённого к коду может поддержка. */
+export function codeOwnerNoticeText(o: Pick<FoundCodeOrder, "amount" | "createdAt">, who: { platform: "TG" | "VK"; label: string }): string {
+  return (
+    `К вашей покупке кода Robux на ${o.amount} R$ от ${fmtDay(o.createdAt)} добавлен ещё один аккаунт: ${PLATFORM_WORD[who.platform]} «${who.label}». ` +
+    `Он видит только статус заказа, сам код — нет.\n\nЕсли это не вы — напишите нам: https://t.me/RobloxBank_PA`
+  );
+}
+
+/** Строка контекста для ИИ-поддержки (`customerContext`). Код и номер не называем. */
+export function codeOrderContextLine(o: { amount: number; status: string; createdAt: Date; issuedAt: Date | null }): string {
+  const d = (x: Date) => x.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
+  return `• Покупка КОДА Robux на сайте (не WB, геймпасс не нужен — человек сам вводит код в Roblox): ${o.amount} R$, ` +
+    `оплачен ${d(o.createdAt)}, ${o.status === "ISSUED" ? `код выдан ${o.issuedAt ? d(o.issuedAt) : ""} — он в кабинете на сайте / в письме` : "код ещё не выдан — готовим, это ждёт менеджера"}`;
+}

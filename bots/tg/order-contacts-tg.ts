@@ -22,8 +22,11 @@ import {
   addOrderContact, addedText, blockedText, cluesFromOcr, declinedText, extractOrderClues, findOrdersByClues, hasClues, ocrLooksUseful,
   offerButtonLabel, offerKey, offerText, parseContactCallback, planContactOffer,
   recordContactDeclined, rememberOffer, removeOrderContact, supportVia, takeOffer, dropOffer,
-  type FoundOrder,
+  addCodeOrderContact, codeAddedText, codeOfferButtonLabel, codeOfferText, codeOwnerNoticeText, findCodeOrders, planCodeContact,
+  recordCodeContactDeclined,
+  type FoundCodeOrder, type FoundOrder,
 } from "../shared/order-contacts";
+import { tgSend, vkSend } from "../shared/notify";
 import { card } from "./pa-ai";
 import { ocrImageText } from "../shared/pending-ocr";
 import { paRecentCustomerText, pinPaOrdersNow } from "./pa-desk-worker";
@@ -47,6 +50,18 @@ function offerKeyboard(orders: FoundOrder[]) {
     [{ text: DECLINE_LABEL, callback_data: `${CONTACT_CB.no}:${orders[0].id}` }],
   ];
 }
+
+function codeOfferKeyboard(orders: FoundCodeOrder[]) {
+  const many = orders.length > 1;
+  return [
+    ...orders.map((o) => [{ text: codeOfferButtonLabel(o, many), callback_data: `${CONTACT_CB.add}:${o.id}` }]),
+    [{ text: DECLINE_LABEL, callback_data: `${CONTACT_CB.no}:${orders[0].id}` }],
+  ];
+}
+
+/** Совпадение по имени спрашиваем один раз в неделю на пару «аккаунт — заказ». */
+const nameAsked = new Map<string, number>();
+const NAME_ASK_QUIET_MS = 7 * 24 * 3600_000;
 
 /* ── Поддержка @RobloxBank_PA ───────────────────────────────────────────── */
 
@@ -77,13 +92,9 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
     const url = await bot.telegram.getFileLink(m.photoFileId).then(String).catch(() => null);
     const text = url ? await ocrImageText(url, ocrLooksUseful) : null;
     clues = text ? cluesFromOcr(text) : clues;
+    if (text && /CODE/i.test(text)) console.log(`[order-contacts] скрин: номеров заказа кода ${clues.codeOrders?.length ?? 0}`);
     console.log(`[order-contacts] скрин: ${text ? `${text.length} симв., кандидатов кода ${clues.codes.length}` : "не прочитался"}`);
   }
-
-  if (!hasClues(clues)) return miss("в переписке нет ни кода, ни ссылки, ни пасса, ни ника");
-  const orders = await findOrdersByClues(db, clues);
-  if (!orders.length) return miss("по тому, что прислал клиент, заказ не найден");
-  const plan = await planContactOffer(db, { senderUserId: sender?.id ?? null, orders });
 
   const send = (text: string, keyboard?: unknown[][]) => api("sendMessage", {
     business_connection_id: m.connId, chat_id: m.chatId, text, parse_mode: "HTML",
@@ -91,6 +102,53 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
     ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
   });
   const read = () => api("readBusinessMessage", { business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId }).catch(() => undefined);
+
+  // 🎟 Заказ кода Robux (18.11.2026): по номеру CODE-… или, если человек ничего
+  // не назвал, по имени профиля. `true` — вопрос ушёл / заказ уже его.
+  const tryCodeOrders = async (byName: boolean): Promise<boolean> => {
+    const ids = clues.codeOrders ?? [];
+    if (!byName && !ids.length) return false;
+    const senderName = [m.from.first_name, m.from.last_name].filter(Boolean).join(" ");
+    if (byName && sender) {
+      // Свои заказы есть — это не «потерянный» покупатель, отвечает ИИ.
+      const [own, ownCodes] = await Promise.all([
+        db.wbOrder.count({ where: { userId: sender.id } }),
+        db.codeOrder.count({ where: { creatorUserId: sender.id, status: { in: ["PAID", "ISSUED"] } } }),
+      ]);
+      if (own + ownCodes > 0) return false;
+    }
+    const found = await findCodeOrders(db, byName ? { senderName } : { ids });
+    const plan = await planCodeContact(db, { senderUserId: sender?.id ?? null, orders: found });
+    if (plan.kind === "none") return false;
+    if (plan.kind === "known") {
+      if (m.operator) await card(bot, `🔗 /привязать: покупка кода на ${found[0].amount} R$ уже привязана к этому аккаунту.`).catch(() => undefined);
+      return false;
+    }
+    if (byName) {
+      const fresh = plan.orders.filter((o) => Date.now() - (nameAsked.get(`${m.from.id}:${o.id}`) ?? 0) > NAME_ASK_QUIET_MS);
+      if (!fresh.length) return false;
+      for (const o of fresh) nameAsked.set(`${m.from.id}:${o.id}`, Date.now());
+      if (nameAsked.size > 5000) nameAsked.delete(nameAsked.keys().next().value as string);
+      plan.orders = fresh;
+    }
+    rememberOffer(offerKey("TG", m.from.id), plan.orders, "code");
+    await send(codeOfferText(plan.orders, "TG"), codeOfferKeyboard(plan.orders));
+    await read();
+    console.log(`[order-contacts] поддержка: предложили заказ кода по «${plan.orders[0].clue}»`);
+    return true;
+  };
+
+  if (await tryCodeOrders(false)) return true;
+  if (!hasClues(clues)) {
+    if (await tryCodeOrders(true)) return true;
+    return miss("в переписке нет ни кода, ни ссылки, ни пасса, ни ника");
+  }
+  const orders = await findOrdersByClues(db, clues);
+  if (!orders.length) {
+    if (await tryCodeOrders(true)) return true;
+    return miss("по тому, что прислал клиент, заказ не найден");
+  }
+  const plan = await planContactOffer(db, { senderUserId: sender?.id ?? null, orders });
 
   if (plan.kind === "none") return miss("заказ не найден");
   if (plan.kind === "known") return miss(`заказ ${orders[0].wbCode} уже привязан к этому аккаунту`);
@@ -198,7 +256,8 @@ export function registerOrderContactActions(bot: Telegraf): void {
       if (parsed.action === "no") {
         dropOffer(key);
         await dropKeyboard();
-        await recordContactDeclined(db, parsed.id, { platform: "TG", label: tgLabel(from), clue: offer.clue });
+        if (offer.kind === "code") await recordCodeContactDeclined(db, parsed.id, { platform: "TG", label: tgLabel(from), clue: offer.clue });
+        else await recordContactDeclined(db, parsed.id, { platform: "TG", label: tgLabel(from), clue: offer.clue });
         await reply(declinedText());
         return;
       }
@@ -213,6 +272,29 @@ export function registerOrderContactActions(bot: Telegraf): void {
         select: { id: true },
       });
       const label = tgLabel(from);
+      if (offer.kind === "code") {
+        const res = await addCodeOrderContact(db, {
+          codeOrderId: parsed.id, userId: user.id, via: offer.clue === "name" ? "support_name" : "support_code",
+          evidence: offer.evidence, platform: "TG", label,
+        });
+        dropOffer(key);
+        await dropKeyboard();
+        if (!res.ok) {
+          await reply(res.reason === "own" ? blockedText("own") : "Не получилось добавить автоматически — менеджер посмотрит и ответит здесь.");
+          return;
+        }
+        await reply(codeAddedText(res.order));
+        if (res.created) {
+          const owner = res.order.user;
+          const notice = codeOwnerNoticeText(res.order, { platform: "TG", label: from.first_name || label });
+          if (owner?.tgId) await tgSend(owner.tgId, notice, { link_preview_options: { is_disabled: true } }).catch(() => undefined);
+          else if (owner?.vkId) await vkSend(owner.vkId, notice).catch(() => undefined);
+          await card(bot, `🔗 К покупке кода на <b>${res.order.amount} R$</b> (${escapeHtml(res.order.publicId)}) подключён Telegram <b>${escapeHtml(label)}</b> — ${offer.clue === "name" ? "по совпадению имени" : "по номеру заказа"}.`).catch(() => undefined);
+        }
+        if (connId) void pinPaOrdersNow(tgId).catch((e) => console.warn("[pa-pin] сразу после привязки кода:", e instanceof Error ? e.message : e));
+        console.log(`[order-contacts] подключён TG-аккаунт к заказу кода ${res.order.publicId} (${offer.clue})`);
+        return;
+      }
       const res = await addOrderContact(db, {
         orderId: parsed.id, userId: user.id,
         via: connId ? supportVia(offer.clue) : "bot_code",
@@ -268,6 +350,7 @@ export async function operatorLinkCommand(bot: Telegraf, api: Api, m: {
       codes: [...new Set([...fromText.codes, ...perLine.flatMap((c) => c.codes), ...fromOcr.codes])],
       passIds: [...new Set([...fromText.passIds, ...perLine.flatMap((c) => c.passIds), ...fromOcr.passIds])],
       nicks: [...new Set(perLine.flatMap((c) => c.nicks))],
+      codeOrders: [...new Set([...(fromText.codeOrders ?? []), ...(fromOcr.codeOrders ?? [])])],
     };
     console.log(`[order-contacts] /привязать: прочитано ${recent.text.length} симв.${recent.ocr ? " + скрин" : ""}, кодов-кандидатов ${clues.codes.length}, ников ${clues.nicks.length}`);
   }

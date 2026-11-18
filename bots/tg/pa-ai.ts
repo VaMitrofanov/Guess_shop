@@ -21,7 +21,7 @@ import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
 import { heldLabel } from "../shared/notify-format";
-import { CODE_VIAS } from "../shared/order-contacts";
+import { CODE_VIAS, codeOrderContextLine } from "../shared/order-contacts";
 import {
   CATEGORY_RU, HANDOFF_TEXT, PA_AI_MODEL, PA_AI_SYSTEM, PaAiDecisionSchema,
   customerContext, guardDecision, type PaAiDecision,
@@ -220,7 +220,18 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
         return `${what} по заказу ${r.wbCode} (${r.occurredAt.toISOString().slice(0, 10)})${r.text ? `: «${r.text.slice(0, 120)}»` : ""}`;
       })
     : [];
-  const context = customerContext({ name: user?.name ?? m.fromName, known: Boolean(user), orders, wbNotes });
+  // 🎟 Покупки кодов Robux (18.11.2026): раньше ИИ их не видел и отвечал «заказов нет».
+  const codeOrders = user
+    ? (await db.codeOrder.findMany({
+        where: {
+          status: { in: ["PAID", "ISSUED"] }, refundedAt: null,
+          OR: [{ creatorUserId: user.id }, { contacts: { some: { userId: user.id, removedAt: null } } }],
+        },
+        orderBy: { createdAt: "desc" }, take: 3,
+        select: { denomination: true, status: true, createdAt: true, issuedAt: true },
+      }).catch(() => [])).map((o) => codeOrderContextLine({ amount: o.denomination, status: o.status, createdAt: o.createdAt, issuedAt: o.issuedAt }))
+    : [];
+  const context = customerContext({ name: user?.name ?? m.fromName, known: Boolean(user), orders, wbNotes, codeOrders });
   const image = m.photoFileId ? await loadPhoto(bot, m.photoFileId) : undefined;
   const raw = await decide(m.chatId, context, image);
   if (raw === "out_of_money") {
@@ -233,7 +244,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   if (!raw) return false;
   const d = guardDecision(raw, text);
   const order = orders[0];
-  const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason, 60)}` : ""}` : "📦 заказов в базе нет";
+  const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason, 60)}` : ""}` : codeOrders.length ? "🎟 покупка кода Robux на сайте (заказов WB нет)" : "📦 заказов в базе нет";
   const who = `👤 <b>${escapeHtml(m.fromName)}</b>${m.username ? ` @${escapeHtml(m.username)}` : ""}`;
   const quote = `💬 «${escapeHtml(text.slice(0, 600))}»`;
 
