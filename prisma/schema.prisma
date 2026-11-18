@@ -88,6 +88,11 @@ model User {
   /// Чужие заказы, к которым этот аккаунт подключён (`OrderContact`, 17.11.2026).
   orderContacts           OrderContact[]
   codeOrderContacts       CodeOrderContact[]
+  /// Почта для чеков и копии кода (18.11.2026). НЕ способ входа и не подтверждена —
+  /// её вписал сам владелец профиля или она пришла из чека его оплаты.
+  contactEmail            String?
+  /// Когда последний раз звали из ВК в Telegram (не чаще раза в 14 дней).
+  tgInviteAt              DateTime?
   directIntents           DirectIntent[]
   identities              UserIdentity[]
   bonusLedgerEntries      BonusLedger[]

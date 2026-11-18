@@ -176,12 +176,12 @@ export async function findCodeOrderByToken(token: string) {
     where: { payTokenHash: hashPayToken(token) },
     include: {
       payments: { orderBy: { createdAt: "desc" } },
-      creator: { select: { email: true, emailVerifiedAt: true } },
+      creator: { select: { email: true, emailVerifiedAt: true, contactEmail: true } },
     },
   });
 }
 
-type OrderWithPayments = CodeOrder & { payments: CodePayment[]; creator?: { email: string | null; emailVerifiedAt: Date | null } | null };
+type OrderWithPayments = CodeOrder & { payments: CodePayment[]; creator?: { email: string | null; emailVerifiedAt: Date | null; contactEmail?: string | null } | null };
 
 export function offerExpired(order: Pick<CodeOrder, "offerExpiresAt" | "paidAt">, now = new Date()): boolean {
   return !order.paidAt && order.offerExpiresAt.getTime() <= now.getTime();
@@ -190,8 +190,9 @@ export function offerExpired(order: Pick<CodeOrder, "offerExpiresAt" | "paidAt">
 /** Адрес для чека по умолчанию: гостю — его email, клиенту — почта аккаунта. */
 export function defaultReceiptEmail(order: OrderWithPayments): string | null {
   // Подарок: адрес получателя — не для чека, иначе сюрприз раскроется письмом банка.
-  if (order.deliveryMode === "GIFT") return order.creator?.email ?? null;
-  return order.recipientEmail ?? order.creator?.email ?? null;
+  if (order.deliveryMode === "GIFT") return order.creator?.email ?? order.creator?.contactEmail ?? null;
+  // contactEmail (18.11.2026) — почта для чеков, которую человек вписал в кабинете.
+  return order.recipientEmail ?? order.creator?.email ?? order.creator?.contactEmail ?? null;
 }
 
 /**

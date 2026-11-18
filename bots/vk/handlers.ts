@@ -84,6 +84,7 @@ import { auditGamepassSubmitted, ORDER_AUDIT_TYPE, type OrderAuditClient } from 
 import { countPreviousOrders } from "../shared/order-loyalty";
 import { corridorHoldText, createCorridorOverride, findUnfinishedCorridorOrder, type CorridorGuardClient } from "../shared/corridor-guard";
 import { VK_HELP_REF } from "../shared/bot-links";
+import { issueBindToken } from "../shared/bot-bind";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import {
@@ -5575,6 +5576,12 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     nickKb.textButton({ label: `✏️ Ник: ${robloxNick.slice(0, 18)}`, payload: { command: "edit_nick" }, color: "secondary" });
   } else {
     nickKb.textButton({ label: "🎮 Привязать ник Roblox", payload: { command: "edit_nick" }, color: "secondary" });
+  }
+  // 📲 Э6 (18.11.2026): Telegram — главный канал. Тихая кнопка в настройках для
+  // тех, у кого его ещё нет: один тап — и бот в Telegram знает все заказы.
+  if (user?.id && !user.tgId) {
+    const bind = await issueBindToken(db, user.id).catch(() => null);
+    if (bind) nickKb.row().urlButton({ label: "📲 Статус в Telegram", url: bind.url });
   }
   await ctx.reply({ message: "⚙️ Настройки:", keyboard: nickKb.inline() });
 }

@@ -36,7 +36,7 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
+import { ContactEmailCard, TelegramBindCard } from "@/components/account/telegram-bind";
 import SignOutAction from "@/components/auth/SignOutAction";
 import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
@@ -207,6 +207,7 @@ export default async function DashboardPage() {
         id: true,
         email: true,
         emailVerifiedAt: true,
+        contactEmail: true,
         name: true,
         role: true,
         createdAt: true,
@@ -484,12 +485,13 @@ export default async function DashboardPage() {
                 })}
               </div>
               {user.email && !user.emailVerifiedAt && <EmailVerificationAction />}
+              {/* 🔗 Э1 (18.11.2026): одна ссылка в бота вместо трёх шагов через виджет. */}
               {!identityNames.has("TG") && !isAdmin && (
                 <div className={styles.linkAction}>
-                  <p>Связать Telegram можно после свежего подтверждения входа.</p>
-                  <TelegramLoginButton mode="link" />
+                  <TelegramBindCard text="Одно нажатие — и Telegram-бот уже знает ваши заказы: статус будет приходить туда. Заказы и бонусы останутся в этом профиле." />
                 </div>
               )}
+              {!user.email && !isAdmin && <ContactEmailCard initial={user.contactEmail} />}
               {!identityNames.has("VK") && <p className={styles.identityHint}>VK ID можно использовать для входа; безопасная привязка появится после повторного подтверждения обоих профилей.</p>}
             </section>
 

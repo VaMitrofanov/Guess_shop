@@ -22,6 +22,10 @@ import styles from "./pay.module.css";
 
 export type PayViewerExtras = {
   isCreator: boolean;
+  /** Э1 (18.11.2026): Telegram ещё не привязан — показать «Получать статус в Telegram». */
+  needsTelegram?: boolean;
+  /** Почты для чека в профиле нет — попросить. */
+  needsEmail?: boolean;
   referralLink: string | null;
   discountPercent: number;
   invitedCount: number;

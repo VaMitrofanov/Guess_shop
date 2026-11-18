@@ -33,9 +33,12 @@ export type VerifiedIdentityInput = VerifiedIdentityProfile & {
  *  - `gate-code-owner-confirmed` — предъявил код гейта, а владелец кода нажал
  *    «да, это я» у себя на площадке;
  *  - `gate-code-bearer` — предъявил код гейта, а владельцу написать нельзя
- *    (VK без диалога с сообществом), то есть спросить было некого.
+ *    (VK без диалога с сообществом), то есть спросить было некого;
+ *  - `bot-bind-token` — одноразовая ссылка `ln_…`, выпущенная владельцу
+ *    профиля (сайт под сессией / его диалог во ВК), открыта в Telegram (Э1, 18.11.2026);
+ *  - `admin-confirmed` — админ склеил вручную из очереди «похоже, один человек» (Э7).
  */
-export type MergeMethod = "dual-fresh-auth" | "gate-code-owner-confirmed" | "gate-code-bearer";
+export type MergeMethod = "dual-fresh-auth" | "gate-code-owner-confirmed" | "gate-code-bearer" | "bot-bind-token" | "admin-confirmed";
 
 type MergeDb = Pick<PrismaClient, "$transaction">;
 
@@ -197,6 +200,29 @@ export async function linkOrMergeVerifiedIdentity(
       tx.directIntent.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
       tx.userIdentity.updateMany({ where: { userId: source.id }, data: { userId: target.id, verifiedAt: new Date() } }),
       tx.priceQuote.updateMany({ where: { userId: source.id, status: "ACTIVE" }, data: { status: "VOID" } }),
+      // Покупки кодов Robux (18.11.2026): без этого кабинет после склейки их «терял».
+      tx.codeOrder.updateMany({ where: { creatorUserId: source.id }, data: { creatorUserId: target.id } }),
+    ]);
+
+    /* Подключённые аккаунты (OrderContact / CodeOrderContact). Ключ уникален по
+       (заказ, аккаунт), поэтому сначала убираем строки источника, которые у
+       цели уже есть, потом переносим остальное, а связь «я подключён к своему
+       же заказу» гасим — после склейки он владелец. */
+    const [targetWb, targetCode] = await Promise.all([
+      tx.orderContact.findMany({ where: { userId: target.id }, select: { orderId: true } }),
+      tx.codeOrderContact.findMany({ where: { userId: target.id }, select: { codeOrderId: true } }),
+    ]);
+    await Promise.all([
+      tx.orderContact.deleteMany({ where: { userId: source.id, orderId: { in: targetWb.map((r) => r.orderId) } } }),
+      tx.codeOrderContact.deleteMany({ where: { userId: source.id, codeOrderId: { in: targetCode.map((r) => r.codeOrderId) } } }),
+    ]);
+    await Promise.all([
+      tx.orderContact.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
+      tx.codeOrderContact.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
+    ]);
+    await Promise.all([
+      tx.orderContact.updateMany({ where: { userId: target.id, removedAt: null, order: { userId: target.id } }, data: { removedAt: new Date(), removedBy: "merge" } }),
+      tx.codeOrderContact.updateMany({ where: { userId: target.id, removedAt: null, codeOrder: { creatorUserId: target.id } }, data: { removedAt: new Date(), removedBy: "merge" } }),
     ]);
 
     const mergedBalance = target.balance + source.balance;
@@ -230,6 +256,7 @@ export async function linkOrMergeVerifiedIdentity(
            «Написать», и без него менеджер видит слитый профиль, до которого
            не может дотянуться одним тапом. */
         username: target.username ?? source.username,
+        contactEmail: target.contactEmail ?? source.contactEmail,
         ...profileUpdate(input),
         ...legacyColumn(input.provider, subject),
       },

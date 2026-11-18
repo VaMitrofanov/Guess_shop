@@ -12,11 +12,27 @@ import {
   type BuyerStepOrder,
 } from "../../bots/shared/buyer-step";
 import { notifyOrderWatchers, type WatcherEvent } from "../../bots/shared/order-contacts";
+import { TG_INVITE_LABEL, TG_INVITE_TEXT, prepareTgInvite } from "../../bots/shared/bot-bind";
 
 interface UserRef {
   id: string;
   tgId?: string | null;
   vkId?: string | null;
+}
+
+/**
+ * 📲 Telegram первым, ВК — запасным (Э3, 18.11.2026). После склейки у человека
+ * бывают оба канала: шлём в Telegram (главный), а если он не доставил (бот
+ * заблокирован, чат не найден) — во ВК. Раньше при живом `tgId` отказ
+ * Telegram означал «клиент ничего не узнал».
+ */
+async function tgThenVk(user: UserRef, tgText: string, vkText: string, tgExtra: Record<string, unknown> = {}, vkExtra: Record<string, string> = {}): Promise<"tg" | "vk" | null> {
+  if (user.tgId && await tgPost(user.tgId, tgText, tgExtra)) return "tg";
+  if (user.vkId && await vkPost(user.vkId, vkText, vkExtra)) {
+    if (user.tgId) console.warn(`[notify] Telegram не доставил ${user.tgId} — ушло во ВК`);
+    return "vk";
+  }
+  return null;
 }
 
 /** true = отправка прошла (или бридж принял), false = точно не доставлено. */
@@ -300,7 +316,10 @@ export async function notifyOrderCompleted(
     });
     // pendingReview (питч отзыва) восстановит сам бот: callback review_hint
     // и фолбэк в photo-handler работают без предустановленного состояния.
-  } else if (user.vkId) {
+  }
+  // 📲 Э3: Telegram не доставил (или его нет) — запасной канал ВК.
+  if (!delivered && user.vkId) {
+    if (user.tgId) console.warn(`[notify] «выкуплено»: Telegram ${user.tgId} не доставил — шлём во ВК`);
     channel = "vk";
     delivered = await vkPost(user.vkId, m.vkMsg1, {
       keyboard: JSON.stringify({ inline: true, buttons: [[{
@@ -316,6 +335,8 @@ export async function notifyOrderCompleted(
       }]),
     });
     bonusDelivered = await vkPost(user.vkId, m.vkMsg2, { keyboard: vkKb });
+    // 📲 Э6: только-ВК клиента мягко зовём в Telegram (раз в 14 дней, `prepareTgInvite`).
+    if (delivered && !user.tgId) await inviteToTelegramVk(user).catch(() => undefined);
   }
 
   // Живая карточка DBS — единственное место, где виден весь заказ целиком;
@@ -340,9 +361,7 @@ export async function notifyRegionalPriceNeeded(
     `⚠️ Нужен новый геймпасс\n\nRoblox включил региональную цену для текущего пасса заказа ${wbCode}, ` +
     `поэтому мы безопасно остановили выкуп. Создай новый геймпасс за ${expectedPrice} R$ без Managed/Regional Pricing и пришли ссылку в бот — заказ продолжится.`;
   await copyToWatchers({ wbCode }, { kind: "new_pass_needed", price: expectedPrice });
-  if (user.tgId) return tgPost(user.tgId, tgText);
-  if (user.vkId) return vkPost(user.vkId, plainText);
-  return false;
+  return (await tgThenVk(user, tgText, plainText)) !== null;
 }
 
 /**
@@ -371,9 +390,7 @@ export async function notifyRebind(
   if (hasGamepass) {
     const tgMsg = `${head}\n\nГеймпасс уже у нас — выкупим, как только дойдёт очередь (сейчас у Roblox задержки — до нескольких суток), и напишем 💛`;
     const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
-    if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
-    if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
-    return null;
+    return tgThenVk(user, tgMsg, vkMsg);
   }
 
   const tgMsg = `${head}\n\nСоздай геймпасс за <b>${dirty} R$</b> и пришли ссылку сюда — выкупим и начислим робуксы 💛`;
@@ -490,8 +507,7 @@ export async function notifyGamepassAttached(user: UserRef, wbCode: string): Pro
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
-  if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
-  if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
+  return tgThenVk(user, tgMsg, vkMsg);
   return null;
 }
 
@@ -522,8 +538,7 @@ export async function notifyGamepassCreatedForBuyer(
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
-  if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
-  if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
+  return tgThenVk(user, tgMsg, vkMsg);
   return null;
 }
 
@@ -551,7 +566,25 @@ export async function notifyOrderRejected(
   const tgMsg = `❌ <b>Заказ отклонён</b> (код <code>${wbCode}</code>)\n\n${reasonLine}${fixTg}`;
   const vkMsg = tgMsg.replace(/<\/?[bi]>/g, "").replace(/<\/?i>/g, "");
 
-  if (user.tgId) await tgPost(user.tgId, tgMsg);
-  else if (user.vkId) await vkPost(user.vkId, vkMsg);
+  await tgThenVk(user, tgMsg, vkMsg);
   await copyToWatchers({ wbCode }, { kind: "rejected", reason: reason && reason !== "не указана" ? reason : null });
+}
+
+/**
+ * 📲 Приглашение из ВК в Telegram (Э6, 18.11.2026; владелец: «переманивать
+ * аккуратно»). После радостного события, одной кнопкой-ссылкой, не чаще раза
+ * в 14 дней (`User.tgInviteAt`). ВКонтакте остаётся — клиента не теряем.
+ */
+export async function inviteToTelegramVk(user: UserRef): Promise<boolean> {
+  if (!user.vkId || user.tgId) return false;
+  const url = await prepareTgInvite(prisma, user.id);
+  if (!url) return false;
+  return vkPost(user.vkId, TG_INVITE_TEXT, {
+    keyboard: JSON.stringify({ inline: true, buttons: [[{ action: { type: "open_link", link: url, label: TG_INVITE_LABEL } }]] }),
+  });
+}
+
+/** Короткое сообщение человеку по правилу «Telegram, при отказе — ВК» (склейка профилей и т.п.). */
+export async function notifyPersonText(user: UserRef, html: string): Promise<"tg" | "vk" | null> {
+  return tgThenVk(user, html, html.replace(/<[^>]+>/g, ""));
 }

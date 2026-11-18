@@ -123,6 +123,17 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
     return { status: 503, body: "temporary processing error" };
   }
 
+  // ✉️ Почта из чека → в профиль покупателя, если там пусто (18.11.2026): её
+  // указал сам плательщик-владелец, и следующий чек подставится сам. Только
+  // для своих (не подарок и не оплата по ссылке другим человеком).
+  if (nextStatus === "CONFIRMED" && payment.receiptEmail) {
+    await prisma.codeOrder.findUnique({ where: { id: payment.orderId }, select: { creatorUserId: true, createdVia: true, deliveryMode: true } })
+      .then((o) => o?.creatorUserId && o.createdVia === "SELF" && o.deliveryMode !== "GIFT"
+        ? prisma.user.updateMany({ where: { id: o.creatorUserId, email: null, contactEmail: null }, data: { contactEmail: payment.receiptEmail } })
+        : null)
+      .catch(() => undefined);
+  }
+
   // Письмо — после фиксации оплаты и кода. Его сбой не трогает ни деньги, ни
   // код: заказ ISSUED, письмо можно переотправить.
   if (issued) {

@@ -7,6 +7,9 @@
 
 import { offerInBot } from "./order-contacts-tg";
 import { CODE_VIAS, notifyOrderWatchers, statusWord } from "../shared/order-contacts";
+import { BIND_STALE_TEXT, bindFailureText, consumeBindToken, parseBindStart } from "../shared/bot-bind";
+import { linkOrMergeVerifiedIdentity } from "../shared/account-merge";
+import { codeOrdersStatusText } from "../shared/customer-orders";
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
@@ -694,6 +697,37 @@ export function registerStart(bot: Telegraf): void {
     if (rawPayload.toLowerCase() === ORDER_START) {
       const { text, keyboard } = await buildStatusMessage(tgId);
       await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+      return;
+    }
+
+    // 🔗 `?start=ln_<токен>` — связка в один тап (Э1, 18.11.2026): профиль сайта
+    // или ВК получает этот Telegram, бот сразу показывает заказы.
+    const bindState = parseBindStart(rawPayload);
+    if (bindState) {
+      recentCodeStarts.set(ctx.from.id, Date.now());
+      setTimeout(() => recentCodeStarts.delete(ctx.from.id), 30_000);
+      const targetUserId = await consumeBindToken(db, bindState).catch(() => null);
+      if (!targetUserId) {
+        await ctx.reply(BIND_STALE_TEXT);
+        return;
+      }
+      const name = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null;
+      try {
+        const res = await linkOrMergeVerifiedIdentity(db as never, targetUserId, { provider: "TG", subject: tgId, name }, "bot-bind-token");
+        if (ctx.from.username) await db.user.update({ where: { id: res.userId }, data: { username: ctx.from.username } }).catch(() => undefined);
+        console.log(`[bind] Telegram ${tgId} → профиль ${res.userId} (${res.merged ? "склейка" : res.alreadyLinked ? "уже был" : "привязан"})`);
+        const { text, keyboard } = await buildStatusMessage(tgId);
+        await ctx.reply(
+          `✅ <b>Узнали вас${ctx.from.first_name ? `, ${escapeHtml(ctx.from.first_name)}` : ""}!</b>\n\n` +
+          "Этот Telegram теперь в вашем профиле. Статус заказов будет приходить сюда — даже тех, что оформлены на сайте или во ВКонтакте.",
+          { parse_mode: "HTML" },
+        );
+        await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[bind] склейка не прошла для ${tgId}: ${message}`);
+        await ctx.reply(bindFailureText(message));
+      }
       return;
     }
 
@@ -2242,6 +2276,22 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   }
 
   const order = focused ?? (activeOrders.length === 1 ? activeOrders[0] : await findRelevantOrder(user.id));
+
+  // 🎟 Живых WB-заказов нет, а покупка кода Robux свежее последнего выкупа (или
+  // выкупов не было вовсе) — показываем её: свои и подключённые (Э2, 18.11.2026).
+  if (!activeOrders.length) {
+    const since = order?.completedAt ?? order?.createdAt ?? null;
+    const codes = await codeOrdersStatusText(db, user.id, since ? new Date(since) : null).catch(() => null);
+    if (codes) {
+      return {
+        text: codes,
+        keyboard: Markup.inlineKeyboard([
+          [Markup.button.url("🎟 Открыть код в кабинете", "https://robloxbank.ru/dashboard")],
+          refreshRow, menuRow,
+        ]),
+      };
+    }
+  }
 
   if (!order) {
     return {

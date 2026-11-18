@@ -9,6 +9,7 @@ import { sessionUserId } from "@/lib/codes/http";
 import { ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
 import { trustStats } from "@/lib/trust-stats";
 import { payFormErrorMessage } from "@/lib/codes/pay-form";
+import { prisma } from "@/lib/prisma";
 import styles from "./pay.module.css";
 
 export const dynamic = "force-dynamic";
@@ -56,10 +57,16 @@ export default async function PayPage({
   let extras: PayViewerExtras = { isCreator: false, referralLink: null, discountPercent: 0, invitedCount: 0, next: null };
   const viewerId = await sessionUserId();
   if (viewerId && order.creatorUserId === viewerId) {
-    const [discount, code] = await Promise.all([viewerCodeDiscount(viewerId), ensureReferralCode(viewerId).catch(() => null)]);
+    const [discount, code, viewer] = await Promise.all([
+      viewerCodeDiscount(viewerId),
+      ensureReferralCode(viewerId).catch(() => null),
+      prisma.user.findUnique({ where: { id: viewerId }, select: { tgId: true, email: true, contactEmail: true } }).catch(() => null),
+    ]);
     const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru").replace(/\/$/, "");
     extras = {
       isCreator: true,
+      needsTelegram: Boolean(viewer && !viewer.tgId),
+      needsEmail: Boolean(viewer && !viewer.email && !viewer.contactEmail),
       referralLink: code ? `${base}/r/${code}` : null,
       discountPercent: discount.percent,
       invitedCount: discount.invitedCount,

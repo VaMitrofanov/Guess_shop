@@ -9,6 +9,7 @@ import {
   Ellipsis,
   ExternalLink,
   Handshake,
+  Link2,
   HelpCircle,
   LayoutDashboard,
   LogOut,
@@ -40,6 +41,7 @@ const SECONDARY_NAV = [
   { href: "/admin/partners/anton", icon: Handshake, label: "Антон" },
   { href: "/admin/activity", icon: Activity, label: "Журнал" },
   { href: "/admin/users", icon: Users, label: "Пользователи" },
+  { href: "/admin/merge", icon: Link2, label: "Склейка" },
   { href: "/admin/reviews", icon: MessageSquare, label: "Отзывы" },
   { href: "/admin/faq", icon: HelpCircle, label: "FAQ" },
 ];

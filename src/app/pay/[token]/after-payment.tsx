@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowUpRight, Check, CheckCircle2, CircleAlert, Clock3, Copy, Gift, Loader2, RotateCcw, Share2, Star } from "lucide-react";
 import type { PublicCodeOrder } from "@/lib/codes/orders";
 import type { PayViewerExtras } from "./pay-client";
+import { ContactEmailCard, TelegramBindCard } from "@/components/account/telegram-bind";
 import styles from "./after-payment.module.css";
 
 /**
@@ -177,6 +178,15 @@ export default function AfterPayment(props: {
       </section>
       {props.info && <p className={styles.ok} role="status"><CheckCircle2 size={16} /> {props.info}</p>}
       {props.error && <p className={styles.error} role="alert"><CircleAlert size={16} /> {props.error}</p>}
+
+      {/* 🔗 Э1 (18.11.2026): статус — в Telegram одним нажатием; почта — для чека и копии кода. */}
+      {extras.isCreator && extras.needsTelegram && (
+        <TelegramBindCard
+          title="Куда написать, когда всё будет готово?"
+          text="Одно нажатие — и Telegram-бот уже знает этот заказ: статус придёт туда. Ничего вводить не нужно."
+        />
+      )}
+      {extras.isCreator && extras.needsEmail && <ContactEmailCard />}
 
       {/* Приглашение в момент радости */}
       <section className={styles.invite} aria-labelledby="invite-title">
