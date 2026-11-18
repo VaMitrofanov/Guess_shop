@@ -17,6 +17,7 @@ import { ADMIN_IDS } from "../shared/admin";
 import { tgSend, tgDeliveryOutcome, vkSend, vkCanReceive, escapeHtml } from "../shared/notify";
 
 import { searchGamepassesByNick } from "../shared/gamepass-search";
+import { DONOR_NET_CAPACITY } from "../shared/gamepass-plan";
 
 
 
@@ -82,6 +83,11 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
         robloxUsername: null,            // user hasn't confirmed a different nick
         probableNick: { not: null },
         createdAt: { gte: thirtyDaysAgo },
+        // Заказ больше донора одним пассом не закрыть (2000 → пасс за 2858, а
+        // аккаунт выкупа держит 2143). До 18.11.2026 воркер искал ОДИН пасс на
+        // всю сумму и звал покупателя подтвердить его (DNJZUB5, 2857 R$) —
+        // такие заказы идут только набором частей, их GP-watch не трогает.
+        amount: { lte: DONOR_NET_CAPACITY },
       },
       orderBy: { probableNickAt: "desc" },
       take: 60, // fetched wide; per-order throttle trims to ~20 actual Roblox checks

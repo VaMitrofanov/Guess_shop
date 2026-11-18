@@ -1361,6 +1361,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         ? `✅ Отлично! Геймпасс ${res.passName} (${res.robux} R$) принят на ник ${res.nick}.\n\nЗаказ в очереди на выкуп — как только выкупим, сразу напишу сюда 💛`
         : res.status === "already"
         ? "✅ Этот заказ уже в работе — ничего делать не нужно."
+        : res.status === "needs_split"
+        ? `⚠️ ${res.message}\n\nСоздайте геймпассы на эти суммы и пришлите ссылки сюда — выкупим каждый.`
         : res.status === "gone"
         ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверьте, что он выставлен на продажу за нужную цену, и пришлите ссылку сюда."
         : res.status === "forbidden"

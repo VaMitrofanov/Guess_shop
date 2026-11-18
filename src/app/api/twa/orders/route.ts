@@ -69,7 +69,7 @@ import { resolveWbOrderSource } from "../../../../../bots/shared/wb-order-source
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
 import { verifyGamePassKeyViaBridge } from "@/lib/roblox-gamepass-create";
 import { createPassesWithKey } from "@/lib/gamepass-key-create";
-import { createTargetsFor } from "@/lib/gamepass-plan";
+import { createTargetsFor, singlePassFits, splitRequiredMessage } from "@/lib/gamepass-plan";
 import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { notifyAdminsKeyCreated, passNeedsHands } from "@/lib/gamepass-key-admin-notify";
@@ -3279,6 +3279,10 @@ export async function POST(req: NextRequest) {
     const nick = order.probableNick ?? order.robloxUsername;
     if (!nick)
       return NextResponse.json({ error: "У заказа нет вероятного ника" }, { status: 400 });
+    // Заказ больше донора закрывается только набором пассов — звать покупателя
+    // подтверждать один пасс на всю сумму нельзя (DNJZUB5, 18.11.2026).
+    if (!singlePassFits(order.amount))
+      return NextResponse.json({ error: splitRequiredMessage(order.amount) }, { status: 400 });
 
     const search = await searchForSalePassesByNick(nick);
     if (search.status === "user_not_found")

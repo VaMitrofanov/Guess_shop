@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { trackSiteEvent } from "@/lib/site-track";
 
 /**
  * 🎞 Движение главной (18.11.2026, мокап А1).
@@ -47,9 +48,24 @@ export default function SiteMotion() {
       }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
       for (const n of nodes) if (!n.classList.contains("rb-in")) io.observe(n);
     }
+    // 📊 Глубина прокрутки: до каких блоков главной дошёл человек (по разу за сессию).
+    // Блок «увиден», когда его верх поднялся выше двух третей экрана.
+    let depth: IntersectionObserver | null = null;
+    const blocks = Array.from(document.querySelectorAll<HTMLElement>("[data-section]"));
+    if ("IntersectionObserver" in window && blocks.length) {
+      depth = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          trackSiteEvent("section", (e.target as HTMLElement).dataset.section);
+          depth?.unobserve(e.target);
+        }
+      }, { rootMargin: "0px 0px -35% 0px", threshold: 0 });
+      for (const b of blocks) depth.observe(b);
+    }
     return () => {
       document.removeEventListener("click", onClick);
       io?.disconnect();
+      depth?.disconnect();
       root.classList.remove("rb-reveal-ready");
     };
   }, []);

@@ -8,6 +8,7 @@ import CorridorNotice from "@/components/corridor-notice";
 import { gamepassPriceMatches } from "@/lib/gamepass-search-view";
 import { CODE_PRICES } from "@/lib/codes-pricing";
 import styles from "@/app/storefront.module.css";
+import { trackSiteEvent } from "@/lib/site-track";
 
 const PACKS = [500, 1000, 2000, 5000];
 /** «ХИТ» у геймпасса — 1 000 (решение владельца 14.11.2026; у кодов — 800). */
@@ -126,7 +127,7 @@ export default function Calculator() {
             type="button"
             aria-pressed={amount === pack}
             className={`${amount === pack ? styles.packActive : styles.pack} ${styles.packTall}`}
-            onClick={() => setRobux(String(pack))}
+            onClick={() => { setRobux(String(pack)); trackSiteEvent("gp_amount", pack); }}
           >
             {pack === HIT_PACK && <span className={styles.packHit}>ХИТ</span>}
             <b>{pack.toLocaleString("ru-RU")}</b>
@@ -175,7 +176,7 @@ export default function Calculator() {
       <Link
         href={needsGuide ? guideHref : checkoutHref}
         aria-disabled={!validUsername || currentLookup.status === "loading"}
-        onClick={(event) => { if (!validUsername || currentLookup.status === "loading") event.preventDefault(); }}
+        onClick={(event) => { if (!validUsername || currentLookup.status === "loading") { event.preventDefault(); return; } trackSiteEvent("gp_checkout", amount); }}
         className={validUsername && currentLookup.status !== "loading" ? styles.checkoutAction : styles.checkoutActionDisabled}
       >
         {needsGuide ? "Продолжить по инструкции" : currentLookup.status === "wrong-price" ? "Выбрать найденный геймпасс" : "Проверить и оформить"} <ArrowRight size={18} />

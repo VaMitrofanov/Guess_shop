@@ -37,6 +37,9 @@ const SPY = [
   { id: "reviews", href: "/#reviews", short: "Отзывы" },
 ] as const;
 
+/** На телефоне без «Подарка»: он — режим блока кодов, а не отдельный раздел. */
+const MOBILE_TABS = SPY.filter((t) => t.id !== "gift");
+
 function useSectionSpy(enabled: boolean): string | null {
   const [active, setActive] = useState<string | null>(null);
   useEffect(() => {
@@ -69,14 +72,49 @@ export default function Navbar() {
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, [onHome]);
-  const activeSpy = spy === "codes" && giftMode ? "gift" : spy;
+  // На широком экране «Коды» и «Геймпасс» стоят рядом — после клика по
+  // вкладке оба блока видны, и наблюдатель выбирал «Коды». Нажатая вкладка
+  // держится, пока человек сам не прокрутит страницу.
+  const [picked, setPicked] = useState<string | null>(null);
+  useEffect(() => {
+    if (!onHome) return;
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest?.("a[href^='/#']") as HTMLAnchorElement | null;
+      const id = a?.getAttribute("href")?.slice(2);
+      if (id && SPY.some((x) => x.id === id)) setPicked(id);
+    };
+    const release = () => setPicked(null);
+    document.addEventListener("click", onClick);
+    window.addEventListener("wheel", release, { passive: true });
+    window.addEventListener("touchmove", release, { passive: true });
+    window.addEventListener("keydown", release);
+    return () => {
+      document.removeEventListener("click", onClick);
+      window.removeEventListener("wheel", release);
+      window.removeEventListener("touchmove", release);
+      window.removeEventListener("keydown", release);
+    };
+  }, [onHome]);
+  const activeSpy = picked ?? (spy === "codes" && giftMode ? "gift" : spy);
+  const mobileActive = activeSpy === "gift" ? "codes" : activeSpy;
   const linksRef = useRef<HTMLDivElement | null>(null);
-  const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
+  // Пилюля берёт ВСЮ геометрию у ссылки (x, y, ширина, высота). До 18.11.2026
+  // вертикаль центрировалась классом `-translate-y-1/2`, а inline-`transform`
+  // ещё раз сдвигал на −50%: в Tailwind 4 это разные свойства (`translate` и
+  // `transform`), они складывались, и пилюля висела на 20 px выше текста.
+  const [pill, setPill] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   useLayoutEffect(() => {
     const box = linksRef.current;
-    const el = activeSpy && box ? box.querySelector<HTMLElement>(`[data-spy="${activeSpy}"]`) : null;
-    if (!box || !el) { setPill(null); return; }
-    setPill({ x: el.offsetLeft, w: el.offsetWidth });
+    const measure = () => {
+      const el = activeSpy && box ? box.querySelector<HTMLElement>(`[data-spy="${activeSpy}"]`) : null;
+      if (!box || !el) { setPill(null); return; }
+      setPill({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });
+    };
+    measure();
+    // Шрифт догружается и ширина окна меняется — ссылки сдвигаются, пилюля за ними.
+    window.addEventListener("resize", measure);
+    void document.fonts?.ready.then(measure);
+    return () => window.removeEventListener("resize", measure);
   }, [activeSpy]);
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated" && !!session?.user;
@@ -85,7 +123,7 @@ export default function Navbar() {
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--rb-border)] bg-[var(--rb-nav)] text-[var(--rb-text)] backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] max-w-[1280px] items-center justify-between px-5 md:px-7">
-        <Link href="/" className="group flex items-center gap-3" aria-label="RobloxBank — главная">
+        <Link href="/" className="group flex shrink-0 items-center gap-3" aria-label="RobloxBank — главная">
           <span className="grid h-9 w-9 -rotate-6 place-items-center rounded-[11px] border-2 border-[var(--rb-text)] bg-[#7556e8] text-sm font-black text-white shadow-[3px_3px_0_#45d6aa] transition-transform group-hover:rotate-0">R$</span>
           <span className="text-[15px] font-black tracking-[-0.04em] sm:text-[18px]">ROBLOXBANK</span>
         </Link>
@@ -94,21 +132,23 @@ export default function Navbar() {
             рядом с ЛК и CTA — шапка вылезала за экран на 160 px (iPad Mini в
             портрете). В 768–1023 px секции живут в бургере, который теперь
             прячется только с lg. */}
-        <div ref={linksRef} className="relative hidden items-center gap-1 lg:flex">
+        <div ref={linksRef} className="relative mx-3 hidden items-center gap-1 lg:flex">
           {/* «Пилюля» под разделом, где сейчас человек (только главная). */}
-          <span aria-hidden="true" className="rb-tabstrip-ind pointer-events-none absolute left-0 top-1/2 h-10 -translate-y-1/2 rounded-full bg-[var(--rb-accent-soft)]"
-            style={{ transform: `translate(${pill?.x ?? 0}px, -50%)`, width: pill?.w ?? 0, opacity: pill ? 1 : 0 }} />
+          <span aria-hidden="true" className="rb-tabstrip-ind pointer-events-none absolute left-0 top-0 rounded-full bg-[var(--rb-accent-soft)]"
+            style={{ transform: `translate(${pill?.x ?? 0}px, ${pill?.y ?? 0}px)`, width: pill?.w ?? 0, height: pill?.h ?? 0, opacity: pill ? 1 : 0 }} />
           {NAV_LINKS.filter((item) => !item.mobileOnly).map((item) => {
             const spyId = SPY.find((x) => x.href === item.href)?.id;
             const active = onHome ? Boolean(spyId && spyId === activeSpy) : pathname === (item.match ?? item.href);
-            const className = cn("rounded-full px-4 py-2 text-base font-bold transition-colors", active ? "bg-[var(--rb-accent-soft)] text-[var(--rb-accent)]" : "text-[var(--rb-muted)] hover:bg-[var(--rb-surface)] hover:text-[var(--rb-text)]");
+            // Подписи в одну строку всегда: на 1024–1279 px «В подарок» и «Код с WB»
+            // ломались на две строки и раздували шапку (18.11.2026).
+            const className = cn("whitespace-nowrap rounded-full px-3 py-2 text-[15px] font-bold transition-colors xl:px-4 xl:text-base", active ? "bg-[var(--rb-accent-soft)] text-[var(--rb-accent)]" : "text-[var(--rb-muted)] hover:bg-[var(--rb-surface)] hover:text-[var(--rb-text)]");
             return item.external
               ? <a key={item.href} href={item.href} data-spy={spyId} aria-current={active ? "location" : undefined} className={cn(className, "relative z-[1]", active && onHome && "bg-transparent")}>{item.label}</a>
               : <Link key={item.href} href={item.href} className={className}>{item.label}</Link>;
           })}
         </div>
 
-        <div className="flex items-center gap-3 lg:gap-6">
+        <div className="flex shrink-0 items-center gap-3 lg:gap-4 xl:gap-6">
           <ThemeToggle compact />
           {/* D2: ссылка была `lg:flex`, а бургер — `md:hidden`, поэтому на
               768–1023 px (все iPad в портрете) в личный кабинет было не попасть
@@ -118,15 +158,15 @@ export default function Navbar() {
               ссылки на /admin не было больше нигде. Теперь у админа два разных
               входа, у обычного клиента — прежний один. */}
           {isAdmin && (
-            <Link href="/admin" aria-label="Админка" className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-accent)] transition-colors hover:opacity-80 md:flex">
-              <Shield size={15} /> <span className="hidden lg:inline">Админка</span>
+            <Link href="/admin" aria-label="Админка" title="Админка" className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-accent)] transition-colors hover:opacity-80 md:flex">
+              <Shield size={15} /> <span className="hidden 2xl:inline">Админка</span>
             </Link>
           )}
-          <Link href={loggedIn ? "/dashboard" : "/login"} aria-label={loggedIn ? "Личный кабинет" : "Войти"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] md:flex">
-            <User size={15} /> <span className="hidden lg:inline">{loggedIn ? "Кабинет" : "Войти"}</span>
+          <Link href={loggedIn ? "/dashboard" : "/login"} aria-label={loggedIn ? "Личный кабинет" : "Войти"} title={loggedIn ? "Личный кабинет" : "Войти"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] md:flex">
+            <User size={15} /> <span className="hidden 2xl:inline">{loggedIn ? "Кабинет" : "Войти"}</span>
           </Link>
-          <Link href="/#codes" className="hidden h-11 items-center gap-2 rounded-xl bg-[var(--rb-strong)] px-4 text-base font-extrabold text-white shadow-[3px_3px_0_#45d6aa] transition-transform hover:-translate-y-0.5 md:flex">
-            Купить Robux <ArrowRight size={15} />
+          <Link href="/#codes" className="hidden h-11 items-center gap-2 whitespace-nowrap rounded-xl bg-[var(--rb-strong)] px-4 text-base font-extrabold text-white shadow-[3px_3px_0_#45d6aa] transition-transform hover:-translate-y-0.5 md:flex">
+            Купить<span className="hidden xl:inline"> Robux</span> <ArrowRight size={15} />
           </Link>
           <button type="button" onClick={() => setOpen((value) => !value)} className="grid h-10 w-10 place-items-center rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] text-[var(--rb-text)] lg:hidden" aria-label={open ? "Закрыть меню" : "Открыть меню"}>
             {open ? <X size={19} /> : <Menu size={19} />}
@@ -134,16 +174,20 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* 📱 Полоса вкладок на главной (телефон и планшет): переезжающий ползунок под разделом. */}
+      {/* 📱 Разделы главной на телефоне и планшете. До 18.11.2026 это была
+          «таблетка» с ползунком и вкладкой «Подарок» — двойник переключателя
+          «Себе / В подарок» в блоке кодов: на экране было два одинаковых
+          контрола про одно и то же. Теперь — обычные вкладки с подчёркиванием,
+          а подарок выбирается только в самом блоке кодов. */}
       {onHome && !open && (
-        <div className="border-t border-[var(--rb-border)] px-4 pb-2 pt-2 lg:hidden">
-          <div className="relative mx-auto grid max-w-[620px] grid-cols-4 rounded-full bg-[var(--rb-accent-soft)] p-1">
-            <span aria-hidden="true" className="rb-tabstrip-ind absolute bottom-1 left-1 top-1 rounded-full bg-[var(--rb-strong)]"
-              style={{ width: "calc((100% - 8px) / 4)", transform: `translateX(${Math.max(0, SPY.findIndex((x) => x.id === activeSpy)) * 100}%)`, opacity: activeSpy ? 1 : 0 }} />
-            {SPY.map((t) => (
-              <a key={t.id} href={t.href} aria-current={t.id === activeSpy ? "location" : undefined}
-                className={cn("relative z-[1] flex h-9 items-center justify-center rounded-full text-[13px] font-extrabold transition-colors duration-300",
-                  t.id === activeSpy ? "text-white" : "text-[var(--rb-muted)]")}>{t.short}</a>
+        <div className="border-t border-[var(--rb-border)] px-4 lg:hidden">
+          <div className="relative mx-auto grid max-w-[620px] grid-cols-3">
+            <span aria-hidden="true" className="rb-tabstrip-ind absolute bottom-0 left-0 h-[3px] rounded-t-full bg-[var(--rb-accent)]"
+              style={{ width: `${100 / MOBILE_TABS.length}%`, transform: `translateX(${Math.max(0, MOBILE_TABS.findIndex((x) => x.id === mobileActive)) * 100}%)`, opacity: mobileActive ? 1 : 0 }} />
+            {MOBILE_TABS.map((t) => (
+              <a key={t.id} href={t.href} aria-current={t.id === mobileActive ? "location" : undefined}
+                className={cn("flex h-11 items-center justify-center text-[14px] font-extrabold transition-colors duration-300",
+                  t.id === mobileActive ? "text-[var(--rb-text)]" : "text-[var(--rb-muted)]")}>{t.short}</a>
             ))}
           </div>
         </div>

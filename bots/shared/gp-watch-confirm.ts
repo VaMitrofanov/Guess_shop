@@ -13,6 +13,7 @@ import { searchGamepassesByNick } from "./gamepass-search";
 import { assertOwnsOrder, type Actor } from "./ownership";
 import { adminTargets } from "./admin-route";
 import { queueAdminDigest } from "./admin-digest";
+import { singlePassFits, splitRequiredMessage } from "./gamepass-plan";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 
@@ -20,6 +21,8 @@ type GpWatchConfirmResult =
   | { status: "ok"; passName: string; robux: number; nick: string; wbCode: string }
   | { status: "already" }        // order already moved on (manager/user handled it)
   | { status: "gone" }           // the gamepass is no longer for sale at the right price
+  /** Заказ больше донора: один пасс на всю сумму не выкупить — нужен набор. */
+  | { status: "needs_split"; message: string }
   | { status: "forbidden" }      // U6: кнопка нажата не владельцем заказа
   | { status: "error" };
 
@@ -39,6 +42,13 @@ export async function confirmGpWatch(orderId: string, actor: Actor): Promise<GpW
     const order = owned.entity;
     const probableNick = order.probableNick;
     if (order.status !== "AWAITING_GAMEPASS" || !probableNick) return { status: "already" };
+    // Пинг мог уйти до 18.11.2026, когда воркер ещё звал подтверждать пасс на
+    // всю сумму заказа больше донора (DNJZUB5, 2857 R$). Такой пасс не выкупит
+    // ни один аккаунт — в очередь его не ставим, а объясняем, какие нужны.
+    if (!singlePassFits(order.amount)) {
+      await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: null } }).catch(() => {});
+      return { status: "needs_split", message: splitRequiredMessage(order.amount) };
+    }
 
     const want = expectedPrice(order.amount);
     const outcome = await searchGamepassesByNick(probableNick, want);

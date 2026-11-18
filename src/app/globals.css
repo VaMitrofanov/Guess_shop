@@ -2481,7 +2481,7 @@ html.twa-route-active [contenteditable="true"] {
    «Уменьшить движение» в настройках — всё мгновенно и без анимаций. */
 html { scroll-behavior: smooth; }
 :root { --rb-anchor-offset: 88px; }
-@media (max-width: 1023px) { :root { --rb-anchor-offset: 132px; } }
+@media (max-width: 1023px) { :root { --rb-anchor-offset: 124px; } }
 #codes, #calculator, #reviews, #invite, #gift { scroll-margin-top: var(--rb-anchor-offset); }
 .rb-arrive { animation: rbArrive 1.1s ease-out; }
 @keyframes rbArrive { 0% { box-shadow: 0 0 0 0 rgba(117, 86, 232, .55); } 100% { box-shadow: 0 0 0 18px rgba(117, 86, 232, 0); } }

@@ -22,6 +22,15 @@ export const ClientSignalSchema = z.discriminatedUnion("type", [
     ref: z.enum(["direct", "wb", "vk", "telegram", "yandex", "google", "internal", "other"]),
     visitor: z.string().regex(/^[a-f0-9]{8}$/),
   }),
+  // 📊 Событие витрины (18.11.2026): воронка кодов, прокрутка, калькулятор —
+  // `src/lib/site-track.ts`.
+  z.object({
+    type: z.literal("event"),
+    route: RouteSchema,
+    name: z.enum(["pack", "gift_on", "buy_click", "order", "section", "gp_amount", "gp_checkout"]),
+    value: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(),
+    visitor: z.string().regex(/^[a-f0-9]{8}$/),
+  }),
   z.object({
     type: z.literal("client-error"),
     route: RouteSchema,
@@ -33,6 +42,7 @@ export const ClientSignalSchema = z.discriminatedUnion("type", [
 type ClientSignal = z.infer<typeof ClientSignalSchema>;
 
 export function formatClientSignal(signal: ClientSignal): string {
+  if (signal.type === "event") return `event ${signal.name}=${signal.value ?? ""} on ${signal.route}`;
   if (signal.type === "visit") return `visit ${signal.device}/${signal.app} from ${signal.ref} on ${signal.route}`;
   if (signal.type === "web-vital") {
     return `${signal.name}=${Math.round(signal.value * 100) / 100} (${signal.rating}) on ${signal.route}`;

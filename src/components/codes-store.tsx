@@ -24,6 +24,7 @@ import {
 import { CODE_DENOMINATIONS, CODE_PRICES, quoteCode } from "@/lib/codes-pricing";
 import GiftArt from "@/components/gift-art";
 import styles from "./codes-store.module.css";
+import { trackSiteEvent } from "@/lib/site-track";
 
 /**
  * 🎟 Покупка кода активации на главной (14.11.2026, витрина 2.0 — 15.11.2026).
@@ -261,6 +262,7 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
   // Номинал сохраняется в адресе и в сессии — его не теряют ни вход, ни переключение сценария.
   const choose = (denomination: number) => {
     setSelected(denomination);
+    trackSiteEvent("pack", denomination);
     setError("");
     setShared(null);
     keyRef.current = "";
@@ -272,6 +274,7 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
 
   const switchMode = (next: "self" | "gift") => {
     setMode(next);
+    if (next === "gift") trackSiteEvent("gift_on");
     setError("");
     setShared(null);
     keyRef.current = "";
@@ -293,6 +296,7 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
     if (!pack || busy) return;
     setError("");
     setBusy(kind);
+    trackSiteEvent("buy_click", pack.denomination);
     if (!keyRef.current) keyRef.current = newKey();
     const gift = mode === "gift"
       ? {
@@ -335,6 +339,8 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
         createdAt: nowMs(),
       };
       safeSet("local", LAST_ORDER_KEY, JSON.stringify(saved));
+      // По id заказа отчёт «Посетители» узнаёт, оплачен ли он (воронка, источник → покупка).
+      if (data.orderId) trackSiteEvent("order", data.orderId);
       keyRef.current = "";
       if (kind === "self" && data.paymentUrl) {
         window.location.assign(data.paymentUrl);

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useReportWebVitals } from "next/web-vitals";
 import { usePathname } from "next/navigation";
+import { visitorId } from "@/lib/site-track";
 
 const ENDPOINT = "/api/observability/client";
 const sentInMemory = new Set<string>();
@@ -95,14 +96,6 @@ function refClass(): "direct" | "wb" | "vk" | "telegram" | "yandex" | "google" |
   if (/google/.test(host)) return "google";
   return "other";
 }
-function visitorId(): string {
-  try {
-    let id = localStorage.getItem("rb-visitor");
-    if (!id) { id = Math.random().toString(16).slice(2, 10).padEnd(8, "0"); localStorage.setItem("rb-visitor", id); }
-    return /^[a-f0-9]{8}$/.test(id) ? id : fingerprint(id);
-  } catch { return fingerprint(navigator.userAgent + Date.now()); }
-}
-
 export function SiteObservability() {
   // A stable callback is required by Next.js to avoid duplicate metric reports.
   useReportWebVitals(reportWebVital);

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const ip = clientIp(req);
-  const limited = rateLimit(`client-observability:${ip}`, 20, 1 / 3);
+  const limited = rateLimit(`client-observability:${ip}`, 40, 1 / 2);
   if (!limited.ok) {
     return NextResponse.json(
       { accepted: false },
@@ -23,6 +23,12 @@ export async function POST(req: NextRequest) {
 
   after(async () => {
     // 📊 Посещение — в базу (раздел админки «Посетители»), не в журнал: их сотни в день.
+    if (signal.type === "event") {
+      await prisma.performanceSample.create({
+        data: { surface: "site-event", route: signal.route, metric: signal.name, rating: signal.value ?? null, fingerprint: signal.visitor },
+      }).catch(() => undefined);
+      return;
+    }
     if (signal.type === "visit") {
       await prisma.performanceSample.create({
         data: { surface: "site-visit", route: signal.route, metric: `${signal.device}:${signal.ref}`, rating: signal.app, fingerprint: signal.visitor },

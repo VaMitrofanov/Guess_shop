@@ -137,7 +137,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       </section>
 
       {/* ── Полоса доверия: простыми словами ───────────────────────────── */}
-      <section data-reveal className={styles.trust} aria-label="Почему это безопасно">
+      <section data-reveal data-section="trust" className={styles.trust} aria-label="Почему это безопасно">
         {trust.map(({ icon: Icon, title, text }) => (
           <div key={title} className={styles.trustItem}>
             <span className={styles.trustIcon}><Icon size={18} /></span>
@@ -147,9 +147,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       </section>
 
       {/* ── Покупка: код первым и крупнее, геймпасс — вторым ───────────── */}
-      <section className={styles.buy}>
+      <section data-section="codes" className={styles.buy}>
         <CodesStore instant={instant} festive={ny} />
-        <div id="calculator" className={styles.passColumn}>
+        <div id="calculator" data-section="calculator" className={styles.passColumn}>
           <div className={styles.passHead}>
             <div className={styles.passTitle}>
               <span className={styles.passIcon} aria-hidden="true"><Gamepad2 size={24} strokeWidth={2.4} /></span>
@@ -166,7 +166,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       </section>
 
       {/* ── Сравнение: код рекомендован ────────────────────────────────── */}
-      <section data-reveal className={styles.compare} aria-labelledby="compare-title">
+      <section data-reveal data-section="compare" className={styles.compare} aria-labelledby="compare-title">
         <div className={styles.sectionHead}>
           <span className={styles.kicker}>Как выбрать</span>
           <h2 id="compare-title">Не хочешь ждать? Бери код</h2>
@@ -195,7 +195,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       </section>
 
       {/* ── Отзывы с Wildberries ───────────────────────────────────────── */}
-      <section data-reveal id="reviews" className={styles.reviews} aria-labelledby="reviews-title">
+      <section data-reveal data-section="reviews" id="reviews" className={styles.reviews} aria-labelledby="reviews-title">
         <div className={styles.reviewsHead}>
           <div className={styles.sectionHead}>
             <span className={styles.kicker}>Отзывы покупателей с Wildberries</span>
@@ -207,7 +207,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       </section>
 
       {/* ── Подарок ───────────────────────────────────────────────────── */}
-      <section data-reveal className={styles.giftPromo} aria-labelledby="gift-title">
+      <section data-reveal data-section="gift" className={styles.giftPromo} aria-labelledby="gift-title">
         <div className={styles.giftCopy}>
           <span className={styles.kicker}>Подарок, который точно порадует</span>
           <h2 id="gift-title">Подари Robux открыткой</h2>
@@ -229,7 +229,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
       </section>
 
       {/* ── Приглашения ───────────────────────────────────────────────── */}
-      <section data-reveal id="invite" className={styles.invite} aria-labelledby="invite-title">
+      <section data-reveal data-section="invite" id="invite" className={styles.invite} aria-labelledby="invite-title">
         <div className={styles.inviteCopy}>
           <span className={styles.kicker}>Приглашай друзей</span>
           <h2 id="invite-title">Скидка на коды растёт вместе с друзьями</h2>
@@ -249,7 +249,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
 
       <CodesInfo instant={instant} />
 
-      <section data-reveal className={styles.bottomCta}>
+      <section data-reveal data-section="bottom" className={styles.bottomCta}>
         <div>
           <span className={styles.kicker}>Готов?</span>
           <h2>{instant ? "Robux через минуту" : "Robux — кодом"}</h2>

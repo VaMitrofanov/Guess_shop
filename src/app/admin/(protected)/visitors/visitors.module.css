@@ -18,3 +18,9 @@
 .day { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:4px; min-width:0; }
 .day i { width:100%; border-radius:4px 4px 0 0; background:#30d158; }
 .day span { font-size:11px; color:var(--admin-muted); }
+
+/* 📈 Таблицы воронки (18.11.2026). */
+.table { width:100%; border-collapse:collapse; font-size:14px; font-variant-numeric:tabular-nums; }
+.table th { text-align:left; color:var(--admin-muted); font-weight:600; font-size:13px; padding:0 8px 8px 0; }
+.table td { padding:8px 8px 8px 0; border-top:1px solid var(--admin-line); }
+.table th:not(:first-child), .table td:not(:first-child) { text-align:right; }

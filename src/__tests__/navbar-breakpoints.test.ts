@@ -20,7 +20,7 @@ const navbar = readFileSync(path.join(__dirname, "..", "components", "navbar.tsx
 
 /** Брейкпоинт, на котором горизонтальный список ссылок секций становится видимым. */
 function navLinksBreakpoint(): string {
-  const match = /className="(?:relative )?hidden items-center gap-1 (\w+):flex"/.exec(navbar);
+  const match = /className="(?:relative )?(?:mx-\d )?hidden items-center gap-1 (\w+):flex"/.exec(navbar);
   if (!match) throw new Error("не найден контейнер ссылок секций в navbar.tsx");
   return match[1];
 }
