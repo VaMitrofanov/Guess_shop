@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
+import { Suspense, cache } from "react";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { adminGrantFor } from "@/lib/admin-grant";
@@ -23,15 +23,17 @@ import {
   Clock,
   ExternalLink,
   Gamepad2,
+  Gift,
+  KeyRound,
   Link2,
   LogOut,
   Package,
   Radio,
   ReceiptText,
+  Send,
   Shield,
   ShieldCheck,
   ShoppingCart,
-  User,
   XCircle,
   Zap,
 } from "lucide-react";
@@ -50,6 +52,9 @@ import { CodesDashboard, ReferralCard, type DashboardCodeOrder } from "@/compone
 import { buyersWord, ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
 import { claimReferralFromCookies } from "@/lib/codes/http";
 import { offerExpired, payTokenFor } from "@/lib/codes/orders";
+import ProfileHero, { type HeroBadge } from "@/components/account/profile-hero";
+import { parseProfileStyle, type NameSources } from "@/lib/profile-style";
+import { loadAvatarRenders } from "@/lib/roblox-avatar-renders";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -150,34 +155,74 @@ function resumeHref(order: DashboardOrder) {
   });
 }
 
-async function RobloxProfileSection({
+// Профиль Roblox нужен и карточке, и блоку управления — один заход в базу на запрос.
+const loadRobloxProfile = cache(loadCustomerRobloxProfile);
+
+function nameFromIdentity(metadata: unknown): string | null {
+  const name = metadata && typeof metadata === "object" ? (metadata as { name?: unknown }).name : null;
+  const clean = typeof name === "string" ? name.replace(/\s+/g, " ").trim().slice(0, 40) : "";
+  return clean || null;
+}
+
+/** 🪪 Карточка профиля (18.11.2026): настоящий персонаж Roblox, имя по выбору. */
+async function ProfileHeroSection({
   userId,
-  fallbackName,
-  bonusAmount,
-  bonusCaption,
+  rawStyle,
+  identityNames,
+  stats,
+  badges,
   isAdmin,
-  activeOrderHref,
 }: {
   userId: string;
-  fallbackName: string;
-  bonusAmount: number;
-  bonusCaption: string;
+  rawStyle: unknown;
+  identityNames: { tg: string | null; vk: string | null };
+  stats: { robux: number; orders: number; discount: number; bonus: number };
+  badges: HeroBadge[];
   isAdmin: boolean;
-  activeOrderHref: string | null;
 }) {
+  const payload = await loadRobloxProfile(userId);
+  const profile = payload.profile;
+  const renders = await loadAvatarRenders(profile?.id ?? null);
+  const sources: NameSources = {
+    roblox: profile ? { displayName: profile.displayName, username: profile.username } : null,
+    tg: identityNames.tg,
+    vk: identityNames.vk,
+  };
+  const createdYear = profile?.createdAt ? new Date(profile.createdAt).getFullYear() : null;
+  return (
+    <ProfileHero
+      initialStyle={parseProfileStyle(rawStyle)}
+      sources={sources}
+      roblox={profile ? {
+        username: profile.username,
+        displayName: profile.displayName,
+        createdYear: Number.isFinite(createdYear) ? createdYear : null,
+        headshot: profile.avatarUrl,
+        full: renders.full,
+        bust: renders.bust,
+      } : null}
+      stats={stats}
+      badges={badges}
+      isAdmin={isAdmin}
+    />
+  );
+}
+
+async function RobloxManageSection({ userId, activeOrderHref }: { userId: string; activeOrderHref: string | null }) {
   // Одной волной: профиль и привязанные ключи независимы, а каждый заход в базу
   // с прод-хоста стоит ~200 мс.
   const [initial, keys] = await Promise.all([
-    loadCustomerRobloxProfile(userId),
+    loadRobloxProfile(userId),
     listRobloxApiKeys(userId),
   ]);
   return (
     <CustomerRobloxProfileCard
+      variant="manage"
       initial={initial}
-      fallbackName={fallbackName}
-      bonusAmount={bonusAmount}
-      bonusCaption={bonusCaption}
-      isAdmin={isAdmin}
+      fallbackName=""
+      bonusAmount={0}
+      bonusCaption=""
+      isAdmin={false}
       activeOrderHref={activeOrderHref}
       keys={keys.map((key) => ({
         id: key.id,
@@ -189,6 +234,15 @@ async function RobloxProfileSection({
       keyAutoEnabled={gamepassAutocreateEnabled()}
     />
   );
+}
+
+/** Шаг заказа для полосы ▰▰▱▱ — те же четыре, что в закрепе бота и `OrderTimeline`. */
+function orderStep(status: string): number {
+  if (["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(status)) return 0;
+  if (status === "AWAITING_GAMEPASS") return 1;
+  if (["PENDING", "IN_PROGRESS", "ERROR"].includes(status)) return 2;
+  if (status === "COMPLETED") return 3;
+  return 0;
 }
 
 export default async function DashboardPage() {
@@ -214,11 +268,13 @@ export default async function DashboardPage() {
         createdAt: true,
         balance: true,
         bonusExpiresAt: true,
+        profileStyle: true,
         identities: {
           orderBy: { verifiedAt: "asc" },
           // `subject` нужен, чтобы определить админа тем же правилом, что и гейт
           // админки: роль после A1 выводится из ADMIN_IDS, а не хранится в БД.
-          select: { provider: true, subject: true, verifiedAt: true },
+          // `metadata.name` — имя из Telegram/ВК для карточки профиля.
+          select: { provider: true, subject: true, verifiedAt: true, metadata: true },
         },
       },
     }),
@@ -311,18 +367,26 @@ export default async function DashboardPage() {
   const identityNames = new Map(user.identities.map((identity) => [identity.provider, identity]));
   const bonusActive = user.balance > 0 && (!user.bonusExpiresAt || user.bonusExpiresAt > new Date());
   const bonusAmount = bonusActive ? user.balance : 0;
-  const bonusCaption = bonusActive && user.bonusExpiresAt
-    ? `Доступно до ${formatDate(user.bonusExpiresAt)}`
-    : bonusActive ? "Готовы к следующему заказу" : "Появятся после акций и отзывов";
   const notices = buildCustomerNotices({
     orders: orders.map(({ id, kind, status, amountRobux, createdAt }) => ({ id, kind, status, amountRobux, createdAt })),
     balance: bonusActive ? user.balance : 0,
     bonusExpiresAt: user.bonusExpiresAt,
     linkedProviders,
   });
-  const completedCount = orders.filter((order) => customerOrderStatus(order.kind, order.status).completed).length;
-  const activeCount = orders.filter((order) => customerOrderStatus(order.kind, order.status).active).length;
-  const greetingName = user.name ?? user.email?.split("@")[0] ?? "друг";
+  const completedOrders = orders.filter((order) => customerOrderStatus(order.kind, order.status).completed);
+  const issuedCodes = codeOrders.filter((order) => order.status === "ISSUED");
+  const heroStats = {
+    robux: completedOrders.reduce((sum, order) => sum + order.amountRobux, 0) + issuedCodes.reduce((sum, order) => sum + order.denomination, 0),
+    orders: completedOrders.length + issuedCodes.length,
+    discount: codeDiscount.percent ?? 0,
+    bonus: bonusAmount,
+  };
+  const heroBadges: HeroBadge[] = [
+    ...(heroStats.orders > 0 ? [{ id: "first", label: "Первый заказ", tone: "violet" as const }] : []),
+    ...(codeDiscount.invitedCount > 0 ? [{ id: "friends", label: `Привёл друзей: ${codeDiscount.invitedCount}`, tone: "mint" as const }] : []),
+    ...(issuedCodes.some((order) => order.deliveryMode === "GIFT") ? [{ id: "gift", label: "Дарил Robux", tone: "orange" as const }] : []),
+    ...(heroStats.robux >= 10_000 ? [{ id: "10k", label: "10 000 R$ с нами", tone: "mint" as const }] : []),
+  ];
   // The checkout API chooses the latest eligible account from the signed-in
   // user's projection. A generic link cannot accidentally prefill an unpaid
   // historical draft.
@@ -345,39 +409,53 @@ export default async function DashboardPage() {
     <main className={styles.page}>
       <Navbar />
       <div className={styles.shell}>
-        <header className={styles.hero}>
-          <Suspense fallback={<div className={styles.robloxHeroLoading}>Загружаем Roblox-профиль…</div>}>
-            <RobloxProfileSection
-              userId={user.id}
-              fallbackName={greetingName}
-              bonusAmount={bonusAmount}
-              bonusCaption={bonusCaption}
-              isAdmin={isAdmin}
-              activeOrderHref={latestActiveHref}
-            />
-          </Suspense>
-        </header>
+        <Suspense fallback={<div className={styles.heroSkeleton} aria-label="Загружаем профиль" />}>
+          <ProfileHeroSection
+            userId={user.id}
+            rawStyle={user.profileStyle}
+            identityNames={{ tg: nameFromIdentity(identityNames.get("TG")?.metadata), vk: nameFromIdentity(identityNames.get("VK")?.metadata) }}
+            stats={heroStats}
+            badges={heroBadges}
+            isAdmin={isAdmin}
+          />
+        </Suspense>
 
-        <section className={styles.stats} aria-label="Краткая сводка">
-          <article><small>Заказы</small><strong>{orders.length}</strong><span>в общей истории</span></article>
-          <article><small>Активные</small><strong>{activeCount}</strong><span>сейчас в работе</span></article>
-          <article><small>Готово</small><strong>{completedCount}</strong><span>уже выполнено</span></article>
-          <article><small>Каналы</small><strong>{linkedProviders.length}</strong><span>подтверждено</span></article>
-        </section>
+        {latestActive && (() => {
+          const step = orderStep(latestActive.status);
+          const wb = latestActive.source === "WB" || latestActive.source === "WB_DBS";
+          const labels = [wb ? "Код" : "Оплата", "Геймпасс", "Выкуп", "Pending у Roblox"];
+          return (
+            <section className={styles.activeCard} aria-label="Заказ в работе">
+              <div className={styles.activeCardMain}>
+                <span className={styles.activeKicker}>Заказ в работе · {sourceLabel(latestActive.source)}{latestActive.customer ? ` · на ник ${latestActive.customer}` : ""}</span>
+                <strong className={styles.activeAmount}>{latestActive.amountRobux.toLocaleString("ru-RU")} R$</strong>
+                <ol className={styles.activeStrip} aria-label={`Шаг ${step + 1} из 4`}>
+                  {labels.map((label, i) => (
+                    <li key={label} className={i < step ? styles.stripDone : i === step ? styles.stripNow : undefined}><i aria-hidden="true" /><span>{label}</span></li>
+                  ))}
+                </ol>
+              </div>
+              <div className={styles.activeCardSide}>
+                <span className={styles.activeNext}>{customerOrderStatus(latestActive.kind, latestActive.status).label}</span>
+                {latestActiveHref && <Link href={latestActiveHref} className={styles.activePrimary}>{step === 1 ? "Открыть инструкцию" : "Подробнее о заказе"} <ArrowRight size={17} /></Link>}
+                <details className={styles.activeSteps}>
+                  <summary>Все шаги</summary>
+                  <OrderTimeline source={latestActive.source} status={latestActive.status} createdAt={latestActive.createdAt} />
+                </details>
+              </div>
+            </section>
+          );
+        })()}
+
+        <nav className={styles.quickRow} aria-label="Быстрые действия">
+          <Link href="/#codes"><KeyRound size={22} aria-hidden="true" /><span>Купить код</span></Link>
+          <Link href="/#gift"><Gift size={22} aria-hidden="true" /><span>Подарить</span></Link>
+          <Link href="/#calculator"><Gamepad2 size={22} aria-hidden="true" /><span>Геймпасс</span></Link>
+          <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer"><Send size={22} aria-hidden="true" /><span>Поддержка</span></a>
+        </nav>
 
         <div className={styles.dashboardGrid}>
           <div className={styles.mainColumn}>
-            {latestActive && (
-              <section className={styles.activeOrder} aria-label="Активный заказ">
-                <div className={styles.activeOrderTop}>
-                  <div><span className={styles.kicker}>Активный заказ · {sourceLabel(latestActive.source)}</span><h2>{latestActive.amountRobux.toLocaleString("ru-RU")} R$</h2><p>{latestActive.displayId} · {latestActive.customer ?? "Roblox-ник уточняется"}</p></div>
-                  <StatusBadge kind={latestActive.kind} status={latestActive.status} />
-                </div>
-                {/* 🎨 З6: шкала сверху вниз с «пульсом» на текущем шаге (те же шаги, что в закрепе бота). */}
-                <OrderTimeline source={latestActive.source} status={latestActive.status} createdAt={latestActive.createdAt} />
-                <div className={styles.activeOrderBottom}><span>Следующий шаг: <strong>{customerOrderStatus(latestActive.kind, latestActive.status).label}</strong></span>{latestActiveHref && <Link href={latestActiveHref}>Подробнее <ArrowRight size={16} /></Link>}</div>
-              </section>
-            )}
             <CodesDashboard orders={dashboardCodes} />
             <section className={styles.sectionCard}>
               <div className={styles.sectionHead}>
@@ -455,16 +533,9 @@ export default async function DashboardPage() {
 
           <aside className={styles.sidebar}>
             {referral && <ReferralCard summary={referral} />}
-            <section className={styles.profileCard}>
-              <div className={styles.profileTop}>
-                <span className={styles.avatar}><User size={25} /></span>
-                <div><strong>{user.name ?? greetingName}</strong><span>{user.email ?? "Аккаунт RobloxBank"}</span></div>
-              </div>
-              <dl className={styles.profileRows}>
-                <div><dt>Клиент с</dt><dd>{formatDate(user.createdAt)}</dd></div>
-                {isAdmin && <div><dt>Роль</dt><dd>Администратор</dd></div>}
-              </dl>
-            </section>
+            <Suspense fallback={null}>
+              <RobloxManageSection userId={user.id} activeOrderHref={latestActiveHref} />
+            </Suspense>
 
             <section id="identity-settings" className={styles.identityCard}>
               <div className={styles.sideHead}><span><Link2 size={18} /> Способы входа</span><ShieldCheck size={18} /></div>

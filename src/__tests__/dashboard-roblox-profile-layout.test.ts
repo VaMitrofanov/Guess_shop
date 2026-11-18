@@ -7,14 +7,24 @@ const profile = readFileSync(path.join(ROOT, "src/components/customer-roblox-pro
 const css = readFileSync(path.join(ROOT, "src/app/dashboard/dashboard.module.css"), "utf8");
 
 describe("dashboard Roblox-first hero", () => {
-  it("renders the Roblox profile in the top hero instead of the sidebar", () => {
-    const heroStart = page.indexOf("<header className={styles.hero}>");
-    const heroEnd = page.indexOf("</header>", heroStart);
+  // 🪪 18.11.2026: лицо профиля — `ProfileHero` (персонаж Roblox на подиуме) над
+  // сеткой кабинета; управление ником и ключом — тот же компонент в режиме
+  // `manage` в сайдбаре.
+  it("renders the profile card on top and Roblox account management in the sidebar", () => {
+    const gridStart = page.indexOf("<div className={styles.dashboardGrid}>");
     const sidebar = page.slice(page.indexOf("<aside className={styles.sidebar}>"));
-
-    expect(page.slice(heroStart, heroEnd)).toContain("<RobloxProfileSection");
-    expect(sidebar).not.toContain("<RobloxProfileSection");
+    expect(page.indexOf("<ProfileHeroSection")).toBeGreaterThan(-1);
+    expect(page.indexOf("<ProfileHeroSection")).toBeLessThan(gridStart);
+    expect(sidebar).toContain("<RobloxManageSection");
+    expect(sidebar).not.toContain("<ProfileHeroSection");
     expect(page).not.toContain("<h1>Привет,");
+  });
+
+  it("profile card loads Roblox renders in the browser, never through our server", () => {
+    const hero = readFileSync(path.join(ROOT, "src/components/account/profile-hero.tsx"), "utf8");
+    expect(hero).not.toContain("/_next/image");
+    expect(hero).not.toContain("next/image");
+    expect(hero).toContain("onError={() => fail(src)}");
   });
 
   it("keeps profile purchase and compact bonus actions in one component", () => {

@@ -35,6 +35,10 @@ model User {
   robloxDescription       String?
   robloxAccountCreatedAt  DateTime?
   robloxProfileSyncedAt   DateTime?
+  /// 🪪 Карточка профиля в кабинете (18.11.2026): как показывать имя
+  /// (Roblox / Telegram / ВК / своё / «Игрок»), вид аватара, фон. Разбор —
+  /// `src/lib/profile-style.ts`; null = всё по умолчанию.
+  profileStyle            Json?
   balance                 Int                 @default(0)
   bonusExpiresAt          DateTime?
   rubleDiscount           Int                 @default(0)

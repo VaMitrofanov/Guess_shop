@@ -39,6 +39,9 @@ type CustomerRobloxProfileCardProps = {
   keys: LinkedKeyView[];
   /** Метод «сделаем пасс за тебя» включён флагом. */
   keyAutoEnabled: boolean;
+  /** 🪪 18.11.2026: в новом кабинете лицо профиля рисует `ProfileHero`, а здесь
+   *  остаётся только управление — выбор/добавление ника, отвязка и ключ. */
+  variant?: "hero" | "manage";
 };
 
 function profileDate(value: string | null) {
@@ -59,6 +62,7 @@ export default function CustomerRobloxProfileCard({
   activeOrderHref,
   keys,
   keyAutoEnabled,
+  variant = "hero",
 }: CustomerRobloxProfileCardProps) {
   const [payload, setPayload] = useState(initial);
   const [editing, setEditing] = useState(!initial.profile);
@@ -155,6 +159,84 @@ export default function CustomerRobloxProfileCard({
   const visibleMainAvatarUrl = mainAvatarUrl && !failedAvatarUrls.has(mainAvatarUrl)
     ? mainAvatarUrl
     : null;
+
+  const switcher = payload.accounts.length > 1 && (
+    <div className={styles.robloxAccountSwitcher} aria-label="Roblox-аккаунты из ваших заказов">
+      <span>Аккаунт для покупки</span>
+      <div>
+        {payload.accounts.map((item) => {
+          const avatarUrl = profileAvatarSrc(item.avatarUrl);
+          const visibleAvatarUrl = avatarUrl && !failedAvatarUrls.has(avatarUrl) ? avatarUrl : null;
+          return (
+            <button
+              key={item.accountId}
+              type="button"
+              className={item.selected ? styles.robloxAccountActive : styles.robloxAccountChoice}
+              onClick={() => void selectAccount(item.accountId)}
+              disabled={busy}
+              aria-pressed={item.selected}
+            >
+              {visibleAvatarUrl
+                ? <Image src={visibleAvatarUrl} width={30} height={30} alt="" unoptimized onError={() => markAvatarFailed(visibleAvatarUrl)} />
+                : <UserRound size={16} />}
+              <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  if (variant === "manage") {
+    return (
+      <section id="roblox-accounts" className={styles.robloxManage} aria-label="Аккаунты Roblox">
+        <div className={styles.robloxManageHead}>
+          <span><Gamepad2 size={18} /> Аккаунт Roblox</span>
+          {profile?.profileUrl && (
+            <a href={profile.profileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Открыть профиль ${profile.username} в Roblox`}>
+              В Roblox <ExternalLink size={14} />
+            </a>
+          )}
+        </div>
+        {switcher}
+        <div className={styles.robloxMetaCard}>
+          {profile ? (
+            <>
+              <dl className={styles.profileRows}>
+                <div><dt>Ник для заказов</dt><dd>@{profile.username}</dd></div>
+                <div><dt>Roblox ID</dt><dd>{profile.id}</dd></div>
+                {profileDate(profile.createdAt) && <div><dt>Аккаунт с</dt><dd>{profileDate(profile.createdAt)}</dd></div>}
+              </dl>
+              <div className={styles.robloxProfileControls}>
+                <button type="button" onClick={() => { setEditing((value) => !value); setMessage(null); }}><Pencil size={15} /> Добавить ник</button>
+                <button type="button" onClick={disconnect} disabled={busy} aria-label="Скрыть Roblox-аккаунт"><Unlink size={15} /></button>
+              </div>
+            </>
+          ) : (
+            <div className={styles.robloxConnectPrompt}>
+              <p>Укажите ник — появится ваш персонаж, и заказывать станет быстрее. Аккаунты из прошлых заказов появятся сами.</p>
+              {!editing && <button type="button" onClick={() => setEditing(true)}>Указать ник Roblox</button>}
+            </div>
+          )}
+        </div>
+        {editing && (
+          <div className={styles.robloxEditor}>
+            <label htmlFor="roblox-profile-username">Ник Roblox</label>
+            <div>
+              <input id="roblox-profile-username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Например, Builderman" maxLength={20} autoComplete="off" />
+              <button type="button" onClick={save} disabled={busy || username.trim().length < 3}>
+                {busy ? <RefreshCw size={16} className={styles.spin} /> : "Найти"}
+              </button>
+            </div>
+            <small>Мы берём только публичные данные Roblox — это не проверка владения аккаунтом.</small>
+          </div>
+        )}
+        {message && <p className={styles.robloxMessage} role="status">{message}</p>}
+        <CustomerRobloxKeyCard initialKeys={keys} username={profile?.username ?? null} enabled={keyAutoEnabled} activeOrderHref={activeOrderHref} />
+      </section>
+    );
+  }
+
   return (
     <div className={styles.robloxHeroShell} aria-label="Профиль Roblox">
       <section className={styles.robloxHeroMain}>
@@ -181,32 +263,7 @@ export default function CustomerRobloxProfileCard({
             </small>
           </div>
         </div>
-        {payload.accounts.length > 1 && (
-          <div className={styles.robloxAccountSwitcher} aria-label="Roblox-аккаунты из ваших заказов">
-            <span>Аккаунт для покупки</span>
-            <div>
-              {payload.accounts.map((item) => {
-                const avatarUrl = profileAvatarSrc(item.avatarUrl);
-                const visibleAvatarUrl = avatarUrl && !failedAvatarUrls.has(avatarUrl) ? avatarUrl : null;
-                return (
-                  <button
-                    key={item.accountId}
-                    type="button"
-                    className={item.selected ? styles.robloxAccountActive : styles.robloxAccountChoice}
-                    onClick={() => void selectAccount(item.accountId)}
-                    disabled={busy}
-                    aria-pressed={item.selected}
-                  >
-                    {visibleAvatarUrl
-                      ? <Image src={visibleAvatarUrl} width={30} height={30} alt="" unoptimized onError={() => markAvatarFailed(visibleAvatarUrl)} />
-                      : <UserRound size={16} />}
-                    <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {switcher}
         {profile?.description && <p className={styles.robloxHeroDescription}>{profile.description}</p>}
         <div className={styles.actions}>
           <Link href={checkoutHref} className={styles.primary}>
