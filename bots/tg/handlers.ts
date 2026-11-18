@@ -136,7 +136,7 @@ import { applyBonusDeltaTx, revertOrderBenefits, BONUS_REASONS, directOrderBonus
 import { extractGamepassId } from "../shared/gamepass-id";
 import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
-import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
+import { WEB_LOGIN_APPROVE_CB, WEB_LOGIN_ASK_TEXT, WEB_LOGIN_DONE_TEXT, WEB_LOGIN_STALE_TEXT, approveWebLogin, buildTelegramWebLoginUrl, parseTelegramWebLoginStart, parseWebLoginApprove } from "../shared/telegram-web-login";
 import { browserFailureMessage, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 import { createBotPayment, isTerminalBotPaymentError, type BotPaymentMethod } from "../shared/bot-payment-api";
 import {
@@ -678,6 +678,15 @@ const startRateLimiter = new Map<string, { attempts: number, resetAt: number }>(
 const recentCodeStarts = new Map<number, number>(); // userId → timestamp
 
 export function registerStart(bot: Telegraf): void {
+  // 🔐 «✅ Да, войти» — одобрить вход на сайт для вкладки, которая ждёт (18.11.2026).
+  bot.action(/^wla:/, async (ctx) => {
+    const state = parseWebLoginApprove((ctx.callbackQuery as { data?: string })?.data);
+    const ok = state ? await approveWebLogin(db, state, String(ctx.from.id)).catch(() => false) : false;
+    await ctx.answerCbQuery(ok ? "Вход подтверждён" : "Вход устарел").catch(() => undefined);
+    await ctx.editMessageText(ok ? WEB_LOGIN_DONE_TEXT : WEB_LOGIN_STALE_TEXT, { parse_mode: "HTML" }).catch(() => undefined);
+    console.log(`[web-login] ${ok ? "одобрен" : "устарел"} вход для tg ${ctx.from.id}`);
+  });
+
   bot.start(async (ctx) => {
     const tgId = String(ctx.from.id);
     const rawPayload = ctx.startPayload?.trim() ?? "";
@@ -791,14 +800,21 @@ export function registerStart(bot: Telegraf): void {
         botToken,
         baseUrl: process.env.WEB_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL,
       });
+      if (webLogin.mode === "login") {
+        // Вход «вернитесь в браузер»: главная кнопка одобряет вход для вкладки,
+        // которая ждёт; ссылка — запасной путь (откроет кабинет прямо здесь).
+        await ctx.reply(WEB_LOGIN_ASK_TEXT, {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("✅ Да, войти", `${WEB_LOGIN_APPROVE_CB}:${webLogin.state}`)],
+            [Markup.button.url("🌐 Открыть кабинет здесь", callbackUrl)],
+          ]),
+        });
+        return;
+      }
       await ctx.reply(
-        webLogin.mode === "link"
-          ? "Подтвердите привязку Telegram к личному кабинету RobloxBank. Ссылка действует 5 минут."
-          : "Подтвердите вход в личный кабинет RobloxBank. Ссылка действует 5 минут.",
-        Markup.inlineKeyboard([[Markup.button.url(
-          webLogin.mode === "link" ? "✅ Привязать Telegram" : "🔐 Войти в кабинет",
-          callbackUrl,
-        )]]),
+        "Подтвердите привязку Telegram к личному кабинету RobloxBank. Ссылка действует 5 минут.",
+        Markup.inlineKeyboard([[Markup.button.url("✅ Привязать Telegram", callbackUrl)]]),
       );
       return;
     }

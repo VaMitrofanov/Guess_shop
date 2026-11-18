@@ -69,7 +69,7 @@ function LoginContent() {
           <header className={styles.cardHeader}>
             <span className={styles.kicker}>Личный кабинет</span>
             <h1 id="login-title">С возвращением</h1>
-            <p>Войди по email или через подтверждённый профиль.</p>
+            <p>Войдите по email или через подтверждённый профиль.</p>
           </header>
 
           <form onSubmit={handleSubmit} className={styles.form}>

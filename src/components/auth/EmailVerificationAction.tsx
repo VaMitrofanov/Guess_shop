@@ -5,7 +5,7 @@ import { Loader2, MailCheck } from "lucide-react";
 
 export default function EmailVerificationAction() {
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Подтверди email, чтобы восстановить доступ при потере пароля.");
+  const [message, setMessage] = useState("Подтвердите email, чтобы восстановить доступ при потере пароля.");
   const [error, setError] = useState(false);
 
   const resend = async () => {

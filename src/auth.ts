@@ -11,7 +11,7 @@ import { verifyTelegramLogin } from "@/lib/telegram-login";
 import { normalizeLoginEmail } from "@/lib/auth-navigation";
 import { allowPasswordSignIn } from "@/lib/auth-throttle";
 import { clientIp } from "@/lib/rate-limit";
-import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
+import { consumeApprovedWebLogin, consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
 import { isRevokedCode } from "../bots/shared/wb-code-revocation";
@@ -174,6 +174,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return prisma.user.update({ where: { id: user.id }, data: { username: verified.username } });
         }
         return user;
+      },
+    }),
+    CredentialsProvider({
+      // 🔐 Вход «вернитесь в браузер» (18.11.2026): человек нажал «✅ Да, войти» в
+      // боте, вкладка, которая ждёт, входит по своему одноразовому state. Раньше
+      // сессия создавалась во встроенном браузере Telegram, а вкладка Safari/
+      // Chrome оставалась без входа — «выбивает после регистрации».
+      id: "telegram-handoff",
+      name: "Telegram",
+      credentials: { state: { label: "One-time state", type: "text" } },
+      async authorize(credentials) {
+        const tgId = await consumeApprovedWebLogin(String(credentials?.state ?? ""));
+        if (!tgId) return null;
+        return findOrCreateVerifiedIdentity({ provider: "TG", subject: tgId });
       },
     }),
     CredentialsProvider({

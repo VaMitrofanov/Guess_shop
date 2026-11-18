@@ -184,7 +184,7 @@ export default function VKAuthCallback() {
           <>
             <div style={{ fontSize: 22, fontWeight: 800 }}>Завершаем вход через ВКонтакте…</div>
             <div style={{ color: "#b8b0c5", fontSize: 16, lineHeight: 1.55 }}>
-              Это займёт пару секунд — сейчас вернём тебя к заказу.
+              Это займёт пару секунд — сейчас вернём вас к заказу.
             </div>
           </>
         ) : (

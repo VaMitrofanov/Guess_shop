@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Send } from "lucide-react";
+import { rememberTelegramPending } from "@/components/auth/telegram-login-resume";
 
 export default function TelegramLoginButton({
   mode = "login",
@@ -28,6 +29,8 @@ export default function TelegramLoginButton({
       if (!response.ok || typeof data.href !== "string") {
         throw new Error(data.error ?? "Не удалось открыть Telegram");
       }
+      // 🔐 Вход «вернитесь в браузер»: эта вкладка дождётся «✅ Да, войти» в боте сама.
+      if (mode === "login") rememberTelegramPending(data.href, returnTo ?? null);
       window.location.assign(data.href);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка Telegram");

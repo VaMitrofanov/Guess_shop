@@ -95,7 +95,7 @@ function RegisterContent() {
         <section className={styles.featurePanel} aria-label="Преимущества аккаунта">
           <div className={styles.featureContent}>
             <span className={styles.featureBadge}><Sparkles size={16} /> Профиль RobloxBank</span>
-            <h1 className={styles.featureTitle}>Создай доступ<br /><span>к своему сейфу.</span></h1>
+            <h1 className={styles.featureTitle}>Создайте доступ<br /><span>к своему сейфу.</span></h1>
             <p className={styles.featureText}>Один аккаунт для истории заказов, бонусов и быстрых повторных покупок.</p>
             <div className={styles.featureList}>{benefits.map(({ icon: Icon, title, text }) => <article key={title} className={styles.featureItem}><span className={styles.featureIcon}><Icon size={20} /></span><span><strong>{title}</strong><small>{text}</small></span></article>)}</div>
             <div className={styles.featureTrust}><ShieldCheck size={17} /> Пароль хранится только в виде защищённого хеша.</div>

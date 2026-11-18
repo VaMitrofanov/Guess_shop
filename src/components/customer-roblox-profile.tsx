@@ -170,14 +170,14 @@ export default function CustomerRobloxProfileCard({
           </span>
           <div className={styles.robloxHeroCopy}>
             {!profile && <small className={styles.robloxHeroGreeting}>Привет, {fallbackName}</small>}
-            <h1 className={styles.robloxHeroTitle}>{profile?.displayName ?? "Подключи Roblox-профиль"}</h1>
+            <h1 className={styles.robloxHeroTitle}>{profile?.displayName ?? "Подключите Roblox-профиль"}</h1>
             <span className={styles.robloxHeroUsername}>{profile ? `@${profile.username}` : "Быстрые покупки без повторного ввода ника"}</span>
             <small className={styles.robloxHeroStatus}>
               {profile
                 ? profile.source === "ORDER_HISTORY"
                   ? `Подтверждён заказом${profile.orderCount > 1 ? ` · покупок: ${profile.orderCount}` : ""}. Это не проверка владения аккаунтом.`
                   : payload.status === "stale" || profile.stale ? "Добавлен вручную · последняя сохранённая версия" : "Добавлен вручную · публичные данные Roblox"
-                : "Если раньше уже покупал, аккаунты появятся автоматически. Новый ник можно добавить отдельно."}
+                : "Если вы уже покупали, аккаунты появятся автоматически. Новый ник можно добавить отдельно."}
             </small>
           </div>
         </div>

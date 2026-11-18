@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { LOGIN_APPROVED_MODE, approvedTelegramId } from "../../bots/shared/telegram-web-login";
 
 export type TelegramWebLoginMode = "login" | "link";
 
@@ -62,5 +63,35 @@ export async function consumeTelegramWebLoginChallenge(
       data: { consumedAt: now },
     });
     return consumed.count === 1 ? challenge : null;
+  });
+}
+
+/* ── Вход «вернитесь в браузер» (18.11.2026): вкладка, которая ждёт ──────────
+   Бот по «✅ Да, войти» ставит `mode = login-approved` и `targetUserId = tg:<id>`
+   (`bots/shared/telegram-web-login.ts`). Вкладка опрашивает статус и одним
+   вызовом `signIn("telegram-handoff")` гасит вызов и входит. ─────────────── */
+
+export type WebLoginStatus = "waiting" | "approved" | "gone";
+
+export async function webLoginStatus(state: string, now = new Date()): Promise<WebLoginStatus> {
+  if (!/^[A-Za-z0-9_-]{32}$/.test(state)) return "gone";
+  const row = await prisma.telegramWebLoginChallenge.findUnique({ where: { stateHash: telegramWebLoginStateHash(state) } });
+  if (!row || row.consumedAt || row.expiresAt <= now) return "gone";
+  if (row.mode === LOGIN_APPROVED_MODE) return "approved";
+  return row.mode === "login" ? "waiting" : "gone";
+}
+
+/** Погасить одобренный вызов. Возвращает Telegram ID одобрившего или null. */
+export async function consumeApprovedWebLogin(state: string, now = new Date()): Promise<string | null> {
+  if (!/^[A-Za-z0-9_-]{32}$/.test(state)) return null;
+  const stateHash = telegramWebLoginStateHash(state);
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.telegramWebLoginChallenge.findUnique({ where: { stateHash } });
+    if (!row || row.mode !== LOGIN_APPROVED_MODE || row.consumedAt || row.expiresAt <= now) return null;
+    const taken = await tx.telegramWebLoginChallenge.updateMany({
+      where: { stateHash, consumedAt: null, mode: LOGIN_APPROVED_MODE },
+      data: { consumedAt: now },
+    });
+    return taken.count === 1 ? approvedTelegramId(row.targetUserId) : null;
   });
 }
