@@ -91,3 +91,4 @@
 :global(html[data-theme="dark"]) .tone_progress{color:#c2b2ff!important;background:rgba(117,86,232,.16)!important}
 :global(html[data-theme="dark"]) .tone_success{color:#8ff0d0!important;background:rgba(69,214,170,.12)!important}
 :global(html[data-theme="dark"]) .tone_danger{color:#ff9bad!important;background:rgba(234,86,111,.12)!important}
+.identityDetails{margin-top:6px}.identityDetails>summary{cursor:pointer;color:var(--rb-muted);font-size:14px;font-weight:700;padding:6px 0;list-style-position:inside}.identityDetails[open]>summary{margin-bottom:8px}

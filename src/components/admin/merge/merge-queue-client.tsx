@@ -26,18 +26,15 @@ export default function MergeQueueClient() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await fetch("/api/admin/merge", { cache: "no-store" });
+  const load = useCallback(() => fetch("/api/admin/merge", { cache: "no-store" })
+    .then(async (res) => {
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error ?? "Не загрузилось");
+      setError(null);
       setPairs(d.pairs);
       setTotal(d.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не загрузилось");
-    }
-  }, []);
+    })
+    .catch((e) => setError(e instanceof Error ? e.message : "Не загрузилось")), []);
   useEffect(() => { void load(); }, [load]);
 
   async function act(p: Pair, action: "merge" | "dismiss") {

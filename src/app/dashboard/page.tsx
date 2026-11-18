@@ -37,6 +37,7 @@ import {
   Zap,
 } from "lucide-react";
 import { ContactEmailCard, TelegramBindCard } from "@/components/account/telegram-bind";
+import ProfileProgress from "@/components/account/profile-progress";
 import SignOutAction from "@/components/auth/SignOutAction";
 import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
@@ -470,6 +471,9 @@ export default async function DashboardPage() {
             <section id="identity-settings" className={styles.identityCard}>
               <div className={styles.sideHead}><span><Link2 size={18} /> Способы входа</span><ShieldCheck size={18} /></div>
               <p>Подтверждённые каналы возвращают в тот же профиль с заказами и бонусами.</p>
+              <ProfileProgress tg={identityNames.has("TG")} vk={identityNames.has("VK")} mail={Boolean(user.emailVerifiedAt || user.contactEmail)} />
+              <details className={styles.identityDetails}>
+              <summary>Подробно</summary>
               <div className={styles.identityList}>
                 {(["TG", "VK", "EMAIL"] as const).map((provider) => {
                   const identity = identityNames.get(provider);
@@ -484,6 +488,7 @@ export default async function DashboardPage() {
                   );
                 })}
               </div>
+              </details>
               {user.email && !user.emailVerifiedAt && <EmailVerificationAction />}
               {/* 🔗 Э1 (18.11.2026): одна ссылка в бота вместо трёх шагов через виджет. */}
               {!identityNames.has("TG") && !isAdmin && (

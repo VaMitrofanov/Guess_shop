@@ -1,0 +1,16 @@
+/* 🎨 И5 (18.11.2026): «профиль собран» — кольцо и цепочка вместо списка. */
+.wrap { display:flex; flex-direction:column; gap:16px; margin:12px 0 4px; }
+.head { display:flex; align-items:center; gap:14px; }
+.ring { --p:0; width:60px; height:60px; flex-shrink:0; border-radius:50%; background:conic-gradient(#7556e8 calc(var(--p) * 1%), #ece7ff 0); display:grid; place-items:center; }
+.ring b { width:46px; height:46px; border-radius:50%; background:var(--rb-surface, #fff); display:grid; place-items:center; font-size:15px; font-weight:900; color:var(--rb-text, #17131f); }
+.title { margin:0; font-size:17px; font-weight:900; color:var(--rb-text, #17131f); }
+.hint { margin:2px 0 0; font-size:14px; color:var(--rb-muted, #5b5468); }
+.chain { display:flex; align-items:flex-start; }
+.node { display:flex; flex-direction:column; align-items:center; gap:6px; width:72px; flex-shrink:0; }
+.badge { width:46px; height:46px; border-radius:15px; display:grid; place-items:center; font-size:14px; font-weight:900; color:#fff; }
+.tg { background:#229ED9; } .vk { background:#0077FF; } .mail { background:#7556e8; }
+.off { background:none; border:2px dashed #b9addf; color:#7556e8; }
+.state { font-size:12px; font-weight:800; text-align:center; }
+.on .state { color:#1e7d3a; } .offNode .state { color:#7556e8; }
+.link { flex:1 1 auto; min-width:12px; margin-top:22px; border-top:3px solid #7556e8; }
+.linkOff { border-top-style:dashed; border-top-color:#cfc6ee; }

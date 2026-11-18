@@ -26,7 +26,14 @@ export function TelegramBindCard({ title, text }: { title?: string; text?: strin
     }
   };
   return (
-    <section className={css.card} aria-labelledby="tg-bind-title">
+    <section className={`${css.card} ${css.tgCard}`} aria-labelledby="tg-bind-title">
+      <div className={css.sky} aria-hidden="true">
+        <span className={css.trail} />
+        <span className={css.plane}>
+          <svg width="32" height="32" viewBox="0 0 24 24"><path d="M21 4.5L2.8 11.4c-.9.35-.9 1.1 0 1.4l4.6 1.5 1.8 5.4c.2.6.9.8 1.4.4l2.6-2.2 4.7 3.5c.6.4 1.4.1 1.6-.6L22.4 5.9c.2-1-.5-1.7-1.4-1.4z" fill="currentColor" /></svg>
+        </span>
+        <span className={css.bot}>RB</span>
+      </div>
       <h2 id="tg-bind-title" className={css.title}>{title ?? "Получать статус в Telegram"}</h2>
       <p className={css.text}>{text ?? "Одно нажатие — и бот уже знает ваши заказы: напишет, когда всё будет готово. Ничего вводить не нужно."}</p>
       <button type="button" className={css.primary} onClick={() => void open()} disabled={busy}>

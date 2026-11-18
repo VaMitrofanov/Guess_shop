@@ -1,3 +1,4 @@
+import path from "node:path";
 /**
  * All Telegraf handler registrations for the TG bot.
  *
@@ -651,6 +652,9 @@ async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean
 // /start [CODE]
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** 🎨 Картинка «Профиль собран» — в образе TG-бота вместе с bots/shared. */
+const PROFILE_ASSEMBLED_PNG = path.resolve(__dirname, "../shared/assets/brand/profile-assembled.png");
+
 /** Диплинк на карточку «Мой заказ»: t.me/RobloxBankBot?start=order. */
 const ORDER_START = "order";
 
@@ -717,11 +721,12 @@ export function registerStart(bot: Telegraf): void {
         if (ctx.from.username) await db.user.update({ where: { id: res.userId }, data: { username: ctx.from.username } }).catch(() => undefined);
         console.log(`[bind] Telegram ${tgId} → профиль ${res.userId} (${res.merged ? "склейка" : res.alreadyLinked ? "уже был" : "привязан"})`);
         const { text, keyboard } = await buildStatusMessage(tgId);
-        await ctx.reply(
+        const welcome =
           `✅ <b>Узнали вас${ctx.from.first_name ? `, ${escapeHtml(ctx.from.first_name)}` : ""}!</b>\n\n` +
-          "Этот Telegram теперь в вашем профиле. Статус заказов будет приходить сюда — даже тех, что оформлены на сайте или во ВКонтакте.",
-          { parse_mode: "HTML" },
-        );
+          "Этот Telegram теперь в вашем профиле. Статус заказов будет приходить сюда — даже тех, что оформлены на сайте или во ВКонтакте.";
+        // 🎨 И3: карточка-билет «Профиль собран» (scripts/render-brand-cards.mjs); не ушла — текстом.
+        await ctx.replyWithPhoto({ source: PROFILE_ASSEMBLED_PNG }, { caption: welcome, parse_mode: "HTML" })
+          .catch(() => ctx.reply(welcome, { parse_mode: "HTML" }));
         await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

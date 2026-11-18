@@ -3,6 +3,7 @@ import { sendMail } from "@/lib/mailer";
 import { decryptActivationCode } from "@/lib/codes/secrets";
 import { GIFT_THEME_META, giftOpenTokenFor, isGiftTheme, type GiftTheme } from "@/lib/codes/gift";
 import { sendCodeToChat } from "@/lib/codes/chat-notify";
+import { issueBindToken } from "../../../bots/shared/bot-bind";
 
 /**
  * Письмо с кодом активации.
@@ -47,8 +48,11 @@ export function buildCodeEmail(input: {
   publicId: string;
   account: boolean;
   waited?: boolean;
+  /** 🎨 И1 (18.11.2026): одноразовая ссылка `ln_…` — корешок «Статус в Telegram». Только владельцу без Telegram. */
+  telegramUrl?: string | null;
 }): { subject: string; text: string; html: string } {
   const amount = input.denomination.toLocaleString("ru-RU");
+  const tgUrl = input.telegramUrl ? escapeHtml(input.telegramUrl) : null;
   const subject = `🎁 Ваш код на ${amount} Robux — заказ ${input.publicId}`;
   const cabinet = input.account ? `\nКод также сохранён в личном кабинете: ${APP_URL}/dashboard#codes\n` : "";
   const text = [
@@ -63,6 +67,7 @@ export function buildCodeEmail(input: {
     "",
     `Активировать: ${ROBLOX_REDEEM_URL}`,
     cabinet,
+    ...(input.telegramUrl ? [`Статус следующих заказов — в Telegram, одно нажатие: ${input.telegramUrl}`, ""] : []),
     "Спасибо, что выбрали нас! Если код не активируется или что-то пошло не так — напишите нам, ответит живой человек: https://t.me/RobloxBank_PA",
     "— Команда RobloxBank",
     "",
@@ -98,7 +103,7 @@ export function buildCodeEmail(input: {
 
 <tr><td bgcolor="#ffffff" style="background:#ffffff;padding:0 18px"><div style="border-top:2px dashed #d8cffa;height:0;line-height:0;font-size:0">&nbsp;</div></td></tr>
 
-<tr><td bgcolor="#ffffff" style="background:#ffffff;border-radius:0 0 22px 22px;padding:22px 26px 26px">
+<tr><td bgcolor="#ffffff" style="background:#ffffff;border-radius:${tgUrl ? "0" : "0 0 22px 22px"};padding:22px 26px 26px">
   <div style="font-size:12px;font-weight:700;letter-spacing:.1em;color:#706780">ВАШ КОД</div>
   <div style="margin:8px 0 6px;padding:18px 12px;border:2px dashed #7556e8;border-radius:14px;background:#f6f3ff;text-align:center;font-family:${mono};font-size:25px;font-weight:700;letter-spacing:.08em;color:#251b3f;user-select:all;-webkit-user-select:all">${code}</div>
   <div style="font-size:12px;color:#706780;text-align:center;margin-bottom:18px">Нажмите и удерживайте, чтобы скопировать</div>
@@ -112,6 +117,23 @@ export function buildCodeEmail(input: {
     <div style="margin-top:10px;font-size:15px;font-style:italic;color:#5b3fd6">— Команда RobloxBank</div>
   </td></tr></table>
 </td></tr>
+${tgUrl ? `
+<tr><td bgcolor="#ffffff" style="background:#ffffff;padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  <td width="14" style="width:14px;height:28px;background:#f4f1fb;border-radius:0 14px 14px 0;font-size:0;line-height:0">&nbsp;</td>
+  <td style="padding:0 6px"><div style="border-top:2px dashed #d8cffa;height:0;line-height:0;font-size:0">&nbsp;</div></td>
+  <td width="14" style="width:14px;height:28px;background:#f4f1fb;border-radius:14px 0 0 14px;font-size:0;line-height:0">&nbsp;</td>
+</tr></table></td></tr>
+<tr><td bgcolor="#ffffff" style="background:#ffffff;border-radius:0 0 22px 22px;padding:16px 26px 24px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+    <td width="76" valign="top"><div style="width:60px;height:60px;line-height:60px;border-radius:18px;background:#229ED9;text-align:center;font-size:30px;color:#ffffff">&#10148;</div></td>
+    <td valign="top">
+      <div style="font-size:12px;font-weight:700;letter-spacing:.1em;color:#706780">КОРЕШОК · ОДНО НАЖАТИЕ</div>
+      <div style="margin:4px 0 4px;font-size:17px;font-weight:800;color:#251b3f">Статус следующих заказов — в Telegram</div>
+      <div style="font-size:14px;line-height:1.45;color:#5b5468">Бот сразу узнает вас и этот заказ. Ничего вводить не нужно.</div>
+      <a href="${tgUrl}" style="display:inline-block;margin-top:10px;background:#229ED9;color:#ffffff;text-decoration:none;font-weight:800;font-size:15px;padding:12px 18px;border-radius:12px">Открыть Telegram →</a>
+    </td>
+  </tr></table>
+</td></tr>` : ""}
 
 <tr><td style="padding:18px 8px 0;font-size:12px;line-height:1.55;color:#8a8199;text-align:center">Пароль Roblox нам не нужен и никогда не запрашивается.<br>Не передавайте код посторонним: кто ввёл код, тот и получил Robux.<br><a href="${APP_URL}" style="color:#8a8199">robloxbank.ru</a> · заказ ${order}</td></tr>
 
@@ -127,7 +149,8 @@ async function deliveryAddress(orderId: string) {
       id: true, publicId: true, denomination: true, status: true, deliveryMode: true, recipientEmail: true, emailAttempts: true,
       paidAt: true, issuedAt: true,
       activationCode: { select: { encryptedValue: true } },
-      creator: { select: { email: true, emailVerifiedAt: true } },
+      createdVia: true, creatorUserId: true,
+      creator: { select: { email: true, emailVerifiedAt: true, tgId: true } },
     },
   });
   if (!order) return null;
@@ -163,7 +186,11 @@ export async function sendCodeEmail(orderId: string, reason: "issued" | "resend"
   }
   // Ручная выдача позже получаса после оплаты — благодарим за терпение.
   const waited = Boolean(order.paidAt && order.issuedAt && order.issuedAt.getTime() - order.paidAt.getTime() > 30 * 60_000);
-  const mail = buildCodeEmail({ denomination: order.denomination, code, publicId: order.publicId, account: order.deliveryMode === "ACCOUNT", waited });
+  // 🎨 И1: корешок «Статус в Telegram» — только владельцу (кабинетная покупка «себе»), у кого Telegram ещё нет.
+  const telegramUrl = order.deliveryMode === "ACCOUNT" && order.createdVia === "SELF" && order.creatorUserId && !order.creator?.tgId
+    ? (await issueBindToken(prisma, order.creatorUserId).catch(() => null))?.url ?? null
+    : null;
+  const mail = buildCodeEmail({ denomination: order.denomination, code, publicId: order.publicId, account: order.deliveryMode === "ACCOUNT", waited, telegramUrl });
   const result = await sendMail({ to, ...mail });
   await prisma.codeOrder.update({
     where: { id: order.id },

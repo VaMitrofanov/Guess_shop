@@ -13,6 +13,9 @@ import {
 } from "../../bots/shared/buyer-step";
 import { notifyOrderWatchers, type WatcherEvent } from "../../bots/shared/order-contacts";
 import { TG_INVITE_LABEL, TG_INVITE_TEXT, prepareTgInvite } from "../../bots/shared/bot-bind";
+import { vkUploadMessagePhoto } from "../../bots/shared/vk-photo";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 interface UserRef {
   id: string;
@@ -579,7 +582,12 @@ export async function inviteToTelegramVk(user: UserRef): Promise<boolean> {
   if (!user.vkId || user.tgId) return false;
   const url = await prepareTgInvite(prisma, user.id);
   if (!url) return false;
+  // 🎨 И4: картинка «Ваши заказы уже ждут в Telegram» (public/brand/tg-invite.png,
+  // scripts/render-brand-cards.mjs). Не загрузилась — то же приглашение текстом.
+  const png = await readFile(path.join(process.cwd(), "public", "brand", "tg-invite.png")).catch(() => null);
+  const attachment = png ? await vkUploadMessagePhoto(user.vkId, png) : null;
   return vkPost(user.vkId, TG_INVITE_TEXT, {
+    ...(attachment ? { attachment } : {}),
     keyboard: JSON.stringify({ inline: true, buttons: [[{ action: { type: "open_link", link: url, label: TG_INVITE_LABEL } }]] }),
   });
 }
