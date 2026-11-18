@@ -39,12 +39,13 @@ function until(iso: string): string {
   return `${new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }).format(new Date(iso))} МСК`;
 }
 
-export default function PayClient({ token, initial, extras, trust, result }: { token: string; initial: PublicCodeOrder; extras: PayViewerExtras; trust: TrustStats | null; result: "success" | "fail" | null }) {
+export default function PayClient({ token, initial, extras, trust, result, initialError = null }: { token: string; initial: PublicCodeOrder; extras: PayViewerExtras; trust: TrustStats | null; result: "success" | "fail" | null; initialError?: string | null }) {
   const [view, setView] = useState(initial);
   const [receiptEmail, setReceiptEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState<"pay" | "refresh" | "resend" | null>(null);
-  const [error, setError] = useState("");
+  // Ошибка, с которой форма без скриптов вернулась на страницу (`?error=`).
+  const [error, setError] = useState(initialError ?? "");
   const [info, setInfo] = useState("");
   const [polls, setPolls] = useState(0);
 
@@ -77,6 +78,16 @@ export default function PayClient({ token, initial, extras, trust, result }: { t
   };
 
   const pay = async () => {
+    // Кнопка больше не выключена до гидратации (17.11 у покупателя скрипты не
+    // ожили, и она так и осталась серой) — поэтому проверяем здесь.
+    if (!agreed) {
+      setError("Поставьте галочку согласия с офертой.");
+      return;
+    }
+    if (!receiptValid) {
+      setError(view.needsReceiptEmail && !receiptEmail.trim() ? "Укажите email для чека." : "Проверьте email для чека.");
+      return;
+    }
     setBusy("pay");
     setError("");
     try {
@@ -193,12 +204,18 @@ export default function PayClient({ token, initial, extras, trust, result }: { t
               {view.quoteIfRefreshed && view.quoteIfRefreshed.discountPercent > 0 ? ` (скидка покупателя ${view.quoteIfRefreshed.discountPercent}%)` : ""}.
               Подтвердите обновлённый заказ, чтобы оплатить.
             </p>
-            <button type="button" className={styles.primary} onClick={confirmRefresh} disabled={busy !== null}>
-              {busy === "refresh" ? <Loader2 size={17} className={styles.spin} /> : <RotateCcw size={17} />} Подтвердить за {rub(amount)}
-            </button>
+            <form method="post" action="/api/codes/refresh" onSubmit={(event) => { event.preventDefault(); void confirmRefresh(); }}>
+              <input type="hidden" name="token" value={token} />
+              <button type="submit" className={styles.primary} disabled={busy !== null}>
+                {busy === "refresh" ? <Loader2 size={17} className={styles.spin} /> : <RotateCcw size={17} />} Подтвердить за {rub(amount)}
+              </button>
+            </form>
           </div>
         ) : (
-          <div className={styles.payBox}>
+          // Обычная HTML-форма: без скриптов она сама уходит на /api/codes/pay и
+          // ведёт в банк; со скриптами onSubmit перехватывает её как раньше.
+          <form className={styles.payBox} method="post" action="/api/codes/pay" onSubmit={(event) => { event.preventDefault(); void pay(); }}>
+            <input type="hidden" name="token" value={token} />
             {(result === "fail" || view.paymentState === "failed" || (waitingBank && !shouldPoll)) && (
               <p className={styles.warn} role="status">
                 <CircleAlert size={16} />
@@ -213,6 +230,8 @@ export default function PayClient({ token, initial, extras, trust, result }: { t
                 <ReceiptText size={18} />
                 <input
                   type="email"
+                  name="receiptEmail"
+                  required={view.needsReceiptEmail}
                   inputMode="email"
                   autoComplete="email"
                   placeholder="you@example.com"
@@ -225,14 +244,14 @@ export default function PayClient({ token, initial, extras, trust, result }: { t
               </small>
             </label>
             <label className={styles.consent}>
-              <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} />
+              <input type="checkbox" name="agreedToTerms" value="1" required checked={agreed} onChange={(event) => { setAgreed(event.target.checked); if (event.target.checked) setError(""); }} />
               <span>Согласен с <Link href="/legal/offer" target="_blank">офертой</Link> и <Link href="/legal/policy" target="_blank">политикой конфиденциальности</Link>.</span>
             </label>
-            <button type="button" className={`${styles.primary} ${styles.payButton}`} onClick={pay} disabled={!agreed || !receiptValid || busy !== null}>
+            <button type="submit" className={`${styles.primary} ${styles.payButton}`} disabled={busy !== null}>
               {busy === "pay" ? <Loader2 size={18} className={styles.spin} /> : <CreditCard size={18} />} Оплатить {rub(view.finalAmountKopecks)}
             </button>
             <p className={styles.hint}>Предложение действует до {until(view.offerExpiresAt)}. Оплата — на защищённой странице Т-Банка.</p>
-          </div>
+          </form>
         )}
 
         {error && <p className={styles.error} role="alert"><CircleAlert size={16} /> {error}</p>}

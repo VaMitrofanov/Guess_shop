@@ -22,6 +22,13 @@ describe("client observability contract", () => {
     expect(formatClientSignal(parsed)).toBe("TypeError #0123abcd on /guide");
   });
 
+  test("accepts the pay page route with its token already masked", () => {
+    // 18.11: клиент шлёт `/pay/[token]`, а схема без скобок отвечала 400 —
+    // все ошибки страницы оплаты терялись.
+    const parsed = ClientSignalSchema.parse({ type: "client-error", route: "/pay/[token]", kind: "TypeError", fingerprint: "0123abcd" });
+    expect(formatClientSignal(parsed)).toBe("TypeError #0123abcd on /pay/[token]");
+  });
+
   test.each([
     { type: "client-error", route: "/checkout?email=user@example.com", kind: "Error", fingerprint: "0123abcd" },
     { type: "client-error", route: "/checkout", kind: "Error", fingerprint: "raw-message" },

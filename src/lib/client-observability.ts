@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-const RouteSchema = z.string().trim().regex(/^\/[A-Za-z0-9_\-./]*$/).max(160);
+// `[` `]` — клиент сам заменяет токен оплаты на `/pay/[token]`; без скобок в
+// схеме всё с /pay отклонялось 400-м, и ошибки страницы оплаты терялись (18.11).
+const RouteSchema = z.string().trim().regex(/^\/[A-Za-z0-9_\-./[\]]*$/).max(160);
 
 export const ClientSignalSchema = z.discriminatedUnion("type", [
   z.object({

@@ -8,6 +8,7 @@ import PayClient, { type PayViewerExtras } from "./pay-client";
 import { sessionUserId } from "@/lib/codes/http";
 import { ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
 import { trustStats } from "@/lib/trust-stats";
+import { payFormErrorMessage } from "@/lib/codes/pay-form";
 import styles from "./pay.module.css";
 
 export const dynamic = "force-dynamic";
@@ -30,9 +31,9 @@ export default async function PayPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ result?: string }>;
+  searchParams: Promise<{ result?: string; error?: string }>;
 }) {
-  const [{ token }, { result }] = await Promise.all([params, searchParams]);
+  const [{ token }, { result, error }] = await Promise.all([params, searchParams]);
   const order = isPayTokenShape(token) ? await findCodeOrderByToken(token) : null;
   if (!order) {
     return (
@@ -69,7 +70,7 @@ export default async function PayPage({
     <main className={styles.page}>
       <Navbar />
       <div className={styles.shell}>
-        <PayClient token={token} initial={view} extras={extras} trust={trust} result={result === "success" || result === "fail" ? result : null} />
+        <PayClient token={token} initial={view} extras={extras} trust={trust} result={result === "success" || result === "fail" ? result : null} initialError={payFormErrorMessage(error)} />
       </div>
     </main>
   );
