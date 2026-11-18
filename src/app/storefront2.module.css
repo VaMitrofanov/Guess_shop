@@ -3,7 +3,7 @@
    жёсткая тень. Поверхности и текст — через токены `--rb-*` (тёмная тема
    работает сама), брендовые акценты фиксированы. */
 
-.page { min-height:100vh; min-height:100dvh; overflow-x:hidden; color:var(--rb-text); background:radial-gradient(circle at 80% 4%,rgba(117,86,232,.12),transparent 30rem),var(--rb-bg); }
+.page { min-height:100vh; min-height:100dvh; overflow-x:hidden; overflow-x:clip; color:var(--rb-text); background:radial-gradient(circle at 80% 4%,rgba(117,86,232,.12),transparent 30rem),var(--rb-bg); }
 .wrap,.hero,.trust,.buy,.compare,.reviewsHead,.giftPromo,.invite,.bottomCta { width:min(1240px,calc(100% - 40px)); margin-left:auto; margin-right:auto; }
 
 /* ── Первый экран ─────────────────────────────────────────────────────── */
@@ -253,3 +253,8 @@
   :global(html:not([data-theme])) .vaultWheel span { background:#151120; }
 }
 @media (prefers-reduced-motion: reduce) { .vaultWheel { animation:none; } }
+
+/* 🎞 Кнопки главной «вдавливаются» в свою тень (18.11.2026). */
+.buyCode, .bottomPrimary { transition:transform .12s ease, box-shadow .12s ease; }
+.buyCode:active { transform:translate(3px,3px); box-shadow:1px 1px 0 #251b3f; }
+@media (prefers-reduced-motion: reduce) { .buyCode, .bottomPrimary { transition:none; } .buyCode:active { transform:none; } }

@@ -411,6 +411,8 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
           </div>
         </div>
         <div className={styles.segment} role="group" aria-label="Для кого код">
+          {/* 🎞 Ползунок переезжает между «Себе» и «В подарок» (18.11.2026). */}
+          <span className={`${styles.segmentThumb} ${mode === "gift" ? styles.segmentThumbGift : ""}`} aria-hidden="true" />
           <button type="button" aria-pressed={mode === "self"} className={mode === "self" ? styles.segmentOn : undefined} onClick={() => switchMode("self")}>Себе</button>
           <button type="button" aria-pressed={mode === "gift"} className={mode === "gift" ? styles.segmentOn : undefined} onClick={() => switchMode("gift")}>
             <Gift size={15} /> {festive ? "🎄 В подарок" : "В подарок"}

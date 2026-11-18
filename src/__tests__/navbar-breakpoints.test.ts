@@ -20,7 +20,7 @@ const navbar = readFileSync(path.join(__dirname, "..", "components", "navbar.tsx
 
 /** Брейкпоинт, на котором горизонтальный список ссылок секций становится видимым. */
 function navLinksBreakpoint(): string {
-  const match = /className="hidden items-center gap-1 (\w+):flex"/.exec(navbar);
+  const match = /className="(?:relative )?hidden items-center gap-1 (\w+):flex"/.exec(navbar);
   if (!match) throw new Error("не найден контейнер ссылок секций в navbar.tsx");
   return match[1];
 }
@@ -41,7 +41,7 @@ describe("брейкпоинты шапки (D2, D12)", () => {
   });
 
   it("выпадающее меню доступно везде, где виден бургер", () => {
-    const panel = /className="border-t border-\[var\(--rb-border\)\] bg-\[var\(--rb-bg\)\] px-5 py-4 (\w+):hidden"/.exec(navbar);
+    const panel = /className="(?:rb-menu-sheet )?border-t border-\[var\(--rb-border\)\] bg-\[var\(--rb-bg\)\] px-5 py-4 (\w+):hidden"/.exec(navbar);
     expect(panel?.[1]).toBe(burgerBreakpoint());
   });
 

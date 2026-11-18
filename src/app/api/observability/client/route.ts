@@ -22,6 +22,13 @@ export async function POST(req: NextRequest) {
   const summary = formatClientSignal(signal);
 
   after(async () => {
+    // 📊 Посещение — в базу (раздел админки «Посетители»), не в журнал: их сотни в день.
+    if (signal.type === "visit") {
+      await prisma.performanceSample.create({
+        data: { surface: "site-visit", route: signal.route, metric: `${signal.device}:${signal.ref}`, rating: signal.app, fingerprint: signal.visitor },
+      }).catch(() => undefined);
+      return;
+    }
     // Client telemetry belongs in structured application logs. It is
     // intentionally never forwarded to the operational Telegram bot: noisy
     // browser errors/Web Vitals used to bury actionable order notifications.

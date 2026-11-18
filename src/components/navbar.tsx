@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -26,9 +26,58 @@ const NAV_LINKS: { href: string; label: string; match?: string; external?: boole
   { href: "/guide?source=site&amount=1000", match: "/guide", label: "Инструкция по геймпассу", mobileOnly: true },
 ];
 
+/* 🎞 Вкладки следят за скроллом (18.11.2026, мокап А1). Раньше активной
+   считалась вкладка с адресом «/#codes», а `usePathname()` отдаёт путь без «#» —
+   совпадения не было никогда, шапка не знала, где человек. Теперь на главной
+   IntersectionObserver выбирает раздел под шапкой, «пилюля» переезжает к нему. */
+const SPY = [
+  { id: "codes", href: "/#codes", short: "Коды" },
+  { id: "gift", href: "/#gift", short: "Подарок" },
+  { id: "calculator", href: "/#calculator", short: "Геймпасс" },
+  { id: "reviews", href: "/#reviews", short: "Отзывы" },
+] as const;
+
+function useSectionSpy(enabled: boolean): string | null {
+  const [active, setActive] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled || !("IntersectionObserver" in window)) return;
+    const ids = ["codes", "calculator", "reviews"];
+    const seen = new Map<string, number>();
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) seen.set(e.target.id, e.isIntersecting ? e.intersectionRatio : 0);
+      let best: string | null = null, ratio = 0;
+      for (const id of ids) { const r = seen.get(id) ?? 0; if (r > ratio) { ratio = r; best = id; } }
+      setActive(best);
+    }, { rootMargin: "-140px 0px -45% 0px", threshold: [0, 0.1, 0.25, 0.5] });
+    for (const id of ids) { const el = document.getElementById(id); if (el) io.observe(el); }
+    return () => io.disconnect();
+  }, [enabled]);
+  return active;
+}
+
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const onHome = pathname === "/";
+  const spy = useSectionSpy(onHome);
+  // «В подарок» живёт внутри блока кодов: подсвечиваем его, пока открыт режим подарка.
+  const [giftMode, setGiftMode] = useState(false);
+  useEffect(() => {
+    if (!onHome) return;
+    const sync = () => setGiftMode(window.location.hash === "#gift");
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [onHome]);
+  const activeSpy = spy === "codes" && giftMode ? "gift" : spy;
+  const linksRef = useRef<HTMLDivElement | null>(null);
+  const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
+  useLayoutEffect(() => {
+    const box = linksRef.current;
+    const el = activeSpy && box ? box.querySelector<HTMLElement>(`[data-spy="${activeSpy}"]`) : null;
+    if (!box || !el) { setPill(null); return; }
+    setPill({ x: el.offsetLeft, w: el.offsetWidth });
+  }, [activeSpy]);
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated" && !!session?.user;
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === "ADMIN";
@@ -45,12 +94,16 @@ export default function Navbar() {
             рядом с ЛК и CTA — шапка вылезала за экран на 160 px (iPad Mini в
             портрете). В 768–1023 px секции живут в бургере, который теперь
             прячется только с lg. */}
-        <div className="hidden items-center gap-1 lg:flex">
+        <div ref={linksRef} className="relative hidden items-center gap-1 lg:flex">
+          {/* «Пилюля» под разделом, где сейчас человек (только главная). */}
+          <span aria-hidden="true" className="rb-tabstrip-ind pointer-events-none absolute left-0 top-1/2 h-10 -translate-y-1/2 rounded-full bg-[var(--rb-accent-soft)]"
+            style={{ transform: `translate(${pill?.x ?? 0}px, -50%)`, width: pill?.w ?? 0, opacity: pill ? 1 : 0 }} />
           {NAV_LINKS.filter((item) => !item.mobileOnly).map((item) => {
-            const active = pathname === (item.match ?? item.href);
+            const spyId = SPY.find((x) => x.href === item.href)?.id;
+            const active = onHome ? Boolean(spyId && spyId === activeSpy) : pathname === (item.match ?? item.href);
             const className = cn("rounded-full px-4 py-2 text-base font-bold transition-colors", active ? "bg-[var(--rb-accent-soft)] text-[var(--rb-accent)]" : "text-[var(--rb-muted)] hover:bg-[var(--rb-surface)] hover:text-[var(--rb-text)]");
             return item.external
-              ? <a key={item.href} href={item.href} className={className}>{item.label}</a>
+              ? <a key={item.href} href={item.href} data-spy={spyId} aria-current={active ? "location" : undefined} className={cn(className, "relative z-[1]", active && onHome && "bg-transparent")}>{item.label}</a>
               : <Link key={item.href} href={item.href} className={className}>{item.label}</Link>;
           })}
         </div>
@@ -81,8 +134,23 @@ export default function Navbar() {
         </div>
       </div>
 
+      {/* 📱 Полоса вкладок на главной (телефон и планшет): переезжающий ползунок под разделом. */}
+      {onHome && !open && (
+        <div className="border-t border-[var(--rb-border)] px-4 pb-2 pt-2 lg:hidden">
+          <div className="relative mx-auto grid max-w-[620px] grid-cols-4 rounded-full bg-[var(--rb-accent-soft)] p-1">
+            <span aria-hidden="true" className="rb-tabstrip-ind absolute bottom-1 left-1 top-1 rounded-full bg-[var(--rb-strong)]"
+              style={{ width: "calc((100% - 8px) / 4)", transform: `translateX(${Math.max(0, SPY.findIndex((x) => x.id === activeSpy)) * 100}%)`, opacity: activeSpy ? 1 : 0 }} />
+            {SPY.map((t) => (
+              <a key={t.id} href={t.href} aria-current={t.id === activeSpy ? "location" : undefined}
+                className={cn("relative z-[1] flex h-9 items-center justify-center rounded-full text-[13px] font-extrabold transition-colors duration-300",
+                  t.id === activeSpy ? "text-white" : "text-[var(--rb-muted)]")}>{t.short}</a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {open && (
-        <div className="border-t border-[var(--rb-border)] bg-[var(--rb-bg)] px-5 py-4 lg:hidden">
+        <div className="rb-menu-sheet border-t border-[var(--rb-border)] bg-[var(--rb-bg)] px-5 py-4 lg:hidden">
           <div className="mx-auto flex max-w-[620px] flex-col gap-1">
             {NAV_LINKS.map((item) => item.external
               ? <a key={item.href} href={item.href} onClick={() => setOpen(false)} className="rounded-xl px-4 py-3 text-sm font-bold text-[var(--rb-muted)] hover:bg-[var(--rb-accent-soft)] hover:text-[var(--rb-accent)]">{item.label}</a>

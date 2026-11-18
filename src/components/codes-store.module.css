@@ -272,3 +272,27 @@
 :global(html[data-theme="dark"]) .subscribeTitle { color:#f4f0ff; }
 :global(html[data-theme="dark"]) .subscribeNote { color:#b6aec6; }
 :global(html[data-theme="dark"]) .subscribeActions button { background:#100d18; color:#f4f0ff; border-color:#a68bff; }
+
+/* ── 🎞 Движение блока кодов (18.11.2026, мокап А1) ─────────────────────────
+   Ползунок «Себе / В подарок» переезжает, выбранный номинал «приподнимается»,
+   галочка выпрыгивает, кнопки «вдавливаются» в тень, нижняя плашка выезжает
+   мягче. «Уменьшить движение» — без анимаций (блок выше). */
+.segment { position:relative; display:inline-grid; grid-template-columns:1fr 1fr; }
+.segment button { position:relative; z-index:1; justify-content:center; transition:color .25s ease; }
+.segment .segmentOn { background:transparent; }
+.segmentThumb { position:absolute; z-index:0; top:4px; bottom:4px; left:4px; width:calc(50% - 6px); border-radius:10px; background:#251b3f; transition:transform .38s cubic-bezier(.2,.9,.25,1.2), background-color .3s ease; }
+.segmentThumbGift { transform:translateX(calc(100% + 4px)); background:#7556e8; }
+:global(html[data-theme="dark"]) .segment .segmentOn { background:transparent; }
+:global(html[data-theme="dark"]) .segmentThumb { background:#7556e8; }
+.pack { transition:border-color .2s ease, transform .3s cubic-bezier(.2,.9,.25,1.4), box-shadow .3s ease, background-color .25s ease, color .25s ease; }
+.packActive, .packActive:hover { transform:translateY(-3px) scale(1.03); }
+.packCheck { animation:rbCheckPop .38s cubic-bezier(.2,.9,.25,1.6) both; }
+@keyframes rbCheckPop { from { transform:scale(0) rotate(-30deg); } to { transform:scale(1) rotate(0); } }
+.primary { transition:transform .12s ease, box-shadow .12s ease; }
+.primary:active:not(:disabled) { transform:translate(3px,3px); box-shadow:1px 1px 0 #251b3f; }
+@media (max-width: 760px) { .stickyBar { transition:transform .42s cubic-bezier(.2,.9,.25,1.12); } }
+@media (prefers-reduced-motion: reduce) {
+  .segmentThumb, .pack, .primary { transition:none; }
+  .packCheck { animation:none; }
+  .packActive, .packActive:hover { transform:none; }
+}
