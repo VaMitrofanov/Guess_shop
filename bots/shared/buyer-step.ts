@@ -189,7 +189,7 @@ export function buyerStepMessage(kind: BuyerStepKind, order: BuyerStepOrder, cus
     case "link":
       return {
         html:
-          `${head}🔗 <b>Пришли сюда ссылку на свой геймпасс</b> или его <b>Pass ID</b> — одним сообщением, без лишнего текста.\n\n` +
+          `${head}🔗 <b>Пришлите сюда ссылку на свой геймпасс</b> или его <b>Pass ID</b> — одним сообщением, без лишнего текста.\n\n` +
           `${priceLine}\nPass ID — число из колонки <b>Pass ID</b> в Creator Hub → Monetization → Passes.`,
         buttons: [
           [{ label: "🔗 Прислать ссылку", action: "link" }],
@@ -199,16 +199,16 @@ export function buyerStepMessage(kind: BuyerStepKind, order: BuyerStepOrder, cus
     case "key":
       return {
         html:
-          `${head}🔑 <b>Пришли сюда ключ из Roblox</b> — одним сообщением. Геймпасс создадим сами, пароль не нужен.\n\n` +
-          `Как получить ключ — по кнопке, там каждое нажатие с картинкой. Скопируй его целиком кнопкой <b>Copy Key To Clipboard</b>.`,
+          `${head}🔑 <b>Пришлите сюда ключ из Roblox</b> — одним сообщением. Геймпасс создадим сами, пароль не нужен.\n\n` +
+          `Как получить ключ — по кнопке, там каждое нажатие с картинкой. Скопируйте его целиком кнопкой <b>Copy Key To Clipboard</b>.`,
         buttons: [[{ label: "📸 Как получить ключ", url: buyerGuideUrl(order, "key") }]],
       };
     case "passid":
       return {
         html:
           `${head}🔢 <b>Где взять Pass ID</b>\n\n` +
-          `Creator Hub → твоя игра → Monetization → <b>Passes</b>. В таблице есть колонка <b>Pass ID</b> — это число. ` +
-          `Скопируй его и пришли сюда одним сообщением.\n\n${priceLine}`,
+          `Creator Hub → ваша игра → Monetization → <b>Passes</b>. В таблице есть колонка <b>Pass ID</b> — это число. ` +
+          `Скопируйте его и пришлите сюда одним сообщением.\n\n${priceLine}`,
         buttons: [
           [{ label: "📸 Показать на скрине", url: buyerGuideUrl(order, "passid") }],
           [{ label: "🔢 Прислать Pass ID", action: "link" }],
@@ -217,11 +217,11 @@ export function buyerStepMessage(kind: BuyerStepKind, order: BuyerStepOrder, cus
     case "sale":
       return {
         html:
-          `${head}💰 <b>Включи продажу и поставь цену</b>\n\n` +
-          `Открой геймпасс → <b>Sales</b> → включи <b>Item for Sale</b> (ползунок синий) → ` +
+          `${head}💰 <b>Включите продажу и поставьте цену</b>\n\n` +
+          `Откройте геймпасс → <b>Sales</b> → включите <b>Item for Sale</b> (ползунок синий) → ` +
           (price ? `цена <b>${price} R$</b>` : "цена, которую назвал бот") +
           ` → <b>Managed pricing</b> выключен → <b>Save Changes</b>.\n\n` +
-          `Пока пасс не продаётся или стоит другую сумму, мы не сможем его выкупить. Как сохранишь — пришли сюда ссылку на него.`,
+          `Пока пасс не продаётся или стоит другую сумму, мы не сможем его выкупить. Как сохраните — пришлите сюда ссылку на него.`,
         buttons: [
           [{ label: "📸 Где это в Roblox", url: buyerGuideUrl(order, "sale") }],
           [{ label: "🔗 Готово — прислать ссылку", action: "link" }],
@@ -230,25 +230,25 @@ export function buyerStepMessage(kind: BuyerStepKind, order: BuyerStepOrder, cus
     case "nick":
       return {
         html:
-          `${head}🔎 <b>Пришли сюда свой ник в Roblox</b> — тот, под которым заходишь в игру.\n\n` +
-          `Посмотрим, что у тебя уже выставлено, и соберём заказ из этого. Если есть ссылка на геймпасс — пришли её, этого тоже хватит.`,
+          `${head}🔎 <b>Пришлите сюда свой ник в Roblox</b> — тот, под которым заходите в игру.\n\n` +
+          `Посмотрим, что у вас уже выставлено, и соберём заказ из этого. Если есть ссылка на геймпасс — пришлите её, этого тоже хватит.`,
         buttons: [[{ label: "🔎 Ввести ник Roblox", action: "nick" }], [guide]],
       };
     case "create":
       return {
         html:
-          `${head}📖 <b>Создай геймпасс по своей инструкции</b> — там каждое нажатие с картинкой.\n\n` +
-          `${priceLine}\nКогда создашь — пришли сюда ник Roblox или ссылку на геймпасс.`,
+          `${head}📖 <b>Создайте геймпасс по своей инструкции</b> — там каждое нажатие с картинкой.\n\n` +
+          `${priceLine}\nКогда создадите — пришлите сюда ник Roblox или ссылку на геймпасс.`,
         buttons: [[guide], [{ label: "🔎 Пасс готов — ввести ник", action: "nick" }]],
       };
     case "place":
       return {
         html:
           `${head}🆕 ${placeHelpInfo("no_universe")}\n\n` +
-          `1️⃣ Скачай <b>Roblox Studio</b> (только компьютер: Windows или Mac).\n` +
-          `2️⃣ Войди в свой аккаунт и нажми <b>New Experience</b>.\n` +
+          `1️⃣ Скачайте <b>Roblox Studio</b> (только компьютер: Windows или Mac).\n` +
+          `2️⃣ Войдите в свой аккаунт и нажмите <b>New Experience</b>.\n` +
           `3️⃣ Сверху <b>File → Publish to Roblox</b>, название любое, <b>Create</b>.\n\n` +
-          `Готово — пришли сюда ключ или ник Roblox, дальше сделаем мы.`,
+          `Готово — пришлите сюда ключ или ник Roblox, дальше сделаем мы.`,
         buttons: [
           [{ label: "⬇️ Скачать Roblox Studio", url: STUDIO_DOWNLOAD_URL }],
           [{ label: "📸 Шаги с картинками", url: placeGuideUrl(corridor ? code : null, order.robloxUsername ?? order.probableNick) }],

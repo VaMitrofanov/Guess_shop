@@ -174,7 +174,7 @@ export async function sendSbpQrToUser(
         `💳 <b>Оплата заказа на ${totalAmount} R$</b>\n\n` +
         `Сумма к оплате: <b>${rublePrice} ₽</b>\n` +
         `Отсканируй QR в приложении банка (по СБП) и переведи <b>точную сумму</b>.\n\n` +
-        `После перевода пришли сюда <b>скриншот или чек об оплате</b> (фотографией, не файлом) 👇`,
+        `После перевода пришлите сюда <b>скриншот или чек об оплате</b> (фотографией, не файлом) 👇`,
       reply_markup: statusKb,
     });
     return ok ? "tg" : null;
@@ -187,7 +187,7 @@ export async function sendSbpQrToUser(
       `💳 Оплата заказа на ${totalAmount} R$\n\n` +
       `Сумма к оплате: ${rublePrice} ₽\n` +
       `Отсканируй QR в приложении банка (по СБП) и переведи точную сумму.\n\n` +
-      `После перевода пришли сюда скриншот или чек об оплате (фотографией, не файлом) 👇`,
+      `После перевода пришлите сюда скриншот или чек об оплате (фотографией, не файлом) 👇`,
     );
     return ok ? "vk" : null;
   }
@@ -207,7 +207,7 @@ export async function sendPaymentDetailsToUser(
       text:
         `💳 <b>Реквизиты для оплаты заказа на ${amount} R$:</b>\n\n` +
         `<code>${esc}</code>\n\n` +
-        `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`,
+        `Переведи деньги и пришлите скриншот подтверждения сюда (фотографией, не файлом) 👇`,
       reply_markup: statusKb,
     });
     return ok ? "tg" : null;
@@ -217,7 +217,7 @@ export async function sendPaymentDetailsToUser(
       user.vkId,
       `💳 Реквизиты для оплаты заказа на ${amount} R$:\n\n` +
       `${details}\n\n` +
-      `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`,
+      `Переведи деньги и пришлите скриншот подтверждения сюда (фотографией, не файлом) 👇`,
     );
     return ok ? "vk" : null;
   }
@@ -229,13 +229,13 @@ export async function notifyIntentRejected(user: IntentUserRef): Promise<"tg" | 
   if (user.tgId) {
     const ok = await tgApi({
       chat_id: user.tgId,
-      text: `❌ <b>Заявка отклонена</b>\n\nМенеджер отклонил твою заявку. Попробуй оформить новую.`,
+      text: `❌ <b>Заявка отклонена</b>\n\nМенеджер отклонил вашу заявку. Попробуйте оформить новую.`,
       reply_markup: { inline_keyboard: [[{ text: "💎 Заказать снова", callback_data: "start_direct" }]] },
     });
     return ok ? "tg" : null;
   }
   if (user.vkId) {
-    const ok = await vkText(user.vkId, `❌ Заявка отклонена. Попробуй оформить новую.`);
+    const ok = await vkText(user.vkId, `❌ Заявка отклонена. Попробуйте оформить новую.`);
     return ok ? "vk" : null;
   }
   return null;

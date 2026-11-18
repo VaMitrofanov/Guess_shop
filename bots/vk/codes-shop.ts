@@ -56,7 +56,7 @@ async function send(ctx: MessageContext, screen: CodesScreen, rows = screen.rows
 }
 
 async function sorry(ctx: MessageContext): Promise<void> {
-  await ctx.reply("Не получилось загрузить витрину кодов. Попробуй через минуту или напиши нам: https://t.me/RobloxBank_PA");
+  await ctx.reply("Не получилось загрузить витрину кодов. Попробуйте через минуту или напишите нам: https://t.me/RobloxBank_PA");
 }
 
 export async function openVkCodesStore(ctx: MessageContext, vkUserId: number): Promise<void> {
@@ -108,7 +108,7 @@ export async function tryVkCodesShop(ctx: MessageContext, vkUserId: number, rawR
   if (referral) {
     const result = await botAttachReferral("VK", String(vkUserId), referral).catch(() => null);
     if (result === "attached") {
-      await ctx.reply("🤝 Тебя пригласил друг — добро пожаловать! Ниже коды Roblox: Robux сразу на баланс, а со скидкой 1% — уже сейчас.");
+      await ctx.reply("🤝 Вас пригласил друг — добро пожаловать! Ниже коды Roblox: Robux сразу на баланс, а со скидкой 1% — уже сейчас.");
     }
     await openVkCodesStore(ctx, vkUserId);
     return true;
@@ -122,7 +122,7 @@ export async function tryVkCodesShop(ctx: MessageContext, vkUserId: number, rawR
     const view = await botCodesView("VK", String(vkUserId), true).catch(() => null);
     if (!view?.ok) { await sorry(ctx); return true; }
     if (!view.subscribed) {
-      await ctx.reply(`Пока не вижу подписки на группу — вступи и нажми «✅ Я подписался» ещё раз: ${view.channelUrl}`);
+      await ctx.reply(`Пока не вижу подписки на группу — вступи и нажмите «✅ Я подписался» ещё раз: ${view.channelUrl}`);
       return true;
     }
     await ctx.reply("✅ Подписка есть — скидка 1% уже в ценах.");

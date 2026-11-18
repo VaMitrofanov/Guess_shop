@@ -206,7 +206,7 @@ async function rePromptAfterSupport(vkUserId: number): Promise<void> {
     let msg = "🤖 Бот снова на связи!";
     if (state?.type === "AWAITING_LINK") {
       const passPrice = Math.ceil(state.denomination / 0.7);
-      msg = `🤖 Бот снова на связи! Цена геймпасса: ${passPrice} R$\n\nНапиши свой ник в Roblox — найду геймпасс 🔎`;
+      msg = `🤖 Бот снова на связи! Цена геймпасса: ${passPrice} R$\n\nНапишите свой ник в Roblox — найду геймпасс 🔎`;
     }
     await _vkApi.messages.send({ peer_id: vkUserId, message: msg, random_id: Date.now() + Math.floor(Math.random() * 1000) });
   } catch (e) {
@@ -439,7 +439,7 @@ async function completeVkBotPayment(ctx: MessageContext, vkUserId: number, inten
         `💳 Перевод по реквизитам\n\n` +
         `Банк: ${result.manual.bank}\nПолучатель: ${result.manual.recipient}\n` +
         `Телефон: ${result.manual.phone}\nСумма: ${amount}\n\n` +
-        `Переведи точную сумму и пришли сюда скриншот чека фотографией. Менеджер подтвердит оплату вручную.`,
+        `Переведи точную сумму и пришлите сюда скриншот чека фотографией. Менеджер подтвердит оплату вручную.`,
       keyboard: kb.inline(),
     });
   } else if (method === "SITE") {
@@ -483,7 +483,7 @@ async function replyVkPaymentFailure(ctx: MessageContext, intentId: string, erro
     return;
   }
   await ctx.reply({
-    message: `${emailOk}❌ ${reason}. Выбери способ ещё раз — email вводить заново не нужно.`,
+    message: `${emailOk}❌ ${reason}. Выберите способ ещё раз — email вводить заново не нужно.`,
     keyboard: vkPaymentChoiceKb(intentId),
   });
 }
@@ -496,7 +496,7 @@ async function startVkBotPayment(ctx: MessageContext, vkUserId: number, intentId
     return;
   }
   setState(vkUserId, { type: "AWAITING_DIRECT_RECEIPT", intentId, method });
-  await ctx.reply("🧾 Email для электронного чека\n\nПришли email одним сообщением. После этого подготовлю оплату автоматически.\n\nПродолжая, ты принимаешь оферту и политику конфиденциальности.");
+  await ctx.reply("🧾 Email для электронного чека\n\nПришлите email одним сообщением. После этого подготовлю оплату автоматически.\n\nПродолжая, вы принимаете оферту и политику конфиденциальности.");
 }
 
 /** Visual step indicator (plain text for VK).
@@ -838,17 +838,17 @@ async function isVkSubscribed(_ctx: MessageContext, vkUserId: number): Promise<b
 
 
 const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
-  { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
-  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на твоём аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("ty") + "\n\nПроверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." },
+  { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто ждите 👌" },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на вашем аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("vy") + "\n\nПроверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
-  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставь отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформи следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.` },
-  { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — открой 📖 Инструкцию и пройди все шаги." },
-  { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Напиши «сменить ник» — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
+  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставьте отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришлите скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформите следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.` },
+  { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто ждите. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — откройте 📖 Инструкцию и пройди все шаги." },
+  { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Напишите «сменить ник» — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
   // 🧭 15.11.2026: ответ строится под заказ (`personalFaqAnswer`).
   { key: GP_HIDDEN_ITEM.key, label: GP_HIDDEN_ITEM.label, answer: personalFaqAnswer(GP_HIDDEN_ITEM.key, null, "none", "plain", "vk") ?? "" },
-  { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
+  { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ.\n\nВкратце: зайдите на create.roblox.com → выберите свою игру → Monetization → Passes → Create Pass → поставьте нужную цену → сохраните." },
   { key: "price",     label: "💰 Какую цену ставить?",      answer: "Цена геймпасса = номинал ÷ 0.7 (округлённо вверх).\n\nНапример: 500 R$ → 715 R$, 1000 R$ → 1429 R$.\n\nТочная цена написана в карточке заказа и в инструкции." },
-  { key: "managed",   label: "⚠️ Managed pricing?",         answer: "Managed pricing (региональные цены) должен быть ОТКЛЮЧЁН.\n\nЕсли он включён — Roblox автоматически меняет цену геймпасса и мы не сможем его выкупить. Робуксы ты получишь только когда всё будет сделано правильно.\n\nПроверь: Passes → твой пасс → ☰ → Sales → переключатель Managed pricing = OFF.\n\nПо умолчанию он отключён, но если случайно включил — отключи и нажми Save Changes." },
+  { key: "managed",   label: "⚠️ Managed pricing?",         answer: "Managed pricing (региональные цены) должен быть ОТКЛЮЧЁН.\n\nЕсли он включён — Roblox автоматически меняет цену геймпасса и мы не сможем его выкупить. Робуксы вы получите только когда всё будет сделано правильно.\n\nПроверьте: Passes → ваш пасс → ☰ → Sales → переключатель Managed pricing = OFF.\n\nПо умолчанию он отключён, но если случайно включил — отключите и нажмите Save Changes." },
 ];
 
 function vkFaqKb() {
@@ -883,10 +883,10 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null, deno
   await ctx.reply({
     message:
       orderLine +
-      `⭐ Чтобы продолжить, подпишись на наше сообщество 👇\n` +
-      `После подписки бот точнее находит геймпассы по нику и ты получишь персональную инструкцию — заказ оформляется прямо в ней.\n\n` +
+      `⭐ Чтобы продолжить, подпишитесь на наше сообщество 👇\n` +
+      `После подписки бот точнее находит геймпассы по нику и вы получите персональную инструкцию — заказ оформляется прямо в ней.\n\n` +
       `${groupUrl}\n\n` +
-      `После подписки нажми кнопку «✅ Я вступил» ниже.`,
+      `После подписки нажмите кнопку «✅ Я вступил» ниже.`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()
@@ -947,9 +947,9 @@ async function sendPostSubscribeContinuation(ctx: MessageContext, vkUserId: numb
     await ctx.reply({
       message:
         `✅ Подписка подтверждена!\n\n` +
-        `🎮 Твой ник: ${knownNick}\n` +
+        `🎮 Ваш ник: ${knownNick}\n` +
         `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-        `Продолжим? Найду твои геймпассы сам 🔎`,
+        `Продолжим? Найду ваши геймпассы сам 🔎`,
       keyboard: Keyboard.builder()
         .textButton({ label: `✅ Найти у ${knownNick}`, payload: { command: "find_gp_recheck" }, color: "positive" })
         .row()
@@ -959,7 +959,7 @@ async function sendPostSubscribeContinuation(ctx: MessageContext, vkUserId: numb
   } else {
     await ctx.reply(
       `✅ Подписка подтверждена!\n\n` +
-      `Пришли свой ник в Roblox — найду геймпасс сам 🔎\n` +
+      `Пришлите свой ник в Roblox — найду геймпасс сам 🔎\n` +
       `📌 Цена геймпасса: ${passPrice} R$\n\n` +
       `Также можно прислать ссылку или Asset ID.`
     );
@@ -1112,7 +1112,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (!parsed) return;
     const presser = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
     if (!presser) {
-      await ctx.reply("Не нашёл твой профиль — напиши нам: https://t.me/RobloxBank_PA");
+      await ctx.reply("Не нашёл ваш профиль — напишите нам: https://t.me/RobloxBank_PA");
       return;
     }
     const result = await confirmXlink(db as any, {
@@ -1122,8 +1122,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     });
     if (!result.ok) {
       await ctx.reply(result.reason === "not_owner"
-        ? "Этот код уже не за тобой."
-        : "Не получилось связать — напиши нам: https://t.me/RobloxBank_PA");
+        ? "Этот код уже не за вами."
+        : "Не получилось связать — напишите нам: https://t.me/RobloxBank_PA");
       return;
     }
     await ctx.reply(stripHtml(xlinkOwnerConfirmedText(parsed.code, result.claimant.tgId ? "TG" : "VK")));
@@ -1185,7 +1185,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const hu = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, balance: true, reviewBonusGrantedAt: true } }).catch(() => null);
       const he = hu ? await resolveReviewEligibility(hu) : null;
       if (he?.kind === "eligible") setState(vkUserId, { type: "AWAITING_REVIEW", orderId: he.orderId });
-      await ctx.reply("📸 Пришли скриншот отзыва ещё раз — фотографией, не файлом.");
+      await ctx.reply("📸 Пришлите скриншот отзыва ещё раз — фотографией, не файлом.");
       return;
     }
     await handleReviewScreenshot(ctx, vkUserId, undefined, held.url);
@@ -1250,7 +1250,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       if (item) {
         let answer = personalFaqAnswer(key, faqOrder, stage, "plain", "vk") ?? item.answer;
         if (key === "when_rbx" && stage === "done" && faqOrder?.completedAt) {
-          answer += `\n\n📌 Твой заказ на ${faqOrder.amount} R$ выкуплен ${fmtDateRu(new Date(faqOrder.completedAt))} — робуксы в Pending у Roblox.`;
+          answer += `\n\n📌 Ваш заказ на ${faqOrder.amount} R$ выкуплен ${fmtDateRu(new Date(faqOrder.completedAt))} — робуксы в Pending у Roblox.`;
         }
         const kb = Keyboard.builder();
         vkFaqNextRows(kb, faqOrder, stage);
@@ -1271,7 +1271,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       kb.urlButton({ label: PENDING_PAGE_BUTTON, url: PENDING_PAGE_URL }).row()
         .textButton({ label: "➕ Другие вопросы", payload: { command: "faq_all" }, color: "secondary" })
         .textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
-      await ctx.reply({ message: `❓ Частые вопросы\n\n${ctxLine}\n\nСверху — вопросы про твой этап 👇`, keyboard: kb.inline() });
+      await ctx.reply({ message: `❓ Частые вопросы\n\n${ctxLine}\n\nСверху — вопросы про ваш этап 👇`, keyboard: kb.inline() });
       return;
     }
   }
@@ -1290,7 +1290,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           })
         : null;
       if (lastDone) {
-        whenRbxExtra = `\n📌 Твой заказ на ${lastDone.amount} R$ выкуплен ${fmtDateRu(new Date(lastDone.completedAt!))} — робуксы в Pending у Roblox.`;
+        whenRbxExtra = `\n📌 Ваш заказ на ${lastDone.amount} R$ выкуплен ${fmtDateRu(new Date(lastDone.completedAt!))} — робуксы в Pending у Roblox.`;
       }
     } catch { /* персонализация — не повод ронять FAQ */ }
 
@@ -1298,7 +1298,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     for (const item of VK_FAQ_ITEMS) {
       lines.push(`${item.label}\n${item.answer}${item.key === "when_rbx" ? whenRbxExtra : ""}\n`);
     }
-    lines.push("💬 Не нашёл ответ? Напиши прямо сюда — ответим здесь, или в Telegram: https://t.me/RobloxBank_PA");
+    lines.push("💬 Не нашёл ответ? Напишите прямо сюда — ответим здесь, или в Telegram: https://t.me/RobloxBank_PA");
     await ctx.reply({
       message: lines.join("\n"),
       keyboard: Keyboard.builder()
@@ -1333,7 +1333,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
     await ctx.reply({
       message:
-        "📸 Оставь отзыв на Wildberries с текстом и фото, сделай скриншот и пришли его сюда фотографией (не файлом).\n\n" +
+        "📸 Оставьте отзыв на Wildberries с текстом и фото, сделайте скриншот и пришлите его сюда фотографией (не файлом).\n\n" +
         "После проверки +100 R$ появятся на бонусном балансе на 30 дней. Это не отдельная выдача и не бонус к покупке на WB: сумма автоматически добавится к следующей прямой покупке в боте или на robloxbank.ru.",
       keyboard: Keyboard.builder()
         .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
@@ -1362,10 +1362,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         : res.status === "already"
         ? "✅ Этот заказ уже в работе — ничего делать не нужно."
         : res.status === "gone"
-        ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверь, что он выставлен на продажу за нужную цену, и пришли ссылку сюда."
+        ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверьте, что он выставлен на продажу за нужную цену, и пришлите ссылку сюда."
         : res.status === "forbidden"
         ? "⚠️ Этот заказ привязан к другому аккаунту — действие отклонено."
-        : "⚠️ Не получилось обработать. Пришли ссылку на геймпасс сюда, помогу.",
+        : "⚠️ Не получилось обработать. Пришлите ссылку на геймпасс сюда, помогу.",
     );
     return;
   }
@@ -1377,7 +1377,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (declined) {
       setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: declined.wbCode, denomination: declined.amount });
     }
-    await ctx.reply("Понял 👍 Если знаешь свой точный ник Roblox — пришли его сюда, и я найду твой геймпасс.");
+    await ctx.reply("Понял 👍 Если знаете свой точный ник Roblox — пришлите его сюда, и я найду ваш геймпасс.");
     return;
   }
 
@@ -1400,7 +1400,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           message:
             `🔄 Исправление ссылки\n\n💎 Номинал: ${order.amount} R$\n` +
             `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-            `Пришли свой ник в Roblox — найду геймпасс сам 🔎\nИли отправь ссылку / Asset ID.\n\n` +
+            `Пришлите свой ник в Roblox — найду геймпасс сам 🔎\nИли отправьте ссылку / Asset ID.\n\n` +
             `Если нужна помощь — https://t.me/RobloxBank_PA`,
           keyboard: Keyboard.builder()
             .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
@@ -1418,7 +1418,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (msgPayload?.command === "check_sub" || isSubConfirmText) {
     try {
       if (!(await isVkSubscribed(ctx, vkUserId))) {
-        await ctx.reply("Похоже, подписка ещё не прошла 🙈 Подпишись на сообщество и нажми кнопку снова.");
+        await ctx.reply("Похоже, подписка ещё не прошла 🙈 Подпишитесь на сообщество и нажмите кнопку снова.");
         return;
       }
       const refToActivate = msgPayload?.ref;
@@ -1442,11 +1442,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         await handleIdleMessage(ctx, vkUserId, stashed);
         return;
       }
-      await ctx.reply("✅ Подписка подтверждена! Теперь отправь свой код с карточки Wildberries — бот выдаст инструкцию.");
+      await ctx.reply("✅ Подписка подтверждена! Теперь отправьте свой код с карточки Wildberries — бот выдаст инструкцию.");
       return;
     } catch (err) {
       console.error("[VK] check_sub handler failed:", err);
-      await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.\n\nЕсли проблема повторяется — напиши нам: https://t.me/RobloxBank_PA");
+      await ctx.reply("Не удалось проверить подписку — попробуйте ещё раз через минуту.\n\nЕсли проблема повторяется — напишите нам: https://t.me/RobloxBank_PA");
       return; // don't fall through to the idle pipeline — avoids a second reply
     }
   }
@@ -1551,7 +1551,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       // сообщение — человек писал менеджеру, а получал бота. Теперь напоминаем
       // про живого человека один раз за окно паузы и молчим.
       if (shouldHintSupportPause(vkUserId)) {
-        await ctx.reply("С тобой на связи живой человек (не бот) — менеджер ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
+        await ctx.reply("С вами на связи живой человек (не бот) — менеджер ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
       }
     } else {
       // Человек уже описал проблему своими словами — спрашивать второй раз
@@ -1595,7 +1595,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (!hasKnownPayload && !looksLikeFlowInput && !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))) {
       // Не молчим совсем: один раз за окно паузы говорим, что происходит.
       if (shouldHintSupportPause(vkUserId)) {
-        await ctx.reply("⏸ Сейчас с тобой на связи менеджер — бот не вмешивается.\nВернуть бота: напиши «+бот».");
+        await ctx.reply("⏸ Сейчас с вами на связи менеджер — бот не вмешивается.\nВернуть бота: напишите «+бот».");
       }
       return;
     }
@@ -1640,7 +1640,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         message:
           `${getGreeting(custStatus, firstName)}\n` +
           `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$${awNickLine}\n\n` +
-          `📖 Открой свою персональную инструкцию — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n` +
+          `📖 Откройте свою персональную инструкцию — заказ оформляется там же: создайте геймпасс и найдите его по нику Roblox 🔎\n` +
           `👉 ${startGuideUrl}\n\n` +
           `🔔 Здесь, в боте, придут уведомления о заказе.`,
         keyboard: awKb.inline(),
@@ -1682,8 +1682,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         message:
           `${getGreeting(custStatus, firstName)}\n` +
           `✅ Код активирован · цена геймпасса ${passPrice} R$${resNickLine}\n\n` +
-          `📖 Вот твоя персональная инструкция — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n\n` +
-          `🔔 Здесь, в боте, ты получишь уведомления о заказе — приняли → выкупаем → готово.`,
+          `📖 Вот ваша персональная инструкция — заказ оформляется там же: создайте геймпасс и найдите его по нику Roblox 🔎\n\n` +
+          `🔔 Здесь, в боте, вы получите уведомления о заказе — приняли → выкупаем → готово.`,
         keyboard: resKb.inline(),
       });
       return;
@@ -1695,7 +1695,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
       await ctx.reply({
-        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
+        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
         keyboard: Keyboard.builder()
           .textButton({ label: "📊 Мой заказ",         payload: { command: "status" },       color: "primary"   })
           .row()
@@ -1712,10 +1712,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await ctx.reply({
       message:
         "👋 Привет! Я бот RobloxBank — помогу получить робуксы 💎\n\n" +
-        "⭐ Подпишись на наше сообщество 👇\n" +
-        "После подписки бот точнее находит геймпассы по нику и ты получишь персональную инструкцию — заказ оформляется прямо в ней.\n\n" +
+        "⭐ Подпишитесь на наше сообщество 👇\n" +
+        "После подписки бот точнее находит геймпассы по нику и вы получите персональную инструкцию — заказ оформляется прямо в ней.\n\n" +
         `${coldGroupUrl}\n\n` +
-        "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
+        "🔑 Есть код с WB-карты? Напишите его прямо сюда.\n" +
         "💎 Нет кода? Можно купить Robux напрямую — без карты WB, быстрее и выгоднее.",
       keyboard: Keyboard.builder()
         .urlButton({ label: "🔔 Подписаться", url: coldGroupUrl })
@@ -1762,7 +1762,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const cExpired = cu?.bonusExpiresAt ? cu.bonusExpiresAt <= new Date() : false;
     const cBonus = cRaw > 0 && !cExpired ? cRaw : 0;
     await ctx.reply({
-      message: "📋 Все паки — выбери количество:",
+      message: "📋 Все паки — выберите количество:",
       keyboard: buildVkPackCatalogKb(cBonus, cu?.rubleDiscount ?? 0),
     });
     return;
@@ -1781,7 +1781,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     customKb.textButton({ label: "◀️ К пакам", payload: { command: "start_direct" }, color: "secondary" });
     customKb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await ctx.reply({
-      message: `✏️ Своё количество\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`,
+      message: `✏️ Своё количество\n\nВведите количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`,
       keyboard: customKb.inline(),
     });
     return;
@@ -1826,25 +1826,25 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (msgPayload?.command === "direct_nick_ok") {
     const nickState = getState(vkUserId);
     if (!nickState || nickState.type !== "AWAITING_DIRECT_NICK") {
-      await ctx.reply("⏳ Сессия истекла. Начни заново.");
+      await ctx.reply("⏳ Сессия истекла. Начните заново.");
       return;
     }
     const savedNick = msgPayload.nick as string;
-    if (!savedNick) { await ctx.reply("Ошибка — начни заново."); return; }
+    if (!savedNick) { await ctx.reply("Ошибка — начните заново."); return; }
     await handleVkDirectNickResolved(ctx, vkUserId, savedNick);
     return;
   }
   if (msgPayload?.command === "direct_nick_new") {
     const nickState = getState(vkUserId);
     if (!nickState || (nickState.type !== "AWAITING_DIRECT_NICK" && nickState.type !== "AWAITING_DIRECT_NICK_INPUT" && nickState.type !== "AWAITING_DIRECT_GAMEPASS" && nickState.type !== "AWAITING_DIRECT_SUMMARY")) {
-      await ctx.reply("⏳ Сессия истекла. Начни заново.");
+      await ctx.reply("⏳ Сессия истекла. Начните заново.");
       return;
     }
     setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: nickState.amount, totalAmount: nickState.totalAmount, bonus: nickState.bonus, rubleDiscount: nickState.rubleDiscount, rublePrice: nickState.rublePrice, hasBonusStep: nickState.hasBonusStep });
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await ctx.reply({ message: "🎮 Введи ник Roblox\n\nНапиши его в чат:", keyboard: kb.inline() });
+    await ctx.reply({ message: "🎮 Введите ник Roblox\n\nНапишите его в чат:", keyboard: kb.inline() });
     return;
   }
   if (msgPayload?.command === "direct_gp_pick" && typeof msgPayload.passId === "string") {
@@ -1855,7 +1855,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (msgPayload?.command === "direct_requote") {
     const st = getState(vkUserId);
     if (!st || st.type !== "AWAITING_DIRECT_SUMMARY") {
-      await ctx.reply("⏳ Сессия истекла. Начни заново.");
+      await ctx.reply("⏳ Сессия истекла. Начните заново.");
       return;
     }
     const q = requoteForPass({
@@ -1864,7 +1864,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       rubleDiscount: st.rubleDiscount,
     });
     if (!q) {
-      await ctx.reply("Под этот пасс заказ не собрать — сделай пасс нужной цены.");
+      await ctx.reply("Под этот пасс заказ не собрать — сделайте пасс нужной цены.");
       return;
     }
     setState(vkUserId, { ...st, amount: q.amount, totalAmount: q.totalAmount, rublePrice: q.rublePrice });
@@ -1911,7 +1911,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       status: string; robloxUsername: string; totalAmount: number;
     }>(vkActor(vkUserId), intentId, { status: true, robloxUsername: true, totalAmount: true });
     if (!owned.ok) {
-      await ctx.reply(owned.reason === "forbidden" ? "⛔ Эта заявка не твоя." : "Заявка уже обработана.");
+      await ctx.reply(owned.reason === "forbidden" ? "⛔ Эта заявка не ваша." : "Заявка уже обработана.");
       return;
     }
     const intent = owned.entity;
@@ -1927,7 +1927,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
   if (msgPayload?.command === "edit_nick") {
     setState(vkUserId, { type: "AWAITING_NICK_EDIT" });
-    await ctx.reply("🎮 Введи новый ник Roblox:");
+    await ctx.reply("🎮 Введите новый ник Roblox:");
     return;
   }
   if (msgPayload?.command === "user_cancel_direct" && msgPayload?.orderId) {
@@ -1942,7 +1942,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     }
     if (ucdOrder.user?.vkId !== String(vkUserId)) {
-      await ctx.reply("⛔ Это не твой заказ.");
+      await ctx.reply("⛔ Это не ваш заказ.");
       return;
     }
     const updateData: any = {};
@@ -1962,7 +1962,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       }
     });
     await ctx.reply({
-      message: `❌ Заказ на ${baseAmount} R$ отменён.\n\nЕсли хочешь — создай новый заказ.`,
+      message: `❌ Заказ на ${baseAmount} R$ отменён.\n\nЕсли хотите — создайте новый заказ.`,
       keyboard: Keyboard.builder()
         .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
         .inline(),
@@ -2035,7 +2035,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     });
     const orders = listUser ? await findActiveOrders(listUser.id) : [];
     if (orders.length === 0) {
-      await ctx.reply("Активных заказов нет. Есть код с карточки WB? Напиши его сюда.");
+      await ctx.reply("Активных заказов нет. Есть код с карточки WB? Напишите его сюда.");
       return;
     }
     if (orders.length === 1) {
@@ -2104,7 +2104,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── Direct order amount input ──────────────────────────────────────────────
   if (state?.type === "AWAITING_DIRECT_RECEIPT") {
     if (!RECEIPT_EMAIL_RE.test(text) || text.length > 254) {
-      await ctx.reply("⚠️ Не похоже на email. Проверь адрес и пришли ещё раз, например: name@example.com");
+      await ctx.reply("⚠️ Не похоже на email. Проверьте адрес и пришлите ещё раз, например: name@example.com");
       return;
     }
     const paymentState = state;
@@ -2127,7 +2127,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // AWAITING_DIRECT_CONFIRM: user should use buttons; if they type text, do nothing
   if (state?.type === "AWAITING_DIRECT_CONFIRM") {
     await ctx.reply({
-      message: "Используй кнопки выше для подтверждения или отмены.",
+      message: "Используйте кнопки выше для подтверждения или отмены.",
       keyboard: Keyboard.builder()
         .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })
         .textButton({ label: "◀️ Назад",       payload: { command: "direct_back"    }, color: "secondary" })
@@ -2151,7 +2151,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const kb = Keyboard.builder();
       kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
       kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-      await ctx.reply({ message: "⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Или пришли ссылку на геймпасс — тоже подойдёт:", keyboard: kb.inline() });
+      await ctx.reply({ message: "⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Или пришлите ссылку на геймпасс — тоже подойдёт:", keyboard: kb.inline() });
       return;
     }
     await handleVkDirectNickResolved(ctx, vkUserId, nick);
@@ -2171,12 +2171,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await handleVkDirectNickResolved(ctx, vkUserId, nick);
       return;
     }
-    await ctx.reply("Пришли Pass ID геймпасса, ссылку на него или другой ник — или выбери кнопку выше ☝️");
+    await ctx.reply("Пришли Pass ID геймпасса, ссылку на него или другой ник — или выберите кнопку выше ☝️");
     return;
   }
   // AWAITING_DIRECT_NICK / AWAITING_DIRECT_SUMMARY: use buttons
   if (state?.type === "AWAITING_DIRECT_NICK" || state?.type === "AWAITING_DIRECT_SUMMARY") {
-    await ctx.reply("Используй кнопки выше ☝️");
+    await ctx.reply("Используйте кнопки выше ☝️");
     return;
   }
   // AWAITING_NICK_EDIT: user editing their nick from /menu
@@ -2185,14 +2185,14 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const nick = text.replace(/^@/, "").trim();
     if (!ROBLOX_NICK_RE.test(nick)) {
       setState(vkUserId, { type: "AWAITING_NICK_EDIT" });
-      await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:");
+      await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуйте ещё раз:");
       return;
     }
     const { resolveRobloxUserId } = await import("../shared/roblox");
     const rId = await resolveRobloxUserId(nick);
     if (!rId) {
       setState(vkUserId, { type: "AWAITING_NICK_EDIT" });
-      await ctx.reply(`❌ Пользователь ${nick} не найден на Roblox. Проверь написание.`);
+      await ctx.reply(`❌ Пользователь ${nick} не найден на Roblox. Проверьте написание.`);
       return;
     }
     await db.user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
@@ -2311,7 +2311,7 @@ async function sweepStaleVkOrderState(
     });
   } else if (order.status === "COMPLETED") {
     await ctx.reply({
-      message: `🎉 Заказ ${order.wbCode} уже выполнен!\n\nХочешь ещё робуксов? Оформи прямой заказ — без карты WB, быстрее и выгоднее.`,
+      message: `🎉 Заказ ${order.wbCode} уже выполнен!\n\nХотите ещё робуксов? Оформите прямой заказ — без карты WB, быстрее и выгоднее.`,
       keyboard: Keyboard.builder()
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
         .row()
@@ -2320,12 +2320,12 @@ async function sweepStaleVkOrderState(
     });
   } else if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") {
     await ctx.reply({
-      message: `💳 Заказ ${order.wbCode} ждёт оплату — реквизиты выше в чате. После оплаты пришли скрин сюда.`,
+      message: `💳 Заказ ${order.wbCode} ждёт оплату — реквизиты выше в чате. После оплаты пришлите скрин сюда.`,
       keyboard: statusKb,
     });
   } else {
     await ctx.reply({
-      message: `ℹ️ Статус заказа ${order.wbCode} изменился — проверь кнопкой ниже.`,
+      message: `ℹ️ Статус заказа ${order.wbCode} изменился — проверьте кнопкой ниже.`,
       keyboard: statusKb,
     });
   }
@@ -2364,7 +2364,7 @@ async function vkOfferPreselectedGamepass(
     if (order && order.status !== "AWAITING_GAMEPASS" && order.status !== "REJECTED") {
       await ctx.reply({
         message:
-          `✅ Заказ уже оформлен — твой геймпасс принят! 🙌\n\n` +
+          `✅ Заказ уже оформлен — ваш геймпасс принят! 🙌\n\n` +
           `🔑 Код ВБ: ${code}\n` +
           `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
           `Как только выкупим — сразу напишу сюда.`,
@@ -2380,8 +2380,8 @@ async function vkOfferPreselectedGamepass(
     // Case 2 — fallback one-tap offer.
     await ctx.reply({
       message:
-        `🎯 Ты уже выбрал геймпасс на сайте!\n\n` +
-        `Выкупаем его за ${passPrice} R$? Жми «✅ Да» — проверю и оформлю заказ.`,
+        `🎯 Вы уже выбрали геймпасс на сайте!\n\n` +
+        `Выкупаем его за ${passPrice} R$? Жмите «✅ Да» — проверю и оформлю заказ.`,
       keyboard: Keyboard.builder()
         .textButton({ label: `✅ Да, выкупаем (${passPrice} R$)`, payload: { command: "gp_pick", passId: gpId }, color: "positive" })
         .row()
@@ -2429,11 +2429,11 @@ async function handleHelpRef(ctx: MessageContext, vkUserId: number): Promise<voi
   }
   await ctx.reply({
     message:
-      "Привет! 👋 Ты открыл меня со страницы инструкции — заказа за тобой я пока не вижу.\n\n" +
-      "Пришли сюда одно из двух, и я его найду:\n" +
+      "Привет! 👋 Вы открыли меня со страницы инструкции — заказа за вами я пока не вижу.\n\n" +
+      "Пришлите сюда одно из двух, и я его найду:\n" +
       "🔑 код с карточки WB — 7 символов, буквы и цифры\n" +
       "📦 код доставки — цифры из чата Wildberries, тот самый, которым закрывают доставку\n\n" +
-      "Просто отправь его сообщением — разберусь сам.",
+      "Просто отправьте его сообщением — разберусь сам.",
     keyboard: Keyboard.builder()
       .urlButton({ label: "📖 Где взять код", url: "https://robloxbank.ru/guide?source=wb" })
       .row()
@@ -2583,13 +2583,13 @@ async function handleRefActivation(
     where: { code: { equals: code, mode: "insensitive" } },
   });
   if (!wbCode) {
-    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+    await ctx.reply("❌ Код не найден. Проверьте правильность ввода на карточке.\n💡 Часто путают букву «О» и цифру «0» — проверьте эти символы в коде.\n\nНужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
     return;
   }
 
   // Заказ на WB отменён, деньги вернулись покупателю: активировать нечего.
   if (isRevokedCode(wbCode)) {
-    await ctx.reply(`🚫 ${REVOKED_CODE_REFUSAL}\n\nНапиши прямо сюда — разберёмся 👇`);
+    await ctx.reply(`🚫 ${REVOKED_CODE_REFUSAL}\n\nНапишите прямо сюда — разберёмся 👇`);
     return;
   }
   // Block only when code was truly completed (isUsed=true + userId set).
@@ -2608,8 +2608,8 @@ async function handleRefActivation(
       const done = placedOrder.status === "COMPLETED";
       await ctx.reply({
         message: done
-          ? `✅ Заказ выполнен — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
-          : `✅ Заказ оформлен — твой геймпасс принят! 🙌\n\n` +
+          ? `✅ Заказ выполнен — спасибо! 🎉\n\nХотите ещё робуксов? 💎`
+          : `✅ Заказ оформлен — ваш геймпасс принят! 🙌\n\n` +
             `🔑 Код ВБ: ${code}\n` +
             `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
             `Как только выкупим — сразу напишу сюда.`,
@@ -2638,14 +2638,14 @@ async function handleRefActivation(
     // как сбой. Ведём в «Мой заказ», а не в тупик.
     if (justLinked) {
       await ctx.reply({
-        message: "📊 Заказ открыт здесь. Нажми «Мой заказ» — покажу, на чём он сейчас.",
+        message: "📊 Заказ открыт здесь. Нажмите «Мой заказ» — покажу, на чём он сейчас.",
         keyboard: Keyboard.builder()
           .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
           .inline(),
       });
       return;
     }
-    await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка твоя — напиши нам: https://t.me/RobloxBank_PA");
+    await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка ваша — напишите нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -2808,7 +2808,7 @@ async function handleRefActivation(
   const vkSavedNick = vkMultiOrder ? null : user.robloxUsername;
   const vkNickLine = vkSavedNick ? `\n🎮 Ник: ${vkSavedNick}` : "";
   const vkMultiLine = vkMultiOrder
-    ? `\n\n📦 Активных заказов: ${vkParallelOrders.length} — они независимы. Для этого кода укажи ник Roblox, на который придут робуксы именно по нему.`
+    ? `\n\n📦 Активных заказов: ${vkParallelOrders.length} — они независимы. Для этого кода укажите ник Roblox, на который придут робуксы именно по нему.`
     : "";
   // Порядок кнопок = порядок шагов: сначала проверка аккаунта (она часто
   // закрывает заказ без единого действия), инструкция — вторым входом.
@@ -2829,7 +2829,7 @@ async function handleRefActivation(
     message:
       greetLine + `\n` +
       `✅ Код ${code} активирован · номинал ${totalAmount} R$${vkNickLine}\n\n` +
-      `🔎 Начнём с ника Roblox: посмотрю, что у тебя уже выставлено — часто заказ собирается из готового и создавать ничего не нужно. Если нужно — покажу, что именно, и дам выбрать способ.\n\n` +
+      `🔎 Начнём с ника Roblox: посмотрю, что у вас уже выставлено — часто заказ собирается из готового и создавать ничего не нужно. Если нужно — покажу, что именно, и дам выбрать способ.\n\n` +
       `📖 Та же проверка и инструкция со скринами — на сайте.` +
       vkMultiLine,
     keyboard: enforceVkInlineKbLimits(kb.inline(), "vk-code-activated"),
@@ -2895,11 +2895,11 @@ async function handleGamepassLink(
     // Roblox returned HTTP responses but no usable data → gamepass doesn't exist
     await showResult(
       "❌ Геймпасс не найден на Roblox.\n\n" +
-      "Убедись, что:\n" +
+      "Убедитесь, что:\n" +
       "• Геймпасс опубликован (не в черновиках)\n" +
       "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
-      "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
-      "Если геймпасс точно существует — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
+      "• Вы скопировали ссылку прямо из браузера Roblox\n\n" +
+      "Если геймпасс точно существует — напишите сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -2914,7 +2914,7 @@ async function handleGamepassLink(
       await handleRobloxNickInput(ctx, vkUserId, owner, wbCode, denomination);
     } else {
       await showResult({
-        message: `⚠️ ${splitRequiredMessage(denomination)}\n\nПришли свой ник Roblox — посмотрю, что уже выставлено, и скажу, что досоздать.`,
+        message: `⚠️ ${splitRequiredMessage(denomination)}\n\nПришлите свой ник Roblox — посмотрю, что уже выставлено, и скажу, что досоздать.`,
         keyboard: Keyboard.builder()
           .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
@@ -2957,8 +2957,8 @@ async function handleGamepassLink(
           message:
             `❌ Геймпасс недоступен — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
             `Два варианта:\n` +
-            `1. Открой игру: Creator Hub → Experience → Settings → Permissions → Public → сохрани. Затем пришли ссылку снова.\n` +
-            `2. Создай геймпасс в любой публичной игре (цена: ${expectedPrice} R$) и пришли новую ссылку.\n\n` +
+            `1. Откройте игру: Creator Hub → Experience → Settings → Permissions → Public → сохраните. Затем пришлите ссылку снова.\n` +
+            `2. Создайте геймпасс в любой публичной игре (цена: ${expectedPrice} R$) и пришлите новую ссылку.\n\n` +
             `Не удаляй геймпасс до получения оплаты.\n\n` +
             `📖 Подробная инструкция по кнопке ниже:`,
           keyboard: Keyboard.builder()
@@ -2971,11 +2971,11 @@ async function handleGamepassLink(
           message:
             `❌ Геймпасс в закрытой игре — выкупить невозможно.\n\n` +
             `Как открыть игру:\n` +
-            `1. Нажми на плейс → Configure → Settings\n` +
-            `2. Найди Audience → выбери Public → сохрани\n\n` +
+            `1. Нажмите на плейс → Configure → Settings\n` +
+            `2. Найдите Audience → выберите Public → сохраните\n\n` +
             `Не помогло? Configure → Questionnaire → Restart\n` +
-            `Ответь «No» на все 10 вопросов → Continue\n\n` +
-            `Или создай геймпасс в другой публичной игре (цена: ${expectedPrice} R$)\n\n` +
+            `Ответьте «No» на все 10 вопросов → Continue\n\n` +
+            `Или создайте геймпасс в другой публичной игре (цена: ${expectedPrice} R$)\n\n` +
             `📖 Полная инструкция со скринами:`,
           keyboard: Keyboard.builder()
             .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
@@ -2987,7 +2987,7 @@ async function handleGamepassLink(
           message:
             passChecklist({ forSale: false, price: gamepassInfo.price, expected: expectedPrice, owner: gamepassInfo.creatorName, html: false }) + `\n\n` +
             `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-            `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.\n\n` +
+            `Убедитесь, что он активен и доступен для покупки, затем пришлите ссылку снова.\n\n` +
             `📖 Как правильно создать и активировать — в инструкции:`,
           keyboard: Keyboard.builder()
             .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
@@ -3036,8 +3036,8 @@ async function handleGamepassLink(
     );
     await showResult(
       `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
-      `Убедись, что цена геймпасса установлена ровно ${Math.ceil(denomination / 0.7)} R$. ` +
-      `Мы проверим вручную — просто жди уведомления.`
+      `Убедитесь, что цена геймпасса установлена ровно ${Math.ceil(denomination / 0.7)} R$. ` +
+      `Мы проверим вручную — просто ждите уведомления.`
     );
     // Alert admins
     const alertText =
@@ -3078,7 +3078,7 @@ async function handleGamepassLink(
 
   const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
-    await showResult("Ошибка сессии. Напиши нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
+    await showResult("Ошибка сессии. Напишите нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
     clearState(vkUserId);
     return;
   }
@@ -3220,16 +3220,16 @@ async function handleGamepassLink(
     }
     if (err.badSplit) {
       console.error("[VK] Разбивка не сошлась:", err.message);
-      await showResult("⚠️ Не сошлась разбивка заказа — проверим руками, чтобы ты получил ровно свою сумму. Напиши сюда, ответим здесь.");
+      await showResult("⚠️ Не сошлась разбивка заказа — проверим руками, чтобы вы получили ровно свою сумму. Напишите сюда, ответим здесь.");
       return;
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await showResult("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+      await showResult("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напишите «статус» чтобы проверить.\n\nНужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
-    await showResult("❌ Ошибка при создании заказа. Попробуй позже или напиши нам: https://t.me/RobloxBank_PA");
+    await showResult("❌ Ошибка при создании заказа. Попробуйте позже или напишите нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -3264,15 +3264,15 @@ async function handleGamepassLink(
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
   await showResult({
     message:
-      `🎉 Твой геймпасс принят!` +
+      `🎉 Ваш геймпасс принят!` +
       creatorLine +
       priceLine +
       `\n\n📋 Что будет дальше:\n` +
-      `1. Выкупим твой геймпасс\n` +
+      `1. Выкупим ваш геймпасс\n` +
       `2. Пришлём уведомление сюда ✅\n` +
       `3. Робуксы попадут в Pending у Roblox — с этого момента с нашей стороны всё, на баланс их переводит сам Roblox\n\n` +
-      `⚠️ Обязательно проверь, что Managed pricing отключён (Sales → переключатель OFF). Если он включён — Roblox изменит цену и мы не сможем выкупить геймпасс, пока ты не исправишь. Подробности — шаг 7 инструкции.\n\n` +
-      `Ничего делать не нужно — просто жди сообщение 👌` +
+      `⚠️ Обязательно проверьте, что Managed pricing отключён (Sales → переключатель OFF). Если он включён — Roblox изменит цену и мы не сможем выкупить геймпасс, пока вы не исправите. Подробности — шаг 7 инструкции.\n\n` +
+      `Ничего делать не нужно — просто ждите сообщение 👌` +
       BUYOUT_ETA_NOTE +
       `\n\nКод ВБ: ${wbCode} · Статус и бонусы — в меню 👇`,
     keyboard: Keyboard.builder()
@@ -3290,7 +3290,7 @@ async function handleGamepassLink(
         const groupUrl = `https://vk.com/club${groupId}`;
         await ctx.reply({
           message:
-            `⭐ Кстати — подпишись на наше сообщество, чтобы не пропустить акции и бонусы:\n${groupUrl}`,
+            `⭐ Кстати — подпишитесь на наше сообщество, чтобы не пропустить акции и бонусы:\n${groupUrl}`,
           keyboard: Keyboard.builder()
             .urlButton({ label: "🔔 Подписаться", url: groupUrl })
             .inline(),
@@ -3383,11 +3383,11 @@ function vkFaqNextRows(kb: any, order: any, stage: FaqStage): void {
 
 /** Текст-подсказка, откуда взять ссылку. Общий для всех точек входа. */
 const GP_LINK_PROMPT =
-  "🔗 Пришли ссылку на свой геймпасс — одним сообщением.\n\n" +
+  "🔗 Пришлите ссылку на свой геймпасс — одним сообщением.\n\n" +
   "Где её взять:\n" +
-  "1. Creator Hub → Creations → твоя игра → Passes\n" +
-  "2. Нажми на геймпасс — он откроется в браузере\n" +
-  "3. Скопируй адрес из адресной строки и пришли сюда\n\n" +
+  "1. Creator Hub → Creations → ваша игра → Passes\n" +
+  "2. Нажмите на геймпасс — он откроется в браузере\n" +
+  "3. Скопируйте адрес из адресной строки и пришлите сюда\n\n" +
   "Подойдёт любой вид: roblox.com/game-pass/1234567, ссылка из Creator Hub или просто номер геймпасса.\n\n" +
   "Так заказ оформится, даже если плейс скрыт и поиск по нику пасс не видит.";
 
@@ -3398,12 +3398,12 @@ async function handleSendGpLink(ctx: MessageContext, vkUserId: number): Promise<
     select: { id: true },
   });
   if (!user) {
-    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    await ctx.reply("Сессия истекла — напишите «Начать», чтобы продолжить.");
     return;
   }
   const working = await resolveWorkingOrder(vkUserId, user.id);
   if (!working) {
-    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    await ctx.reply("У вас сейчас нет активного заказа. Введите код WB чтобы начать.");
     return;
   }
   if ("choose" in working) {
@@ -3435,12 +3435,12 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     select: { id: true },
   });
   if (!user) {
-    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    await ctx.reply("Сессия истекла — напишите «Начать», чтобы продолжить.");
     return;
   }
   const working = await resolveWorkingOrder(vkUserId, user.id);
   if (!working) {
-    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    await ctx.reply("У вас сейчас нет активного заказа. Введите код WB чтобы начать.");
     return;
   }
   if ("choose" in working) {
@@ -3460,9 +3460,9 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
   // `ceil(номинал/0.7)`, теперь смотрит аккаунт целиком и складывает заказ из
   // того, что уже выставлено (то же самое делает инструкция на сайте).
   await ctx.reply(
-    `🔎 Введи ник Roblox${forOrder} — то, как ты заходишь в игру.\n\n` +
-    `Посмотрю, что у тебя уже выставлено, и соберу заказ на ${order.amount} R$ из этого — создавать что-то новое нужно не всегда.\n` +
-    `Если под рукой есть ссылка на геймпасс — пришли её, этого тоже достаточно.`
+    `🔎 Введите ник Roblox${forOrder} — то, как вы заходите в игру.\n\n` +
+    `Посмотрю, что у вас уже выставлено, и соберу заказ на ${order.amount} R$ из этого — создавать что-то новое нужно не всегда.\n` +
+    `Если под рукой есть ссылка на геймпасс — пришлите её, этого тоже достаточно.`
   );
 }
 
@@ -3477,7 +3477,7 @@ async function handleFindGpSaved(ctx: MessageContext, vkUserId: number): Promise
   }
   const working = await resolveWorkingOrder(vkUserId, user.id);
   if (!working) {
-    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    await ctx.reply("У вас сейчас нет активного заказа. Введите код WB чтобы начать.");
     return;
   }
   if ("choose" in working) {
@@ -3506,12 +3506,12 @@ async function handleFindGpRecheck(ctx: MessageContext, vkUserId: number): Promi
     select: { id: true, robloxUsername: true },
   });
   if (!user) {
-    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    await ctx.reply("Сессия истекла — напишите «Начать», чтобы продолжить.");
     return;
   }
   const working = await resolveWorkingOrder(vkUserId, user.id);
   if (!working) {
-    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    await ctx.reply("У вас сейчас нет активного заказа. Введите код WB чтобы начать.");
     return;
   }
   if ("choose" in working) {
@@ -3544,7 +3544,7 @@ async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<
     select: { id: true },
   });
   if (!user) {
-    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    await ctx.reply("Сессия истекла — напишите «Начать», чтобы продолжить.");
     return;
   }
   const working = await resolveWorkingOrder(vkUserId, user.id, { wbOnly: true });
@@ -3566,8 +3566,8 @@ async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<
   await ctx.reply(
     `⚠️ Внимание: меняем ник и геймпасс в заказе!\n\n` +
     `Текущий геймпасс будет заменён на новый.\n` +
-    `Пришли новый ник Roblox — найду геймпассы за ${passPrice} R$ и переоформлю заказ.\n\n` +
-    `Используй это только если ошибся с ником при оформлении.`
+    `Пришлите новый ник Roblox — найду геймпассы за ${passPrice} R$ и переоформлю заказ.\n\n` +
+    `Используйте это только если ошибся с ником при оформлении.`
   );
 }
 
@@ -3712,7 +3712,7 @@ async function handleRobloxNickInput(
       message:
         "⚠️ Ник не похож на ник Roblox.\n\n" +
         "Должно быть 3–20 символов: буквы, цифры или подчёркивание. Например: lokomotiv_2018\n\n" +
-        "Если под рукой есть ссылка на сам геймпасс — пришли её, этого тоже достаточно.",
+        "Если под рукой есть ссылка на сам геймпасс — пришлите её, этого тоже достаточно.",
       keyboard: Keyboard.builder()
         .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "primary" })
         .inline(),
@@ -3735,7 +3735,7 @@ async function handleRobloxNickInput(
     await showResult({
       message:
         "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
-        "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.\n\n" +
+        "Попробуйте ещё раз через минуту или пришлите ссылку на геймпасс вручную.\n\n" +
         "📖 Вся инструкция по созданию и оформлению — по кнопке ниже.",
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: downGuideUrl })
@@ -3788,7 +3788,7 @@ async function handleQuestConfirm(ctx: MessageContext, vkUserId: number): Promis
   const quest = getQuestPlan(vkUserId);
   if (!quest || quest.plan.kind === "empty") {
     await ctx.reply({
-      message: "Проверка устарела — пришли ник ещё раз, посмотрим аккаунт заново.",
+      message: "Проверка устарела — пришлите ник ещё раз, посмотрим аккаунт заново.",
       keyboard: Keyboard.builder()
         .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
@@ -3835,7 +3835,7 @@ async function handleQuestFork(ctx: MessageContext, vkUserId: number): Promise<v
   const quest = getQuestPlan(vkUserId);
   if (!quest) {
     await ctx.reply({
-      message: "Сначала посмотрим твой аккаунт — пришли ник Roblox.",
+      message: "Сначала посмотрим ваш аккаунт — пришлите ник Roblox.",
       keyboard: Keyboard.builder()
         .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
@@ -3865,7 +3865,7 @@ async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Prom
   const userId = quest && gamepassAutocreateEnabled() ? await vkDbUserId(vkUserId) : null;
   if (!quest || targets.length === 0 || !userId) {
     await ctx.reply({
-      message: "Проверка устарела — пришли ник ещё раз, посмотрим аккаунт заново.",
+      message: "Проверка устарела — пришлите ник ещё раз, посмотрим аккаунт заново.",
       keyboard: Keyboard.builder()
         .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
@@ -3885,7 +3885,7 @@ async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Prom
 
   if (!outcome) {
     // Ключ успели удалить между показом кнопки и нажатием — обычная развилка.
-    await showResult("Сохранённого ключа больше нет — выбери способ ниже.");
+    await showResult("Сохранённого ключа больше нет — выберите способ ниже.");
     await handleQuestFork(ctx, vkUserId);
     return;
   }
@@ -3904,7 +3904,7 @@ async function handleQuestStoredKey(ctx: MessageContext, vkUserId: number): Prom
     if (verdict.placeHelp) await sendPlaceHelpVk(ctx, vkUserId, verdict.placeHelp, { wbCode: quest.wbCode, denomination: quest.denomination, nick: quest.nick });
     return;
   }
-  await showResult(`✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`);
+  await showResult(`✅ Сделали за вас\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`);
   await showVkQuestPlan(ctx, vkUserId, {
     wbCode: quest.wbCode,
     denomination: quest.denomination,
@@ -3928,7 +3928,7 @@ async function handleQuestKey(ctx: MessageContext, vkUserId: number): Promise<vo
     // Кнопка живёт в диалоге дольше флага: старое сообщение не имеет права
     // обещать то, чего уже нет.
     await ctx.reply({
-      message: "Этот способ сейчас недоступен — создай геймпасс по инструкции, там всё по шагам.",
+      message: "Этот способ сейчас недоступен — создайте геймпасс по инструкции, там всё по шагам.",
       keyboard: Keyboard.builder()
         .textButton({ label: "↩️ Другой способ", payload: { command: "quest_fork" }, color: "secondary" })
         .inline(),
@@ -3937,7 +3937,7 @@ async function handleQuestKey(ctx: MessageContext, vkUserId: number): Promise<vo
   }
   if (!quest || targetsToCreate(quest.plan).length === 0) {
     await ctx.reply({
-      message: "Сначала посмотрим твой аккаунт — пришли ник Roblox.",
+      message: "Сначала посмотрим ваш аккаунт — пришлите ник Roblox.",
       keyboard: Keyboard.builder()
         .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
@@ -4037,9 +4037,9 @@ async function routeVkOffKeyInput(
  * человека, поэтому просим удалить его самого — как и в штатной ветке.
  */
 async function handleVkStrayApiKey(ctx: MessageContext, vkUserId: number, raw: string): Promise<void> {
-  const deleteHint = "Удали, пожалуйста, своё сообщение с ключом из чата — он нам больше не нужен в переписке.";
+  const deleteHint = "Удалите, пожалуйста, своё сообщение с ключом из чата — он нам больше не нужен в переписке.";
   if (!gamepassAutocreateEnabled()) {
-    await ctx.reply(`Ключ получили, но этот способ сейчас выключен — создай геймпасс по инструкции (кнопка «Статус»).\n\n${deleteHint}`);
+    await ctx.reply(`Ключ получили, но этот способ сейчас выключен — создайте геймпасс по инструкции (кнопка «Статус»).\n\n${deleteHint}`);
     return;
   }
   const user = await strayKeyDb.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, robloxUsername: true } });
@@ -4053,11 +4053,11 @@ async function handleVkStrayApiKey(ctx: MessageContext, vkUserId: number, raw: s
   const order = orders.find((o) => o.wbCode === st?.wbCode) ?? (orders.length === 1 ? orders[0] : null);
   if (!order) {
     if (orders.length > 1) {
-      await ctx.reply(`🔑 Ключ получили. У тебя несколько заказов — выбери, для какого он, и пришли ключ ещё раз.\n\n${deleteHint}`);
+      await ctx.reply(`🔑 Ключ получили. У вас несколько заказов — выберите, для какого он, и пришлите ключ ещё раз.\n\n${deleteHint}`);
       await replyOrderPicker(ctx, orders);
       return;
     }
-    await ctx.reply(`🔑 Ключ получили, но сейчас нет заказа, который ждёт геймпасс. Если это ошибка — напиши сюда, ответим.\n\n${deleteHint}`);
+    await ctx.reply(`🔑 Ключ получили, но сейчас нет заказа, который ждёт геймпасс. Если это ошибка — напишите сюда, ответим.\n\n${deleteHint}`);
     return;
   }
 
@@ -4065,7 +4065,7 @@ async function handleVkStrayApiKey(ctx: MessageContext, vkUserId: number, raw: s
   if (!nick) {
     void recordBuyerDeadEnd(stepDb, { orderId: order.id, via: "vk-bot", reason: "key_no_nick" });
     setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: order.wbCode, denomination: order.amount });
-    await ctx.reply(`🔑 Ключ получили. Чтобы создать пасс на нужный аккаунт, сначала пришли свой ник в Roblox — а потом ключ ещё раз.\n\n${deleteHint}`);
+    await ctx.reply(`🔑 Ключ получили. Чтобы создать пасс на нужный аккаунт, сначала пришлите свой ник в Roblox — а потом ключ ещё раз.\n\n${deleteHint}`);
     return;
   }
 
@@ -4074,13 +4074,13 @@ async function handleVkStrayApiKey(ctx: MessageContext, vkUserId: number, raw: s
     const outcome = await searchGamepassesByNick(nick, Math.ceil(order.amount / 0.7));
     if (outcome.status === "user_not_found") {
       setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: order.wbCode, denomination: order.amount });
-      await ctx.reply(`Аккаунта ${nick} нет на Roblox. Пришли свой ник ещё раз — потом ключ.`);
+      await ctx.reply(`Аккаунта ${nick} нет на Roblox. Пришлите свой ник ещё раз — потом ключ.`);
       return;
     }
     owned = outcome.status === "no_gamepasses" ? [] : vkOwnedFromSearch(outcome.all);
   } catch (err: unknown) {
     console.error("[VK/stray-key] поиск по нику упал:", errText(err));
-    await ctx.reply("⚠️ Roblox сейчас не отвечает. Пришли ключ ещё раз через минуту.");
+    await ctx.reply("⚠️ Roblox сейчас не отвечает. Пришлите ключ ещё раз через минуту.");
     return;
   }
 
@@ -4115,7 +4115,7 @@ async function handleVkApiKeyInput(
   const key = game && heldKey ? heldKey : raw.trim();
 
   if (!game && heldKey && !looksLikeApiKey(key)) {
-    await ctx.reply(`Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`);
+    await ctx.reply(`Жду ссылку на вашу игру: ${GAME_LINK_HOWTO}\n\nИли пришлите новый ключ.`);
     return;
   }
 
@@ -4136,7 +4136,7 @@ async function handleVkApiKeyInput(
     }
     await ctx.reply({
       message:
-        "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».",
+        "Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируйте её целиком кнопкой «Copy Key To Clipboard».",
       keyboard: Keyboard.builder()
         .urlButton({ label: "📸 Шаги с картинками", url: guideUrlFor(pending.wbCode, pending.nick, "key") })
         .row()
@@ -4192,7 +4192,7 @@ async function handleVkApiKeyInput(
       })),
     ];
     await showResult(
-      `✅ Сделали за тебя\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`,
+      `✅ Сделали за вас\n\n${keyCreateSuccessText(outcome.created.map((c) => c.priceInRobux), quest.nick)}`,
     );
     await showVkQuestPlan(ctx, vkUserId, {
       wbCode: quest.wbCode,
@@ -4231,12 +4231,12 @@ async function handleGpPick(
     select: { id: true },
   });
   if (!user) {
-    await ctx.reply("Сессия истекла — напиши «Начать».");
+    await ctx.reply("Сессия истекла — напишите «Начать».");
     return;
   }
   const working = await resolveWorkingOrder(vkUserId, user.id);
   if (!working) {
-    await ctx.reply("У тебя сейчас нет активного заказа.");
+    await ctx.reply("У вас сейчас нет активного заказа.");
     return;
   }
   if ("choose" in working) {
@@ -4268,7 +4268,7 @@ async function handleOrderPick(ctx: MessageContext, vkUserId: number, code: stri
       })
     : null;
   if (!order) {
-    await ctx.reply("Этот заказ уже не активен. Напиши «статус», чтобы увидеть актуальные.");
+    await ctx.reply("Этот заказ уже не активен. Напишите «статус», чтобы увидеть актуальные.");
     return;
   }
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: order.wbCode, denomination: order.amount });
@@ -4280,7 +4280,7 @@ async function handleOrderPick(ctx: MessageContext, vkUserId: number, code: stri
   await ctx.reply({
     message:
       `📦 Работаем с заказом ${order.wbCode} · ${order.amount} R$ → геймпасс ${passPrice} R$\n` +
-      (nick ? `🎮 Ник: ${nick}\n` : `🎮 Ник ещё не указан — робуксы придут на тот аккаунт, который назовёшь здесь.\n`) +
+      (nick ? `🎮 Ник: ${nick}\n` : `🎮 Ник ещё не указан — робуксы придут на тот аккаунт, который назовёте здесь.\n`) +
       `📊 Статус: ${VK_STATUS_LABEL[order.status] ?? order.status}\n\n` +
       `📖 Инструкция по этому заказу: ${guideUrl}`,
     keyboard: Keyboard.builder()
@@ -4377,7 +4377,7 @@ async function handleStartDirect(
   setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
 
   await ctx.reply({
-    message: `${stepBar(1, bonus > 0 ? 5 : 4, "Выбери пак")}\n\n💎 Прямой заказ Robux${nickNote}${notesBlock}\n\nВыбери количество:`,
+    message: `${stepBar(1, bonus > 0 ? 5 : 4, "Выберите пак")}\n\n💎 Прямой заказ Robux${nickNote}${notesBlock}\n\nВыберите количество:`,
     keyboard: buildVkPackKb(bonus, rubleDiscount, lastOrderAmount),
   });
 }
@@ -4389,7 +4389,7 @@ async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, te
     kb.textButton({ label: "◀️ К пакам", payload: { command: "start_direct" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await ctx.reply({
-      message: `⚠️ Введи число от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}.\n\nНапример: 500`,
+      message: `⚠️ Введите число от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}.\n\nНапример: 500`,
       keyboard: kb.inline(),
     });
     return;
@@ -4424,7 +4424,7 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
 
   const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
   const customerRate = totalAmount > 0 ? rublePrice / totalAmount : customRate(amount);
-  const rateLine = `📊 Твой курс:       ${customerRate.toFixed(3)} ₽/R$\n`;
+  const rateLine = `📊 Ваш курс:       ${customerRate.toFixed(3)} ₽/R$\n`;
 
   const kb = Keyboard.builder();
   kb.textButton({ label: `✅ С бонусом (+${bonus} R$)`, payload: { command: "direct_confirm" }, color: "positive" });
@@ -4437,11 +4437,11 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
   await ctx.reply({
     message:
       `${stepBar(2, 5, "Бонус")}\n\n` +
-      `🎁 У тебя бонус +${bonus} R$ — использовать в этом заказе?\n\n` +
+      `🎁 У вас бонус +${bonus} R$ — использовать в этом заказе?\n\n` +
       `💎 Запрос:          ${amount} R$\n` +
-      `🎁 Твой бонус:     +${bonus} R$\n` +
+      `🎁 Ваш бонус:     +${bonus} R$\n` +
       `─────────────────\n` +
-      `📦 Итого получишь:  ${totalAmount} R$\n` +
+      `📦 Итого получите:  ${totalAmount} R$\n` +
       rateLine + discountLine +
       `💰 К оплате:       ${fmtRub(rublePrice)} (бонус бесплатный)\n\n` +
       `📌 С бонусом цена геймпасса — ${passPrice} R$ (без бонуса — ${Math.ceil(amount / 0.7)} R$).`,
@@ -4453,7 +4453,7 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number, skipBo
   const state = getState(vkUserId);
   if (state?.type !== "AWAITING_DIRECT_CONFIRM") {
     await ctx.reply({
-      message: "⏳ Время подтверждения вышло. Начни заново:",
+      message: "⏳ Время подтверждения вышло. Начните заново:",
       keyboard: Keyboard.builder()
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "primary" })
         .inline(),
@@ -4491,7 +4491,7 @@ async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: {
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await ctx.reply({
-      message: `${nickHeader}\n\nТвой сохранённый ник: ${savedNick}\n\nПродолжить с ним?`,
+      message: `${nickHeader}\n\nВаш сохранённый ник: ${savedNick}\n\nПродолжить с ним?`,
       keyboard: kb.inline(),
     });
   } else {
@@ -4500,7 +4500,7 @@ async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: {
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await ctx.reply({
-      message: `${nickHeader}\n\nВведи свой ник Roblox — напиши его в чат:`,
+      message: `${nickHeader}\n\nВведите свой ник Roblox — напишите его в чат:`,
       keyboard: kb.inline(),
     });
   }
@@ -4539,14 +4539,14 @@ async function handleVkDirectGamepassLink(ctx: MessageContext, vkUserId: number,
 
   if (!gp || gp.validationSkipped) {
     await showResult({
-      message: "⚠️ Не удалось проверить геймпасс — Roblox сейчас не отвечает.\n\nПодожди минуту и пришли ссылку (или свой ник) ещё раз:",
+      message: "⚠️ Не удалось проверить геймпасс — Roblox сейчас не отвечает.\n\nПодождите минуту и пришлите ссылку (или свой ник) ещё раз:",
       keyboard: backKb(),
     });
     return;
   }
   if (!gp.isActive) {
     await showResult({
-      message: `⚠️ Геймпасс ${gp.name} не выставлен на продажу.\n\nВключи Item for sale и пришли ссылку ещё раз:`,
+      message: `⚠️ Геймпасс ${gp.name} не выставлен на продажу.\n\nВключите Item for sale и пришлите ссылку ещё раз:`,
       keyboard: backKb(),
     });
     return;
@@ -4711,7 +4711,7 @@ async function finishVkDirectKey(
     price: pass.priceInRobux,
     isForSale: true,
   }));
-  await ctx.reply(`✅ Сделали за тебя\n\n${plainText(keyCreateSuccessText(outcome.created.map((p) => p.priceInRobux), nick))}`);
+  await ctx.reply(`✅ Сделали за вас\n\n${plainText(keyCreateSuccessText(outcome.created.map((p) => p.priceInRobux), nick))}`);
   const base: VkDirectFlowBase = {
     amount: fd.amount, totalAmount: fd.totalAmount, bonus: fd.bonus,
     rubleDiscount: fd.rubleDiscount, rublePrice: fd.rublePrice, hasBonusStep: fd.hasBonusStep,
@@ -4743,7 +4743,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await showResult({
-      message: "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\nПодожди минуту и пришли ник ещё раз:",
+      message: "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\nПодождите минуту и пришлите ник ещё раз:",
       keyboard: kb.inline(),
     });
     return;
@@ -4759,7 +4759,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await showResult({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверь написание и отправь ещё раз — или пришли ссылку на геймпасс, этого тоже достаточно:`, keyboard: kb.inline() });
+    await showResult({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверьте написание и отправьте ещё раз — или пришлите ссылку на геймпасс, этого тоже достаточно:`, keyboard: kb.inline() });
     return;
   }
   // ── Дальше решает разбор плана, как в коридоре ВБ ────────────────────────
@@ -4825,12 +4825,12 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
 
   const summaryText =
     `${stepBar(...dirStep(flowState, "summary"), "Подтверждение")}\n\n` +
-    `📦 Получишь:    ${flowState.totalAmount} R$${bonusLine}\n` +
+    `📦 Получите:    ${flowState.totalAmount} R$${bonusLine}\n` +
     `🎮 Ник:         ${nick}\n` +
     (set
       ? `🧩 Соберём из ${set.length} геймпассов — каждую часть выкупаем отдельно:\n${plainText(directPartsLines(set).join("\n"))}${discountLine}\n`
       : `🎫 Геймпасс:    ${gpRobux} R$ · "${gpName.slice(0, 30)}"${discountLine}\n`) +
-    `📊 Твой курс:   ${(flowState.rublePrice / flowState.totalAmount).toFixed(3)} ₽/R$\n` +
+    `📊 Ваш курс:   ${(flowState.rublePrice / flowState.totalAmount).toFixed(3)} ₽/R$\n` +
     `💰 К оплате:    ${fmtRub(flowState.rublePrice)}` +
     mpLine;
 
@@ -4861,12 +4861,12 @@ async function startVkDirectKey(ctx: MessageContext, vkUserId: number, nickFromP
     ? { ...st, robloxUsername: nick }
     : null;
   if (!flowState) {
-    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    await ctx.reply("⏳ Сессия истекла. Начните заново.");
     return;
   }
   if (!gamepassAutocreateEnabled()) {
     await ctx.reply({
-      message: "Этот способ сейчас недоступен — создай геймпасс по инструкции: https://robloxbank.ru/guide?source=direct",
+      message: "Этот способ сейчас недоступен — создайте геймпасс по инструкции: https://robloxbank.ru/guide?source=direct",
     });
     return;
   }
@@ -4904,7 +4904,7 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
   const key = game && heldKey ? heldKey : raw.trim();
 
   if (!game && heldKey && !looksLikeApiKey(key)) {
-    await ctx.reply(`Жду ссылку на твою игру: ${GAME_LINK_HOWTO}\n\nИли пришли новый ключ.`);
+    await ctx.reply(`Жду ссылку на вашу игру: ${GAME_LINK_HOWTO}\n\nИли пришлите новый ключ.`);
     return;
   }
 
@@ -4920,7 +4920,7 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
       await triggerSupport(ctx, vkUserId, "key-stuck-direct", { problemText: raw });
       return;
     }
-    await ctx.reply("Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируй её целиком кнопкой «Copy Key To Clipboard».");
+    await ctx.reply("Это не похоже на ключ. Ключ — одна длинная строка без пробелов; скопируйте её целиком кнопкой «Copy Key To Clipboard».");
     return;
   }
   resetKeyMisses(vkUserId);
@@ -4960,7 +4960,7 @@ async function startVkDirectStoredKey(ctx: MessageContext, vkUserId: number, nic
   const st = getState(vkUserId);
   const nick = st && "robloxUsername" in st ? (st as { robloxUsername: string }).robloxUsername : nickFromPayload;
   if (!st || !nick || (st.type !== "AWAITING_DIRECT_GAMEPASS" && st.type !== "AWAITING_DIRECT_SUMMARY")) {
-    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    await ctx.reply("⏳ Сессия истекла. Начните заново.");
     return;
   }
   const userId = gamepassAutocreateEnabled() ? await vkDbUserId(vkUserId) : null;
@@ -4989,13 +4989,13 @@ async function startVkDirectStoredKey(ctx: MessageContext, vkUserId: number, nic
 async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passId: string): Promise<void> {
   const state = getState(vkUserId);
   if (!state || state.type !== "AWAITING_DIRECT_GAMEPASS") {
-    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    await ctx.reply("⏳ Сессия истекла. Начните заново.");
     return;
   }
 
   const gpDetails = await getGamepassDetails(passId);
   if (!gpDetails) {
-    await ctx.reply("❌ Геймпасс не найден. Попробуй другой.");
+    await ctx.reply("❌ Геймпасс не найден. Попробуйте другой.");
     return;
   }
 
@@ -5023,7 +5023,7 @@ async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passI
 async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Promise<void> {
   const state = getState(vkUserId);
   if (!state || state.type !== "AWAITING_DIRECT_SUMMARY") {
-    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    await ctx.reply("⏳ Сессия истекла. Начните заново.");
     return;
   }
   // Последняя проверка — общее правило приёма (как гейт ВБ и касса сайта).
@@ -5055,7 +5055,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   });
   if (existingIntent) {
     await ctx.reply({
-      message: `⏳ У тебя уже есть активная заявка на ${existingIntent.totalAmount} R$.\n\nВыбери, как оплатить: на готовой странице сайта, через Т‑Банк здесь или переводом по реквизитам.`,
+      message: `⏳ У вас уже есть активная заявка на ${existingIntent.totalAmount} R$.\n\nВыберите, как оплатить: на готовой странице сайта, через Т‑Банк здесь или переводом по реквизитам.`,
       keyboard: vkPaymentChoiceKb(existingIntent.id),
     });
     return;
@@ -5065,7 +5065,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   });
   if (existingOrder) {
     await ctx.reply({
-      message: `⏳ У тебя уже есть активный заказ на ${existingOrder.amount} R$.\n\nЗаверши или дождись обработки текущей оплаты, а затем оформи новый.`,
+      message: `⏳ У вас уже есть активный заказ на ${existingOrder.amount} R$.\n\nЗаверши или дождитесь обработки текущей оплаты, а затем оформите новый.`,
       keyboard: vkFaqKb(),
     });
     return;
@@ -5090,7 +5090,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     });
   } catch (err) {
     console.error("[VK] DirectIntent create error:", err);
-    await ctx.reply({ message: "❌ Не удалось оформить заявку. Попробуй снова.", keyboard: vkFaqKb() });
+    await ctx.reply({ message: "❌ Не удалось оформить заявку. Попробуйте снова.", keyboard: vkFaqKb() });
     return;
   }
 
@@ -5117,7 +5117,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
       `📦 ${state.totalAmount} R$ → ${recipient}\n` +
       `💰 К оплате: ${fmtRub(state.rublePrice)}${receiptLine}\n\n` +
       `🌐 На сайте удобнее: всё уже будет заполнено. Но можно остаться здесь — оплатить через Т‑Банк или переводом по реквизитам.\n\n` +
-      `Нажимая способ оплаты, ты принимаешь оферту и политику конфиденциальности.`,
+      `Нажимая способ оплаты, вы принимаете оферту и политику конфиденциальности.`,
     keyboard: vkPaymentChoiceKb(intent.id),
   });
 
@@ -5133,7 +5133,7 @@ async function handleDirectPaymentScreenshot(
   const url = await extractPhotoUrl(ctx);
 
   if (!url) {
-    await ctx.reply("📸 Не удалось получить фото. Отправь скриншот оплаты как фотографию (не файлом) 👇");
+    await ctx.reply("📸 Не удалось получить фото. Отправьте скриншот оплаты как фотографию (не файлом) 👇");
     return;
   }
 
@@ -5184,7 +5184,7 @@ async function handleReviewScreenshot(
             t.chatId,
             `⚠️ <b>VK отзыв: не удалось извлечь фото — нужна ручная проверка</b>\n` +
             `VK ID: <code>${vkUserId}</code> (${vkDialogLink(vkUserId, "диалог")})\n\n` +
-            `Пользователь прислал скрин отзыва, авто-извлечение URL не сработало. Проверь диалог и начисли бонус вручную.`,
+            `Пользователь прислал скрин отзыва, авто-извлечение URL не сработало. Проверьте диалог и начисли бонус вручную.`,
             t.extra,
           );
         }
@@ -5196,8 +5196,8 @@ async function handleReviewScreenshot(
     if (knownOrderId) {
       await ctx.reply({
         message:
-          "📸 Оставь отзыв на Wildberries с текстом и фото, пришли скриншот в виде фотографии (не файлом).\n" +
-          "После проверки получишь +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся и к покупке на WB не добавляется.",
+          "📸 Оставьте отзыв на Wildberries с текстом и фото, пришлите скриншот в виде фотографии (не файлом).\n" +
+          "После проверки получите +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся и к покупке на WB не добавляется.",
         keyboard: Keyboard.builder()
           .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
           .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
@@ -5206,8 +5206,8 @@ async function handleReviewScreenshot(
     } else {
       // Photo was detected at routing level but URL extraction failed — guide user
       await ctx.reply(
-        "📸 Не удалось получить фото. Попробуй отправить скриншот ещё раз — именно как фотографию (не файлом).\n\n" +
-        "Если не получается — напиши нам: https://t.me/RobloxBank_PA"
+        "📸 Не удалось получить фото. Попробуйте отправить скриншот ещё раз — именно как фотографию (не файлом).\n\n" +
+        "Если не получается — напишите нам: https://t.me/RobloxBank_PA"
       );
     }
     return;
@@ -5217,9 +5217,9 @@ async function handleReviewScreenshot(
   if (!user) {
     console.log(`[VK] handleReviewScreenshot: user not found for vkId=${vkUserId} — notifying admins`);
     await ctx.reply(
-      "📸 Получили твой скриншот, но не смогли найти твой заказ в базе.\n\n" +
-      "Свяжись с нами напрямую: https://t.me/RobloxBank_PA — " +
-      "укажи свой VK ID, и мы разберёмся вручную."
+      "📸 Получили ваш скриншот, но не смогли найти ваш заказ в базе.\n\n" +
+      "Свяжитесь с нами напрямую: https://t.me/RobloxBank_PA — " +
+      "укажите свой VK ID, и мы разберёмся вручную."
     );
     try {
       for (const t of await adminTargets("reviews", { loud: true })) {
@@ -5256,8 +5256,8 @@ async function handleReviewScreenshot(
         await ctx.reply(reviewIneligibleMessage(elig, { html: false }));
       } else {
         await ctx.reply(
-          "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
-          "Если у тебя возникла проблема или вопрос — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
+          "📸 У вас сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
+          "Если у вас возникла проблема или вопрос — напишите сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
         );
       }
       return;
@@ -5395,7 +5395,7 @@ async function replyOrderPicker(ctx: MessageContext, orders: any[]): Promise<voi
       `свой ник Roblox и свой геймпасс.\n\n` +
       shown.map((o, i) => `${i + 1}. ${orderPickerLabel(o)}`).join("\n") +
       (rest > 0 ? `\n…и ещё ${rest}` : "") +
-      `\n\nВыбери, с каким работаем 👇`,
+      `\n\nВыберите, с каким работаем 👇`,
     // 5 рядов при лимите 6 — но пикер строится из данных, так что рубеж лишним
     // не бывает: переполнение клавиатуры VK отвергает целиком (P0 04.07).
     keyboard: enforceVkInlineKbLimits(kb.inline(), "vk-order-picker"),
@@ -5417,7 +5417,7 @@ function vkPendingStage(createdAt: Date | string): { label: string; note: string
   if (mins < 3)   return { label: "🆕 Заказ создан",             note: "Только что приняли — ставим в очередь на выкуп." };
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
-  if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
+  if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт ваш геймпасс в работу." };
   if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Сейчас у Roblox задержки, поэтому очередь движется медленнее обычного. Заказ на месте — уведомим сразу, как выкупим 🙏" };
   return            { label: "⏳ В очереди на выкуп",        note: "Заказ в очереди и никуда не пропадёт — из-за задержек Roblox выкуп сейчас может занять до нескольких суток. Уведомим сразу, как выкупим 🙏" };
 }
@@ -5706,9 +5706,9 @@ async function handleIdleMessage(
       return;
     }
     await ctx.reply(
-      "❌ Код не найден. Проверь правильность ввода на карточке.\n" +
-      "💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\n" +
-      "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
+      "❌ Код не найден. Проверьте правильность ввода на карточке.\n" +
+      "💡 Часто путают букву «О» и цифру «0» — проверьте эти символы в коде.\n\n" +
+      "Нужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -5732,10 +5732,10 @@ async function handleIdleMessage(
       return;
     }
     await ctx.reply(
-      "⚠️ Сначала активируй код с WB-карты — напиши его прямо сюда или на сайте:\n" +
+      "⚠️ Сначала активируйте код с WB-карты — напишите его прямо сюда или на сайте:\n" +
       "🔗 https://robloxbank.ru/guide?source=wb\n\n" +
-      "После активации пришли свой ник в Roblox или ссылку на геймпасс.\n" +
-      "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
+      "После активации пришлите свой ник в Roblox или ссылку на геймпасс.\n" +
+      "Нужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -5763,9 +5763,9 @@ async function handleIdleMessage(
     const user = await db.user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
       await ctx.reply(
-        "У тебя пока нет заявок.\n\n" +
-        "Есть код с WB-карты? Напиши его прямо сюда — и мы всё оформим.\n" +
-        "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
+        "У вас пока нет заявок.\n\n" +
+        "Есть код с WB-карты? Напишите его прямо сюда — и мы всё оформим.\n" +
+        "Нужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
       );
       return;
     }
@@ -5782,7 +5782,7 @@ async function handleIdleMessage(
     const order = activeOrders[0] ?? await findRelevantOrder(user.id);
 
     if (!order) {
-      await ctx.reply("У тебя пока нет заказов.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+      await ctx.reply("У вас пока нет заказов.\n\nЕсть код с WB-карты? Напишите его прямо сюда.\nНужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
 
@@ -5814,26 +5814,26 @@ async function handleIdleMessage(
 
     const hint =
       order.status === "AWAITING_PAYMENT"
-        ? "\n\n💡 Менеджер скоро пришлёт реквизиты для оплаты. Если прошло больше 15 минут — напиши нам."
+        ? "\n\n💡 Менеджер скоро пришлёт реквизиты для оплаты. Если прошло больше 15 минут — напишите нам."
         : order.status === "PAYMENT_PENDING"
-        ? "\n\n💳 Пришли скриншот оплаты сюда (фотографией, не файлом)."
+        ? "\n\n💳 Пришлите скриншот оплаты сюда (фотографией, не файлом)."
         : order.status === "AWAITING_GAMEPASS"
-        ? `\n\nПройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$` +
+        ? `\n\nПройди инструкцию, создайте геймпасс — затем напишите свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$` +
           "\n💡 Ник, ссылку на геймпасс или ключ можно прислать прямо сюда — одним сообщением."
         : order.status === "PENDING"
         ? `\n\n💬 ${stage!.note}` + (pendingOver120 ? "\n💡 Ответы на частые вопросы — в кнопке ниже 👇" : "")
         : order.status === "IN_PROGRESS"
-        ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
+        ? "\n\n🔧 Менеджер уже работает над вашим заказом. Скоро всё будет готово!"
         : order.status === "COMPLETED"
-        ? "\n\n💎 Робуксы уже у тебя в Roblox — в статусе Pending. С нашей стороны всё сделано, дальше решает Roblox: когда перевести их на баланс, он определяет сам." +
+        ? "\n\n💎 Робуксы уже у вас в Roblox — в статусе Pending. С нашей стороны всё сделано, дальше решает Roblox: когда перевести их на баланс, он определяет сам." +
           "\n💡 Проверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." +
           (reviewClaimed
-            ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
-            : "\n\n🎁 Оставь отзыв на Wildberries с текстом и фото — получи +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся.\nПришли скриншот отзыва сюда фотографией.")
+            ? "\n\n🚀 Хотите заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пишите: https://t.me/RobloxBank_PA"
+            : "\n\n🎁 Оставьте отзыв на Wildberries с текстом и фото — получите +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся.\nПришлите скриншот отзыва сюда фотографией.")
         : order.status === "REJECTED" && order.isDirectOrder
-        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Если хочешь — оформи новый заказ.`
+        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Если хотите — оформите новый заказ.`
         : order.status === "REJECTED"
-        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
+        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправьте геймпасс и нажмите кнопку ниже — отправим на проверку заново.`
         : "";
 
     // Выполненный WB-заказ отработан: код и ссылка на геймпасс больше не нужны —
@@ -5919,7 +5919,7 @@ async function handleIdleMessage(
       message:
         `${getGreeting(status, firstName)}\n` +
         `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
-        `📖 Открой свою персональную инструкцию — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n` +
+        `📖 Откройте свою персональную инструкцию — заказ оформляется там же: создайте геймпасс и найдите его по нику Roblox 🔎\n` +
         `👉 ${idleGuideUrl}\n\n` +
         `🔔 Здесь, в боте, придут уведомления о заказе.`,
       keyboard: Keyboard.builder()
@@ -5936,7 +5936,7 @@ async function handleIdleMessage(
 
   if (status.isReturning) {
     await ctx.reply({
-      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
+      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? Напишите прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
       keyboard: Keyboard.builder()
         .textButton({ label: "👤 Моё меню",        payload: { command: "menu" },         color: "primary"   })
         .row()
@@ -5951,7 +5951,7 @@ async function handleIdleMessage(
     await ctx.reply({
       message:
         `${greeting}Я помогу получить робуксы за код с карты Wildberries 💎\n\n` +
-        `🔑 Есть код с WB-карты? Напиши его прямо сюда — дам твою персональную инструкцию, заказ оформишь по ней, а тут будешь получать уведомления о заказе.\n\n` +
+        `🔑 Есть код с WB-карты? Напишите его прямо сюда — дам вашу персональную инструкцию, заказ оформите по ней, а тут будете получать уведомления о заказе.\n\n` +
         `💎 Нет кода? Можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`,
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })

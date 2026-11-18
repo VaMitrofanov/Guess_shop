@@ -285,6 +285,11 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   await card(bot, body, buttons, mode === "dry" ? "test" : "support");
   if (mode === "on") {
     handedOffAt.set(m.chatId, Date.now());
+    // ✨ З7: 👀 на сообщение клиента — «взяли в работу». Не встала — не беда.
+    await api("setMessageReaction", {
+      business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId,
+      reaction: [{ type: "emoji", emoji: "👀" }],
+    }).catch((e: unknown) => console.warn("[pa-ai] 👀 не встала:", e instanceof Error ? e.message : e));
     await api("sendMessage", { business_connection_id: m.connId, chat_id: m.chatId, text: HANDOFF_TEXT });
     rememberTurn(m.chatId, "assistant", HANDOFF_TEXT);
   }

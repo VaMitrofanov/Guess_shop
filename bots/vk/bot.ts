@@ -71,7 +71,7 @@ vk.updates.on("message_new", async (ctx) => {
           : null,
       }).catch(() => {});
       try {
-        await ctx.reply("⚠️ Произошла ошибка. Попробуй ещё раз или напиши нам: https://t.me/RobloxBank_PA");
+        await ctx.reply("⚠️ Произошла ошибка. Попробуйте ещё раз или напишите нам: https://t.me/RobloxBank_PA");
       } catch {}
     }
   }

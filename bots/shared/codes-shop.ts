@@ -120,23 +120,23 @@ export function codesStoreScreen(viewer: CodesViewer, siteUrl: string): CodesScr
   lines.push("🎟 <b>Коды Roblox — Robux сразу на баланс</b>");
   lines.push("");
   lines.push(viewer.instant
-    ? "Оплатил → код пришёл сюда в чат → ввёл на roblox.com/redeem. Никаких геймпассов и ожидания."
-    : "Оплатил → пришлём код сюда в чат → ввёл на roblox.com/redeem. Никаких геймпассов.");
+    ? "Оплатили → код пришёл сюда в чат → ввели на roblox.com/redeem. Никаких геймпассов и ожидания."
+    : "Оплатили → пришлём код сюда в чат → ввели на roblox.com/redeem. Никаких геймпассов.");
   lines.push("🔒 Пароль от Roblox не нужен.");
   lines.push("");
   const progress = codeDiscountProgress(viewer.invitedCount);
   const needsSubscribe = viewer.subscribed === false && viewer.discountPercent === 0 && Boolean(viewer.channelUrl);
   lines.push(viewer.discountPercent > 0
-    ? `💜 Твоя скидка <b>${viewer.discountPercent}%</b> — уже в ценах ниже${progress.next ? ` · до ${progress.next.percent}% — ещё ${progress.next.remaining} ${friendsWord(progress.next.remaining)}` : ""}`
+    ? `💜 Ваша скидка <b>${viewer.discountPercent}%</b> — уже в ценах ниже${progress.next ? ` · до ${progress.next.percent}% — ещё ${progress.next.remaining} ${friendsWord(progress.next.remaining)}` : ""}`
     : needsSubscribe
-      ? "📢 <b>Подпишись на наш канал — и скидка 1% на все коды</b>, навсегда. Розыгрыши кодов — тоже там."
+      ? "📢 <b>Подпишитесь на наш канал — и скидка 1% на все коды</b>, навсегда. Розыгрыши кодов — тоже там."
       : "💜 Цены ниже — без скидки");
   if (!viewer.salesOpen) {
     lines.push("");
     lines.push("⏳ Продажа кодов откроется совсем скоро — цены уже здесь.");
   }
   lines.push("");
-  lines.push("Выбери номинал 👇");
+  lines.push("Выберите номинал 👇");
 
   const rows: CodesButton[][] = [];
   for (let index = 0; index < CODE_DENOMINATIONS.length; index += 2) {
@@ -185,14 +185,14 @@ export function codePickScreen(input: {
   lines.push(`🎟 <b>Код на ${robux(input.denomination)} Robux</b>`);
   lines.push("");
   lines.push(quote.discountPercent > 0
-    ? `💳 К оплате: <s>${rub(quote.baseAmountKopecks)}</s> <b>${rub(quote.finalAmountKopecks)}</b> · твоя скидка ${quote.discountPercent}%`
+    ? `💳 К оплате: <s>${rub(quote.baseAmountKopecks)}</s> <b>${rub(quote.finalAmountKopecks)}</b> · ваша скидка ${quote.discountPercent}%`
     : `💳 К оплате: <b>${rub(quote.finalAmountKopecks)}</b>`);
   lines.push(input.instant
     ? "📩 Код придёт сюда, в чат, сразу после оплаты — и сохранится в кабинете на сайте."
     : "📩 Код пришлём сюда, в чат, после оплаты — и сохраним в кабинете на сайте.");
   lines.push("🧾 Картой или СБП на странице Т-Банка · чек на почту");
   lines.push("");
-  lines.push(`<i>Платит родитель? Перешли ему ссылку — он оплатит без входа, а код придёт тебе.</i>`);
+  lines.push(`<i>Платит родитель? Перешлите ему ссылку — он оплатит без входа, а код придёт вам.</i>`);
   const html = lines.join("\n");
   const shareText = `Оплати, пожалуйста, код Roblox на ${robux(input.denomination)} Robux — ${rub(quote.finalAmountKopecks)}. Вход не нужен:`;
   return {
@@ -222,19 +222,19 @@ export function tierBar(percent: number): string {
 export function inviteScreen(viewer: InviteViewer): CodesScreen {
   const progress = codeDiscountProgress(viewer.invitedCount);
   const lines: string[] = [];
-  lines.push("🤝 <b>Зови друзей — скидка на коды растёт</b>");
+  lines.push("🤝 <b>Зовите друзей — скидка на коды растёт</b>");
   lines.push("");
   lines.push(`Сейчас: <b>${viewer.discountPercent}%</b> ${tierBar(viewer.discountPercent)} · засчитано ${viewer.invitedCount} ${friendsWord(viewer.invitedCount)}`);
   lines.push(progress.next
     ? `До <b>${progress.next.percent}%</b> — ещё ${progress.next.remaining} ${friendsWord(progress.next.remaining)}`
-    : "🏆 У тебя максимальная скидка — спасибо!");
+    : "🏆 У вас максимальная скидка — спасибо!");
   lines.push("");
   lines.push(CODE_DISCOUNT_TIERS.map((tier) => (tier.invited === 0 ? `${tier.percent}% сразу` : `${tier.percent}% — ${tier.invited}`)).join(" · "));
   lines.push("");
-  lines.push("Друг засчитывается, когда купит код по твоей ссылке. Скидка остаётся навсегда и действует на коды — здесь и на сайте.");
+  lines.push("Друг засчитывается, когда купит код по вашей ссылке. Скидка остаётся навсегда и действует на коды — здесь и на сайте.");
   lines.push("");
-  lines.push(`🔗 Твоя ссылка: ${viewer.siteLink}`);
-  const shareText = "Robux кодом — сразу на баланс, без геймпассов. Держи ссылку:";
+  lines.push(`🔗 Ваша ссылка: ${viewer.siteLink}`);
+  const shareText = "Robux кодом — сразу на баланс, без геймпассов. Держите ссылку:";
   const rows: CodesButton[][] = [
     [{ label: "📤 Отправить другу", url: `https://t.me/share/url?url=${encodeURIComponent(viewer.siteLink)}&text=${encodeURIComponent(shareText)}`, primary: true }],
   ];
@@ -253,46 +253,42 @@ export function vkShareFallback(rows: CodesButton[][], siteLink: string): CodesB
 
 // ─── Сообщения после оплаты (шлёт Web, `src/lib/codes/chat-notify.ts`) ───────
 
+/**
+ * 🎉 Код в чат (З1, 18.11.2026): подпись к картинке-билету (≤ 1024 символов).
+ * Код — под спойлером (не подсмотрят из-за плеча), скопировать — кнопкой
+ * «📋 Скопировать код» (`copyButton`). ВК спойлеров не умеет — там код текстом.
+ */
 export function codeChatIssuedText(input: { denomination: number; code: string; publicId: string }): { html: string; plain: string } {
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const amount = robux(input.denomination);
   const html = [
-    "✅ <b>Оплата прошла — твой код готов!</b>",
+    `🎉 <b>Код на ${amount} Robux готов!</b>`,
+    "Коснитесь, чтобы показать:",
+    `<tg-spoiler><code>${escape(input.code)}</code></tg-spoiler>`,
     "",
-    `🎟 Код на <b>${amount} Robux</b>:`,
-    `<code>${escape(input.code)}</code>`,
-    "<i>Нажми на код — он скопируется.</i>",
+    "Откройте roblox.com/redeem (кнопка ниже), войдите в аккаунт, куда нужны Robux, и вставьте код.",
     "",
-    "Как активировать:",
-    "1. Открой roblox.com/redeem — кнопка ниже",
-    "2. Войди в аккаунт, куда нужны Robux",
-    "3. Вставь код и нажми «Активировать»",
-    "",
-    "Код сохранён и в кабинете на сайте.",
-    "⚠️ Никому не показывай код: кто ввёл, тот и получил Robux.",
+    "Код сохранён и в кабинете на сайте. Никому его не показывайте: кто ввёл, тот и получил Robux.",
   ].join("\n");
   const plain = [
-    "✅ Оплата прошла — твой код готов!",
+    `🎉 Код на ${amount} Robux готов!`,
     "",
-    `🎟 Код на ${amount} Robux:`,
     input.code,
     "",
-    "Как активировать:",
-    "1. Открой roblox.com/redeem — кнопка ниже",
-    "2. Войди в аккаунт, куда нужны Robux",
-    "3. Вставь код и нажми «Активировать»",
+    "Откройте roblox.com/redeem (кнопка ниже), войдите в аккаунт, куда нужны Robux, и вставьте код.",
     "",
-    "Код сохранён и в кабинете на сайте.",
-    "⚠️ Никому не показывай код: кто ввёл, тот и получил Robux.",
+    "Код сохранён и в кабинете на сайте. Никому его не показывайте: кто ввёл, тот и получил Robux.",
   ].join("\n");
   return { html, plain };
 }
 
+/** Ручная выдача (З2): подпись к картинке «Готовим ваш код». Код придёт сюда же. */
 export function codeChatPaidText(input: { denomination: number; publicId: string }): { html: string; plain: string } {
   const html = [
     "✅ <b>Оплата прошла — спасибо!</b>",
+    "✅ Оплата → ⏳ Готовим код → ○ Код у вас",
     "",
-    `Готовим код на <b>${robux(input.denomination)} Robux</b> — пришлём его сюда же, в этот чат. Ничего делать не нужно.`,
+    `Код на <b>${robux(input.denomination)} Robux</b> придёт сюда, в этот чат. Ничего делать не нужно.`,
     "",
     "Вопросы — @RobloxBank_PA",
   ].join("\n");

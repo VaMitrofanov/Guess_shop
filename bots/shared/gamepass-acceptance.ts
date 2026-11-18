@@ -183,7 +183,7 @@ export async function acceptGamepasses(input: {
   if (unverified.length > 0 && input.onUnreachable === "reject") {
     return fail(
       "ROBLOX_UNAVAILABLE",
-      "Roblox сейчас не ответил про геймпасс. Подожди минуту и нажми ещё раз — заказ не создан, деньги не списаны.",
+      "Roblox сейчас не ответил про геймпасс. Подождите минуту и нажмите ещё раз — заказ не создан, деньги не списаны.",
       { gamepassId: unverified[0] },
     );
   }
@@ -192,7 +192,7 @@ export async function acceptGamepasses(input: {
     const info = details.get(part.gamepassId);
     if (!info) continue;
     if (info.isActive === false) {
-      return fail("NOT_FOR_SALE", `Геймпасс ${part.gamepassId} не выставлен на продажу — включи Item for sale`, {
+      return fail("NOT_FOR_SALE", `Геймпасс ${part.gamepassId} не выставлен на продажу — включите Item for sale`, {
         gamepassId: part.gamepassId,
       });
     }
@@ -203,8 +203,8 @@ export async function acceptGamepasses(input: {
       return fail(
         "WRONG_PRICE",
         `Цена геймпасса ${part.gamepassId} должна быть ${want} R$, а стоит ${Number(info.price ?? 0)} R$. ` +
-          "Поставь ровно столько и нажми Save Changes. " +
-          "Если цену ставил правильно — выключи Managed pricing на странице пасса.",
+          "Поставьте ровно столько и нажмите Save Changes. " +
+          "Если цену ставил правильно — выключите Managed pricing на странице пасса.",
         { gamepassId: part.gamepassId, expectedPrice: want },
       );
     }
@@ -288,7 +288,7 @@ export function priceMismatchMessage(opts: {
   const expected = Math.round(opts.expected);
   const actual = Math.round(opts.actual);
   const fixPath =
-    `Passes → твой пасс → ☰ → Sales → выключи <b>Managed pricing</b> → ` +
+    `Passes → ваш пасс → ☰ → Sales → выключите <b>Managed pricing</b> → ` +
     `цена <b>${expected} R$</b> → <b>Save Changes</b>`;
 
   if (opts.managed) {
@@ -296,10 +296,10 @@ export function priceMismatchMessage(opts: {
     return (
       `⚠️ <b>Managed pricing включён</b> — Roblox сам меняет цену геймпасса.\n\n` +
       `Цена Roblox: <b>${actual} R$</b>\n` +
-      (base == null ? "" : `Твоя цена:   <b>${base} R$</b>\n`) +
+      (base == null ? "" : `Ваша цена:   <b>${base} R$</b>\n`) +
       `Нужна:       <b>${expected} R$</b>\n\n` +
       `Пока Managed pricing включён, выкупить геймпасс <b>невозможно</b>.\n\n` +
-      `Исправь: ${fixPath}. Потом пришли ссылку снова.`
+      `Исправьте: ${fixPath}. Потом пришлите ссылку снова.`
     );
   }
 
@@ -308,11 +308,11 @@ export function priceMismatchMessage(opts: {
     `⚠️ Цена геймпасса не совпадает.\n\n` +
     `Установлено: <b>${actual} R$</b>\n` +
     `Нужно:       <b>${expected} R$</b>${partNote}\n\n` +
-    `Проверь по порядку:\n` +
-    `1️⃣ Цена указана не та — поставь ровно <b>${expected} R$</b>\n` +
+    `Проверьте по порядку:\n` +
+    `1️⃣ Цена указана не та — поставьте ровно <b>${expected} R$</b>\n` +
     `2️⃣ После смены цены нажал <b>Save Changes</b>? Без этого цена не меняется\n` +
     `3️⃣ Ставил ровно ${expected} R$, а стоит другое — значит включён <b>Managed pricing</b>: ${fixPath}\n\n` +
-    `Потом пришли ссылку снова.`
+    `Потом пришлите ссылку снова.`
   );
 }
 
@@ -333,8 +333,8 @@ export function passChecklist(opts: {
   const b = (s: string) => (opts.html === false ? s : `<b>${s}</b>`);
   const esc = (s: string) => (opts.html === false ? s : s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
   const expected = Math.round(opts.expected);
-  const lines = [`🔎 ${b("Проверил твой геймпасс")}`];
-  lines.push(opts.forSale ? "✅ В продаже" : "❌ Не в продаже — включи «On Sale»");
+  const lines = [`🔎 ${b("Проверил ваш геймпасс")}`];
+  lines.push(opts.forSale ? "✅ В продаже" : "❌ Не в продаже — включите «On Sale»");
   if (typeof opts.price === "number" && opts.price > 0) {
     const price = Math.round(opts.price);
     lines.push(Math.abs(price - expected) <= 2 ? `✅ Цена ${price} R$` : `❌ Цена ${price} R$ — нужно ${b(`${expected} R$`)}`);

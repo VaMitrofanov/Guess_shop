@@ -49,6 +49,8 @@ export interface CompletedMessagesInput {
    *  `bots/shared/direct-discount.ts`, начисление — там же). Ровно один раз за
    *  всё время, поэтому текст «дарю скидку» больше не может повториться. */
   discountGranted: boolean;
+  /** Ник Roblox заказа — в подписи «выкуплены на ник …» (З3, 18.11.2026). */
+  nick?: string | null;
 }
 
 /** Кнопка под первым сообщением (о выкупе) — «✅ Робуксы поступили», 27.10.2026. */
@@ -65,6 +67,25 @@ export interface CompletedMessages {
   buttons: CompletedButton[];
 }
 
+/**
+ * 🎉 З3 (18.11.2026): «выкуплено» = картинка `order-done.jpg` (плашки этапов
+ * нарисованы в ней) + эта подпись + кнопки `completedMsg1Keyboard`. Ссылки —
+ * кнопками, единый текст про ожидание (`robuxWaitText`) — в сворачиваемой
+ * цитате: видна одна строка, раскрывается касанием. Подпись ≤ 1024 символов.
+ */
+export const COMPLETED_IMAGE = "order-done.jpg";
+export const ROBLOX_TRANSACTIONS = "https://www.roblox.com/transactions";
+
+/** Кнопки под «выкуплено» в TG: проверить, почему так, «✅ Робуксы поступили». */
+export function completedMsg1Keyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "📊 Проверить Pending", url: ROBLOX_TRANSACTIONS }, { text: "📖 Почему так", url: PENDING_INFO_URL }],
+      [{ text: ROBUX_CONFIRM.label, callback_data: ROBUX_CONFIRM.command }],
+    ],
+  };
+}
+
 const BTN_REVIEW: CompletedButton = { label: "📸 Прислать отзыв", command: "review_hint" };
 const BTN_DIRECT: CompletedButton = { label: "💎 Купить напрямую", command: "start_direct" };
 const BTN_USE_BONUS: CompletedButton = { label: "💎 Использовать бонус", command: "start_direct" };
@@ -74,30 +95,33 @@ const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (review-eligibility.
 export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
   /* С 26.10.2026 — без срока и даты: Roblox стал держать Pending дольше 7 дней,
      и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
+  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const amountStr = inp.amount ? `${inp.amount.toLocaleString("ru-RU")} Robux` : "Robux";
+  const nickHtml = inp.nick ? ` на ник <code>${esc(inp.nick)}</code>` : "";
+  const nickPlain = inp.nick ? ` на ник ${inp.nick}` : "";
   const tgMsg1 =
-    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
-    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
+    `✅ <b>${amountStr} выкуплены</b>${nickHtml}\n\n` +
+    `<b>С нашей стороны всё сделано:</b> робуксы уже в Roblox, в статусе <b>Pending</b>. В истории транзакций — строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}.\n` +
+    `<blockquote expandable>⏳ ${robuxWaitText("vy")}</blockquote>\n` +
     confirmHintLine("html");
   const vkMsg1 =
-    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
-    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `✅ ${amountStr} выкуплены${nickPlain}\n\n` +
+    `С нашей стороны всё сделано: робуксы уже в Roblox, в статусе Pending. ${robuxWaitText("vy")}\n\n` +
+    `📊 Проверить: ${ROBLOX_TRANSACTIONS} → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
     `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
     confirmHintLine("plain");
 
-  const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
-  const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";
+  const discountTg = inp.discountGranted ? `\n\n💰 Дарю вам скидку <b>60 рублей</b> к следующему заказу.` : "";
+  const discountVk = inp.discountGranted ? `\n\n💰 Дарю вам скидку 60 рублей к следующему заказу.` : "";
 
   // 1. Питч отзыва: WB-заказ, бонуса на балансе нет, код не заклеймлен.
   if (!inp.isDirectOrder && !inp.bonusGrantedAt && inp.codeUnclaimed) {
     const tgMsg2 =
       `🎁 <b>Бонус за отзыв: +100 R$</b> к следующей прямой покупке в RobloxBank.\n\n` +
       `Как получить:\n` +
-      `1. Оставь отзыв на Wildberries — с текстом и фото (только оценка не подойдёт).\n` +
-      `2. Пришли скриншот сюда фотографией (не файлом).\n\n` +
-      `После проверки бонус появится на балансе на ${BONUS_EXPIRY_DAYS} дней. Отдельно 100 R$ не выдаются и к покупке на WB не добавляются: оформи следующий прямой заказ в боте или на robloxbank.ru.`;
+      `1. Оставьте отзыв на Wildberries — с текстом и фото (только оценка не подойдёт).\n` +
+      `2. Пришлите скриншот сюда фотографией (не файлом).\n\n` +
+      `После проверки бонус появится на балансе на ${BONUS_EXPIRY_DAYS} дней. Отдельно 100 R$ не выдаются и к покупке на WB не добавляются: оформите следующий прямой заказ в боте или на robloxbank.ru.`;
     return {
       kind: "review_pitch",
       tgMsg1, vkMsg1, tgMsg2,
@@ -111,7 +135,7 @@ export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMe
     const expiresStr = fmtDateRu(new Date(inp.bonusGrantedAt.getTime() + BONUS_EXPIRY_DAYS * 86_400_000));
     const balanceStr = inp.bonusBalance > 0 ? `${inp.bonusBalance} R$` : `+100 R$`;
     const tgMsg2 =
-      `🎁 У тебя бонус <b>${balanceStr}</b> — действует до <b>${expiresStr}</b>.\n\n` +
+      `🎁 У вас бонус <b>${balanceStr}</b> — действует до <b>${expiresStr}</b>.\n\n` +
       `Он автоматически добавится к следующей прямой покупке в боте или на robloxbank.ru; к покупке на WB бонус не применяется.`;
     return {
       kind: "bonus_reminder",
@@ -124,22 +148,22 @@ export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMe
   // 3. Повторный WB-клиент — TIER-2 питч закрытого формата (текст без изменений).
   if (!inp.isDirectOrder && inp.completedCount > 1) {
     const tgMsg2 =
-      `Это уже твой <b>${inp.completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
-      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
-      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
+      `Это уже ваш <b>${inp.completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
+      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пишите нам в поддержку напрямую: @RobloxBank_PA\n\n` +
+      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за вами персональное обслуживание.\n\n` +
+      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напишите в поддержку, мы читаем каждое сообщение!`;
     const vkMsg2 = tgMsg2.replace(/<\/?b>/g, "").replace("@RobloxBank_PA", "https://t.me/RobloxBank_PA");
     return { kind: "tier2", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
   }
 
   // 4. Прямой заказ / остальное — благодарность (+скидка для DIR <500).
   const tgMsg2 = inp.completedCount > 1
-    ? `Это уже твой <b>${inp.completedCount}-й</b> заказ — спасибо за доверие! 💛${discountTg}\n\n` +
-      `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`
-    : `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛${discountTg}`;
+    ? `Это уже ваш <b>${inp.completedCount}-й</b> заказ — спасибо за доверие! 💛${discountTg}\n\n` +
+      `Всё ли было удобно? Напишите нам — мы читаем каждое сообщение.`
+    : `Спасибо, что выбрали RobloxBank! Заказывайте ещё — мы всегда здесь 💛${discountTg}`;
   const vkMsg2 = inp.completedCount > 1
-    ? `Это уже твой ${inp.completedCount}-й заказ — спасибо за доверие! 💛${discountVk}\n\n` +
-      `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`
-    : `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛${discountVk}`;
+    ? `Это уже ваш ${inp.completedCount}-й заказ — спасибо за доверие! 💛${discountVk}\n\n` +
+      `Всё ли было удобно? Напишите нам — мы читаем каждое сообщение.`
+    : `Спасибо, что выбрали RobloxBank! Заказывайте ещё — мы всегда здесь 💛${discountVk}`;
   return { kind: "thanks", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
 }

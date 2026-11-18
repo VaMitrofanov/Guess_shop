@@ -17,7 +17,7 @@ type PlatformKey = keyof typeof PLATFORM_WORD;
 export function xlinkLinkedText(code: string, from: PlatformKey | null): string {
   const origin = from ? ` — он был оформлен через ${PLATFORM_WORD[from]}` : "";
   return (
-    `✅ Нашёл твой заказ по коду ${code}${origin}.\n\n` +
+    `✅ Нашёл ваш заказ по коду ${code}${origin}.\n\n` +
     `Теперь он и здесь: статус, выкуп и бонусы приходят на обе площадки. ` +
     `Ничего заново оформлять не нужно.`
   );
@@ -27,7 +27,7 @@ export function xlinkLinkedText(code: string, from: PlatformKey | null): string 
 export function xlinkWaitingText(): string {
   return (
     `🔒 Этот код уже активирован на другой площадке.\n\n` +
-    `Если это твой заказ — я уже спросил подтверждение там, где он был оформлен. ` +
+    `Если это ваш заказ — я уже спросил подтверждение там, где он был оформлен. ` +
     `Как только придёт «да», открою заказ здесь и напишу.`
   );
 }
@@ -37,9 +37,9 @@ export function xlinkOwnerAskText(code: string, claimant: string, platform: Plat
   return (
     `🔑 Доступ к заказу <code>${code}</code>\n\n` +
     `Из ${PLATFORM_WORD[platform]} просят открыть этот заказ: <b>${claimant}</b>.\n\n` +
-    `Это ты перешёл на другую площадку? Нажми «Да» — заказ откроется и там, ` +
+    `Это вы перешёли на другую площадку? Нажмите «Да» — заказ откроется и там, ` +
     `а статус и бонусы будут приходить в оба места.\n\n` +
-    `Если это не ты — просто не отвечай, ничего не изменится.`
+    `Если это не вы — просто не отвечай, ничего не изменится.`
   );
 }
 
@@ -51,7 +51,7 @@ export function xlinkOwnerConfirmedText(code: string, platform: PlatformKey): st
 export function xlinkConflictText(): string {
   return (
     `⚠️ Этот код уже активирован в другом аккаунте на этой же площадке.\n\n` +
-    `Если код твой — напиши нам, разберёмся вручную.`
+    `Если код ваш — напишите нам, разберёмся вручную.`
   );
 }
 

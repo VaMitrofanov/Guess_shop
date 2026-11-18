@@ -36,7 +36,7 @@ const menu = (over: Record<string, unknown> = {}) =>
     ...over,
   } as any);
 
-describe("«От тебя» — что именно нужно от человека", () => {
+describe("«От вас» — что именно нужно от человека", () => {
   it("ждём геймпасс и ник известен — называет точную цену пасса", () => {
     const line = stepFor({ status: "AWAITING_GAMEPASS", robloxUsername: "lox23_limon" });
     expect(line).toContain("создать геймпасс");
@@ -71,7 +71,7 @@ describe("«От тебя» — что именно нужно от челове
 describe("экран целиком", () => {
   it("показывает статус, возраст и код ВБ заказа", () => {
     const text = menu().text;
-    expect(text).toContain("ТВОЙ ЗАКАЗ");
+    expect(text).toContain("ВАШ ЗАКАЗ");
     expect(text).toContain("1000 R$");
     expect(text).toContain("Ждём геймпасс");
     expect(text).toContain("2 дня назад");
@@ -107,9 +107,9 @@ describe("экран целиком", () => {
   });
 
   it("ключ назван как быстрый путь там, где ждём геймпасс", () => {
-    expect(menu().text).toContain("пришли ключ Roblox");
+    expect(menu().text).toContain("пришлите ключ Roblox");
     // А в очереди на выкуп это было бы ложью: ключ там уже ничего не меняет.
-    expect(menu({ active: [order({ status: "PENDING" })] }).text).not.toContain("пришли ключ");
+    expect(menu({ active: [order({ status: "PENDING" })] }).text).not.toContain("пришлите ключ");
   });
 
   it("бонус и скидка стоят в шапке одной строкой", () => {
@@ -132,7 +132,7 @@ describe("экран целиком", () => {
 
   it("без заказов зовёт за прямым, а не показывает пустые блоки", () => {
     const text = menu({ active: [], lastCompleted: null, orderCount: 0, isReturning: false }).text;
-    expect(text).not.toContain("ТВОЙ ЗАКАЗ");
+    expect(text).not.toContain("ВАШ ЗАКАЗ");
     expect(text).not.toContain("ГОТОВО");
     expect(text).toContain("напрямую");
     expect(text).toContain("Новый клиент");

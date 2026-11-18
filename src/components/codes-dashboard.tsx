@@ -1,5 +1,7 @@
 "use client";
 
+import ScratchReveal from "@/components/account/scratch-reveal";
+
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -8,7 +10,6 @@ import {
   CheckCircle2,
   Clock3,
   Copy,
-  Eye,
   Gift,
   Link2,
   Loader2,
@@ -66,14 +67,14 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
   const status = STATUS[order.status];
   const Icon = status.tone === "ok" ? CheckCircle2 : status.tone === "bad" ? XCircle : Clock3;
 
-  const reveal = async () => {
-    setBusy("reveal");
+  /** 🎨 З5: код для скретч-слоя — запрашивается при первом касании. */
+  const fetchCode = async (): Promise<string | null> => {
     setMessage("");
     const response = await fetch("/api/codes/reveal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: order.publicId }) }).catch(() => null);
     const data = await response?.json().catch(() => ({}));
-    if (response?.ok && data?.code) setCode(data.code);
-    else setMessage(data?.error ?? "Не получилось показать код.");
-    setBusy(null);
+    if (response?.ok && data?.code) return String(data.code);
+    setMessage(data?.error ?? "Не получилось показать код.");
+    return null;
   };
 
   const resend = async () => {
@@ -120,9 +121,7 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
               </ol>
             </>
           ) : (
-            <button type="button" className={styles.reveal} onClick={reveal} disabled={busy !== null}>
-              {busy === "reveal" ? <Loader2 size={16} className={styles.spin} /> : <Eye size={16} />} Показать код
-            </button>
+            <ScratchReveal fetchCode={fetchCode} onRevealed={setCode} />
           )}
           <div className={styles.actions}>
             <a className={styles.redeem} href="https://www.roblox.com/redeem" target="_blank" rel="noopener noreferrer">Активировать на Roblox <ArrowUpRight size={15} /></a>

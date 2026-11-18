@@ -108,7 +108,7 @@ export function pendingVerdict(read: PendingRead, amount: number | null | undefi
 /** Строка для менеджера: что бот увидел на скрине. */
 export function pendingCheckNote(read: PendingRead, verdict: PendingVerdict, amount?: number | null): string {
   const nick = read.nickSeen === true ? "ник заказа виден" : read.nickSeen === false ? "ник заказа НЕ найден на скрине" : "";
-  if (verdict === "unreadable") return `🤖 Автопроверка скрина: не прочиталось${read.labelFound ? " (строка Pending есть, числа нет)" : ""} — смотри глазами`;
+  if (verdict === "unreadable") return `🤖 Автопроверка скрина: не прочиталось${read.labelFound ? " (строка Pending есть, числа нет)" : ""} — смотрите глазами`;
   const head = verdict === "ok"
     ? `🤖 Автопроверка скрина: ✅ в Pending ${read.pending} (заказ ${amount}) — покупателю ответили, что всё в порядке`
     : `🤖 Автопроверка скрина: ❌ в Pending ${read.pending} — меньше заказа (${amount})`;
@@ -118,10 +118,10 @@ export function pendingCheckNote(read: PendingRead, verdict: PendingVerdict, amo
 /** Ответ покупателю, когда на скрине всё на месте. */
 export function pendingOkReplyText(pending: number): string {
   return (
-    `🤖 Посмотрел твой скриншот: в строке Pending Robux — ${pending}. ` +
-    `Значит, всё в порядке — робуксы на твоём аккаунте, с нашей стороны всё сделано. ` +
+    `🤖 Посмотрел ваш скриншот: в строке Pending Robux — ${pending}. ` +
+    `Значит, всё в порядке — робуксы на вашем аккаунте, с нашей стороны всё сделано. ` +
     `На баланс их переведёт сам Roblox.\n\n` +
-    `Скрин я всё равно передал менеджеру. Когда робуксы появятся на балансе — нажми «✅ Робуксы поступили» 🙏`
+    `Скрин я всё равно передал менеджеру. Когда робуксы появятся на балансе — нажмите «✅ Робуксы поступили» 🙏`
   );
 }
 
@@ -248,9 +248,9 @@ export function wrongPageReplyText(fmt: "html" | "plain"): string {
   return (
     `🤖 На скриншоте не видно строки ${b("Pending Robux")} — похоже, это другая страница.\n\n` +
     `Нужна именно страница транзакций:\n` +
-    `1. Открой ${link} в браузере (в приложении Roblox её нет).\n` +
-    `2. Войди в аккаунт, на который делали заказ.\n` +
+    `1. Откройте ${link} в браузере (в приложении Roblox её нет).\n` +
+    `2. Войдите в аккаунт, на который делали заказ.\n` +
     `3. Тип — ${b("Summary")}, в таблице строка ${b("Pending Robux")} с числом.\n\n` +
-    `📸 Пришли скриншот этой страницы сюда — я сразу проверю.`
+    `📸 Пришлите скриншот этой страницы сюда — я сразу проверю.`
   );
 }

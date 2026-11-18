@@ -36,16 +36,16 @@ describe("когда показываем инструкцию по плейсу
   });
 
   it("пояснение — формулировка владельца, без вопроса", () => {
-    expect(placeHelpInfo("no_universe")).toContain("Скорее всего у тебя новый аккаунт");
+    expect(placeHelpInfo("no_universe")).toContain("Скорее всего у вас новый аккаунт");
     expect(placeHelpInfo("no_universe")).toContain("это нормально");
     expect(placeHelpInfo("no_universe")).toContain("раз и навсегда");
     // У «скрыты» игра может быть — фраза мягче.
-    expect(placeHelpInfo("games_hidden")).toContain("Если своей игры у тебя ещё нет");
+    expect(placeHelpInfo("games_hidden")).toContain("Если своей игры у вас ещё нет");
   });
 
   it("экран отказа: пояснение, Studio и шаги — без кнопок «да/нет»", () => {
     const screen = questKeyFailScreen({ verdict: keyCreateVerdict("no_universe"), wbCode: "AB12CD3", nick: "lox23" });
-    expect(screen.text).toContain("Скорее всего у тебя новый аккаунт");
+    expect(screen.text).toContain("Скорее всего у вас новый аккаунт");
     const buttons = screen.rows.flat();
     expect(buttons.some((b) => b.url === STUDIO_DOWNLOAD_URL)).toBe(true);
     expect(buttons.some((b) => b.url?.includes("stage=place"))).toBe(true);

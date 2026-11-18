@@ -20,6 +20,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import type { PrismaClient } from "@prisma/client";
+import { copyButton } from "./tg-flair";
 
 export type OrderPinStage = "wait" | "queue" | "done";
 export type PinPlatform = "TG" | "VK";
@@ -39,30 +40,37 @@ const DAY_FMT = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short
 /** Текст закрепа. `html` — для TG (код моноширинный), `plain` — для VK. */
 /* 15.11.2026 (владелец: «закреп-шкала»): шаги со статусом ✅/⏳/○ и цена пасса —
    человек видит, сколько осталось, а в TG под закрепом — кнопка текущего шага. */
-const PIN_DOTS: Record<OrderPinStage, string> = { wait: "●○○○", queue: "●●○○", done: "●●●○" };
+/* З4 (18.11.2026): полоса и этап одним словом — в ПЕРВОЙ строке: её видно в
+   плашке закрепа сверху чата, не открывая сообщение. Места в очереди нет
+   (владелец: «доебутся, у нас иногда задержки по выдачам»). */
+const PIN_BAR: Record<OrderPinStage, string> = { wait: "▰▱▱▱", queue: "▰▰▱▱", done: "▰▰▰▱" };
+const PIN_WORD: Record<OrderPinStage, string> = { wait: "ждём геймпасс", queue: "выкупаем", done: "выкуплен" };
 
 export function orderPinText(opts: {
   code: string;
   amount: number;
   stage: OrderPinStage;
   completedAt?: Date | null;
+  /** Ник Roblox — рядом с «Геймпасс принят». */
+  nick?: string | null;
   format: "html" | "plain";
 }): string {
   const html = opts.format === "html";
   const code = html ? `<code>${opts.code}</code>` : opts.code;
   const b = (s: string) => (html ? `<b>${s}</b>` : s);
-  const head = `📌 Ваш заказ: ${code} · ${opts.amount.toLocaleString("ru-RU")} R$ · ${PIN_DOTS[opts.stage]}`;
+  const head = `📌 Заказ ${code} · ${opts.amount.toLocaleString("ru-RU")} R$ · ${PIN_BAR[opts.stage]} ${b(PIN_WORD[opts.stage])}`;
+  const nick = opts.nick ? ` · ${html ? `<code>${opts.nick.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>` : opts.nick}` : "";
   const price = opts.amount <= 1500 ? ` — цена ${Math.ceil(opts.amount / 0.7)} R$` : " — по инструкции";
   const day = opts.completedAt ? ` ${DAY_FMT.format(opts.completedAt).replace(".", "")}` : "";
   const steps = opts.stage === "wait"
     ? ["✅ Код активирован", `⏳ ${b(`Геймпасс${price}`)}`, "○ Выкуп", "○ Robux на балансе"]
     : opts.stage === "queue"
-      ? ["✅ Код активирован", "✅ Геймпасс принят", `⏳ ${b("Выкуп — заказ в очереди выкупа")}`, "○ Robux на балансе"]
-      : ["✅ Код активирован", "✅ Геймпасс принят", `✅ Выкуплен${day}`, `⏳ ${b("Robux в Pending у Roblox")} — зачислит сам`];
+      ? ["✅ Код активирован", `✅ Геймпасс принят${nick}`, `⏳ ${b("Выкуп — заказ в очереди")}`, "○ Robux в Pending у Roblox"]
+      : ["✅ Код активирован", `✅ Геймпасс принят${nick}`, `✅ Выкуплен${day}`, `⏳ ${b("Robux в Pending у Roblox")} — зачислит сам`];
   const foot = opts.stage === "wait"
     ? "Напишете в поддержку — назовите этот код, так мы сразу найдём заказ."
     : opts.stage === "queue"
-      ? "Как выкупим — карточка обновится сама."
+      ? "Как выкупим — карточка обновится сама и придёт уведомление."
       : "С нашей стороны всё готово, дальше их зачисляет Roblox.";
   return [head, "", ...steps, "", foot].join("\n");
 }
@@ -75,7 +83,7 @@ export function orderPinMarkupTg(stage: OrderPinStage, code: string): { inline_k
       [{ text: "📖 Моя инструкция", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${encodeURIComponent(code)}` }],
     ] };
   }
-  if (stage === "queue") return { inline_keyboard: [[{ text: "📊 Мой заказ", callback_data: "refresh_status" }]] };
+  if (stage === "queue") return { inline_keyboard: [[copyButton("📋 Код заказа", code) as never, { text: "📊 Мой заказ", callback_data: "refresh_status" }]] };
   return { inline_keyboard: [
     [{ text: "🔍 Проверить Robux — Transactions", url: "https://www.roblox.com/transactions" }],
     [{ text: "💬 Робуксов нет", callback_data: "rbx_chk" }],
@@ -118,6 +126,7 @@ export interface PinToUpdate extends PinRecord {
   code: string;
   amount: number;
   completedAt: Date | null;
+  nick?: string | null;
   next: OrderPinStage;
 }
 
@@ -125,13 +134,13 @@ export interface PinToUpdate extends PinRecord {
 export async function loadPinsToUpdate(db: PinDb, platform: PinPlatform): Promise<PinToUpdate[]> {
   const rows = (await db.$queryRawUnsafe(`
     select distinct on (e."orderId") e."orderId" as "orderId", e.payload as payload,
-           w.status::text as status, w."wbCode" as code, w.amount as amount, w."completedAt" as "completedAt"
+           w.status::text as status, w."wbCode" as code, w.amount as amount, w."completedAt" as "completedAt", w."robloxUsername" as nick
       from "OrderEvent" e
       join "WbOrder" w on w.id = e."orderId"
      where e.type = '${ORDER_PIN_EVENT}' and e.payload->>'platform' = $1
        and w."isTest" = false and w."updatedAt" > now() - interval '30 days'
      order by e."orderId", e."createdAt" desc`, platform)) as Array<{
-      orderId: string; payload: PinRecord; status: string; code: string; amount: number; completedAt: Date | null;
+      orderId: string; payload: PinRecord; status: string; code: string; amount: number; completedAt: Date | null; nick: string | null;
     }>;
   const out: PinToUpdate[] = [];
   for (const r of rows) {
@@ -140,7 +149,7 @@ export async function loadPinsToUpdate(db: PinDb, platform: PinPlatform): Promis
     // Назад стадия не откатывается: «выкуплен» не превращается обратно в «очередь».
     const rank = { wait: 0, queue: 1, done: 2 } as const;
     if (rank[next] < rank[r.payload.stage]) continue;
-    out.push({ ...r.payload, orderId: r.orderId, code: r.code, amount: Number(r.amount), completedAt: r.completedAt ? new Date(r.completedAt) : null, next });
+    out.push({ ...r.payload, orderId: r.orderId, code: r.code, amount: Number(r.amount), completedAt: r.completedAt ? new Date(r.completedAt) : null, nick: r.nick ?? null, next });
   }
   return out;
 }
@@ -158,7 +167,7 @@ export async function syncOrderPins(
   let updated = 0;
   for (const pin of pins) {
     const text = orderPinText({
-      code: pin.code, amount: pin.amount, stage: pin.next, completedAt: pin.completedAt,
+      code: pin.code, amount: pin.amount, stage: pin.next, completedAt: pin.completedAt, nick: pin.nick,
       format: platform === "TG" ? "html" : "plain",
     });
     const placed = await apply(pin, text).catch((err) => {

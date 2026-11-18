@@ -17,7 +17,7 @@
    Что экран обязан отвечать теперь, тремя ярусами и без простыни:
 
    1. кто я и что мне причитается (статус клиента, бонусы);
-   2. ЧТО С ЗАКАЗОМ и **что от меня нужно** — строка «От тебя» словами
+   2. ЧТО С ЗАКАЗОМ и **что от меня нужно** — строка «От вас» словами
       действия; подробно показывается ОДИН заказ (самый свежий), остальные
       уходят в кнопку (решение владельца О4);
    3. что уже готово — отдельным блоком, с датой выхода робуксов из Pending:
@@ -120,22 +120,22 @@ export function nextStepLine(order: BuyerMenuOrder): string {
     case "AWAITING_GAMEPASS": {
       const price = expectedGamepassPrice(order.amount);
       return nick
-        ? `👉 <b>От тебя:</b> создать геймпасс на <b>${price} R$</b> и прислать ссылку`
-        : `👉 <b>От тебя:</b> прислать ник Roblox — найдём твои геймпассы и скажем, что создать`;
+        ? `👉 <b>От вас:</b> создать геймпасс на <b>${price} R$</b> и прислать ссылку`
+        : `👉 <b>От вас:</b> прислать ник Roblox — найдём ваши геймпассы и скажем, что создать`;
     }
     case "PAYMENT_PENDING":
-      return "👉 <b>От тебя:</b> оплатить заказ по реквизитам из чата";
+      return "👉 <b>От вас:</b> оплатить заказ по реквизитам из чата";
     case "AWAITING_PAYMENT":
-      return "⏳ <b>От тебя:</b> ничего — пришлём реквизиты сюда";
+      return "⏳ <b>От вас:</b> ничего — пришлём реквизиты сюда";
     case "PENDING":
     case "IN_PROGRESS":
-      return "✅ <b>От тебя:</b> ничего — выкупаем и сразу напишем";
+      return "✅ <b>От вас:</b> ничего — выкупаем и сразу напишем";
     case "ERROR":
-      return "✅ <b>От тебя:</b> ничего — разбираемся сами, напишем";
+      return "✅ <b>От вас:</b> ничего — разбираемся сами, напишем";
     case "REJECTED":
-      return "👉 <b>От тебя:</b> прислать новый геймпасс — заказ ждёт";
+      return "👉 <b>От вас:</b> прислать новый геймпасс — заказ ждёт";
     default:
-      return "✅ <b>От тебя:</b> ничего";
+      return "✅ <b>От вас:</b> ничего";
   }
 }
 
@@ -154,7 +154,7 @@ export function buildBuyerMenuText(input: BuyerMenuInput): BuyerMenuText {
   const lines: string[] = [];
   lines.push(nick
     ? `🎮 <b>RobloxBank</b> · ${nick}`
-    : `👤 <b>Твоё меню</b>${input.firstName ? `, ${input.firstName}` : ""} · RobloxBank`);
+    : `👤 <b>Ваше меню</b>${input.firstName ? `, ${input.firstName}` : ""} · RobloxBank`);
   lines.push("");
 
   const perks: string[] = [];
@@ -173,7 +173,7 @@ export function buildBuyerMenuText(input: BuyerMenuInput): BuyerMenuText {
   const othersCount = Math.max(0, input.active.length - 1);
   if (focus) {
     lines.push("");
-    lines.push("━━ <b>ТВОЙ ЗАКАЗ</b> ━━");
+    lines.push("━━ <b>ВАШ ЗАКАЗ</b> ━━");
     lines.push(`📦 <b>${focus.amount} R$</b> · ${STATUS_WORD[focus.status] ?? focus.status} · создан ${humanAge(focus.createdAt, now)}`);
     const code = codeLine(focus);
     if (code) lines.push(code);
@@ -182,7 +182,7 @@ export function buildBuyerMenuText(input: BuyerMenuInput): BuyerMenuText {
     // Ключ — самый быстрый путь, и именно его люди не знают: он закрывает
     // заказ без ручной возни с ценой пасса.
     if (focus.status === "AWAITING_GAMEPASS") {
-      lines.push("💡 Не хочешь возиться — пришли ключ Roblox, создадим пасс сами");
+      lines.push("💡 Не хотите возиться — пришлите ключ Roblox, создадим пасс сами");
     }
     if (othersCount > 0) {
       lines.push("");

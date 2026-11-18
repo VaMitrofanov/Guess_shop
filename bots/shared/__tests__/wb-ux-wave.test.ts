@@ -44,7 +44,7 @@ describe("карточка DBS в 3 строки", () => {
 describe("закреп-шкала у покупателя", () => {
   it("шаги, цена пасса, кнопка текущего шага", () => {
     const text = orderPinText({ code: "ZT8BW8D", amount: 500, stage: "wait", format: "plain" });
-    expect(text).toContain("●○○○");
+    expect(text).toContain("▰▱▱▱ ждём геймпасс");
     expect(text).toContain("Геймпасс — цена 715 R$");
     expect(orderPinMarkupTg("wait", "ZT8BW8D").inline_keyboard[0][0].callback_data).toBe("send_gp_link");
     expect(orderPinMarkupTg("done", "ZT8BW8D").inline_keyboard[1][0].callback_data).toBe("rbx_chk");

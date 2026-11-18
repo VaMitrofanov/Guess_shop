@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { decryptActivationCode } from "@/lib/codes/secrets";
 import { codeChatIssuedText, codeChatPaidText, CODES_CB, ROBLOX_REDEEM_LINK } from "../../../bots/shared/codes-shop";
+import { FLAIR_IMAGE, copyButton, effectExtra, hasCodeImage, isEffectRefusal } from "../../../bots/shared/tg-flair";
+import { telegramRequestInit } from "../../../bots/shared/telegram-photo";
+import { vkUploadMessagePhoto } from "../../../bots/shared/vk-photo";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 /**
  * Код в чат бота (15.11.2026): заказ, оформленный в TG или ВК, получает код
@@ -12,39 +17,61 @@ import { codeChatIssuedText, codeChatPaidText, CODES_CB, ROBLOX_REDEEM_LINK } fr
  * всё равно в кабинете и в повторной отправке.
  */
 
-async function tgPost(chatId: string, text: string, replyMarkup: unknown): Promise<boolean> {
+type TgResult = { ok: boolean; messageId?: number; description?: string };
+
+/**
+ * Любой вызов Bot API — через мост (RF-хост не видит Telegram) или напрямую.
+ * `photo_base64` уходит multipart (`telegramRequestInit`), мост сам выберет sendPhoto.
+ */
+async function tgCall(fields: Record<string, unknown>): Promise<TgResult> {
   const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
-  const payload = {
-    token: process.env.TG_TOKEN,
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-    reply_markup: replyMarkup,
-  };
   try {
     if (bridgeUrl) {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (process.env.VALIDATOR_KEY) headers["x-validator-key"] = process.env.VALIDATOR_KEY;
-      const response = await fetch(`${bridgeUrl}/tg-proxy`, { method: "POST", headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(15_000) });
-      const json = await response.json().catch(() => null) as { ok?: boolean; delivered?: boolean } | null;
-      return response.ok && json?.ok !== false && json?.delivered !== false;
+      const response = await fetch(`${bridgeUrl}/tg-proxy`, { method: "POST", headers, body: JSON.stringify(fields), signal: AbortSignal.timeout(20_000) });
+      const json = await response.json().catch(() => null) as { ok?: boolean; delivered?: boolean; result?: { message_id?: number }; description?: string } | null;
+      return { ok: response.ok && json?.ok !== false && json?.delivered !== false, messageId: json?.result?.message_id, description: json?.description };
     }
-    const response = await fetch(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15_000),
+    const { method, chat_id, ...rest } = fields;
+    const resolved = typeof method === "string" ? method : rest.photo_base64 ? "sendPhoto" : "sendMessage";
+    const response = await fetch(`https://api.telegram.org/bot${process.env.TG_TOKEN}/${resolved}`, {
+      ...telegramRequestInit({ ...rest, chat_id }),
+      signal: AbortSignal.timeout(20_000),
     });
-    const json = await response.json().catch(() => null) as { ok?: boolean } | null;
-    return json?.ok === true;
+    const json = await response.json().catch(() => null) as { ok?: boolean; result?: { message_id?: number }; description?: string } | null;
+    return { ok: json?.ok === true, messageId: json?.result?.message_id, description: json?.description };
   } catch {
-    return false;
+    return { ok: false };
   }
 }
 
-async function vkPost(userId: string, message: string, keyboard: unknown): Promise<boolean> {
+/** Картинка из public/brand base64 (null — нет файла: шлём без картинки). */
+async function brandPhoto(name: string): Promise<string | null> {
+  const bytes = await readFile(path.join(process.cwd(), "public", "brand", name)).catch(() => null);
+  return bytes ? bytes.toString("base64") : null;
+}
+
+/**
+ * Сообщение в TG: с картинкой (подпись) или текстом; эффект 🎉 — если дали.
+ * Отказ из-за эффекта → ещё раз без него (`isEffectRefusal`).
+ */
+async function tgPost(chatId: string, html: string, replyMarkup: unknown, opts: { photo?: string | null; effect?: Record<string, unknown> } = {}): Promise<TgResult> {
+  const base: Record<string, unknown> = opts.photo
+    ? { chat_id: chatId, photo_base64: opts.photo, caption: html, parse_mode: "HTML", reply_markup: replyMarkup }
+    : { chat_id: chatId, text: html, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: replyMarkup };
+  const first = await tgCall({ ...base, ...(opts.effect ?? {}) });
+  if (first.ok || !opts.effect?.message_effect_id || !isEffectRefusal({ description: first.description })) {
+    // Картинка не ушла (не эффект) — пробуем текстом: код важнее красоты.
+    if (!first.ok && opts.photo) return tgPost(chatId, html, replyMarkup, { effect: opts.effect });
+    return first;
+  }
+  return tgCall(base);
+}
+
+async function vkPost(userId: string, message: string, keyboard: unknown, attachment?: string | null): Promise<boolean> {
   const params = new URLSearchParams({
+    ...(attachment ? { attachment } : {}),
     user_id: userId,
     message,
     random_id: String(Date.now() + Math.floor(Math.random() * 1000)),
@@ -67,9 +94,10 @@ async function vkPost(userId: string, message: string, keyboard: unknown): Promi
   }
 }
 
-function tgKeyboard(issued: boolean) {
+function tgKeyboard(issued: boolean, code?: string) {
   return {
     inline_keyboard: [
+      ...(issued && code ? [[copyButton("📋 Скопировать код", code)]] : []),
       ...(issued ? [[{ text: "🚀 Активировать на Roblox", url: ROBLOX_REDEEM_LINK }]] : []),
       [{ text: "🤝 Скидка за друзей", callback_data: CODES_CB.invite }, { text: "🎟 Ещё код", callback_data: CODES_CB.open }],
     ],
@@ -100,10 +128,13 @@ async function chatTarget(orderId: string) {
   });
 }
 
-async function send(channel: string, creator: { tgId: string | null; vkId: string | null } | null, html: string, plain: string, issued: boolean): Promise<boolean | null> {
-  if (channel === "TG" && creator?.tgId) return tgPost(creator.tgId, html, tgKeyboard(issued));
-  if (channel === "VK" && creator?.vkId) return vkPost(creator.vkId, plain, vkKeyboard(issued));
-  return null;
+const PAID_MESSAGE_EVENT = "CHAT_PAID_MESSAGE";
+
+/** VK: картинка вложением (не загрузилась — без неё) и текст. */
+async function vkWithPhoto(vkId: string, plain: string, keyboard: unknown, photoName: string | null): Promise<boolean> {
+  const bytes = photoName ? await readFile(path.join(process.cwd(), "public", "brand", photoName)).catch(() => null) : null;
+  const attachment = bytes ? await vkUploadMessagePhoto(vkId, bytes) : null;
+  return vkPost(vkId, plain, keyboard, attachment);
 }
 
 /** Код в чат. null — заказ не из бота (слать некуда). */
@@ -119,7 +150,19 @@ export async function sendCodeToChat(orderId: string): Promise<boolean | null> {
     return false;
   }
   const text = codeChatIssuedText({ denomination: order.denomination, code, publicId: order.publicId });
-  const ok = await send(order.channel, order.creator, text.html, text.plain, true);
+  const image = hasCodeImage(order.denomination) ? FLAIR_IMAGE.code(order.denomination) : null;
+  let ok: boolean | null = null;
+  if (order.channel === "TG" && order.creator?.tgId) {
+    const tgId = order.creator.tgId;
+    // З2: было «Готовим ваш код» — убираем его, билет приходит на его место.
+    const paid = await prisma.codeOrderEvent.findFirst({ where: { orderId: order.id, type: PAID_MESSAGE_EVENT }, select: { payload: true } }).catch(() => null);
+    const paidMessageId = Number((paid?.payload as { messageId?: number } | null)?.messageId) || null;
+    if (paidMessageId) await tgCall({ method: "deleteMessage", chat_id: tgId, message_id: paidMessageId }).catch(() => undefined);
+    const sent = await tgPost(tgId, text.html, tgKeyboard(true, code), { photo: image ? await brandPhoto(image) : null, effect: effectExtra("party") });
+    ok = sent.ok;
+  } else if (order.channel === "VK" && order.creator?.vkId) {
+    ok = await vkWithPhoto(order.creator.vkId, text.plain, vkKeyboard(true), image);
+  }
   if (ok) await prisma.codeOrder.update({ where: { id: order.id }, data: { chatDeliveredAt: new Date() } });
   else if (ok === false) console.warn("[codes] chat delivery failed", { order: order.publicId, channel: order.channel });
   return ok;
@@ -133,7 +176,7 @@ export async function sendPayReminderToChat(orderId: string, payUrl: string, amo
   const html = `⏳ <b>Код на ${amount} Robux ждёт оплаты</b>\n\nЦена ${amountRub} сохранена. Оплатить можно по кнопке ниже — картой или СБП.`;
   const plain = `⏳ Код на ${amount} Robux ждёт оплаты\n\nЦена ${amountRub} сохранена. Оплатить: ${payUrl}`;
   if (order.channel === "TG" && order.creator?.tgId) {
-    return tgPost(order.creator.tgId, html, { inline_keyboard: [[{ text: `💳 Оплатить ${amountRub}`, url: payUrl }]] });
+    return (await tgPost(order.creator.tgId, html, { inline_keyboard: [[{ text: `💳 Оплатить ${amountRub}`, url: payUrl }]] })).ok;
   }
   if (order.channel === "VK" && order.creator?.vkId) {
     return vkPost(order.creator.vkId, plain, { inline: true, buttons: [[{ action: { type: "open_link", link: payUrl, label: `💳 Оплатить ${amountRub}` } }]] });
@@ -146,5 +189,17 @@ export async function sendPaidToChat(orderId: string): Promise<boolean | null> {
   const order = await chatTarget(orderId);
   if (!order || (order.channel !== "TG" && order.channel !== "VK") || order.status !== "PAID") return null;
   const text = codeChatPaidText({ denomination: order.denomination, publicId: order.publicId });
-  return send(order.channel, order.creator, text.html, text.plain, false);
+  // З2: картинка «Готовим ваш код»; её message_id запоминаем — при выдаче кода
+  // сообщение удаляется, и на его месте приходит билет с конфетти.
+  if (order.channel === "TG" && order.creator?.tgId) {
+    const sent = await tgPost(order.creator.tgId, text.html, tgKeyboard(false), { photo: await brandPhoto(FLAIR_IMAGE.codePreparing) });
+    if (sent.ok && sent.messageId) {
+      await prisma.codeOrderEvent.create({
+        data: { orderId: order.id, type: PAID_MESSAGE_EVENT, idempotencyKey: `chat-paid:${order.id}`, payload: { messageId: sent.messageId } },
+      }).catch(() => undefined);
+    }
+    return sent.ok;
+  }
+  if (order.channel === "VK" && order.creator?.vkId) return vkWithPhoto(order.creator.vkId, text.plain, vkKeyboard(false), FLAIR_IMAGE.codePreparing);
+  return null;
 }

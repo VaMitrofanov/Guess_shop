@@ -122,10 +122,10 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
       let delivered: "tg" | "vk" | "skip" | "unreachable" | null = pingCustomer ? null : "skip";
       if (pingCustomer) {
         const tgMsg =
-          `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
+          `🎉 <b>Похоже, ваш геймпасс готов!</b>\n\n` +
           `Ник: <b>${escapeHtml(order.probableNick!)}</b>\n` +
           `Геймпасс: <b>${escapeHtml(pass.name)}</b> · <b>${pass.robux} R$</b>\n\n` +
-          `Это твой геймпасс? Подтверди — и мы сразу заберём его в выкуп 💛`;
+          `Это ваш геймпасс? Подтвердите — и мы сразу заберём его в выкуп 💛`;
         const kb = {
           inline_keyboard: [[
             { text: "✅ Да, это мой", callback_data: `gpw_ok:${order.id}` },
@@ -146,8 +146,8 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
             ]],
           });
           const ok = await vkSend(order.user.vkId,
-            `🎉 Похоже, твой геймпасс готов!\n\nНик: ${order.probableNick}\nГеймпасс: ${pass.name} · ${pass.robux} R$\n\n` +
-            `Это твой геймпасс? Подтверди — заберём его в выкуп 💛`,
+            `🎉 Похоже, ваш геймпасс готов!\n\nНик: ${order.probableNick}\nГеймпасс: ${pass.name} · ${pass.robux} R$\n\n` +
+            `Это ваш геймпасс? Подтвердите — заберём его в выкуп 💛`,
             { keyboard: vkKb });
           // VK 901 («нет разрешения на сообщения») не лечится повтором —
           // спрашиваем VK прямо, а не гадаем по коду ошибки.
@@ -168,7 +168,7 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
       if (alertAdmin) {
         const pingLine =
           delivered === "skip"        ? "клиенту НЕ отправлял (режим admin) — оповести из карточки TWA" :
-          delivered === "unreachable" ? "📵 клиенту написать нельзя (заблокировал бота / закрыл сообщения) — подтверди пасс сам или напиши в чат WB" :
+          delivered === "unreachable" ? "📵 клиенту написать нельзя (заблокировал бота / закрыл сообщения) — подтвердите пасс сами или напишите в чат WB" :
                                         `клиент оповещён (${String(delivered).toUpperCase()}), ждём ✅/❌`;
         await alertAdmins(
           `👁 <b>GP-watch: нашёл геймпасс по вероятному нику</b>\n` +

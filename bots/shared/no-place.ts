@@ -36,8 +36,8 @@ export const PLACE_HELP_EVENT = "BOT_NO_PLACE_HELP";
  */
 export function placeHelpInfo(verdictCode?: string | null): string {
   return verdictCode === "games_hidden"
-    ? "Если своей игры у тебя ещё нет — скорее всего, аккаунт новый, и это нормально. Сейчас покажем, как создать плейс раз и навсегда."
-    : "Скорее всего у тебя новый аккаунт, и на нём ещё нет плейса — это нормально. Сейчас покажем, как создать его раз и навсегда.";
+    ? "Если своей игры у вас ещё нет — скорее всего, аккаунт новый, и это нормально. Сейчас покажем, как создать плейс раз и навсегда."
+    : "Скорее всего у вас новый аккаунт, и на нём ещё нет плейса — это нормально. Сейчас покажем, как создать его раз и навсегда.";
 }
 
 interface PlaceStep {
@@ -54,15 +54,15 @@ interface PlaceStep {
 export const PLACE_STEPS: readonly PlaceStep[] = [
   {
     image: `${SITE}/guide/place-hub.jpg`,
-    caption: "Так выглядит плейс: Creator Hub → Creations. Если такая карточка у тебя есть — пришли ссылку на неё. Если пусто — шаги ниже.",
+    caption: "Так выглядит плейс: Creator Hub → Creations. Если такая карточка у вас есть — пришлите ссылку на неё. Если пусто — шаги ниже.",
   },
   {
     image: `${SITE}/guide/place-studio-new.jpg`,
-    caption: "Шаг 1. Скачай Roblox Studio, войди в свой аккаунт и нажми New Experience.",
+    caption: "Шаг 1. Скачайте Roblox Studio, войдите в свой аккаунт и нажмите New Experience.",
   },
   {
     image: `${SITE}/guide/place-studio-publish.jpg`,
-    caption: "Шаг 2. Сверху File → Publish to Roblox. Название любое — нажми Create. Готово, плейс есть.",
+    caption: "Шаг 2. Сверху File → Publish to Roblox. Название любое — нажмите Create. Готово, плейс есть.",
   },
 ] as const;
 
@@ -82,12 +82,12 @@ export function placeStepsText(): string {
   return [
     "🛠 <b>Как создать плейс — 2 минуты, один раз:</b>",
     "",
-    "1️⃣ Скачай <b>Roblox Studio</b> — кнопка ниже. Он работает только на компьютере (Windows или Mac).",
-    "2️⃣ Открой Studio, войди в свой аккаунт и нажми <b>New Experience</b>.",
-    "3️⃣ Сверху <b>File → Publish to Roblox</b>, название любое, нажми <b>Create</b>.",
+    "1️⃣ Скачайте <b>Roblox Studio</b> — кнопка ниже. Он работает только на компьютере (Windows или Mac).",
+    "2️⃣ Откройте Studio, войдите в свой аккаунт и нажмите <b>New Experience</b>.",
+    "3️⃣ Сверху <b>File → Publish to Roblox</b>, название любое, нажмите <b>Create</b>.",
     "",
-    "Готово — пришли сюда ключ ещё раз (тот же самый, новый делать не нужно), и мы создадим геймпасс.",
+    "Готово — пришлите сюда ключ ещё раз (тот же самый, новый делать не нужно), и мы создадим геймпасс.",
     "",
-    "<i>Компьютера нет? Напиши нам — поможем.</i>",
+    "<i>Компьютера нет? Напишите нам — поможем.</i>",
   ].join("\n");
 }

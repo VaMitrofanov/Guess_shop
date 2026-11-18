@@ -1,9 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { fmtUnlockDate } from "@/lib/order-presentation";
 import { refreshDbsCardByCode } from "../../bots/shared/wb-dbs-thread";
 import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
-import { PENDING_INFO_URL, ROBUX_CONFIRM, confirmHintLine } from "../../bots/shared/robux-eta";
-import { robuxWaitText } from "../../bots/shared/robux-wait";
+import { ROBUX_CONFIRM } from "../../bots/shared/robux-eta";
 import {
   BUYER_STEP_COMMANDS,
   buyerStepMessage,
@@ -14,6 +12,9 @@ import {
 import { notifyOrderWatchers, type WatcherEvent } from "../../bots/shared/order-contacts";
 import { TG_INVITE_LABEL, TG_INVITE_TEXT, prepareTgInvite } from "../../bots/shared/bot-bind";
 import { vkUploadMessagePhoto } from "../../bots/shared/vk-photo";
+import { effectExtra } from "../../bots/shared/tg-flair";
+import { COMPLETED_IMAGE, buildCompletedMessages, completedMsg1Keyboard, fmtDateRu } from "../../bots/shared/completed-messages";
+import { telegramRequestInit } from "../../bots/shared/telegram-photo";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -30,7 +31,7 @@ interface UserRef {
  * Telegram означал «клиент ничего не узнал».
  */
 async function tgThenVk(user: UserRef, tgText: string, vkText: string, tgExtra: Record<string, unknown> = {}, vkExtra: Record<string, string> = {}): Promise<"tg" | "vk" | null> {
-  if (user.tgId && await tgPost(user.tgId, tgText, tgExtra)) return "tg";
+  if (user.tgId && await tgPostWithEffect(user.tgId, tgText, tgExtra)) return "tg";
   if (user.vkId && await vkPost(user.vkId, vkText, vkExtra)) {
     if (user.tgId) console.warn(`[notify] Telegram не доставил ${user.tgId} — ушло во ВК`);
     return "vk";
@@ -79,6 +80,52 @@ async function tgPost(chatId: string, text: string, extra: Record<string, unknow
 }
 
 /** true = VK принял сообщение, false = ошибка (напр. 901 — юзер не писал сообществу). */
+/**
+ * 🎨 Фото с подписью (З3, 18.11.2026): картинка из `public/brand`, подпись HTML,
+ * кнопки и эффект. Не вышло с эффектом — ещё раз без него; не вышло с фото —
+ * текстом (`tgPost`): сообщение важнее картинки.
+ */
+async function tgPhotoPost(chatId: string, photoName: string, caption: string, extra: Record<string, unknown> = {}): Promise<boolean> {
+  const bytes = await readFile(path.join(process.cwd(), "public", "brand", photoName)).catch(() => null);
+  const attempt = async (fields: Record<string, unknown>): Promise<boolean> => {
+    const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+    try {
+      if (bridgeUrl) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (process.env.VALIDATOR_KEY) headers["x-validator-key"] = process.env.VALIDATOR_KEY;
+        const r = await fetch(`${bridgeUrl}/tg-proxy`, { method: "POST", headers, body: JSON.stringify(fields) });
+        const j = await r.json().catch(() => null) as { ok?: boolean; delivered?: boolean } | null;
+        return r.ok && j?.ok !== false && j?.delivered !== false;
+      }
+      const { chat_id, ...rest } = fields;
+      const r = await fetch(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendPhoto`, telegramRequestInit({ ...rest, chat_id }));
+      const j = await r.json().catch(() => null) as { ok?: boolean } | null;
+      return j?.ok === true;
+    } catch {
+      return false;
+    }
+  };
+  if (bytes) {
+    const base = { chat_id: chatId, photo_base64: bytes.toString("base64"), caption, parse_mode: "HTML", ...extra };
+    if (await attempt(base)) return true;
+    if ("message_effect_id" in base) {
+      const { message_effect_id: _e, ...noEffect } = base;
+      void _e;
+      if (await attempt(noEffect)) return true;
+    }
+  }
+  return tgPostWithEffect(chatId, caption, extra);
+}
+
+/** Текст с эффектом; отказ — ещё раз без эффекта. */
+async function tgPostWithEffect(chatId: string, text: string, extra: Record<string, unknown> = {}): Promise<boolean> {
+  if (await tgPost(chatId, text, extra)) return true;
+  if (!("message_effect_id" in extra)) return false;
+  const { message_effect_id: _e, ...rest } = extra;
+  void _e;
+  return tgPost(chatId, text, rest);
+}
+
 async function vkPost(vkUserId: string, message: string, extra: Record<string, string> = {}): Promise<boolean> {
   const params = new URLSearchParams({
     user_id:      vkUserId,
@@ -115,129 +162,9 @@ function copyToWatchers(ref: { orderId?: string | null; wbCode?: string | null }
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Ф5 (2026-07-12): уведомление о выкупе = ДВА сообщения (операционное + бонусное).
-// ЗЕРКАЛО bots/shared/completed-messages.ts — bots/ и src/ не импортируют друг
-// друга, менять СИНХРОННО. Ветвление msg2: питч отзыва (2 кнопки, О2) →
-// напоминание о бонусе на балансе → TIER-2 питч → благодарность (+скидка DIR<500).
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const fmtDateRu = (d: Date): string => fmtUnlockDate(d);
-
-type CompletedButton = {
-  label: string;
-  /** TG callback_data и VK payload.command — одинаковые строки. */
-  command: "review_hint" | "start_direct";
-};
-
-interface CompletedMessagesInput {
-  /** Номинал — столько должно стоять в Pending Robux (24.10.2026). */
-  amount?: number | null;
-  isDirectOrder: boolean;
-  /** Все COMPLETED-заказы юзера (включая этот). */
-  completedCount: number;
-  /** Момент выкупа (WbOrder.completedAt); null у легаси-путей → сейчас. */
-  completedAt: Date | null;
-  /** user.reviewBonusGrantedAt — бонус сейчас на балансе (крон обнуляет по истечении). */
-  bonusGrantedAt: Date | null;
-  /** user.balance (R$ бонуса). */
-  bonusBalance: number;
-  /** WbCode этого заказа существует и reviewBonusClaimed=false (WB-код, отзыв ещё не оплачен). */
-  codeUnclaimed: boolean;
-  /** Скидка 60 ₽ действительно начислена этим завершением (правило —
-   *  bots/shared/direct-discount.ts, один раз за всё время). */
-  discountGranted: boolean;
-}
-
-interface CompletedMessages {
-  kind: "review_pitch" | "bonus_reminder" | "tier2" | "thanks";
-  /** HTML-версии для TG. */
-  tgMsg1: string;
-  tgMsg2: string;
-  /** Plain-версии для VK (ссылки текстом). */
-  vkMsg1: string;
-  vkMsg2: string;
-  buttons: CompletedButton[];
-}
-
-const BTN_REVIEW: CompletedButton = { label: "📸 Прислать отзыв", command: "review_hint" };
-const BTN_DIRECT: CompletedButton = { label: "💎 Купить напрямую", command: "start_direct" };
-const BTN_USE_BONUS: CompletedButton = { label: "💎 Использовать бонус", command: "start_direct" };
-
-const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (bots/shared/review-eligibility.ts)
-
-function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
-  /* С 26.10.2026 — без срока и даты: Roblox стал держать Pending дольше 7 дней,
-     и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
-  const tgMsg1 =
-    `✅ <b>Заказ выкуплен!</b> Робуксы уже на твоём аккаунте — в статусе <b>Pending</b> 🚀\n\n` +
-    `<b>С нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending Robux</b>, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
-    confirmHintLine("html");
-  const vkMsg1 =
-    `✅ Заказ выкуплен! Робуксы уже на твоём аккаунте — в статусе Pending 🚀\n\n` +
-    `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, и ускорить это нельзя. ${robuxWaitText("ty")}\n\n` +
-    `📊 Проверить: https://www.roblox.com/transactions → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
-    `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
-    confirmHintLine("plain");
-
-  const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
-  const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";
-
-  // 1. Питч отзыва: WB-заказ, бонуса на балансе нет, код не заклеймлен.
-  if (!inp.isDirectOrder && !inp.bonusGrantedAt && inp.codeUnclaimed) {
-    const tgMsg2 =
-      `🎁 <b>Бонус за отзыв: +100 R$</b> к следующей прямой покупке в RobloxBank.\n\n` +
-      `Как получить:\n` +
-      `1. Оставь отзыв на Wildberries — с текстом и фото (только оценка не подойдёт).\n` +
-      `2. Пришли скриншот сюда фотографией (не файлом).\n\n` +
-      `После проверки бонус появится на балансе на ${BONUS_EXPIRY_DAYS} дней. Отдельно 100 R$ не выдаются и к покупке на WB не добавляются: оформи следующий прямой заказ в боте или на robloxbank.ru.`;
-    return {
-      kind: "review_pitch",
-      tgMsg1, vkMsg1, tgMsg2,
-      vkMsg2: tgMsg2.replace(/<\/?b>/g, ""),
-      buttons: [BTN_REVIEW, BTN_DIRECT],
-    };
-  }
-
-  // 2. Бонус уже на балансе — напомнить потратить.
-  if (inp.bonusGrantedAt) {
-    const expiresStr = fmtDateRu(new Date(inp.bonusGrantedAt.getTime() + BONUS_EXPIRY_DAYS * 86_400_000));
-    const balanceStr = inp.bonusBalance > 0 ? `${inp.bonusBalance} R$` : `+100 R$`;
-    const tgMsg2 =
-      `🎁 У тебя бонус <b>${balanceStr}</b> — действует до <b>${expiresStr}</b>.\n\n` +
-      `Он автоматически добавится к следующей прямой покупке в боте или на robloxbank.ru; к покупке на WB бонус не применяется.`;
-    return {
-      kind: "bonus_reminder",
-      tgMsg1, vkMsg1, tgMsg2,
-      vkMsg2: tgMsg2.replace(/<\/?b>/g, ""),
-      buttons: [BTN_USE_BONUS],
-    };
-  }
-
-  // 3. Повторный WB-клиент — TIER-2 питч закрытого формата (текст без изменений).
-  if (!inp.isDirectOrder && inp.completedCount > 1) {
-    const tgMsg2 =
-      `Это уже твой <b>${inp.completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
-      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
-      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
-    const vkMsg2 = tgMsg2.replace(/<\/?b>/g, "").replace("@RobloxBank_PA", "https://t.me/RobloxBank_PA");
-    return { kind: "tier2", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
-  }
-
-  // 4. Прямой заказ / остальное — благодарность (+скидка для DIR <500).
-  const tgMsg2 = inp.completedCount > 1
-    ? `Это уже твой <b>${inp.completedCount}-й</b> заказ — спасибо за доверие! 💛${discountTg}\n\n` +
-      `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`
-    : `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛${discountTg}`;
-  const vkMsg2 = inp.completedCount > 1
-    ? `Это уже твой ${inp.completedCount}-й заказ — спасибо за доверие! 💛${discountVk}\n\n` +
-      `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`
-    : `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛${discountVk}`;
-  return { kind: "thanks", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
-}
+// Ф5: «выкуплено» = два сообщения. Тексты — ОДНИ на ботов и сайт
+// (`bots/shared/completed-messages.ts`, 18.11.2026: копия здесь расходилась).
+export { fmtDateRu };
 
 /** Чем закончилась попытка сказать покупателю «выкуплен». */
 export interface CompletedNoticeResult {
@@ -268,7 +195,7 @@ export async function notifyOrderCompleted(
 ): Promise<CompletedNoticeResult> {
   const [completedCount, order, dbUser] = await Promise.all([
     prisma.wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
-    prisma.wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
+    prisma.wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true, robloxUsername: true } }),
     prisma.user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
   ]);
 
@@ -301,6 +228,7 @@ export async function notifyOrderCompleted(
     bonusBalance: dbUser?.balance ?? 0,
     codeUnclaimed: codeRow ? codeRow.reviewBonusClaimed === false : false,
     discountGranted,
+    nick: order?.robloxUsername ?? null,
   });
   if (m.kind === "tier2") console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
 
@@ -310,9 +238,9 @@ export async function notifyOrderCompleted(
 
   if (user.tgId) {
     channel = "tg";
-    // Под первым сообщением — «✅ Робуксы поступили» (зеркало ботов, 27.10.2026).
-    delivered = await tgPost(user.tgId, m.tgMsg1, {
-      reply_markup: { inline_keyboard: [[{ text: ROBUX_CONFIRM.label, callback_data: ROBUX_CONFIRM.command }]] },
+    // 🎉 З3: картинка «Заказ выкуплен» + подпись + кнопки + конфетти (зеркало ботов).
+    delivered = await tgPhotoPost(user.tgId, COMPLETED_IMAGE, m.tgMsg1, {
+      reply_markup: completedMsg1Keyboard(), ...effectExtra("party"),
     });
     bonusDelivered = await tgPost(user.tgId, m.tgMsg2, {
       reply_markup: { inline_keyboard: m.buttons.map((b) => [{ text: b.label, callback_data: b.command }]) },
@@ -324,7 +252,10 @@ export async function notifyOrderCompleted(
   if (!delivered && user.vkId) {
     if (user.tgId) console.warn(`[notify] «выкуплено»: Telegram ${user.tgId} не доставил — шлём во ВК`);
     channel = "vk";
+    const doneJpg = await readFile(path.join(process.cwd(), "public", "brand", COMPLETED_IMAGE)).catch(() => null);
+    const doneAttachment = doneJpg ? await vkUploadMessagePhoto(user.vkId, doneJpg) : null;
     delivered = await vkPost(user.vkId, m.vkMsg1, {
+      ...(doneAttachment ? { attachment: doneAttachment } : {}),
       keyboard: JSON.stringify({ inline: true, buttons: [[{
         action: { type: "text", label: ROBUX_CONFIRM.label, payload: JSON.stringify({ command: ROBUX_CONFIRM.command }) },
         color: "positive",
@@ -359,10 +290,10 @@ export async function notifyRegionalPriceNeeded(
   const tgText =
     `⚠️ <b>Нужен новый геймпасс</b>\n\n` +
     `Roblox включил региональную цену для текущего пасса заказа <b>${wbCode}</b>, поэтому мы безопасно остановили выкуп. ` +
-    `Создай новый геймпасс за <b>${expectedPrice} R$</b> без Managed/Regional Pricing и пришли ссылку в бот — заказ продолжится.`;
+    `Создайте новый геймпасс за <b>${expectedPrice} R$</b> без Managed/Regional Pricing и пришлите ссылку в бот — заказ продолжится.`;
   const plainText =
     `⚠️ Нужен новый геймпасс\n\nRoblox включил региональную цену для текущего пасса заказа ${wbCode}, ` +
-    `поэтому мы безопасно остановили выкуп. Создай новый геймпасс за ${expectedPrice} R$ без Managed/Regional Pricing и пришли ссылку в бот — заказ продолжится.`;
+    `поэтому мы безопасно остановили выкуп. Создайте новый геймпасс за ${expectedPrice} R$ без Managed/Regional Pricing и пришлите ссылку в бот — заказ продолжится.`;
   await copyToWatchers({ wbCode }, { kind: "new_pass_needed", price: expectedPrice });
   return (await tgThenVk(user, tgText, plainText)) !== null;
 }
@@ -396,7 +327,7 @@ export async function notifyRebind(
     return tgThenVk(user, tgMsg, vkMsg);
   }
 
-  const tgMsg = `${head}\n\nСоздай геймпасс за <b>${dirty} R$</b> и пришли ссылку сюда — выкупим и начислим робуксы 💛`;
+  const tgMsg = `${head}\n\nСоздайте геймпасс за <b>${dirty} R$</b> и пришлите ссылку сюда — выкупим и начислим робуксы 💛`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "") + `\n\n📖 Инструкция: ${instructionUrl}`;
 
   if (user.tgId) {
@@ -425,10 +356,10 @@ export async function notifyGpWatchPing(
   priceRobux: number,
 ): Promise<"tg" | "vk" | null> {
   const tgMsg =
-    `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
+    `🎉 <b>Похоже, ваш геймпасс готов!</b>\n\n` +
     `Ник: <b>${escHtml(nick)}</b>\n` +
     `Геймпасс: <b>${escHtml(passName)}</b> · <b>${priceRobux} R$</b>\n\n` +
-    `Это твой геймпасс? Подтверди — и мы сразу заберём его в выкуп 💛`;
+    `Это ваш геймпасс? Подтвердите — и мы сразу заберём его в выкуп 💛`;
 
   if (user.tgId) {
     const ok = await tgPost(user.tgId, tgMsg, {
@@ -451,8 +382,8 @@ export async function notifyGpWatchPing(
     });
     const ok = await vkPost(
       user.vkId,
-      `🎉 Похоже, твой геймпасс готов!\n\nНик: ${nick}\nГеймпасс: ${passName} · ${priceRobux} R$\n\n` +
-      `Это твой геймпасс? Подтверди — заберём его в выкуп 💛`,
+      `🎉 Похоже, ваш геймпасс готов!\n\nНик: ${nick}\nГеймпасс: ${passName} · ${priceRobux} R$\n\n` +
+      `Это ваш геймпасс? Подтвердите — заберём его в выкуп 💛`,
       { keyboard: vkKb },
     );
     return ok ? "vk" : null;
@@ -510,8 +441,8 @@ export async function notifyGamepassAttached(user: UserRef, wbCode: string): Pro
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
-  return tgThenVk(user, tgMsg, vkMsg);
-  return null;
+  // ✨ З7: 🔥 — эффект на «геймпасс принят».
+  return tgThenVk(user, tgMsg, vkMsg, effectExtra("fire"));
 }
 
 /**
@@ -533,9 +464,9 @@ export async function notifyGamepassCreatedForBuyer(
     ? `Создали геймпассы: ${opts.prices.map((price) => `${price} R$`).join(" + ")}`
     : `Создали геймпасс на ${opts.prices[0] ?? 0} R$`;
   const tgMsg =
-    `🔑 <b>Сделали за тебя — геймпасс готов</b>\n\n` +
-    `${passLine} на аккаунте <b>${opts.nick}</b> — по ключу, который ты нам прислал.\n\n` +
-    `👍 От тебя больше ничего не нужно: заказ уже в очереди на выкуп.\n` +
+    `🔑 <b>Сделали за вас — геймпасс готов</b>\n\n` +
+    `${passLine} на аккаунте <b>${opts.nick}</b> — по ключу, который вы нам прислал.\n\n` +
+    `👍 От вас больше ничего не нужно: заказ уже в очереди на выкуп.\n` +
     `⏳ Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — как только будет готово, напишем.\n` +
     `💡 <i>После выкупа робуксы сначала попадут в Pending у Roblox — когда перевести их на баланс, решает уже Roblox.</i>\n\n` +
     `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
@@ -556,14 +487,14 @@ export async function notifyOrderRejected(
 
   const fixTg = isPrivate
     ? `Как исправить:\n` +
-      `1. Нажми на плейс → <b>Configure → Settings</b> → Audience → выбери <b>Public</b>\n` +
-      `   Не помогло? <b>Configure → Questionnaire → Restart</b> → ответь «No» на 10 вопросов\n` +
-      `2. Установи цену геймпасса: <b>${Math.ceil(amount / 0.7)} R$</b>\n` +
-      `3. Отправь новую ссылку:`
+      `1. Нажмите на плейс → <b>Configure → Settings</b> → Audience → выберите <b>Public</b>\n` +
+      `   Не помогло? <b>Configure → Questionnaire → Restart</b> → ответьте «No» на 10 вопросов\n` +
+      `2. Установите цену геймпасса: <b>${Math.ceil(amount / 0.7)} R$</b>\n` +
+      `3. Отправьте новую ссылку:`
     : `Чаще всего причина в одном из двух:\n` +
       `• Цена геймпасса неверная — нужно ${Math.ceil(amount / 0.7)} R$\n` +
       `• Геймпасс не выставлен на продажу\n\n` +
-      `Исправь и отправь ссылку заново:`;
+      `Исправьте и отправьте ссылку заново:`;
 
   // Идентификатор для клиента = код ВБ, не внутренний номер (C2, 2026-07-03).
   const tgMsg = `❌ <b>Заказ отклонён</b> (код <code>${wbCode}</code>)\n\n${reasonLine}${fixTg}`;

@@ -32,8 +32,8 @@ export function fmtDateRu(d: Date): string {
 /** Главная мысль про Pending — одна на все тексты (26.10.2026). */
 function ourPartDoneText(fmt: RobuxEtaFormat): string {
   return (
-    `✅ ${b(fmt, "С нашей стороны всё сделано:")} геймпасс выкуплен, робуксы уже на твоём аккаунте — в статусе Pending. ` +
-    `Дальше всё зависит от Roblox: он сам решает, когда перевести их на баланс. Ускорить это не может ни наша поддержка, ни мы. ${robuxWaitText("ty")}`
+    `✅ ${b(fmt, "С нашей стороны всё сделано:")} геймпасс выкуплен, робуксы уже на вашем аккаунте — в статусе Pending. ` +
+    `Дальше всё зависит от Roblox: он сам решает, когда перевести их на баланс. Ускорить это не может ни наша поддержка, ни мы. ${robuxWaitText("vy")}`
   );
 }
 
@@ -128,7 +128,7 @@ export function buildRobuxEtaReply(
     lines.push(`⏳ ${b(fmt, `Робуксы за заказ на ${o.amount} R$ — в Pending у Roblox`)}`);
     lines.push(`Выкупили: ${fmtDateRu(o.completedAt)}`);
   } else {
-    lines.push(`⏳ ${b(fmt, "Твои робуксы — в Pending у Roblox")}`);
+    lines.push(`⏳ ${b(fmt, "Ваши робуксы — в Pending у Roblox")}`);
     for (const o of orders) lines.push(`• ${b(fmt, `${o.amount} R$`)} · выкупили ${fmtDateRu(o.completedAt)}`);
   }
   lines.push("");
@@ -136,7 +136,7 @@ export function buildRobuxEtaReply(
   lines.push("");
   lines.push(checkLine(fmt, orders.length === 1 ? orders[0].amount : null));
   lines.push("");
-  lines.push(`Числа нет или там 0 — нажми «${NO_ROBUX_BUTTON}», проверим вместе.`);
+  lines.push(`Числа нет или там 0 — нажмите «${NO_ROBUX_BUTTON}», проверим вместе.`);
   lines.push("");
   lines.push(confirmHintLine(fmt));
   lines.push("");
@@ -160,7 +160,7 @@ function infoLine(fmt: RobuxEtaFormat): string {
  * покупателя. Таймер заморозки тут не к месту — отвечаем этапом заказа.
  */
 export function activeOrderLeadText(fmt: RobuxEtaFormat): string {
-  return `⏳ ${b(fmt, "Робуксы приходят после выкупа геймпасса, а твой заказ ещё не выкуплен.")} Вот где он сейчас 👇`;
+  return `⏳ ${b(fmt, "Робуксы приходят после выкупа геймпасса, а ваш заказ ещё не выкуплен.")} Вот где он сейчас 👇`;
 }
 
 // ── Барьер перед поддержкой ─────────────────────────────────────────────────
@@ -206,11 +206,11 @@ export function robuxSelfCheckText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}
   const link = fmt === "html" ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>` : ROBLOX_TRANSACTIONS_URL;
   return (
     `🔍 ${b(fmt, "Давай проверим за минуту")}\n\n` +
-    `1. Зайди в Roblox в ${account}.\n` +
-    `2. Открой ${link} и найди строку ${b(fmt, "Pending Robux")}.\n\n` +
+    `1. Зайдите в Roblox в ${account}.\n` +
+    `2. Откройте ${link} и найдите строку ${b(fmt, "Pending Robux")}.\n\n` +
     `⚠️ Строка Pending Robux есть у всех — важно ${b(fmt, "число")} в ней. ` +
     `Там должно быть ${b(fmt, c.amount ? `не меньше ${c.amount}` : "не меньше суммы заказа")}, а не 0.\n\n` +
-    `Какое число видишь?`
+    `Какое число видите?`
   );
 }
 
@@ -226,8 +226,8 @@ export function selfCheckButtons(c: SelfCheckContext = {}): { enough: string; lo
 /** «В Pending номинал или больше» — значит всё на месте, ждать Roblox. */
 export function robuxPendingSeenText(fmt: RobuxEtaFormat): string {
   return (
-    `✅ ${b(fmt, "Значит, всё в порядке — робуксы на твоём аккаунте.")}\n\n` +
-    `Число в Pending Robux — это твои робуксы. С нашей стороны всё сделано, дальше решает Roblox: ` +
+    `✅ ${b(fmt, "Значит, всё в порядке — робуксы на вашем аккаунте.")}\n\n` +
+    `Число в Pending Robux — это ваши робуксы. С нашей стороны всё сделано, дальше решает Roblox: ` +
     `когда перевести их на баланс, он определяет сам, и ускорить это не может ни наша поддержка, ни мы.\n\n` +
     `Ничего делать не нужно: как только Roblox их отпустит, робуксы сами появятся на балансе.\n\n` +
     `${confirmHintLine(fmt)}\n\n` +
@@ -240,8 +240,8 @@ export function robuxPendingWhereText(fmt: RobuxEtaFormat, c: SelfCheckContext =
   const link = fmt === "html" ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>` : ROBLOX_TRANSACTIONS_URL;
   return (
     `📍 ${b(fmt, "Где искать")}\n\n` +
-    `• Открой ${link} в браузере (в приложении Roblox этой страницы нет).\n` +
-    `• Войди в аккаунт ${c.robloxUsername ? b(fmt, c.robloxUsername) : "заказа"}.\n` +
+    `• Откройте ${link} в браузере (в приложении Roblox этой страницы нет).\n` +
+    `• Войдите в аккаунт ${c.robloxUsername ? b(fmt, c.robloxUsername) : "заказа"}.\n` +
     `• Вкладка ${b(fmt, "Summary")} → в таблице строка ${b(fmt, "Pending Robux")}, справа число.\n\n` +
     `Скриншот с подсказкой — на странице: ${PENDING_INFO_URL}\n\n` +
     `Нашёл? Какое там число?`
@@ -267,19 +267,19 @@ export function intakeNeedsScreenshot(contextKey: string | null | undefined): bo
 /** Просьба о скриншоте после «меньше номинала». */
 export function robuxScreenshotRequestText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}): string {
   return (
-    `📸 ${b(fmt, "Пришли скриншот страницы Transactions")} — одним фото, сюда в чат.\n\n` +
+    `📸 ${b(fmt, "Пришлите скриншот страницы Transactions")} — одним фото, сюда в чат.\n\n` +
     `На скрине должны быть видны:\n` +
     `• строка ${b(fmt, "Pending Robux")} с числом;\n` +
     `• ник аккаунта${c.robloxUsername ? ` (${c.robloxUsername})` : ""} в правом верхнем углу.\n\n` +
     `По скрину менеджер сразу проверит выкуп и ответит по делу. Без скриншота обращение не передаётся — ` +
     `проверить «на слово» мы не можем.\n\n` +
-    `Передумал — напиши «отмена».`
+    `Передумал — напишите «отмена».`
   );
 }
 
 /** Прислал текст вместо скриншота. */
 export function robuxScreenshotRepeatText(): string {
-  return "📸 Нужен именно скриншот страницы Transactions (фото, не текст) — с ним менеджер сразу проверит выкуп. Пришли его сюда или напиши «отмена».";
+  return "📸 Нужен именно скриншот страницы Transactions (фото, не текст) — с ним менеджер сразу проверит выкуп. Пришлите его сюда или напишите «отмена».";
 }
 
 /** Короткий ответ на повторный вопрос за несколько минут: вся карточка заново
@@ -288,7 +288,7 @@ export function buildRobuxEtaShort(ordersIn: RobuxEtaOrder[], fmt: RobuxEtaForma
   if (etaOrders(ordersIn, now).length === 0) return null;
   return (
     `⏳ Всё так же: робуксы в Pending у Roblox. ${b(fmt, "С нашей стороны всё сделано")} — когда перевести их на баланс, решает Roblox.\n` +
-    `Если в строке Pending Robux нет суммы заказа — нажми «${NO_ROBUX_BUTTON}».`
+    `Если в строке Pending Robux нет суммы заказа — нажмите «${NO_ROBUX_BUTTON}».`
   );
 }
 
@@ -394,14 +394,14 @@ export function robuxSurveyText(fmt: RobuxEtaFormat, amount: number): string {
     `Roblox сейчас держит робуксы за геймпассы в статусе Pending дольше обычного — так у всех продавцов, не только у нас.\n\n` +
     `❗️ ${b(fmt, "Важно: робуксы должны быть в одном из двух мест — в Pending или уже на балансе.")} ` +
     `Если они в Pending — всё в порядке: с нашей стороны всё сделано, на баланс их переведёт сам Roblox.\n\n` +
-    `🔍 Проверь: ${link} → строка ${b(fmt, "Pending Robux")} (там должно быть ${amount} или больше) и баланс робуксов.\n\n` +
-    `Нажми, что видишь 👇`
+    `🔍 Проверьте: ${link} → строка ${b(fmt, "Pending Robux")} (там должно быть ${amount} или больше) и баланс робуксов.\n\n` +
+    `Нажмите, что видите 👇`
   );
 }
 
 /** Ответ на «✅ Уже на балансе». */
 export function robuxSurveyGotText(): string {
-  return "🙌 Отлично, робуксы дошли! Спасибо, что подтвердил — это очень важно для нас.\n\nЗахочешь ещё — в меню есть покупка напрямую, без карты WB 💎";
+  return "🙌 Отлично, робуксы дошли! Спасибо, что подтвердили — это очень важно для нас.\n\nЗахотите ещё — в меню есть покупка напрямую, без карты WB 💎";
 }
 
 // ── «Что на скриншоте?» (26.10.2026) ────────────────────────────────────────
@@ -426,10 +426,10 @@ export function photoKindQuestionText(fmt: RobuxEtaFormat): string {
 /** Ответ на «это скрин Pending / Transactions». */
 export function pendingPhotoReplyText(fmt: RobuxEtaFormat): string {
   return (
-    `👍 Спасибо! Посмотри на строку ${b(fmt, "Pending Robux")}:\n\n` +
+    `👍 Спасибо! Посмотрите на строку ${b(fmt, "Pending Robux")}:\n\n` +
     `✅ там сумма заказа или больше (или робуксы уже на балансе) — ${b(fmt, "всё в порядке")}. ` +
     `С нашей стороны всё сделано, на баланс робуксы переведёт сам Roblox.\n\n` +
-    `❌ там 0 или меньше суммы, и на балансе пусто — нажми «${NO_ROBUX_BUTTON}», проверим вместе.\n\n` +
+    `❌ там 0 или меньше суммы, и на балансе пусто — нажмите «${NO_ROBUX_BUTTON}», проверим вместе.\n\n` +
     confirmHintLine(fmt)
   );
 }
@@ -451,17 +451,17 @@ export const ROBUX_CONFIRM = { command: SURVEY_CMD.got, label: "✅ Робукс
 
 /** Строка-просьба под текстом, где стоит кнопка. */
 export function confirmHintLine(fmt: RobuxEtaFormat): string {
-  return `🙏 Когда робуксы появятся на балансе — нажми ${b(fmt, `«${ROBUX_CONFIRM.label}»`)}. Это очень важно для нас.`;
+  return `🙏 Когда робуксы появятся на балансе — нажмите ${b(fmt, `«${ROBUX_CONFIRM.label}»`)}. Это очень важно для нас.`;
 }
 
 /** Рассылка «нажми, когда поступят» (или если уже поступили). */
 export function robuxConfirmText(fmt: RobuxEtaFormat, amount: number): string {
   return (
     `💎 ${b(fmt, `Робуксы за заказ на ${amount} R$ уже на балансе?`)}\n\n` +
-    `Нажми ${b(fmt, `«${ROBUX_CONFIRM.label}»`)}, как только они появятся на балансе Roblox — или прямо сейчас, если уже появились. ` +
+    `Нажмите ${b(fmt, `«${ROBUX_CONFIRM.label}»`)}, как только они появятся на балансе Roblox — или прямо сейчас, если уже появились. ` +
     `Это очень важно для нас 🙏\n\n` +
     `Пока робуксы в ${b(fmt, "Pending")} — всё в порядке: с нашей стороны всё сделано, на баланс их переведёт сам Roblox. ` +
-    `Кнопка никуда не денется — нажми её, когда они придут.`
+    `Кнопка никуда не денется — нажмите её, когда они придут.`
   );
 }
 

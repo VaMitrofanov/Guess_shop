@@ -27,6 +27,7 @@ import {
   type FoundCodeOrder, type FoundOrder,
 } from "../shared/order-contacts";
 import { tgSend, vkSend } from "../shared/notify";
+import { effectExtra, withoutEffectOnError } from "../shared/tg-flair";
 import { card } from "./pa-ai";
 import { ocrImageText } from "../shared/pending-ocr";
 import { paRecentCustomerText, pinPaOrdersNow } from "./pa-desk-worker";
@@ -217,13 +218,19 @@ export function registerOrderContactActions(bot: Telegraf): void {
     const chatId = msg?.chat?.id;
 
     // Ответ туда же, откуда нажали: чат поддержки (через Business) или бот.
-    const reply = (html: string, keyboard?: unknown[][]) => connId
+    const sendOnce = (html: string, keyboard?: unknown[][], extra: Record<string, unknown> = {}) => connId
       ? api("sendMessage", {
           business_connection_id: connId, chat_id: chatId, text: html, parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
           ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+          ...extra,
         })
-      : ctx.reply(html, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}) } as never);
+      : ctx.reply(html, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}), ...extra } as never);
+    // ✨ З7: «нашли ваш заказ, подключили» — с конфетти 🎉; Telegram не принял эффект
+    // (бизнес-чат) — то же сообщение без него.
+    const reply = (html: string, keyboard?: unknown[][], celebrate = false) => celebrate
+      ? withoutEffectOnError(effectExtra("party"), (x) => sendOnce(html, keyboard, x)).catch(() => sendOnce(html, keyboard))
+      : sendOnce(html, keyboard);
     // Кнопки вопроса убираем, чтобы не нажали дважды.
     const dropKeyboard = () => msg?.message_id
       ? api("editMessageReplyMarkup", {
@@ -283,7 +290,7 @@ export function registerOrderContactActions(bot: Telegraf): void {
           await reply(res.reason === "own" ? blockedText("own") : "Не получилось добавить автоматически — менеджер посмотрит и ответит здесь.");
           return;
         }
-        await reply(codeAddedText(res.order));
+        await reply(codeAddedText(res.order), undefined, true);
         if (res.created) {
           const owner = res.order.user;
           const notice = codeOwnerNoticeText(res.order, { platform: "TG", label: from.first_name || label });
@@ -307,7 +314,7 @@ export function registerOrderContactActions(bot: Telegraf): void {
         return;
       }
       const inBot = !connId;
-      await reply(addedText(res.order, { inBot }), inBot ? undefined : [[{ text: "🔔 Получать уведомления", url: BOT_URL }]]);
+      await reply(addedText(res.order, { inBot }), inBot ? undefined : [[{ text: "🔔 Получать уведомления", url: BOT_URL }]], true);
       if (res.created) {
         await notifyContactOwner(res.order.user, res.order, res.contactId, { platform: "TG", label: from.first_name || label });
       }

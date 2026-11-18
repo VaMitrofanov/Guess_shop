@@ -62,7 +62,7 @@ describe("экран результата", () => {
     expect(plan.kind).toBe("empty");
     expect(screen.text).toContain("ЧТО НУЖНО СДЕЛАТЬ");
     // Список найденного не рисуется вовсе: находить было нечего.
-    expect(screen.text).not.toContain("Берём твой геймпасс");
+    expect(screen.text).not.toContain("Берём ваш геймпасс");
     expect(screenButtons(screen).map((b) => b.id)).toContain(QUEST.fork);
     expect(screenButtons(screen).map((b) => b.id)).not.toContain(QUEST.confirm);
     expectFitsVk(screen);
@@ -108,7 +108,7 @@ describe("экран выбора способа", () => {
     const screen = questForkScreen({ targets, keyEnabled: true, wbCode: "ABC1234", nick: "Nick" });
     const ids = screenButtons(screen).map((b) => b.id);
     expect(ids).toContain("url");        // инструкция
-    expect(ids).toContain(QUEST.key);    // сделаем за тебя
+    expect(ids).toContain(QUEST.key);    // сделаем за вас
     expect(ids).toContain(QUEST.passid); // уже есть
     expect(screen.text).toContain("тремя способами");
     expectFitsVk(screen);
@@ -165,7 +165,7 @@ describe("ветка ключа", () => {
   test("ВК не обещает удалить чужое сообщение — там просим удалить самому", () => {
     const vk = questKeyScreen({ targets: [{ price: 1429, amount: 1000 }], wbCode: "ABC1234", deleteBy: "user" });
     expect(vk.text).not.toContain("удалим из переписки");
-    expect(vk.text).toContain("удали сразу");
+    expect(vk.text).toContain("удалите сразу");
   });
 
   test("про хранение ключа сказано честно: храним зашифрованным", () => {

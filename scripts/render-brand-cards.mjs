@@ -60,16 +60,65 @@ p{margin:14px 0 0;font-size:30px;font-weight:600;color:#e4dcff}
   },
 };
 
+/* ── Заказы (18.11.2026, мокапы З1–З3): билет кода по номиналу, «Готовим код», «Заказ выкуплен».
+   JPEG — Telegram всё равно пережимает фото, а репозиторий не пухнет. ── */
+const TICKET = `<style>${BASE}
+.c{background:linear-gradient(135deg,#251b3f 0%,#3b2a8f 55%,#7556e8 100%)}
+.n{font-family:Unbounded,sans-serif;font-weight:800;font-size:200px;line-height:.9;letter-spacing:-.05em}
+.u{font-size:44px;font-weight:800;color:#e4dcff;margin-top:10px}
+.perf{position:absolute;left:0;right:0;bottom:0;height:34px;background:radial-gradient(circle at 24px 34px,#f4f1fb 18px,transparent 19px) repeat-x;background-size:48px 34px}
+.tag{position:absolute;right:72px;top:150px;padding:14px 26px;border-radius:999px;background:#45d6aa;color:#173f34;font-weight:800;font-size:28px;box-shadow:6px 6px 0 #251b3f}
+</style>`;
+const DENOMS = [100, 200, 800, 1000, 2000, 2500, 4500, 10000];
+for (const d of DENOMS) {
+  cards[`code-${d}`] = {
+    out: "public/brand", jpeg: true,
+    html: `${TICKET}<div class="c"><div class="ring"></div>
+<div class="top"><div>ROBLOX<b>BANK</b></div><span>ПОДАРОЧНЫЙ КОД</span></div>
+<div><div class="n">${d.toLocaleString("ru-RU").replace(/\u00a0/g, " ")}</div><div class="u">Robux</div></div>
+<div class="tag">Код готов ✓</div><div class="perf"></div></div>`,
+  };
+}
+cards["code-preparing"] = {
+  out: "public/brand", jpeg: true,
+  html: `<style>${BASE}
+.c{background:linear-gradient(135deg,#2e2a3f 0%,#4a4170 100%)}
+.bar{height:22px;border-radius:11px;background:rgba(255,255,255,.16)}.bar i{display:block;width:56%;height:22px;border-radius:11px;background:#ffd36b}
+.steps{display:flex;gap:16px;font-weight:800;font-size:28px;margin-top:22px}.steps span{padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.12)}
+.steps .ok{background:#45d6aa;color:#173f34}.steps .now{background:#ffd36b;color:#4a3200}
+</style><div class="c"><div class="ring"></div>
+<div class="top"><div>ROBLOX<b>BANK</b></div><span>ОПЛАТА ПРОШЛА</span></div>
+<h1>Готовим<br>ваш код</h1>
+<div><div class="bar"><i></i></div><div class="steps"><span class="ok">Оплата ✓</span><span class="now">Готовим код</span><span>Код у вас</span></div></div></div>`,
+};
+cards["order-done"] = {
+  out: ["public/brand", "bots/shared/assets/brand"], jpeg: true,
+  html: `<style>${BASE}
+.c{background:linear-gradient(135deg,#251b3f 0%,#3b2a8f 55%,#7556e8 100%)}
+.steps{display:flex;align-items:center;gap:0;font-weight:800;font-size:30px}
+.steps span{padding:16px 26px;border-radius:999px;background:#45d6aa;color:#173f34}.steps .p{background:#ffd36b;color:#4a3200}
+.steps i{width:30px;border-top:5px dashed #c9bcff}
+.s{position:absolute;color:#ffd36b;font-size:54px}
+</style><div class="c"><div class="ring"></div>
+<div class="s" style="left:820px;top:150px">✦</div><div class="s" style="left:990px;top:260px;font-size:36px">✦</div>
+<div class="top"><div>ROBLOX<b>BANK</b></div><span>ЗАКАЗ ВЫКУПЛЕН</span></div>
+<h1>Robux уже<br>в Roblox</h1>
+<div class="steps"><span>Код ✓</span><i></i><span>Геймпасс ✓</span><i></i><span>Выкуп ✓</span><i></i><span class="p">Pending</span></div></div>`,
+};
+
 const browser = await puppeteer.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: "new" });
 try {
   for (const [name, card] of Object.entries(cards)) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 675, deviceScaleFactor: 1 });
     await page.setContent(`<!doctype html><html><head><meta charset="utf-8">${FONTS}</head><body>${card.html}</body></html>`, { waitUntil: "networkidle0", timeout: 60_000 });
-    const dir = path.resolve(card.out);
-    mkdirSync(dir, { recursive: true });
-    await page.screenshot({ path: path.join(dir, `${name}.png`), type: "png" });
-    console.log(`${card.out}/${name}.png`);
+    for (const out of [card.out].flat()) {
+      const dir = path.resolve(out);
+      mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${name}.${card.jpeg ? "jpg" : "png"}`);
+      await page.screenshot(card.jpeg ? { path: file, type: "jpeg", quality: 86 } : { path: file, type: "png" });
+      console.log(path.relative(process.cwd(), file));
+    }
   }
 } finally {
   await browser.close();

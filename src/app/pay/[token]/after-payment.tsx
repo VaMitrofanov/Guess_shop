@@ -6,6 +6,7 @@ import { ArrowUpRight, Check, CheckCircle2, CircleAlert, Clock3, Copy, Gift, Loa
 import type { PublicCodeOrder } from "@/lib/codes/orders";
 import type { PayViewerExtras } from "./pay-client";
 import { ContactEmailCard, TelegramBindCard } from "@/components/account/telegram-bind";
+import ScratchReveal from "@/components/account/scratch-reveal";
 import styles from "./after-payment.module.css";
 
 /**
@@ -43,25 +44,20 @@ export default function AfterPayment(props: {
   const issued = view.status === "ISSUED";
   const amount = view.denomination.toLocaleString("ru-RU");
   const [code, setCode] = useState<string | null>(null);
-  const [revealing, setRevealing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [stars, setStars] = useState<number | null>(view.rating);
   const [rateError, setRateError] = useState("");
 
-  const reveal = async () => {
-    setRevealing(true);
-    try {
-      const response = await fetch("/api/codes/reveal", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId: view.publicId }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data.code) setCode(data.code);
-    } finally {
-      setRevealing(false);
-    }
+  /** Код с сервера (для скретч-слоя). Сам код в страницу заранее не кладём. */
+  const fetchCode = async (): Promise<string | null> => {
+    const response = await fetch("/api/codes/reveal", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ orderId: view.publicId }),
+    });
+    const data = await response.json().catch(() => ({}));
+    return response.ok && data.code ? String(data.code) : null;
   };
 
   const copy = async (value: string, done: (v: boolean) => void) => {
@@ -140,9 +136,8 @@ export default function AfterPayment(props: {
           ) : (
             <>
               <span className={styles.codeLabel}>Код активации · заказ {view.publicId}</span>
-              <button type="button" className={styles.revealButton} onClick={reveal} disabled={revealing}>
-                {revealing ? <Loader2 size={18} className={styles.spin} /> : null} Показать код
-              </button>
+              {/* 🎨 З5: серебристый слой стирается, как у настоящей карты. */}
+              <ScratchReveal fetchCode={fetchCode} onRevealed={setCode} />
             </>
           )
         ) : (

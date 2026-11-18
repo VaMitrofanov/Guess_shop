@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { adminGrantFor } from "@/lib/admin-grant";
 import {
   buildCustomerNotices,
-  customerOrderProgress,
   customerOrderStatus,
   orderRecordLabel,
   paymentAttemptLabel,
@@ -38,6 +37,7 @@ import {
 } from "lucide-react";
 import { ContactEmailCard, TelegramBindCard } from "@/components/account/telegram-bind";
 import ProfileProgress from "@/components/account/profile-progress";
+import OrderTimeline from "@/components/account/order-timeline";
 import SignOutAction from "@/components/auth/SignOutAction";
 import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
@@ -328,7 +328,6 @@ export default async function DashboardPage() {
   // historical draft.
   const checkoutHref = "/checkout";
   const latestActive = orders.find((order) => customerOrderStatus(order.kind, order.status).active);
-  const latestActiveProgress = latestActive ? customerOrderProgress(latestActive.kind, latestActive.status) : 0;
   const latestActiveHref = latestActive ? resumeHref(latestActive) : null;
 
   // После A1 админа делает не `User.role`, а проверенная TG-личность из
@@ -374,9 +373,8 @@ export default async function DashboardPage() {
                   <div><span className={styles.kicker}>Активный заказ · {sourceLabel(latestActive.source)}</span><h2>{latestActive.amountRobux.toLocaleString("ru-RU")} R$</h2><p>{latestActive.displayId} · {latestActive.customer ?? "Roblox-ник уточняется"}</p></div>
                   <StatusBadge kind={latestActive.kind} status={latestActive.status} />
                 </div>
-                <ol className={styles.orderProgress}>
-                  {["Оплата", "Очередь", "Выкуп", "Готово"].map((label, index) => <li key={label} className={index < latestActiveProgress ? styles.progressDone : index === latestActiveProgress ? styles.progressCurrent : ""}><span>{index < latestActiveProgress ? <CheckCircle2 size={15} /> : index + 1}</span><small>{label}</small></li>)}
-                </ol>
+                {/* 🎨 З6: шкала сверху вниз с «пульсом» на текущем шаге (те же шаги, что в закрепе бота). */}
+                <OrderTimeline source={latestActive.source} status={latestActive.status} createdAt={latestActive.createdAt} />
                 <div className={styles.activeOrderBottom}><span>Следующий шаг: <strong>{customerOrderStatus(latestActive.kind, latestActive.status).label}</strong></span>{latestActiveHref && <Link href={latestActiveHref}>Подробнее <ArrowRight size={16} /></Link>}</div>
               </section>
             )}

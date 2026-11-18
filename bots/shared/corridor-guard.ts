@@ -67,9 +67,9 @@ export async function findUnfinishedCorridorOrder(
  */
 export function corridorHoldText(order: UnfinishedCorridorOrder): string {
   return (
-    `📦 У тебя есть оплаченный заказ <b>${order.wbCode}</b> на <b>${order.amount} R$</b> — ` +
+    `📦 У вас есть оплаченный заказ <b>${order.wbCode}</b> на <b>${order.amount} R$</b> — ` +
     `он ждёт только геймпасс.\n\n` +
-    `За него ты уже заплатил на Wildberries, второй раз платить не нужно. ` +
+    `За него вы уже заплатили на Wildberries, второй раз платить не нужно. ` +
     `Давай закончим его — это пара минут, я всё покажу.`
   );
 }

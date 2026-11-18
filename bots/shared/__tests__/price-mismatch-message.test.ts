@@ -36,7 +36,7 @@ describe("priceMismatchMessage", () => {
     const text = priceMismatchMessage({ expected: 715, actual: 1430, managed: true, basePrice: 715 });
     expect(text).toContain("Managed pricing включён");
     expect(text).toContain("Цена Roblox: <b>1430 R$</b>");
-    expect(text).toContain("Твоя цена:   <b>715 R$</b>");
+    expect(text).toContain("Ваша цена:   <b>715 R$</b>");
     expect(text).toContain("Нужна:       <b>715 R$</b>");
     expect(text).not.toContain("Цена указана не та");
   });

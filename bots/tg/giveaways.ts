@@ -1,3 +1,4 @@
+import { TG_EFFECT } from "../shared/tg-flair";
 import { Markup, type Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
@@ -81,7 +82,7 @@ export function registerGiveaways(bot: Telegraf): void {
       return;
     }
     if (!channel) { await ctx.reply("TG_CHANNEL_ID не задан — некуда постить."); return; }
-    if (state.active) { await ctx.reply("Уже идёт розыгрыш — сначала дождись итогов или /giveaway_cancel."); return; }
+    if (state.active) { await ctx.reply("Уже идёт розыгрыш — сначала дождитесь итогов или /giveaway_cancel."); return; }
     const hours = Number(hoursRaw);
     const prize = prizeRaw ? Number(prizeRaw) : GIVEAWAY_DEFAULT_PRIZE;
     if (!Number.isFinite(hours) || hours < 1 || hours > 24 * 14) { await ctx.reply("Часы — от 1 до 336. Пример: /giveaway 48"); return; }
@@ -118,7 +119,7 @@ export function registerGiveaways(bot: Telegraf): void {
     const tgId = String(ctx.from?.id ?? "");
     if (!channel || !tgId) { await ctx.answerCbQuery().catch(() => undefined); return; }
     if (!(await isSubscribed(bot, channel, tgId))) {
-      await ctx.answerCbQuery("Сначала подпишись на канал — и нажми ещё раз 💜", { show_alert: true }).catch(() => undefined);
+      await ctx.answerCbQuery("Сначала подпишитесь на канал — и нажмите ещё раз 💜", { show_alert: true }).catch(() => undefined);
       return;
     }
     const name = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "Участник");
@@ -131,7 +132,7 @@ export function registerGiveaways(bot: Telegraf): void {
       return { status: "added" as const, g: joined.giveaway };
     });
     if (result.status === "over") { await ctx.answerCbQuery("Этот розыгрыш уже закончился").catch(() => undefined); return; }
-    await ctx.answerCbQuery(result.status === "added" ? "🎉 Ты участвуешь! Итоги — в канале" : "Ты уже участвуешь 💜").catch(() => undefined);
+    await ctx.answerCbQuery(result.status === "added" ? "🎉 Вы участвуете! Итоги — в канале" : "Вы уже участвуете 💜").catch(() => undefined);
     // Счётчик на кнопке — не чаще раза в 20 секунд (лимиты Telegram на правки).
     if (result.status === "added" && result.g.channelMessageId && !buttonRefresh.has(id)) {
       buttonRefresh.set(id, setTimeout(async () => {
@@ -165,6 +166,11 @@ async function finishIfDue(bot: Telegraf): Promise<void> {
   if (g.channelMessageId) {
     await bot.telegram.editMessageText(channel, g.channelMessageId, undefined, `${giveawayPostText(finished)}\n\n✅ <b>Розыгрыш завершён</b> — итоги ниже.`, { parse_mode: "HTML" }).catch(() => undefined);
   }
+  // ✨ З7: «барабан» 🎰 перед итогами — анимация Telegram, ~3 с, потом имя победителя.
+  if (winner) {
+    const spun = await bot.telegram.sendDice(channel, { emoji: "🎰", ...(g.channelMessageId ? { reply_parameters: { message_id: g.channelMessageId } } : {}) } as never).then(() => true).catch(() => false);
+    if (spun) await new Promise((resolve) => setTimeout(resolve, 3500));
+  }
   await bot.telegram.sendMessage(channel, giveawayResultText(finished), {
     parse_mode: "HTML",
     ...(g.channelMessageId ? { reply_parameters: { message_id: g.channelMessageId } } : {}),
@@ -173,8 +179,11 @@ async function finishIfDue(bot: Telegraf): Promise<void> {
   let dm = false;
   if (winner) {
     dm = await bot.telegram.sendMessage(Number(winner.tgId),
-      `🎉 <b>Ты выиграл код Roblox на ${g.prize} Robux!</b>\n\nПоздравляем! Код пришлём сюда в ближайшее время. Активировать: roblox.com/redeem.`,
-      { parse_mode: "HTML" }).then(() => true).catch(() => false);
+      `🎉 <b>Вы выиграли код Roblox на ${g.prize} Robux!</b>\n\nПоздравляем! Код пришлём сюда в ближайшее время. Активировать: roblox.com/redeem.`,
+      { parse_mode: "HTML", message_effect_id: TG_EFFECT.party } as never).then(() => true)
+      .catch(() => bot.telegram.sendMessage(Number(winner.tgId),
+        `🎉 <b>Вы выиграли код Roblox на ${g.prize} Robux!</b>\n\nПоздравляем! Код пришлём сюда в ближайшее время. Активировать: roblox.com/redeem.`,
+        { parse_mode: "HTML" }).then(() => true).catch(() => false));
   }
   const text = formatAdminNotice({
     marker: winner ? "action" : "waiting",

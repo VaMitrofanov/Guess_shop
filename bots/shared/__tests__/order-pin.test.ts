@@ -39,7 +39,7 @@ describe("syncOrderPins", () => {
     const db = mkDb([row("wait", "PENDING")]);
     const apply = jest.fn().mockResolvedValue({});
     await expect(syncOrderPins(db as never, "TG", apply)).resolves.toBe(1);
-    expect(apply.mock.calls[0][1]).toContain("очереди выкупа");
+    expect(apply.mock.calls[0][1]).toContain("▰▰▱▱ <b>выкупаем</b>");
     expect(db.orderEvent.create.mock.calls[0][0].data.payload).toMatchObject({ stage: "queue", messageId: 7 });
   });
 

@@ -64,7 +64,7 @@ async function show(ctx: Context, screen: CodesScreen, edit: boolean) {
   await ctx.reply(screen.html, extra);
 }
 
-async function sorry(ctx: Context, text = "Не получилось загрузить витрину кодов. Попробуй через минуту или напиши @RobloxBank_PA.") {
+async function sorry(ctx: Context, text = "Не получилось загрузить витрину кодов. Попробуйте через минуту или напишите @RobloxBank_PA.") {
   await ctx.reply(text, { link_preview_options: { is_disabled: true } });
 }
 
@@ -120,7 +120,7 @@ export function registerCodesShop(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     const result = await botAttachReferral("TG", tgId, code).catch(() => null);
     if (result === "attached") {
-      await ctx.reply("🤝 Тебя пригласил друг — добро пожаловать! Ниже коды Roblox: Robux сразу на баланс, а со скидкой 1% — уже сейчас.");
+      await ctx.reply("🤝 Вас пригласил друг — добро пожаловать! Ниже коды Roblox: Robux сразу на баланс, а со скидкой 1% — уже сейчас.");
     }
     await openCodesStore(ctx);
   });
@@ -142,10 +142,10 @@ export function registerCodesShop(bot: Telegraf): void {
   bot.action(CODES_CB.subscribed, async (ctx) => {
     const view = await botCodesView("TG", String(ctx.from?.id ?? ""), true).catch(() => null);
     if (!view?.ok) {
-      await ctx.answerCbQuery("Не получилось проверить — попробуй через минуту").catch(() => undefined);
+      await ctx.answerCbQuery("Не получилось проверить — попробуйте через минуту").catch(() => undefined);
       return;
     }
-    await ctx.answerCbQuery(view.subscribed ? "✅ Подписка есть — скидка 1% уже в ценах" : "Пока не вижу подписки — подпишись и нажми ещё раз", { show_alert: !view.subscribed }).catch(() => undefined);
+    await ctx.answerCbQuery(view.subscribed ? "✅ Подписка есть — скидка 1% уже в ценах" : "Пока не вижу подписки — подпишитесь и нажмите ещё раз", { show_alert: !view.subscribed }).catch(() => undefined);
     if (view.subscribed) await show(ctx, codesStoreScreen(view, siteUrl()), true);
   });
   bot.action(CODES_PICK_RE, async (ctx) => {

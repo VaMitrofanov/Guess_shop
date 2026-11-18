@@ -27,7 +27,7 @@ describe("умный FAQ", () => {
   it("шапка показывает заказ и этап, код копируется", () => {
     const lines = faqContextLines(base, "gp", "html").join("\n");
     expect(lines).toContain("<code>ZT8BW8D</code>");
-    expect(lines).toContain("ждём твой геймпасс");
+    expect(lines).toContain("ждём ваш геймпасс");
   });
 
   it("«не тот ник» ведёт на кнопку, которая на этом этапе есть", () => {
@@ -38,11 +38,11 @@ describe("умный FAQ", () => {
 
 describe("текст ожидания Robux", () => {
   it("ориентир есть, дат и отсчёта нет, виновата механика игры", () => {
-    const t = robuxWaitText("ty");
+    const t = robuxWaitText("vy");
     expect(t).toContain("до 30 дней");
     expect(t).toContain("внутренняя механика");
     expect(t).toContain("перевод на проверке");
-    expect(t).toContain("твоём аккаунте");
+    expect(t).toContain("вашем аккаунте");
     expect(t).not.toMatch(/осталось|до \d+ (ноября|декабря)|через \d+/);
     expect(robuxWaitText("vy")).toContain("вашем аккаунте");
   });
