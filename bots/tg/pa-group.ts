@@ -15,6 +15,7 @@
       «📊 Сводки». По запросу — `/digest`.
    ───────────────────────────────────────────────────────────────────────── */
 
+import { NOT_FOREIGN_REVIEW } from "../shared/buyout-gate";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
@@ -226,7 +227,7 @@ async function orderInfo(code: string) {
   });
   if (!o && !dbs) return { found: false };
   const risks = await db.riskEvent.findMany({
-    where: { wbCode }, orderBy: { occurredAt: "desc" }, take: 5,
+    where: { wbCode, ...NOT_FOREIGN_REVIEW }, orderBy: { occurredAt: "desc" }, take: 5,
     select: { kind: true, stars: true, text: true, occurredAt: true, resolvedAt: true },
   });
   return {

@@ -69,6 +69,13 @@ export interface WbFeedback {
  *  отсекают и метки «плохой отзыв» в чатах поддержки. */
 export const MISATTRIBUTED_ACTOR = "авто: отзыв другого заказа (по времени заказа WB)";
 
+/** Prisma-условие «не отзыв тёзки» для чтения `RiskEvent`. Через OR, а не
+ *  `NOT`: `NOT { resolvedBy: X }` в SQL отбрасывает и строки с NULL — то есть
+ *  все неразобранные события. */
+export const NOT_FOREIGN_REVIEW: { OR: Array<{ resolvedBy: null | { not: string } }> } = {
+  OR: [{ resolvedBy: null }, { resolvedBy: { not: MISATTRIBUTED_ACTOR } }],
+};
+
 /** Окно «заказ WB → задание DBS»: задание появляется после заказа (до 8 мин
  *  в замерах 19.11.2026), чуть раньше — только из-за округления секунд. */
 export const REVIEW_ORDER_WINDOW_MS = { before: 30_000, after: 10 * 60_000 } as const;
@@ -265,6 +272,37 @@ export const GATE_ACTOR = "гейт выкупа";
 
 /** Заморозку поставил гейт по отзыву, и с тех пор её никто не перебил
  *  (заявка или человек переписывают `createdBy`/причину) — её гейт и снимает. */
+/**
+ * Отзыв, за который гейт заморозил заказ, но который по времени заказа WB —
+ * чужой (19.11.2026, WSS8CAC: заказ 19.08, заморожен 11.11 за ★1 другой
+ * «Анны» от 10.11). Ищем отзыв из причины замка — `(имя, ★N, YYYY-MM-DD)` —
+ * среди отзывов того же товара; вернёт его, только если привязка по времени
+ * известна, указывает НЕ на этот заказ и своего плохого отзыва у заказа нет.
+ * Нужен потому, что у таких замков бывает нет записи в «Рисках», и разбор по
+ * событиям (`releaseMisattributed`) их не видит.
+ */
+export function foreignReviewOfHold(order: GateOrder, reason: string, feedbacks: WbFeedback[]): WbFeedback | null {
+  if (!reason.startsWith(BAD_REVIEW_REASON_HEAD) || !order.nmId) return null;
+  const m = reason.match(/\(([^,()]*), ★(\d), (\d{4}-\d{2}-\d{2})\)/);
+  if (!m) return null;
+  const [, name, stars, day] = m;
+  if (matchBadReview(order, feedbacks)) return null;
+  const same = feedbacks.filter((f) => feedbackNmId(f) === order.nmId
+    && Number(f.productValuation ?? 0) === Number(stars)
+    && String(f.createdDate ?? "").slice(0, 10) === day);
+  const named = same.filter((f) => normalizeName(f.userName) === normalizeName(name));
+  const pool = named.length > 0 ? named : same;
+  if (pool.length === 0) return null;
+  // Правка отзыва даёт вторую версию с тем же временем заказа — это один
+  // отзыв. Разные привязки у кандидатов — не угадываем, замок не трогаем.
+  const key = (f: WbFeedback) => (f.orderCodes ? [...f.orderCodes].sort().join(",") : null);
+  const first = key(pool[0]);
+  if (first === null || pool.some((f) => key(f) !== first)) return null;
+  const f = pool[0];
+  // Пустая привязка = заказа автора у нас нет в окне; этим заказом он точно не был.
+  return f.orderCodes && !f.orderCodes.includes(order.wbCode) ? f : null;
+}
+
 export function isGateReviewHold(hold: { reason: string; createdBy: string }): boolean {
   return hold.createdBy === GATE_ACTOR && hold.reason.startsWith(BAD_REVIEW_REASON_HEAD);
 }

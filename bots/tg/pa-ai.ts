@@ -14,6 +14,7 @@
    скажет «устарело» — открыть чат и ответить руками.
    ───────────────────────────────────────────────────────────────────────── */
 
+import { NOT_FOREIGN_REVIEW } from "../shared/buyout-gate";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { Telegraf } from "telegraf";
@@ -211,7 +212,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     : [];
   const wbNotes = orders.length
     ? (await db.riskEvent.findMany({
-        where: { wbCode: { in: orders.map((o) => o.wbCode) }, kind: { in: ["BAD_REVIEW", "REVIEW_FIXED", "REVIEW_DELETED", "CLAIM_OPENED", "REFUND_OPEN", "REFUND_AFTER_DELIVERY"] } },
+        where: { wbCode: { in: orders.map((o) => o.wbCode) }, ...NOT_FOREIGN_REVIEW, kind: { in: ["BAD_REVIEW", "REVIEW_FIXED", "REVIEW_DELETED", "CLAIM_OPENED", "REFUND_OPEN", "REFUND_AFTER_DELIVERY"] } },
         orderBy: { occurredAt: "desc" }, take: 5,
         select: { kind: true, wbCode: true, stars: true, starsBefore: true, text: true, occurredAt: true },
       }).catch(() => [])).map((r) => {

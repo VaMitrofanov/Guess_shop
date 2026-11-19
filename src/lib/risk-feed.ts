@@ -8,6 +8,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { buyerKey } from "@/lib/order-risk";
+import { MISATTRIBUTED_ACTOR } from "../../bots/shared/buyout-gate";
 import { RISK_FEED_KINDS, RISK_FEED_KINDS_SQL, type BuyerDossier, type RiskFeed, type RiskFeedItem, type RiskState } from "@/lib/risk-feed-types";
 
 export type { BuyerDossier, RiskFeed, RiskFeedItem, RiskState } from "@/lib/risk-feed-types";
@@ -52,6 +53,10 @@ function toItem(row: RiskRow): RiskFeedItem {
   };
 }
 
+/** Отзыв тёзки, отнесённый по времени заказа WB к другому заказу (19.11.2026):
+ *  ни в ленте, ни в досье его нет — это не отзыв этого покупателя. */
+const NOT_FOREIGN_SQL = `e."resolvedBy" IS DISTINCT FROM '${MISATTRIBUTED_ACTOR.replace(/'/g, "''")}'`;
+
 const RISK_SELECT = `
   e.id, e.kind, e."wbCode", e."wbOrderId", e."buyerName", e."buyerKey", e.amount,
   e.stars, e."starsBefore", e.text, e.action, e."occurredAt", e."resolvedAt", e."resolvedBy",
@@ -61,7 +66,7 @@ const RISK_SELECT = `
 
 export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFeed> {
   const take = Math.min(200, Math.max(10, limit));
-  const where = `WHERE e.kind IN (${RISK_FEED_KINDS_SQL})${state === "open" ? ` AND e."resolvedAt" IS NULL` : ""}`;
+  const where = `WHERE e.kind IN (${RISK_FEED_KINDS_SQL}) AND ${NOT_FOREIGN_SQL}${state === "open" ? ` AND e."resolvedAt" IS NULL` : ""}`;
   const [rows, summaryRows] = await Promise.all([
     db.$queryRawUnsafe(
       `SELECT ${RISK_SELECT}
@@ -78,7 +83,7 @@ export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFe
         COUNT(*) FILTER (WHERE kind = 'REVIEW_FIXED' AND "occurredAt" > NOW() - INTERVAL '7 days')::int AS "fixed7d",
         COUNT(*) FILTER (WHERE kind = 'CLAIM_OPENED' AND "resolvedAt" IS NULL)::int AS "claimsOpen"
       FROM "RiskEvent"
-      WHERE kind = ANY(${RISK_FEED_KINDS as string[]})` as Promise<Array<RiskFeed["summary"]>>,
+      WHERE kind = ANY(${RISK_FEED_KINDS as string[]}) AND "resolvedBy" IS DISTINCT FROM ${MISATTRIBUTED_ACTOR}` as Promise<Array<RiskFeed["summary"]>>,
   ]);
   return {
     items: rows.map(toItem),
@@ -137,7 +142,7 @@ export async function loadBuyerDossier(rawKey: string): Promise<BuyerDossier | n
       `SELECT ${RISK_SELECT}
        FROM "RiskEvent" e
        LEFT JOIN "WbOrder" o ON o."wbCode" = e."wbCode"
-       WHERE e."buyerKey" = $1 AND e.kind IN (${RISK_FEED_KINDS_SQL})
+       WHERE e."buyerKey" = $1 AND e.kind IN (${RISK_FEED_KINDS_SQL}) AND ${NOT_FOREIGN_SQL}
        ORDER BY e."occurredAt" DESC
        LIMIT 60`,
       key,

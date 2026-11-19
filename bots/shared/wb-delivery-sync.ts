@@ -91,7 +91,7 @@ import {
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
 import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
-import { GATE_ACTOR, MISATTRIBUTED_ACTOR, attributeFeedbacks, isGateReviewHold, matchBadReview, matchFixedReview, reviewOrderTime, runBuyoutGate, REVIEW_ORDER_WINDOW_MS, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
+import { GATE_ACTOR, MISATTRIBUTED_ACTOR, attributeFeedbacks, foreignReviewOfHold, isGateReviewHold, matchBadReview, matchFixedReview, reviewOrderTime, runBuyoutGate, REVIEW_ORDER_WINDOW_MS, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
 import {
   autoResolveRiskEvents,
   badReviewEvent,
@@ -2337,6 +2337,7 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
       feedbacks: loaded.feedbacks,
       codes: allCodes,
       reviewHoldCodes,
+      reviewHolds: reviewHoldRows.filter(isGateReviewHold).filter((h) => dbsByCode.has(h.wbCode)),
       alreadyReleased: new Set([...res.released.map((r) => r.wbCode), ...res.releasedDeleted.map((r) => r.wbCode)]),
       toGateOrder,
     }).catch((error) => {
@@ -2550,9 +2551,21 @@ async function releaseMisattributed(db: Db, input: {
   feedbacks: WbFeedback[];
   codes: string[];
   reviewHoldCodes: Set<string>;
+  /** Замки гейта «плохой отзыв» с причиной — у заказов, чей DBS известен. */
+  reviewHolds: { wbCode: string; reason: string }[];
   alreadyReleased: Set<string>;
   toGateOrder: (code: string) => GateOrder;
 }) {
+  // Замок за чужой отзыв без записи в «Рисках» (WSS8CAC, 19.11.2026): отзыв
+  // ищем по причине замка, чей он — по времени заказа WB.
+  for (const hold of input.reviewHolds) {
+    if (input.alreadyReleased.has(hold.wbCode)) continue;
+    const foreign = foreignReviewOfHold(input.toGateOrder(hold.wbCode), hold.reason, input.feedbacks);
+    if (!foreign) continue;
+    await releaseByCode(db, { wbCode: hold.wbCode, actor: GATE_ACTOR });
+    input.alreadyReleased.add(hold.wbCode);
+    console.log(`[WbDbsSync] отзыв не этого заказа: ${hold.wbCode} → ${foreign.orderCodes?.join(", ") || "—"} (по причине замка) — гейт разморозил`);
+  }
   if (input.codes.length === 0) return;
   const byId = new Map(input.feedbacks.filter((f) => f.id).map((f) => [f.id as string, f] as const));
   const events = await db.riskEvent.findMany({

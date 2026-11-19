@@ -16,6 +16,8 @@
               и не выдаём догадку за факт.
    ───────────────────────────────────────────────────────────────────────── */
 
+import { NOT_FOREIGN_REVIEW } from "./buyout-gate";
+
 // Клиент Prisma у ботов и у сайта разный по типам — модуль принимает утиный.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -269,7 +271,8 @@ export async function buyerProfile(db: Db, userId: string) {
       : [],
     codes.length
       ? db.riskEvent.findMany({
-          where: { wbCode: { in: codes } },
+          // Отзыв тёзки, отнесённый к другому заказу (19.11.2026), — не его.
+          where: { wbCode: { in: codes }, ...NOT_FOREIGN_REVIEW },
           orderBy: { occurredAt: "desc" },
           take: 15,
           select: { kind: true, wbCode: true, stars: true, starsBefore: true, text: true, occurredAt: true, resolvedAt: true },
@@ -353,7 +356,7 @@ export async function whoIs(db: Db, query: string) {
  */
 export async function recentBadReviewsWithBuyers(db: Db, limit = 10) {
   const events = await db.riskEvent.findMany({
-    where: { kind: "BAD_REVIEW" },
+    where: { kind: "BAD_REVIEW", ...NOT_FOREIGN_REVIEW },
     orderBy: { occurredAt: "desc" },
     take: limit * 3,
     select: { wbCode: true, wbOrderId: true, buyerName: true, stars: true, text: true, occurredAt: true, resolvedAt: true, feedbackId: true },

@@ -7,6 +7,9 @@
 import {
   GATE_FREEZE_CAP,
   attributeFeedbacks,
+  foreignReviewOfHold,
+  NOT_FOREIGN_REVIEW,
+  MISATTRIBUTED_ACTOR,
   STALE_BUYOUT_DAYS,
   decideGate,
   isStaleForBuyout,
@@ -366,5 +369,59 @@ describe("attributeFeedbacks — отзыв к заказу по времени 
     expect(five.orderCodes).toEqual(["K9XZ5UL"]);
     expect(matchFixedReview(gate("K9XZ5UL"), [one, five])?.review.id).toBe("NEW");
     expect(matchFixedReview(gate("8ZJ6BRX"), [one, five])).toBeNull();
+  });
+});
+
+describe("foreignReviewOfHold — замок гейта за чужой отзыв (WSS8CAC, 19.11.2026)", () => {
+  const NM = 939574441;
+  const anna = (over: Partial<WbFeedback> = {}) => feedback({
+    id: "ANNA", userName: "Анна", productValuation: 1, productDetails: { nmId: NM },
+    createdDate: "2026-11-10T09:00:00Z", lastOrderCreatedAt: "2026-11-10T08:00:00Z", ...over,
+  });
+  const wss = order({ wbCode: "WSS8CAC", nmId: NM, buyerName: "Анна", createdAt: new Date("2026-08-19T12:43:29Z") });
+  const reason = "плохой отзыв WB (Анна, ★1, 2026-11-10) — выкуп запрещён до ручной проверки";
+
+  it("отзыв из причины по времени — другого заказа → чужой", () => {
+    const f = anna();
+    attributeFeedbacks([f], [{ code: "OTHER01", nmId: NM, at: new Date("2026-11-10T08:03:00Z"), buyerName: "Анна" }]);
+    expect(foreignReviewOfHold(wss, reason, [f])?.id).toBe("ANNA");
+  });
+
+  it("отзыв по времени этого заказа — замок остаётся", () => {
+    const f = anna({ lastOrderCreatedAt: "2026-08-19T12:43:27Z" });
+    attributeFeedbacks([f], [{ code: "WSS8CAC", nmId: NM, at: new Date("2026-08-19T12:43:29Z"), buyerName: "Анна" }]);
+    expect(foreignReviewOfHold(wss, reason, [f])).toBeNull();
+  });
+
+  it("без привязки по времени (нет lastOrderCreatedAt) — не трогаем", () => {
+    expect(foreignReviewOfHold(wss, reason, [anna({ lastOrderCreatedAt: null })])).toBeNull();
+  });
+
+  it("две версии правленого отзыва с одной привязкой — это один отзыв (живой WSS8CAC)", () => {
+    const a = anna({ id: "A1", childFeedbackId: "A2", lastOrderCreatedAt: "2026-10-19T14:44:30Z" });
+    const b = anna({ id: "A2", parentFeedbackId: "A1", lastOrderCreatedAt: "2026-10-19T14:44:30Z" });
+    attributeFeedbacks([a, b], []);
+    expect(a.orderCodes).toEqual([]);
+    expect(foreignReviewOfHold(wss, reason, [a, b])?.id).toBe("A1");
+  });
+
+  it("два разных отзыва с разной привязкой — не угадываем", () => {
+    const a = anna({ id: "A1", lastOrderCreatedAt: "2026-11-10T08:00:00Z" });
+    const b = anna({ id: "A2", lastOrderCreatedAt: "2026-08-19T12:43:27Z" });
+    attributeFeedbacks([a, b], [
+      { code: "OTHER01", nmId: NM, at: new Date("2026-11-10T08:03:00Z"), buyerName: "Анна" },
+      { code: "OTHER02", nmId: NM, at: new Date("2026-08-19T12:43:29Z"), buyerName: "Анна" },
+    ]);
+    expect(foreignReviewOfHold(wss, reason, [a, b])).toBeNull();
+  });
+
+  it("ручной замок и замок «висяк» не трогаем", () => {
+    const f = anna();
+    attributeFeedbacks([f], [{ code: "OTHER01", nmId: NM, at: new Date("2026-11-10T08:03:00Z"), buyerName: "Анна" }]);
+    expect(foreignReviewOfHold(wss, "отзыв", [f])).toBeNull();
+  });
+
+  it("NOT_FOREIGN_REVIEW оставляет неразобранные (resolvedBy = NULL)", () => {
+    expect(NOT_FOREIGN_REVIEW.OR).toEqual([{ resolvedBy: null }, { resolvedBy: { not: MISATTRIBUTED_ACTOR } }]);
   });
 });

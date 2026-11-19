@@ -6,7 +6,7 @@
  * (их единицы), оба параллельно: к загрузке карточек это не добавляет захода в
  * базу, если звать вместе с остальной обвязкой.
  */
-import { normalizeName } from "../../bots/shared/buyout-gate";
+import { MISATTRIBUTED_ACTOR, normalizeName } from "../../bots/shared/buyout-gate";
 import type { OrderRisk } from "./order-risk-types";
 
 export type { OrderRisk } from "./order-risk-types";
@@ -55,6 +55,8 @@ export async function riskInfoForCodes(db: Db, codes: string[]): Promise<Map<str
         SELECT e.kind, e.stars, e."starsBefore", e.text, e."occurredAt", e.action
         FROM "RiskEvent" e
         WHERE e."wbCode" = c.code AND e.kind IN ('BAD_REVIEW', 'REVIEW_FIXED', 'REVIEW_DELETED')
+          -- Отзыв тёзки, по времени заказа WB — чужой (19.11.2026): его не показываем.
+          AND e."resolvedBy" IS DISTINCT FROM ${MISATTRIBUTED_ACTOR}
         ORDER BY e."occurredAt" DESC
         LIMIT 1
       ) r ON true`,
