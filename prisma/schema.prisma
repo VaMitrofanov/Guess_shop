@@ -87,6 +87,7 @@ model User {
   channelCheckedAt        DateTime?
   referrals               User[]              @relation("UserReferrals")
   codeOrders              CodeOrder[]
+  codeDiscountGrants      CodeDiscountGrant[]
   wbCodes                 WbCode[]
   wbOrders                WbOrder[]
   /// Чужие заказы, к которым этот аккаунт подключён (`OrderContact`, 17.11.2026).
@@ -1692,4 +1693,25 @@ model CodeOrderContact {
 
   @@unique([codeOrderId, userId])
   @@index([userId])
+}
+
+/// 🎁 Подарочная скидка на коды (19.11.2026): извинение или компенсация от
+/// нас, одному человеку. Действует вместо обычной (берётся бо́льшая), на ОДИН
+/// оплаченный заказ кода; не оплатил — подарок остаётся. `note` — личные
+/// слова в кабинете и в боте.
+model CodeDiscountGrant {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  percent     Int
+  reason      String
+  note        String?
+  grantedBy   String
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  usedAt      DateTime?
+  usedOrderId String?   @unique
+  revokedAt   DateTime?
+
+  @@index([userId, usedAt])
 }

@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
         salesOpen: codesSalesOpen(),
         instant: codesInstantDelivery(),
         discountPercent: discount.percent,
+        giftPercent: discount.giftApplied ? discount.gift?.percent ?? 0 : 0,
         invitedCount: discount.invitedCount,
         referralCode,
         siteLink: `${appUrl()}/r/${referralCode}`,
@@ -86,6 +87,7 @@ export async function POST(req: NextRequest) {
       finalAmountKopecks: order.finalAmountKopecks,
       baseAmountKopecks: order.baseAmountKopecks,
       discountPercent: order.discountPercent,
+      giftApplied: Boolean(await prisma.codeDiscountGrant.count({ where: { usedOrderId: order.id } }).catch(() => 0)),
       payUrl: payUrlFor(order.id),
       instant: codesInstantDelivery(),
     }, { status: reused ? 200 : 201, headers: internalNoStore });

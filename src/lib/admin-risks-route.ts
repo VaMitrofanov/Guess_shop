@@ -11,12 +11,13 @@ import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-access";
-import { countOpenRisks, loadRiskFeed, setRiskResolved } from "@/lib/risk-feed";
+import { countOpenRisks, countOpenSignalOrders, loadRiskFeed, setRiskResolved } from "@/lib/risk-feed";
 
 export async function GET(req: NextRequest) {
   if (!await requireAdmin(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (req.nextUrl.searchParams.get("count") === "1") {
-    return NextResponse.json({ open: await countOpenRisks() });
+    const [open, orders] = await Promise.all([countOpenRisks(), countOpenSignalOrders()]);
+    return NextResponse.json({ open, orders });
   }
   const state = req.nextUrl.searchParams.get("state") === "all" ? "all" : "open";
   const limit = Number(req.nextUrl.searchParams.get("limit") ?? 80) || 80;

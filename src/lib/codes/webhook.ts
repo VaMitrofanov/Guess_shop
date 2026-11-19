@@ -75,6 +75,10 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
         select: { id: true, denomination: true, status: true, paidAt: true, activationCodeId: true },
       });
 
+      if (nextStatus === "CONFIRMED" && !order.paidAt) {
+        // 🎁 Подарочная скидка потрачена этой оплатой (если резерв за этим заказом).
+        await tx.codeDiscountGrant.updateMany({ where: { usedOrderId: order.id, usedAt: null }, data: { usedAt: new Date() } });
+      }
       if (nextStatus === "CONFIRMED") {
         if (order.paidAt) {
           // Второй успешный платёж по уже оплаченному заказу (старая сессия

@@ -86,6 +86,8 @@ function stripTags(html: string): string {
 
 export interface CodesViewer {
   discountPercent: number;
+  /** 🎁 Подарочная скидка от нас (19.11.2026); >0 — она и дала `discountPercent`. */
+  giftPercent?: number;
   invitedCount: number;
   /** Продажа открыта (флаг сервера). */
   salesOpen: boolean;
@@ -126,7 +128,9 @@ export function codesStoreScreen(viewer: CodesViewer, siteUrl: string): CodesScr
   lines.push("");
   const progress = codeDiscountProgress(viewer.invitedCount);
   const needsSubscribe = viewer.subscribed === false && viewer.discountPercent === 0 && Boolean(viewer.channelUrl);
-  lines.push(viewer.discountPercent > 0
+  lines.push((viewer.giftPercent ?? 0) > 0
+    ? `🎁 <b>Подарок: −${viewer.giftPercent}% на один код</b> — уже в ценах ниже. Спишется только после оплаты.`
+    : viewer.discountPercent > 0
     ? `💜 Ваша скидка <b>${viewer.discountPercent}%</b> — уже в ценах ниже${progress.next ? ` · до ${progress.next.percent}% — ещё ${progress.next.remaining} ${friendsWord(progress.next.remaining)}` : ""}`
     : needsSubscribe
       ? "📢 <b>Подпишитесь на наш канал — и скидка 1% на все коды</b>, навсегда. Розыгрыши кодов — тоже там."
@@ -175,6 +179,8 @@ function friendsWord(n: number): string {
 export function codePickScreen(input: {
   denomination: number;
   discountPercent: number;
+  /** Цену дал подарок — так и пишем, а не «ваша скидка». */
+  giftApplied?: boolean;
   instant: boolean;
   payUrl: string;
   shareUrl: string;
@@ -185,7 +191,7 @@ export function codePickScreen(input: {
   lines.push(`🎟 <b>Код на ${robux(input.denomination)} Robux</b>`);
   lines.push("");
   lines.push(quote.discountPercent > 0
-    ? `💳 К оплате: <s>${rub(quote.baseAmountKopecks)}</s> <b>${rub(quote.finalAmountKopecks)}</b> · ваша скидка ${quote.discountPercent}%`
+    ? `💳 К оплате: <s>${rub(quote.baseAmountKopecks)}</s> <b>${rub(quote.finalAmountKopecks)}</b> · ${input.giftApplied ? "🎁 подарок" : "ваша скидка"} ${quote.discountPercent}%`
     : `💳 К оплате: <b>${rub(quote.finalAmountKopecks)}</b>`);
   lines.push(input.instant
     ? "📩 Код придёт сюда, в чат, сразу после оплаты — и сохранится в кабинете на сайте."

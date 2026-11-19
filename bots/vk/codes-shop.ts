@@ -92,6 +92,7 @@ async function pickVk(ctx: MessageContext, vkUserId: number, denomination: numbe
   const screen = codePickScreen({
     denomination: order.denomination,
     discountPercent: order.discountPercent,
+    giftApplied: order.giftApplied,
     instant: order.instant,
     payUrl: order.payUrl,
     shareUrl: order.payUrl,

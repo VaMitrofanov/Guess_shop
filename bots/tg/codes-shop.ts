@@ -102,6 +102,7 @@ async function pick(ctx: Context, denomination: number): Promise<void> {
   await show(ctx, codePickScreen({
     denomination: order.denomination,
     discountPercent: order.discountPercent,
+    giftApplied: order.giftApplied,
     instant: order.instant,
     payUrl: order.payUrl,
     shareUrl: order.payUrl,

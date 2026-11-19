@@ -75,9 +75,9 @@ function normalizeEmail(email: string | null | undefined): string | null {
   return value ? value : null;
 }
 
-async function quoteFor(denomination: number, userId: string | null): Promise<CodeQuote> {
+async function quoteFor(denomination: number, userId: string | null): Promise<CodeQuote & { giftId: string | null }> {
   const discount = await viewerCodeDiscount(userId);
-  return quoteCode(denomination, discount.percent);
+  return { ...quoteCode(denomination, discount.percent), giftId: discount.giftApplied ? discount.gift?.id ?? null : null };
 }
 
 export type CodeOrderChannel = "SITE" | "TG" | "VK";
@@ -157,6 +157,14 @@ export async function createCodeOrder(input: CreateCodeOrderInput): Promise<{ or
           },
         },
       });
+      /* 🎁 Подарок резервируется за последним заказом, где он дал цену, и
+         тратится при его ОПЛАТЕ (webhook). Бросил оплату — подарок цел. */
+      if (quote.giftId) {
+        await prisma.codeDiscountGrant.updateMany({
+          where: { id: quote.giftId, usedAt: null },
+          data: { usedOrderId: order.id },
+        }).catch(() => undefined);
+      }
       return { order, token, reused: false };
     } catch (error) {
       // Коллизия publicId (32^8) — просто берём другой номер.

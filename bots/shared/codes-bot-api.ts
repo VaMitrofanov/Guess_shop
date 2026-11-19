@@ -40,6 +40,8 @@ export type BotCodesView = {
   salesOpen: boolean;
   instant: boolean;
   discountPercent: number;
+  /** 🎁 Подарочная скидка, если именно она дала `discountPercent` (19.11.2026). */
+  giftPercent?: number;
   invitedCount: number;
   referralCode: string;
   siteLink: string;
@@ -54,6 +56,8 @@ export type BotCodeOrder = {
   finalAmountKopecks: number;
   baseAmountKopecks: number;
   discountPercent: number;
+  /** Цена дана подарочной скидкой — потратится при оплате. */
+  giftApplied?: boolean;
   payUrl: string;
   instant: boolean;
 };

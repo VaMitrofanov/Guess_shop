@@ -52,6 +52,7 @@ type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" 
    поэтому prisma в клиентский бандл не попадает (значение отсюда импортировать
    нельзя). */
 import type { FilterTab } from "@/lib/order-queue";
+import SignalsBoard from "../SignalsBoard";
 import { forgetRecentSearches, loadRecentSearches, rememberRecentSearch } from "@/lib/recent-searches";
 import { buyerJourney, type JourneyEventRow, type JourneyNext } from "@/lib/buyer-journey";
 import type { BuyerStepKind } from "../../../../../bots/shared/buyer-step";
@@ -3956,7 +3957,23 @@ export default function OrdersScreen({
   // Экран открывается на «Выкупить»: это очередь, ради которой сюда заходят.
   // Прежний дефолт «В работе» был мешком из трёх разных работ и первым делом
   // требовал выбрать, чем заняться, — сегмента, который это позволял, больше нет.
-  const [filter, setFilter] = useState<FilterTab>(initialQuery ? "ALL" : (initialTab as FilterTab) || "BUYOUT");
+  const [filter, setFilter] = useState<FilterTab>(initialQuery || initialTab === "SIGNALS" ? (initialQuery ? "ALL" : "BUYOUT") : (initialTab as FilterTab) || "BUYOUT");
+  /* ⚠ «Разобрать» (19.11.2026): бывший раздел «Риски», карточка = заказ.
+     Не FilterTab — данные из ленты RiskEvent, а не из очереди заказов. */
+  const [signalsOn, setSignalsOn] = useState(!initialQuery && initialTab === "SIGNALS");
+  const [signalsCount, setSignalsCount] = useState<number | null>(null);
+  // «Разобрать» из меню «Ещё», когда «Заказы» уже открыты (экран не монтируется заново).
+  useEffect(() => {
+    if (initialTab === "SIGNALS" && !initialQuery) { setSignalsOn(true); onInitialQueryConsumed?.(); }
+  }, [initialTab, initialQuery, onInitialQueryConsumed]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/twa/risks?count=1", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive && d && typeof d.orders === "number") setSignalsCount(d.orders); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [token]);
   const [query, setQuery] = useState(initialQuery ?? "");
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   useEffect(() => { setRecentSearches(loadRecentSearches("twa")); }, []);
@@ -4118,6 +4135,7 @@ export default function OrdersScreen({
   }, [sliceId]);
 
   const selectSlice = useCallback((next: FilterTab) => {
+    setSignalsOn(false);
     setFilter(next);
     setAllView("list");
     setNarrow({});
@@ -4828,7 +4846,7 @@ export default function OrdersScreen({
           <div className="twa-slice-row">
             <div className="twa-slice-scroll twa-no-scrollbar" ref={sliceRowRef}>
             {SLICES.filter(s => s.id === sliceId || (data?.counts?.[s.id] ?? 0) > 0 || !data).map(s => {
-              const isOn = sliceId === s.id;
+              const isOn = sliceId === s.id && !signalsOn;
               return (
                 <button
                   key={s.id}
@@ -4843,6 +4861,18 @@ export default function OrdersScreen({
                 </button>
               );
             })}
+            {(signalsOn || (signalsCount ?? 0) > 0) && (
+              <button
+                type="button"
+                className={`twa-slice-tab twa-press-sm${signalsOn ? " is-on" : ""}`}
+                style={signalsOn ? { background: `${C.orange}2a`, color: C.orange } : undefined}
+                onClick={() => { haptic.select(); setSignalsOn(true); }}
+              >
+                <i style={{ background: C.orange }} />
+                Разобрать
+                <b>{signalsCount ?? 0}</b>
+              </button>
+            )}
             </div>
             <button
               type="button"
@@ -4895,6 +4925,14 @@ export default function OrdersScreen({
       </div>
 
 
+        {signalsOn && !query ? (
+          <SignalsBoard
+            token={token}
+            onCount={setSignalsCount}
+            onOpenOrder={code => { setSignalsOn(false); setQuery(code); }}
+            onOpenBuyer={name => setDossierName(name)}
+          />
+        ) : (<>
         {/* Шапка среза: сводка того среза, в котором вы стоите. Скроллится
             вместе с лентой — высоту тулбара не отбирает; при поиске её нет
             вовсе: ищут конкретный заказ, а не разбирают очередь. */}
@@ -5156,6 +5194,7 @@ export default function OrdersScreen({
             )}
           </div>
         )}
+        </>)}
       </div>
 
       {/* Шторка «Фильтры»: всё, что не является ежедневной работой. Ни одна

@@ -388,6 +388,7 @@ export default async function DashboardPage() {
     ...(codeDiscount.invitedCount > 0 ? [{ id: "friends", label: `Привёл друзей: ${codeDiscount.invitedCount}`, tone: "mint" as const }] : []),
     ...(issuedCodes.some((order) => order.deliveryMode === "GIFT") ? [{ id: "gift", label: "Дарил Robux", tone: "orange" as const }] : []),
     ...(heroStats.robux >= 10_000 ? [{ id: "10k", label: "10 000 R$ с нами", tone: "mint" as const }] : []),
+    ...(codeDiscount.gift ? [{ id: "gift-from-us", label: `🎁 Подарок −${codeDiscount.gift.percent}%`, tone: "orange" as const }] : []),
   ];
   // The checkout API chooses the latest eligible account from the signed-in
   // user's projection. A generic link cannot accidentally prefill an unpaid
@@ -421,6 +422,23 @@ export default async function DashboardPage() {
             isAdmin={isAdmin}
           />
         </Suspense>
+
+        {/* 🎁 Подарочная скидка от нас (19.11.2026, `CodeDiscountGrant`): личные
+            слова и −N% на один код. Видна, пока не потрачена оплатой. */}
+        {codeDiscount.gift && (
+          <section className={styles.giftCard} aria-label="Подарок от RobloxBank">
+            <span className={styles.giftIcon} aria-hidden="true">🎁</span>
+            <div className={styles.giftBody}>
+              <span className={styles.giftKicker}>Подарок от нас</span>
+              <strong className={styles.giftTitle}>−{codeDiscount.gift.percent}% на любой код Roblox</strong>
+              {codeDiscount.gift.note && <p className={styles.giftNote}>{codeDiscount.gift.note}</p>}
+              <span className={styles.giftMeta}>
+                Один раз, любой номинал, без срока · {codeDiscount.giftApplied ? "уже в ценах кодов" : "сработает, когда будет выгоднее вашей скидки"} · спишется только после оплаты
+              </span>
+            </div>
+            <Link href="/#codes" className={styles.giftCta}>Выбрать код</Link>
+          </section>
+        )}
 
         {latestActive && (() => {
           const step = orderStep(latestActive.status);

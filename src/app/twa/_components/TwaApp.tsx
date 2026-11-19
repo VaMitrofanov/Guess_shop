@@ -16,7 +16,6 @@ const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
 const EconomicsScreen = dynamic(() => import("./screens/EconomicsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
-const RisksScreen     = dynamic(() => import("./screens/RisksScreen"),    { ssr: false, loading: () => <ScreenSkeleton /> });
 
 function ScreenSkeleton() {
   return (
@@ -344,7 +343,7 @@ export default function TwaApp() {
       .catch(() => {});
     fetch("/api/twa/risks?count=1", { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setRisksBadge(d.open ?? 0); })
+      .then(d => { if (d) setRisksBadge(d.orders ?? d.open ?? 0); })
       .catch(() => {});
   }, [token]);
 
@@ -491,11 +490,13 @@ export default function TwaApp() {
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}
         {screen === "economics"  && <EconomicsScreen {...sp} />}
-        {screen === "risks"      && <RisksScreen     {...sp} onChanged={refreshBadge}
-          onOpenOrder={(code) => { setOrderQueryPreload(code); setOrdersTabPreload(""); setScreen("orders"); }} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} risksBadge={risksBadge} onQuick={runQuick} />
+      <BottomNav active={screen} onChange={(next) => {
+        // «Риски» с 19.11.2026 — срез «Разобрать» в «Заказах».
+        if (next === "risks") { setOrderQueryPreload(""); setOrdersTabPreload("SIGNALS"); setScreen("orders"); return; }
+        setScreen(next);
+      }} ordersBadge={ordersBadge} dbsBadge={dbsBadge} risksBadge={risksBadge} onQuick={runQuick} />
       <ToastHost />
     </div>
   );

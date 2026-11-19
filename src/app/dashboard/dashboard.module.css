@@ -148,3 +148,15 @@
 .activeSteps { --rb-text:#fff; --rb-muted:rgba(255,255,255,.78); --rb-border:rgba(255,255,255,.28); }
 .activeSteps :global(*) { color:inherit; }
 .activeSteps { color:#fff; }
+
+/* 🎁 Подарок от нас (19.11.2026) */
+.giftCard{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:18px 0 0;padding:20px;border:2px solid #7556e8;border-radius:24px;background:var(--rb-surface);box-shadow:0 12px 28px rgba(117,86,232,.16)}
+.giftIcon{flex:none;width:56px;height:56px;display:grid;place-items:center;border-radius:16px;background:#7556e8;font-size:28px}
+.giftBody{flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.giftKicker{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#7556e8}
+.giftTitle{font-family:var(--font-display),sans-serif;font-size:24px;letter-spacing:-.03em}
+.giftNote{margin:0;font-size:15px;line-height:1.5;color:var(--rb-text);white-space:pre-line}
+.giftMeta{font-size:13px;color:var(--rb-muted)}
+.giftCta{flex:none;min-height:48px;display:inline-flex;align-items:center;padding:0 22px;border-radius:14px;background:#7556e8;color:#fff;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 #45d6aa}
+.giftCta:hover{background:#6446d8}
+@media (max-width:720px){.giftCard{padding:16px;gap:12px}.giftTitle{font-size:20px}.giftCta{flex:1 1 100%;justify-content:center}}

@@ -28,7 +28,11 @@ export interface RiskFeedItem {
   occurredAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
-  order: { id: string; status: string; held: boolean } | null;
+  order: {
+    id: string; status: string; held: boolean;
+    /** С 19.11.2026 — для «Разобрать» в «Заказах»: карточка по заказу, а не по событию. */
+    nick?: string | null; amount?: number | null; source?: string | null; heldReason?: string | null;
+  } | null;
 }
 
 export interface RiskFeed {

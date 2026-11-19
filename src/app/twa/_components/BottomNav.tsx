@@ -131,7 +131,7 @@ export default function BottomNav({
           <div className="twa-more-group">Контроль</div>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("risks")}>
             <span className="twa-more-icon is-red"><ShieldAlert size={19} /></span>
-            <span><strong>Риски</strong><small>Плохие отзывы, исправления, возвраты</small></span>
+            <span><strong>Разобрать</strong><small>Отзывы, возвраты, просьбы — по заказам, в «Заказах»</small></span>
             {risksBadge > 0
               ? <b className="twa-more-badge">{risksBadge > 99 ? "99+" : risksBadge}</b>
               : <span aria-hidden="true">›</span>}

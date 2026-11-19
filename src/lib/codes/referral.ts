@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { CODE_SIGNUP_DISCOUNT_PERCENT, codeDiscountPercent, codeDiscountProgress, type CodeDiscountProgress } from "@/lib/codes-pricing";
+import { CODE_MAX_DISCOUNT_PERCENT, CODE_SIGNUP_DISCOUNT_PERCENT, codeDiscountPercent, codeDiscountProgress, type CodeDiscountProgress } from "@/lib/codes-pricing";
 import { channelSubscription, type SubscriptionCheck } from "@/lib/codes/subscription";
 
 /**
@@ -138,9 +138,40 @@ export async function countQualifiedInvites(referrerId: string): Promise<number>
   return Number(rows[0]?.n ?? 0);
 }
 
+/** 🎁 Подарочная скидка (19.11.2026, `CodeDiscountGrant`): извинение от нас. */
+export interface CodeGift {
+  id: string;
+  percent: number;
+  /** Личные слова — в кабинете и в боте. */
+  note: string | null;
+}
+
+/** Действующий подарок (не потрачен, не отозван, не истёк) — самый щедрый. */
+export async function activeCodeGift(userId: string, now = new Date()): Promise<CodeGift | null> {
+  const row = await prisma.codeDiscountGrant.findFirst({
+    where: { userId, usedAt: null, revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+    orderBy: [{ percent: "desc" }, { createdAt: "asc" }],
+    select: { id: true, percent: true, note: true },
+  }).catch(() => null);
+  if (!row) return null;
+  return { ...row, percent: Math.min(CODE_MAX_DISCOUNT_PERCENT, Math.max(0, row.percent)) };
+}
+
+/**
+ * Подарок участвует в цене, только если он щедрее обычной скидки: иначе его
+ * не на что тратить, и он ждёт заказа, где пригодится. Скидки не складываются.
+ */
+export function withGift(basePercent: number, gift: CodeGift | null): { percent: number; giftApplied: boolean } {
+  if (gift && gift.percent > basePercent) return { percent: gift.percent, giftApplied: true };
+  return { percent: basePercent, giftApplied: false };
+}
+
 export interface ViewerDiscount {
   registered: boolean;
   percent: number;
+  /** Подарок, если он есть; `giftApplied` — он и дал `percent`. */
+  gift: CodeGift | null;
+  giftApplied: boolean;
   invitedCount: number;
   progress: CodeDiscountProgress | null;
   /** Подписан ли на канал/группу и чем это можно проверить. */
@@ -157,14 +188,18 @@ export function discountWithSubscription(invitedCount: number, subscribed: boole
 }
 
 export async function viewerCodeDiscount(userId: string | null | undefined, opts: { forceSubscriptionCheck?: boolean } = {}): Promise<ViewerDiscount> {
-  if (!userId) return { registered: false, percent: 0, invitedCount: 0, progress: null, subscription: null };
-  const [invitedCount, subscription] = await Promise.all([
+  if (!userId) return { registered: false, percent: 0, gift: null, giftApplied: false, invitedCount: 0, progress: null, subscription: null };
+  const [invitedCount, subscription, gift] = await Promise.all([
     countQualifiedInvites(userId),
     channelSubscription(userId, { force: opts.forceSubscriptionCheck }),
+    activeCodeGift(userId),
   ]);
+  const priced = withGift(discountWithSubscription(invitedCount, subscription.subscribed), gift);
   return {
     registered: true,
-    percent: discountWithSubscription(invitedCount, subscription.subscribed),
+    percent: priced.percent,
+    gift,
+    giftApplied: priced.giftApplied,
     invitedCount,
     progress: codeDiscountProgress(invitedCount),
     subscription,

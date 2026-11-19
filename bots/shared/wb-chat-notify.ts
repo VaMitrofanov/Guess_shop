@@ -1,3 +1,4 @@
+import { WB_CODES_ARTICLE } from "./robux-eta";
 import type { PrismaClient } from "@prisma/client";
 import { sendBuyerChatMessage } from "./wb-delivery-api";
 import { decryptWbSecret, wbDeliveryCryptoReady } from "./wb-delivery-crypto";
@@ -90,6 +91,8 @@ export function wbChatCompletedMessage(amount: number, nick: string | null): str
     `Ваш заказ выполнен: ${amount} R$${who} отправлены через геймпасс.\n\n` +
     `${pending}\n\n` +
     `Проверить можно в Roblox: раздел Transactions, строка Pending.\n\n` +
+    `P.S. Хотите в следующий раз без ожидания — возьмите код пополнения: артикул ${WB_CODES_ARTICLE} на WB. ` +
+    `Код вводится на roblox.com/redeem, Robux сразу на балансе.\n\n` +
     `Если робуксы не появились — напишите сюда, разберёмся.`
   );
 }

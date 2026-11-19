@@ -28,7 +28,7 @@ export { fmtDateRu };
 export type CompletedButton = {
   label: string;
   /** TG callback_data и VK payload.command — одинаковые строки. */
-  command: "review_hint" | "start_direct";
+  command: "review_hint" | "start_direct" | "codes";
 };
 
 export interface CompletedMessagesInput {
@@ -92,7 +92,27 @@ const BTN_USE_BONUS: CompletedButton = { label: "💎 Использовать �
 
 const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (review-eligibility.ts)
 
+/* ⚡ Допродажа кодов после выкупа (19.11.2026, владелец): человек только что
+   узнал про Pending — самое время сказать, что можно без него. Код Roblox
+   вводится на roblox.com/redeem, Robux сразу на балансе. Срок Pending не
+   называем (правило 26.10). Кнопка открывает витрину кодов в боте. */
+const BTN_CODES: CompletedButton = { label: "⚡ Коды — без ожидания", command: "codes" };
+export const CODES_UPSELL_TG =
+  `⚡ <b>Не хотите ждать Pending в следующий раз?</b> Возьмите код Roblox: оплатили — код пришёл сюда в чат, ` +
+  `ввели на roblox.com/redeem — и Robux сразу на балансе. Без геймпасса и без заморозки.`;
+export const CODES_UPSELL_PLAIN = CODES_UPSELL_TG.replace(/<\/?b>/g, "");
+const withUpsell = (m: CompletedMessages): CompletedMessages => ({
+  ...m,
+  tgMsg2: `${m.tgMsg2}\n\n${CODES_UPSELL_TG}`,
+  vkMsg2: `${m.vkMsg2}\n\n${CODES_UPSELL_PLAIN}`,
+  buttons: [...m.buttons, BTN_CODES],
+});
+
 export function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
+  return withUpsell(buildCompletedMessagesBase(inp));
+}
+
+function buildCompletedMessagesBase(inp: CompletedMessagesInput): CompletedMessages {
   /* С 26.10.2026 — без срока и даты: Roblox стал держать Pending дольше 7 дней,
      и названный срок рождал обращения. Мысль одна: с нашей стороны всё. */
   const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

@@ -296,6 +296,18 @@ export function buildRobuxEtaShort(ordersIn: RobuxEtaOrder[], fmt: RobuxEtaForma
  * Текст для чата Wildberries: без HTML, без ссылок наружу и без кнопок — WB
  * их не любит. Вместо кнопки «проверить» — просьба прислать скриншот сюда же.
  */
+/**
+ * ⚡ Промо кодов в чате WB (19.11.2026, владелец согласовал). Только свой
+ * артикул на WB — ссылок на сайт нет (чат WB, не наша площадка). Карточка
+ * `800code` — код пополнения, выдаётся в чат того заказа. Срок Pending не
+ * называем. В публичные ответы на отзывы это НЕ ставим.
+ */
+export const WB_CODES_ARTICLE = "1447864924";
+export const WB_CODES_UPSELL =
+  `⚡ Не хотите ждать в следующий раз? У нас есть коды пополнения Roblox: код вводится на roblox.com/redeem, ` +
+  `и Robux сразу на балансе — без геймпасса и без заморозки Pending. Найдите в поиске WB артикул ${WB_CODES_ARTICLE} — ` +
+  `«Карта пополнения 800 Robux»: код пришлём в чат того заказа.`;
+
 export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaReply | null {
   const orders = etaOrders(ordersIn, now);
   if (orders.length === 0) return null;
@@ -303,9 +315,10 @@ export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new D
   return {
     text:
       `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox — в статусе Pending. Выкупили: ${fmtDateRu(completedAt)}.\n\n` +
-      `С нашей стороны всё сделано. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, ускорить это мы не можем. ${robuxWaitText("vy")}\n\n` +
+      `С нашей стороны всё сделано. Похоже, ваш аккаунт попал под дополнительную проверку Roblox — тогда он держит покупку дольше обычного. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, ускорить это мы не можем. ${robuxWaitText("vy")}\n\n` +
       `Проверить можно в Roblox: раздел Transactions, строка Pending Robux — в ней должно быть число не меньше ${amount}. ` +
-      `Если там меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.`,
+      `Если там меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.\n\n` +
+      WB_CODES_UPSELL,
   };
 }
 

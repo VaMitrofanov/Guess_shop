@@ -24,6 +24,7 @@ type RiskRow = {
   stars: number | null; starsBefore: number | null; text: string | null; action: string | null;
   occurredAt: Date; resolvedAt: Date | null; resolvedBy: string | null;
   orderId: string | null; orderStatus: string | null; heldAt: Date | null;
+  orderNick: string | null; orderAmount: number | null; orderSource: string | null; heldReason: string | null;
 };
 
 function toItem(row: RiskRow): RiskFeedItem {
@@ -43,7 +44,10 @@ function toItem(row: RiskRow): RiskFeedItem {
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
     resolvedBy: row.resolvedBy,
     order: row.orderId
-      ? { id: row.orderId, status: row.orderStatus ?? "", held: Boolean(row.heldAt) }
+      ? {
+          id: row.orderId, status: row.orderStatus ?? "", held: Boolean(row.heldAt),
+          nick: row.orderNick, amount: row.orderAmount, source: row.orderSource, heldReason: row.heldReason,
+        }
       : null,
   };
 }
@@ -51,7 +55,8 @@ function toItem(row: RiskRow): RiskFeedItem {
 const RISK_SELECT = `
   e.id, e.kind, e."wbCode", e."wbOrderId", e."buyerName", e."buyerKey", e.amount,
   e.stars, e."starsBefore", e.text, e.action, e."occurredAt", e."resolvedAt", e."resolvedBy",
-  o.id AS "orderId", o.status AS "orderStatus", o."heldAt"
+  o.id AS "orderId", o.status AS "orderStatus", o."heldAt",
+  o."robloxUsername" AS "orderNick", o.amount AS "orderAmount", o."orderSource"::text AS "orderSource", o."heldReason"
 `;
 
 export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFeed> {
@@ -79,6 +84,16 @@ export async function loadRiskFeed(state: RiskState, limit = 80): Promise<RiskFe
     items: rows.map(toItem),
     summary: summaryRows[0] ?? { open: 0, badReviews7d: 0, fixed7d: 0, claimsOpen: 0 },
   };
+}
+
+/** Заказов с открытыми сигналами — для среза «Разобрать» в «Заказах»
+ *  (событие без кода считается отдельным «заказом», как и в карточках). */
+export async function countOpenSignalOrders(): Promise<number> {
+  const rows = await db.$queryRawUnsafe(
+    `SELECT COUNT(DISTINCT COALESCE("wbCode", id))::int AS n FROM "RiskEvent"
+     WHERE "resolvedAt" IS NULL AND kind IN (${RISK_FEED_KINDS_SQL})`,
+  ) as Array<{ n: number }>;
+  return rows[0]?.n ?? 0;
 }
 
 /** Число открытых событий — для значка в навигации. */
