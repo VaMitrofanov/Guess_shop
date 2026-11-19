@@ -28,16 +28,14 @@ type Manifest = {
 };
 type Vec = { x?: number; y?: number; z?: number };
 
-/** Хеш файла 3D-модели → адрес на CDN Roblox. Старые 32-символьные хеши
- *  раскиданы по t0…t7 по XOR символов, новые («30DAY-…») — на tr. */
+/** Хеш файла 3D-модели → адрес на CDN Roblox: t0…t7 по XOR ВСЕХ символов
+ *  хеша, включая префикс «30DAY-» (проверено 19.11.2026 — на tr.rbxcdn и при
+ *  XOR только 32 символов файлы отдают 404). */
 export function rbxCdnUrl(hash: string): string {
   if (/^https:\/\//.test(hash)) return hash;
-  if (/^[0-9a-f]{32}$/i.test(hash)) {
-    let i = 31;
-    for (let t = 0; t < 32; t++) i ^= hash.charCodeAt(t);
-    return `https://t${i % 8}.rbxcdn.com/${hash}`;
-  }
-  return `https://tr.rbxcdn.com/${hash}`;
+  let i = 31;
+  for (let t = 0; t < hash.length; t++) i ^= hash.charCodeAt(t);
+  return `https://t${i % 8}.rbxcdn.com/${hash}`;
 }
 
 function strongDevice(): boolean {

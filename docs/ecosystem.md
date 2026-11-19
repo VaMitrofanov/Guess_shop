@@ -250,14 +250,16 @@ iPhone (390×844).
     охватывает и аксессуары, крылья/меч делали персонажа мелким и сдвинутым. Кадр симметричен
     вокруг центра (камера Roblox смотрит на тело), «пол» — по ногам в центральной полосе;
     tr.rbxcdn.com отдаёт CORS `*`, без него — прежние фиксированные отступы;
-  - 3D-персонаж (19.11, ждёт cookie): `ROBLOX_AVATAR_COOKIE` в env Web — `.ROBLOSECURITY` ПУСТОГО
+  - 3D-персонаж (19.11, cookie заведена в Web): `ROBLOX_AVATAR_COOKIE` в env Web — `.ROBLOSECURITY` ПУСТОГО
     служебного аккаунта (не донор). `src/lib/roblox-avatar-3d.ts` берёт у `avatar-3d` только адрес
     манифеста, `/api/account/avatar-3d` отдаёт его владельцу сессии (id — из профиля, не из запроса).
     Браузер (`avatar-3d.tsx`) сам качает obj/mtl/текстуры с `*.rbxcdn.com` (CSP connect-src) и рисует
     three.js, лениво и только на сильных устройствах (WebGL2, ≥4 ядра, ≥4 ГБ, без saveData). Режим
     «на подиуме», статично, поворот пальцем вокруг вертикали. Пока грузится и при любом сбое — 2D.
     Roblox ответил 401/403 → 3D выключается на час, алерт в тему «Система» раз в 12 ч. Проверка
-    новой cookie: `ROBLOX_AVATAR_COOKIE=… node scripts/avatar-cookie-check.mjs`. Env — runtime
+    новой cookie: `ROBLOX_AVATAR_COOKIE=… node scripts/avatar-cookie-check.mjs`. Адрес файла на CDN —
+    `t{N}.rbxcdn.com/<хеш>`, N = XOR всех символов хеша ВМЕСТЕ с префиксом `30DAY-` (от 31) по модулю 8;
+    на `tr.rbxcdn.com` и по одним 32 hex-символам — 404. Env — runtime
     (не NEXT_PUBLIC), хватает рестарта Web.
   - фон: фиолетовый, мятный, закат, небо, ночь, новый год.
   Выбранное имя пока видно только в кабинете.

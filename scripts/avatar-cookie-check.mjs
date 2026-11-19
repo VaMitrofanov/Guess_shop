@@ -20,12 +20,9 @@ const headers = { accept: "application/json", cookie: `.ROBLOSECURITY=${cookie}`
 
 function cdnUrl(hash) {
   if (/^https:\/\//.test(hash)) return hash;
-  if (/^[0-9a-f]{32}$/i.test(hash)) {
-    let i = 31;
-    for (let t = 0; t < 32; t++) i ^= hash.charCodeAt(t);
-    return `https://t${i % 8}.rbxcdn.com/${hash}`;
-  }
-  return `https://tr.rbxcdn.com/${hash}`;
+  let i = 31;
+  for (let t = 0; t < hash.length; t++) i ^= hash.charCodeAt(t);
+  return `https://t${i % 8}.rbxcdn.com/${hash}`;
 }
 
 async function probe(label, url) {
