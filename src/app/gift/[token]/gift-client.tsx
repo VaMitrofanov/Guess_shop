@@ -59,6 +59,13 @@ export default function GiftClient(props: {
   };
 
   return (
+    <div className={styles.stack}>
+    {/* Бренд (19.11.2026, владелец: «продать нас, но не навязчиво»): логотип
+        над открыткой, а предложение — только ПОСЛЕ того, как код открыт. */}
+    <Link href="/" className={styles.brand} aria-label="RobloxBank — главная">
+      <span className={styles.brandMark} aria-hidden="true">R$</span>
+      <span className={styles.brandWord}>ROBLOXBANK</span>
+    </Link>
     <article className={`${styles.card} ${styles[`theme${props.theme}`]}`} aria-labelledby="gift-title">
       <header className={styles.cover}>
         <GiftArt theme={props.theme} className={styles.art} />
@@ -100,5 +107,19 @@ export default function GiftClient(props: {
         <p className={styles.foot}>Подарок оформлен в <Link href="/">RobloxBank</Link> · вопросы — <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">@RobloxBank_PA</a></p>
       </div>
     </article>
+    {code && (
+      <aside className={styles.promo} aria-label="RobloxBank">
+        <span className={styles.brandMark} aria-hidden="true">R$</span>
+        <div className={styles.promoText}>
+          <b>Robux — сразу на баланс</b>
+          <span>Коды Roblox от RobloxBank: оплатили — код пришёл, ввели — готово. Себе или в подарок.</span>
+        </div>
+        <div className={styles.promoActions}>
+          <Link href="/#codes" className={styles.promoLink}>Посмотреть коды</Link>
+          <Link href="/?gift=1#codes" className={styles.promoGhost}>🎁 Подарить в ответ</Link>
+        </div>
+      </aside>
+    )}
+    </div>
   );
 }

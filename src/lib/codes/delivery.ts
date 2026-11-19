@@ -249,6 +249,7 @@ export function buildGiftEmail(input: {
       : "";
   const html = `<!doctype html><html lang="ru"><body style="margin:0;background:#f4f5fb;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#151827">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
+<a href="${APP_URL}" style="display:inline-block;margin:0 0 14px;text-decoration:none;color:#251b3f"><span style="display:inline-block;width:30px;height:30px;line-height:30px;border-radius:9px;background:#7556e8;color:#ffffff;font-weight:900;font-size:12px;text-align:center;vertical-align:middle;box-shadow:2px 2px 0 #45d6aa">R$</span>&nbsp;&nbsp;<span style="font-weight:900;font-size:15px;letter-spacing:-.03em;vertical-align:middle">ROBLOXBANK</span></a>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:22px;overflow:hidden">
 <tr><td style="background:${meta.from};background-image:linear-gradient(165deg,${meta.from},${meta.to});padding:0;text-align:center">
 <img src="${APP_URL}${meta.image}" width="520" alt="" style="display:block;width:100%;max-width:520px;height:auto;border:0">
