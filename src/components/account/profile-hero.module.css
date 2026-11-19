@@ -12,6 +12,12 @@
 /* У рендера Roblox прозрачные поля ~25% сверху и снизу — срезаем отступами,
    иначе персонаж висит над подиумом. */
 .figure { position:relative; z-index:1; width:100%; height:auto; margin:-16% 0 -27%; filter:drop-shadow(0 14px 20px rgba(0,0,0,.42)); }
+/* Кадр по видимым пикселям (см. PodiumFigure): коробка с пропорциями фигуры,
+   высота одна для всех персонажей, широкие (крылья) упираются в ширину слота. */
+.figureBox { position:relative; z-index:1; display:block; aspect-ratio:var(--ar); width:min(100%, calc(var(--fig-h) * var(--ar))); margin-bottom:-22px; filter:drop-shadow(0 14px 20px rgba(0,0,0,.42)); --fig-h:230px; }
+/* Без overflow:hidden: кончик крыла ниже ног ложится на подиум, а не срезается. */
+.figureCropped { position:absolute; max-width:none; height:auto; pointer-events:none; }
+.figureLoading { visibility:hidden; display:block; width:100%; }
 .podiumBase { width:72%; height:46px; border-radius:50%; background:radial-gradient(ellipse at center, rgba(255,255,255,.5), rgba(255,255,255,.12) 58%, transparent 72%); box-shadow:inset 0 0 0 2px rgba(255,255,255,.22); }
 .bustFrame, .portraitFrame { display:block; overflow:hidden; border:3px solid rgba(255,255,255,.55); background:rgba(11,9,18,.25); box-shadow:5px 5px 0 #45d6aa; }
 .bustFrame { width:230px; height:230px; border-radius:34px; align-self:center; }
@@ -89,6 +95,7 @@
   .avatarSlot { order:-1; padding:20px 16px 4px; }
   .avatarTall { padding-bottom:18px; }
   .podium { max-width:230px; }
+  .figureBox { --fig-h:180px; margin-bottom:-16px; }
   .bustFrame { width:170px; height:170px; border-radius:28px; }
   .portraitFrame { width:130px; height:130px; border-radius:26px; }
   .badgeAvatar { width:110px; height:110px; border-radius:28px; font-size:46px; }

@@ -4,7 +4,7 @@
    браузер: оптимизатор Next на RF-хосте этот домен не видит (см. roblox-avatar-renders). */
 
 import Link from "next/link";
-import { useState, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { Check, Pencil, Shield, X } from "lucide-react";
 
 import {
@@ -82,17 +82,85 @@ function Avatar({ mode, roblox, letter, alt }: { mode: AvatarMode; roblox: HeroR
     return <span className={css.badgeAvatar} aria-hidden="true">{letter}</span>;
   }
   const src = roblox[kind]!;
-  if (kind === "full") {
-    return (
-      <span className={css.podium}>
-        <img src={src} alt={alt} width={360} height={360} className={css.figure} decoding="async" onError={() => fail(src)} />
-        <span className={css.podiumBase} aria-hidden="true" />
-      </span>
-    );
-  }
+  if (kind === "full") return <PodiumFigure key={src} src={src} alt={alt} onFail={() => fail(src)} />;
   return (
     <span className={kind === "bust" ? css.bustFrame : css.portraitFrame}>
       <img src={src} alt={alt} width={240} height={240} decoding="async" onError={() => fail(src)} />
+    </span>
+  );
+}
+
+/* Рамка полного рендера Roblox — по всему телу С аксессуарами: крылья, меч,
+   хвост раздвигают её, и сам персонаж становится мелким и уезжает от центра
+   (19.11, жалоба владельца). Поэтому кадрируем по видимым пикселям: картинку
+   рисуем в маленький canvas и ищем рамку непрозрачного, по ней ставим
+   персонажа одной высоты и ногами на подиум. tr.rbxcdn.com отдаёт
+   `Access-Control-Allow-Origin: *`, так что canvas не «портится». Не вышло
+   (старый браузер, CDN без CORS) — прежние фиксированные отступы. */
+type Box = { x: number; y: number; w: number; h: number };
+
+function alphaBox(img: HTMLImageElement): Box | null {
+  const side = 160;
+  const canvas = document.createElement("canvas");
+  canvas.width = side;
+  canvas.height = side;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, side, side);
+  const { data } = ctx.getImageData(0, 0, side, side);
+  let minX = side, minY = side, maxX = -1, maxY = -1;
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      if (data[(y * side + x) * 4 + 3] > 24) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  // Камера Roblox смотрит на ТЕЛО, оно по центру кадра, а аксессуары торчат
+  // несимметрично — кадр делаем симметричным вокруг середины, иначе персонаж
+  // съезжает с подиума в сторону короткого крыла.
+  const half = Math.max(0.5 - minX / side, (maxX + 1) / side - 0.5);
+  // «Пол» — ноги: нижний непрозрачный пиксель в центральной полосе. Кончик
+  // крыла или хвоста бывает ниже ног — по нему персонаж повис бы в воздухе.
+  let ground = -1;
+  for (let y = side - 1; y >= 0 && ground < 0; y--) {
+    for (let x = Math.floor(side * 0.4); x <= Math.ceil(side * 0.6); x++) {
+      if (data[(y * side + x) * 4 + 3] > 24) { ground = y; break; }
+    }
+  }
+  if (ground <= minY) ground = maxY;
+  return { x: 0.5 - half, y: minY / side, w: 2 * half, h: (ground + 1 - minY) / side };
+}
+
+function PodiumFigure({ src, alt, onFail }: { src: string; alt: string; onFail: () => void }) {
+  const [box, setBox] = useState<Box | null | "none">(null);
+  const measure = useCallback((el: HTMLImageElement) => {
+    try {
+      setBox(alphaBox(el) ?? "none");
+    } catch {
+      setBox("none"); // canvas «испорчен» — CORS не пришёл
+    }
+  }, []);
+  // Картинка из кэша успевает загрузиться до гидратации — тогда onLoad уже
+  // не придёт, меряем сразу по ref.
+  const ref = useCallback((el: HTMLImageElement | null) => {
+    if (el?.complete && el.naturalWidth > 0) measure(el);
+  }, [measure]);
+  const img = (
+    <img src={src} alt={alt} width={720} height={720} crossOrigin="anonymous" decoding="async" ref={ref} onLoad={(e) => measure(e.currentTarget)} onError={onFail}
+      className={box && box !== "none" ? css.figureCropped : css.figure}
+      style={box && box !== "none" ? { width: `${100 / box.w}%`, left: `${(-box.x / box.w) * 100}%`, top: `${(-box.y / box.h) * 100}%` } : undefined} />
+  );
+  return (
+    <span className={css.podium}>
+      {box && box !== "none"
+        ? <span className={css.figureBox} style={{ "--ar": box.w / box.h } as CSSProperties}>{img}</span>
+        : <span className={box === null ? css.figureLoading : undefined}>{img}</span>}
+      <span className={css.podiumBase} aria-hidden="true" />
     </span>
   );
 }
