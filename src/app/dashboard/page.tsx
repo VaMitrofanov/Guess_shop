@@ -49,6 +49,7 @@ import { continueHref } from "@/lib/active-order";
 import { listRobloxApiKeys } from "@/lib/roblox-api-key-store";
 import { gamepassAutocreateEnabled } from "@/lib/gamepass-autocreate-flag";
 import { CodesDashboard, ReferralCard, type DashboardCodeOrder } from "@/components/codes-dashboard";
+import { giftLinksFor } from "@/lib/codes/gift-share";
 import { buyersWord, ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
 import { claimReferralFromCookies } from "@/lib/codes/http";
 import { offerExpired, payTokenFor } from "@/lib/codes/orders";
@@ -314,7 +315,7 @@ export default async function DashboardPage() {
       select: {
         id: true, publicId: true, denomination: true, finalAmountKopecks: true, discountPercent: true,
         status: true, createdAt: true, offerExpiresAt: true, paidAt: true, emailSentAt: true,
-        deliveryMode: true, giftTo: true,
+        deliveryMode: true, giftTo: true, giftOpenTokenHash: true, giftOpenedAt: true, revealedAt: true,
       },
     }),
     ensureReferralCode(userId).catch(() => null),
@@ -323,6 +324,8 @@ export default async function DashboardPage() {
   if (!user) redirect("/login");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
+  // 🎁 Ссылки на подарки (при покупке и «Подарить» из кабинета, 19.11.2026).
+  const giftLinks = await giftLinksFor(codeOrders).catch(() => new Map<string, string>());
   const dashboardCodes: DashboardCodeOrder[] = codeOrders.map((order) => ({
     publicId: order.publicId,
     denomination: order.denomination,
@@ -335,6 +338,11 @@ export default async function DashboardPage() {
     emailSent: Boolean(order.emailSentAt),
     canEmail: order.deliveryMode === "GIFT" || Boolean(user.email && user.emailVerifiedAt),
     gift: order.deliveryMode === "GIFT" ? { to: order.giftTo } : null,
+    revealed: Boolean(order.revealedAt),
+    giftLink: giftLinks.get(order.id) ?? null,
+    shared: order.deliveryMode !== "GIFT" && order.giftOpenTokenHash
+      ? { to: order.giftTo, opened: Boolean(order.giftOpenedAt) }
+      : null,
   }));
   const referral = referralCode && codeDiscount.progress ? {
     link: `${appUrl}/r/${referralCode}`,

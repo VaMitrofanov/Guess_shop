@@ -47,3 +47,49 @@
 :global(html[data-theme="dark"]) .bad { background:#3a1621; color:#ffb3c4; }
 :global(html[data-theme="dark"]) .redeem,
 :global(html[data-theme="dark"]) .redeemButton { background:#7556e8; }
+
+/* 🎁 «Подарить» купленный код (19.11.2026) */
+.giftButton { min-height:44px; padding:0 14px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:0; border-radius:12px; background:#7556e8; color:#fff; font:inherit; font-size:14.5px; font-weight:850; cursor:pointer; box-shadow:3px 3px 0 #45d6aa; }
+.giftButton:focus-visible,.linkButton:focus-visible,.themeCard:focus-visible,.giftSubmit:focus-visible,.messenger:focus-visible { outline:3px solid #45d6aa; outline-offset:2px; }
+.giftForm,.giftPanel { margin-top:12px; padding:14px; border-radius:14px; background:var(--rb-surface); border:1px solid var(--rb-border); display:flex; flex-direction:column; gap:12px; }
+.giftPanel { background:var(--rb-accent-soft); }
+.row,.giftForm,.giftPanel,.giftForm > *,.giftPanel > * { min-width:0; }
+.giftPanel .refLink { max-width:100%; box-sizing:border-box; }
+.giftFormHead { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:17px; }
+.giftPanelTitle { display:flex; align-items:center; gap:8px; font-size:16px; color:var(--rb-text); }
+.giftWarn { margin:0; padding:10px 12px; border-radius:10px; background:#fff6df; color:#7a5a0e; font-size:14px; line-height:1.45; }
+.themes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.themeCard { min-height:64px; padding:8px; border:0; border-radius:14px; color:#fff; font:inherit; font-size:13.5px; font-weight:850; cursor:pointer; display:flex; align-items:flex-end; text-align:left; }
+.themeBIRTHDAY { background:linear-gradient(150deg,#ff6aa8,#7556e8); }
+.themeNEW_YEAR { background:linear-gradient(150deg,#1d5a9e,#0b1f3d); }
+.themeJUST { background:linear-gradient(150deg,#ffb35c,#ff6a3d); }
+.themeOn { outline:3px solid var(--rb-text); outline-offset:2px; }
+.giftGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.field { display:flex; flex-direction:column; gap:5px; font-size:13.5px; font-weight:750; color:var(--rb-muted); }
+.field input,.field textarea { min-height:46px; box-sizing:border-box; padding:10px 12px; border:1px solid var(--rb-border); border-radius:12px; background:var(--rb-surface); color:var(--rb-text); font:inherit; font-size:16px; font-weight:500; resize:none; }
+.field input:focus-visible,.field textarea:focus-visible { outline:2px solid #7556e8; outline-offset:1px; }
+.fieldError { margin:0; color:#b3261e; font-size:13.5px; font-weight:700; }
+.methods { margin:0; padding:0; border:0; display:flex; flex-direction:column; gap:8px; }
+.methods legend { margin-bottom:6px; padding:0; font-size:14px; font-weight:850; color:var(--rb-text); }
+.method,.methodOn { display:flex; gap:10px; align-items:flex-start; padding:12px; border-radius:14px; border:1px solid var(--rb-border); cursor:pointer; }
+.methodOn { border:2px solid #7556e8; background:var(--rb-accent-soft); }
+.method input,.methodOn input { margin-top:3px; accent-color:#7556e8; }
+.method span,.methodOn span { display:flex; flex-direction:column; gap:2px; }
+.method b,.methodOn b { font-size:15px; color:var(--rb-text); }
+.method small,.methodOn small { font-size:13.5px; color:var(--rb-muted); }
+.giftSubmit { min-height:52px; border:0; border-radius:14px; background:#7556e8; color:#fff; font:inherit; font-size:16px; font-weight:850; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; box-shadow:3px 3px 0 #45d6aa; }
+.giftSubmit:disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
+.giftHint { margin:0; color:var(--rb-muted); font-size:13.5px; line-height:1.45; }
+.linkButton { min-height:44px; padding:0 4px; border:0; background:none; color:var(--rb-accent); font:inherit; font-size:14px; font-weight:850; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+.linkButton:disabled { opacity:.5; }
+.shareRow { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.shareRow3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.shareRow > * { min-width:0; }
+.messenger { min-height:44px; display:grid; place-items:center; border-radius:12px; color:#fff; text-decoration:none; font-size:14px; font-weight:800; }
+.tg { background:#229ed9; }
+.wa { background:#1f9e5a; }
+.vk { background:#0077ff; }
+.giftOpened { margin:12px 0 0; padding:12px; border-radius:12px; background:var(--rb-accent-soft); color:var(--rb-text); font-size:14.5px; font-weight:750; display:flex; align-items:center; gap:8px; }
+:global(html[data-theme="dark"]) .giftWarn { background:#2c2410; color:#f3dc95; }
+@media (max-width:380px) { .giftGrid { grid-template-columns:1fr; } }
+.giftPanel svg,.giftForm svg,.giftButton svg,.linkButton svg,.giftOpened svg { flex:none; }

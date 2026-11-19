@@ -20,9 +20,14 @@ export async function POST(req: NextRequest) {
 
   const order = await prisma.codeOrder.findFirst({
     where: { publicId: body.orderId, creatorUserId: userId, status: "ISSUED" },
-    select: { id: true, revealedAt: true, activationCode: { select: { encryptedValue: true } } },
+    select: { id: true, revealedAt: true, deliveryMode: true, giftOpenTokenHash: true, activationCode: { select: { encryptedValue: true } } },
   });
   if (!order?.activationCode) return NextResponse.json({ error: "Заказ не найден." }, { status: 404 });
+  // Подаренный из кабинета код открывает получатель (19.11.2026): иначе его
+  // легко ввести самому и подарить «пустышку». «Вернуть себе» снимает запрет.
+  if (order.deliveryMode !== "GIFT" && order.giftOpenTokenHash) {
+    return NextResponse.json({ error: "Этот код подарен — его откроет получатель. Чтобы забрать, нажмите «Вернуть себе»." }, { status: 409 });
+  }
   let code: string;
   try {
     code = decryptActivationCode(order.activationCode.encryptedValue);

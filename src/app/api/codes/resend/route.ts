@@ -29,6 +29,9 @@ export async function POST(req: NextRequest) {
     }
   }
   if (!orderId) return NextResponse.json({ error: "Заказ не найден." }, { status: 404 });
+  // Подаренный из кабинета код письмом себе не шлём (19.11.2026) — его откроет получатель.
+  const shared = await prisma.codeOrder.findFirst({ where: { id: orderId, deliveryMode: { not: "GIFT" }, giftOpenTokenHash: { not: null } }, select: { id: true } });
+  if (shared) return NextResponse.json({ error: "Этот код подарен — его откроет получатель." }, { status: 409 });
 
   const result = await sendCodeEmail(orderId, "resend");
   const order = await prisma.codeOrder.findUnique({
