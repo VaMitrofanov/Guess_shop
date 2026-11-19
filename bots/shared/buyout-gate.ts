@@ -9,10 +9,15 @@
    Правило 1 — «плохой отзыв до выкупа → не выкупать». Покупатель, оставивший
    на Wildberries отзыв на 1–3 звезды по нашему товару, выкуп не получает:
    деньги ему уже, по сути, вернут, а мы бы потратили робуксы донора впустую.
-   Совпадение — по имени покупателя + тому же `nmId` + оценке ≤3, и отзыв не
-   раньше заказа (минус запас в 3 дня на часовые пояса WB). Имя на WB не уникально,
-   поэтому это «замок с предупреждением»: заморозку всегда можно снять руками, но
-   по умолчанию такой заказ выкупать нельзя.
+
+   Чей отзыв — с 19.11.2026 решает ВРЕМЯ ЗАКАЗА, а не имя. WB кладёт в отзыв
+   `lastOrderCreatedAt` — момент заказа автора; задание DBS появляется через
+   0–8 минут после него (замер по 400 отзывам: 163 из 186 — одно совпадение,
+   в 18 спорных ближайший по времени всегда верный). Раньше сверяли имя +
+   `nmId` + дату — и ★1 одной «Кристины» заморозила заказ другой (8ZJ6BRX ↔
+   K9XZ5UL), а «аринка»/«rina», «Шевченко Вова»/«Шевченко» не находились вовсе.
+   Имя осталось двум случаям: развести заказы одной секунды и отзыв без времени
+   заказа (WB его пока отдаёт всегда).
 
    Правило 2 — «старый висяк без ответа → сначала подтверждение». Заказ, который
    висит дольше `STALE_BUYOUT_DAYS` и до сих пор не выкуплен, замораживается до
@@ -53,6 +58,96 @@ export interface WbFeedback {
    *  у новой `parentFeedbackId`. Решает только последняя версия. */
   parentFeedbackId?: string | null;
   childFeedbackId?: string | null;
+  /** Момент заказа автора отзыва по часам WB (ISO, UTC). */
+  lastOrderCreatedAt?: string | null;
+  /** Коды наших заказов, к которым отзыв отнесён по времени заказа
+   *  (`attributeFeedbacks`). Есть поле — решает только оно, имя не смотрим. */
+  orderCodes?: string[];
+}
+
+/** Кто разбирает записи «Рисков», приписанные тёзке: по этой подписи их
+ *  отсекают и метки «плохой отзыв» в чатах поддержки. */
+export const MISATTRIBUTED_ACTOR = "авто: отзыв другого заказа (по времени заказа WB)";
+
+/** Окно «заказ WB → задание DBS»: задание появляется после заказа (до 8 мин
+ *  в замерах 19.11.2026), чуть раньше — только из-за округления секунд. */
+export const REVIEW_ORDER_WINDOW_MS = { before: 30_000, after: 10 * 60_000 } as const;
+/** Заказы одной корзины создаются в одну-две секунды — это один покупатель. */
+const SAME_CART_MS = 2_000;
+
+/** Время заказа автора отзыва или `null` (нет, «0001-01-01», мусор). */
+export function reviewOrderTime(f: WbFeedback): number | null {
+  const raw = f.lastOrderCreatedAt;
+  if (!raw) return null;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) && t > Date.UTC(2020, 0, 1) ? t : null;
+}
+
+/** Заказ DBS, к которому может относиться отзыв. Кандидатами должны быть ВСЕ
+ *  заказы по товару, включая закрытые и без кода, — иначе «ближайшим» окажется
+ *  чужой заказ, когда настоящий не попал в выборку. */
+export interface ReviewOrderCandidate {
+  code: string | null;
+  nmId: number | null;
+  at: Date;
+  buyerName: string | null;
+}
+
+function feedbackNmId(f: WbFeedback): number {
+  return Number(f.productDetails?.nmId ?? f.nmId ?? 0);
+}
+
+function sameFirstName(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = normalizeName(a).split(" ")[0] ?? "";
+  const y = normalizeName(b).split(" ")[0] ?? "";
+  return x.length >= 2 && y.length >= 2 && (x.startsWith(y) || y.startsWith(x));
+}
+
+/**
+ * Проставляет каждому отзыву `orderCodes` — заказы, к которым он относится по
+ * времени заказа WB. Ближайшее задание DBS того же товара в окне; задания той
+ * же секунды — одна корзина, берём все (при разных именах — совпавшее с
+ * автором). Отзыв без времени заказа поле не получает и сверяется по-старому.
+ * Правленые версии наследуют привязку по цепочке parent/child.
+ */
+export function attributeFeedbacks(feedbacks: WbFeedback[], candidates: ReviewOrderCandidate[]): void {
+  const byNm = new Map<number, ReviewOrderCandidate[]>();
+  for (const c of candidates) {
+    if (!c.nmId) continue;
+    const list = byNm.get(c.nmId) ?? [];
+    list.push(c);
+    byNm.set(c.nmId, list);
+  }
+  for (const f of feedbacks) {
+    const at = reviewOrderTime(f);
+    if (at === null) continue;
+    const inWindow = (byNm.get(feedbackNmId(f)) ?? [])
+      .map((c) => ({ c, d: c.at.getTime() - at }))
+      .filter(({ d }) => d >= -REVIEW_ORDER_WINDOW_MS.before && d <= REVIEW_ORDER_WINDOW_MS.after);
+    if (inWindow.length === 0) { f.orderCodes = []; continue; }
+    const best = Math.min(...inWindow.map(({ d }) => Math.abs(d)));
+    let cart = inWindow.filter(({ d }) => Math.abs(d) - best <= SAME_CART_MS).map(({ c }) => c);
+    if (cart.length > 1) {
+      const named = cart.filter((c) => sameFirstName(c.buyerName, f.userName));
+      if (named.length > 0 && named.length < cart.length) cart = named;
+    }
+    f.orderCodes = [...new Set(cart.map((c) => c.code).filter((c): c is string => Boolean(c)))];
+  }
+  // Версия без времени заказа берёт привязку у соседей по цепочке правок.
+  const byId = indexById(feedbacks);
+  for (const f of feedbacks) {
+    if (f.orderCodes) continue;
+    const seen = new Set<string>();
+    for (const dir of ["parentFeedbackId", "childFeedbackId"] as const) {
+      let cur = f[dir] ? byId.get(f[dir] as string) : undefined;
+      for (let hops = 0; cur && hops < 20 && !f.orderCodes; hops += 1) {
+        if (cur.id && seen.has(cur.id)) break;
+        if (cur.id) seen.add(cur.id);
+        if (cur.orderCodes) f.orderCodes = cur.orderCodes;
+        cur = cur[dir] ? byId.get(cur[dir] as string) : undefined;
+      }
+    }
+  }
 }
 
 /** Заказ в терминах, которые нужны гейту (склеены из `WbOrder` + DBS-карточки). */
@@ -101,16 +196,17 @@ function indexById(feedbacks: WbFeedback[]): Map<string, WbFeedback> {
   return byId;
 }
 
-/** Отзывы покупателя этого заказа (имя + товар + не раньше заказа −3 дня),
- *  только последние версии. Пусто, если сверять не с чем (не-DBS заказ). */
+/** Отзывы покупателя этого заказа, только последние версии. Отнесённые по
+ *  времени заказа (`orderCodes`) — только к своему коду; без времени заказа —
+ *  по-старому: имя + товар + не раньше заказа −3 дня. */
 function buyerCurrentReviews(order: GateOrder, feedbacks: WbFeedback[], byId: Map<string, WbFeedback>): WbFeedback[] {
-  if (!order.nmId || !order.buyerName) return [];
   const name = normalizeName(order.buyerName);
-  if (name.length < 2) return [];
   const floor = order.createdAt.getTime() - 3 * 86_400_000;
   return feedbacks.filter((f) => {
     if (!isCurrentVersion(f, byId)) return false;
-    if (Number(f.productDetails?.nmId ?? f.nmId ?? 0) !== order.nmId) return false;
+    if (f.orderCodes) return f.orderCodes.includes(order.wbCode);
+    if (!order.nmId || name.length < 2) return false;
+    if (feedbackNmId(f) !== order.nmId) return false;
     if (normalizeName(f.userName) !== name) return false;
     const dt = f.createdDate ? Date.parse(f.createdDate) : NaN;
     return !(Number.isFinite(dt) && dt < floor);
@@ -201,7 +297,7 @@ export function decideGate(order: GateOrder, feedbacks: WbFeedback[], now: numbe
       wbCode: order.wbCode,
       rule: "bad_review",
       review: bad,
-      reason: `${BAD_REVIEW_REASON_HEAD} (${order.buyerName}, ★${stars}, ${when}) — выкуп запрещён до ручной проверки`,
+      reason: `${BAD_REVIEW_REASON_HEAD} (${order.buyerName || bad.userName?.trim() || "покупатель"}, ★${stars}, ${when}) — выкуп запрещён до ручной проверки`,
     };
   }
   if (order.staleCheck !== false && isStaleForBuyout(order.createdAt, now)) {

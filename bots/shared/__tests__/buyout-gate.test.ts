@@ -6,6 +6,7 @@
 
 import {
   GATE_FREEZE_CAP,
+  attributeFeedbacks,
   STALE_BUYOUT_DAYS,
   decideGate,
   isStaleForBuyout,
@@ -281,5 +282,89 @@ describe("удалённый отзыв", () => {
     expect(released).toEqual(["AAAAAAA"]);
     expect(res.released).toHaveLength(1);
     expect(res.releasedDeleted).toEqual([]);
+  });
+});
+
+/* 19.11.2026: чей отзыв — по времени заказа WB, а не по имени. Данные — живой
+   случай: ★1 «Кристины» (заказ WB 08.11 08:17:49) заморозила и 8ZJ6BRX
+   другой Кристины (заказ 07.11). */
+describe("attributeFeedbacks — отзыв к заказу по времени заказа WB", () => {
+  const NM = 967447850;
+  const cand = (code: string | null, at: string, buyerName: string | null = null, nmId = NM) =>
+    ({ code, nmId, at: new Date(at), buyerName });
+  const kristinaOrders = [
+    cand("8ZJ6BRX", "2026-11-07T06:50:47Z", "Кристина"),
+    cand("WJ3VUEY", "2026-11-08T08:03:44Z", "Ксения"),
+    cand("K9XZ5UL", "2026-11-08T08:17:51Z", "Кристина"),
+  ];
+  const review = (over: Partial<WbFeedback> = {}) => feedback({
+    id: "FY", userName: "Кристина", productDetails: { nmId: NM },
+    createdDate: "2026-11-08T11:58:01Z", lastOrderCreatedAt: "2026-11-08T08:17:49Z", ...over,
+  });
+  const gate = (wbCode: string, createdAt = "2026-11-07T06:56:46Z") =>
+    order({ wbCode, nmId: NM, buyerName: "Кристина", createdAt: new Date(createdAt) });
+
+  it("тёзка с другим заказом отзыв не получает — только автор", () => {
+    const f = review();
+    attributeFeedbacks([f], kristinaOrders);
+    expect(f.orderCodes).toEqual(["K9XZ5UL"]);
+    expect(matchBadReview(gate("8ZJ6BRX"), [f])).toBeNull();
+    expect(matchBadReview(gate("K9XZ5UL", "2026-11-08T08:53:55Z"), [f])?.id).toBe("FY");
+  });
+
+  it("имя в отзыве и в чате разное — заказ всё равно находится", () => {
+    const f = review({ userName: "аринка" });
+    attributeFeedbacks([f], [cand("V7BSW9Y", "2026-11-08T08:17:50Z", "rina")]);
+    expect(matchBadReview(order({ wbCode: "V7BSW9Y", nmId: NM, buyerName: "rina", createdAt: new Date("2026-11-08T08:20:00Z") }), [f])).not.toBeNull();
+  });
+
+  it("заказ без имени в чате тоже получает свой отзыв", () => {
+    const f = review();
+    attributeFeedbacks([f], [cand("NONAME1", "2026-11-08T08:17:52Z")]);
+    expect(matchBadReview(order({ wbCode: "NONAME1", nmId: NM, buyerName: null, createdAt: new Date("2026-11-08T08:20:00Z") }), [f])).not.toBeNull();
+    expect(decideGate(order({ wbCode: "NONAME1", nmId: NM, buyerName: null }), [f], NOW)?.reason).toContain("Кристина");
+  });
+
+  it("задание DBS приходит до 10 минут позже заказа — берём ближайшее", () => {
+    const f = review({ lastOrderCreatedAt: "2026-11-15T11:56:14Z", userName: "Людмила" });
+    attributeFeedbacks([f], [cand("LUDA001", "2026-11-15T11:56:45Z", "Людмила"), cand("VERA001", "2026-11-15T11:58:03Z", "Вероника")]);
+    expect(f.orderCodes).toEqual(["LUDA001"]);
+    const late = review({ lastOrderCreatedAt: "2026-10-11T08:08:08Z" });
+    attributeFeedbacks([late], [cand("TKQMJHF", "2026-10-11T08:15:45Z", "Вероника")]);
+    expect(late.orderCodes).toEqual(["TKQMJHF"]);
+  });
+
+  it("вне окна, другой товар или задание раньше заказа — ничей", () => {
+    const f = review();
+    attributeFeedbacks([f], [
+      cand("FAR0001", "2026-11-08T08:40:00Z"),
+      cand("NM00001", "2026-11-08T08:17:50Z", null, 111),
+      cand("EARLY01", "2026-11-08T08:10:00Z"),
+    ]);
+    expect(f.orderCodes).toEqual([]);
+    expect(matchBadReview(gate("FAR0001"), [f])).toBeNull();
+  });
+
+  it("одна корзина (та же секунда) — отзыв на все её заказы; разные имена — совпавшее", () => {
+    const cart = review({ userName: "Павел" });
+    attributeFeedbacks([cart], [cand("KU6VMV5", "2026-11-08T08:17:55Z", "Павел"), cand("8GPBVEY", "2026-11-08T08:17:55Z", "Павел")]);
+    expect(cart.orderCodes?.sort()).toEqual(["8GPBVEY", "KU6VMV5"]);
+    const two = review({ userName: "Ирина" });
+    attributeFeedbacks([two], [cand("IRINA01", "2026-11-08T08:17:51Z", "Ирина"), cand("OLGA001", "2026-11-08T08:17:52Z", "Ольга")]);
+    expect(two.orderCodes).toEqual(["IRINA01"]);
+  });
+
+  it("без времени заказа — прежняя сверка по имени; правленая версия наследует привязку", () => {
+    const legacy = review({ lastOrderCreatedAt: null, createdDate: "2026-11-07T10:00:00Z" });
+    attributeFeedbacks([legacy], kristinaOrders);
+    expect(legacy.orderCodes).toBeUndefined();
+    expect(matchBadReview(gate("8ZJ6BRX"), [legacy])).not.toBeNull();
+
+    const one = review({ id: "OLD", childFeedbackId: "NEW" });
+    const five = review({ id: "NEW", parentFeedbackId: "OLD", productValuation: 5, lastOrderCreatedAt: null });
+    attributeFeedbacks([one, five], kristinaOrders);
+    expect(five.orderCodes).toEqual(["K9XZ5UL"]);
+    expect(matchFixedReview(gate("K9XZ5UL"), [one, five])?.review.id).toBe("NEW");
+    expect(matchFixedReview(gate("8ZJ6BRX"), [one, five])).toBeNull();
   });
 });

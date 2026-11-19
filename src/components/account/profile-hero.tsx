@@ -21,6 +21,7 @@ import {
   type NameSources,
   type ProfileStyle,
 } from "@/lib/profile-style";
+import Avatar3d from "./avatar-3d";
 import css from "./profile-hero.module.css";
 
 /* 🪪 Карточка профиля в кабинете (18.11.2026, мокап владельца).
@@ -47,6 +48,8 @@ type Props = {
   stats: { robux: number; orders: number; discount: number; bonus: number };
   badges: HeroBadge[];
   isAdmin: boolean;
+  /** Сервер может отдать 3D-модель (`ROBLOX_AVATAR_COOKIE` задана и жива). */
+  has3d?: boolean;
 };
 
 const NAME_LABEL: Record<NameMode, string> = {
@@ -66,7 +69,7 @@ function Greeting() {
   return <span className={css.greeting}>{text},</span>;
 }
 
-function Avatar({ mode, roblox, letter, alt }: { mode: AvatarMode; roblox: HeroRoblox | null; letter: string; alt: string }) {
+function Avatar({ mode, roblox, letter, alt, has3d }: { mode: AvatarMode; roblox: HeroRoblox | null; letter: string; alt: string; has3d: boolean }) {
   const [failed, setFailed] = useState<Set<string>>(() => new Set());
   const fail = (url: string) => setFailed((f) => new Set(f).add(url));
   const ok = (url: string | null | undefined): url is string => Boolean(url && !failed.has(url));
@@ -82,7 +85,11 @@ function Avatar({ mode, roblox, letter, alt }: { mode: AvatarMode; roblox: HeroR
     return <span className={css.badgeAvatar} aria-hidden="true">{letter}</span>;
   }
   const src = roblox[kind]!;
-  if (kind === "full") return <PodiumFigure key={src} src={src} alt={alt} onFail={() => fail(src)} />;
+  if (kind === "full") {
+    const flat = <PodiumFigure key={src} src={src} alt={alt} onFail={() => fail(src)} />;
+    // 3D — только «на подиуме» и только при живой служебной сессии Roblox.
+    return has3d ? <Avatar3d fallback={flat} alt={alt} /> : flat;
+  }
   return (
     <span className={kind === "bust" ? css.bustFrame : css.portraitFrame}>
       <img src={src} alt={alt} width={240} height={240} decoding="async" onError={() => fail(src)} />
@@ -165,7 +172,7 @@ function PodiumFigure({ src, alt, onFail }: { src: string; alt: string; onFail: 
   );
 }
 
-export default function ProfileHero({ initialStyle, sources, roblox, stats, badges, isAdmin }: Props) {
+export default function ProfileHero({ initialStyle, sources, roblox, stats, badges, isAdmin, has3d = false }: Props) {
   const [saved, setSaved] = useState(initialStyle);
   const [draft, setDraft] = useState(initialStyle);
   const [customInput, setCustomInput] = useState(initialStyle.customName ?? "");
@@ -211,7 +218,7 @@ export default function ProfileHero({ initialStyle, sources, roblox, stats, badg
         <span className={css.ringA} aria-hidden="true" />
         <span className={css.ringB} aria-hidden="true" />
         <div className={`${css.avatarSlot} ${style.avatarMode === "podium" && roblox?.full ? css.avatarTall : ""}`}>
-          <Avatar mode={style.avatarMode} roblox={roblox} letter={letter} alt={roblox ? `Персонаж Roblox ${roblox.username}` : ""} />
+          <Avatar mode={style.avatarMode} roblox={roblox} letter={letter} alt={roblox ? `Персонаж Roblox ${roblox.username}` : ""} has3d={has3d && !editing} />
         </div>
         <div className={css.info}>
           <div className={css.head}>

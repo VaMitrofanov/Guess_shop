@@ -91,7 +91,7 @@ import {
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
 import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
-import { GATE_ACTOR, isGateReviewHold, matchBadReview, matchFixedReview, runBuyoutGate, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
+import { GATE_ACTOR, MISATTRIBUTED_ACTOR, attributeFeedbacks, isGateReviewHold, matchBadReview, matchFixedReview, reviewOrderTime, runBuyoutGate, REVIEW_ORDER_WINDOW_MS, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
 import {
   autoResolveRiskEvents,
   badReviewEvent,
@@ -2250,8 +2250,8 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
     if (meta?.isTest || meta?.cancelledAt) continue;
     // Выкупленный — морозить нечего; закрытый — выкупа и так не будет.
     if (own && (own.status === "COMPLETED" || own.status === "REJECTED" || own.heldAt)) continue;
-    // Без имени отзыв не сверить, а висяк смотрим только у PENDING.
-    if (!meta?.buyerName && !pendingCodes.has(code)) continue;
+    // С 19.11.2026 отзыв сверяется по времени заказа WB — имя не нужно.
+    if (!meta && !pendingCodes.has(code)) continue;
     gateOrders.push(toGateOrder(code));
   }
   gateOrders.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
@@ -2259,6 +2259,11 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
 
   // Отзывы — один раз на прогон: ими пользуются и гейт, и лента.
   const loaded = await fetchGateFeedbacks().catch(() => ({ feedbacks: [] as WbFeedback[], complete: false }));
+  // Чей отзыв — по времени заказа WB (19.11.2026, см. buyout-gate.ts).
+  const attributed = await attributeByOrderTime(db, loaded.feedbacks).catch((error) => {
+    console.error(`[WbDbsSync] привязка отзывов к заказам не прошла: ${safeErrorCode(error)}`);
+    return false;
+  });
   // Удалённые плохие отзывы — только по полной выдаче (иначе «пропал» = «не пришла страница»).
   const deletedReviews = loaded.complete
     ? await findDeletedBadReviews(db, loaded.feedbacks, allCodes, reviewHoldCodes).catch((error) => {
@@ -2324,6 +2329,19 @@ async function syncBuyoutGate(db: Db, out: WbDeliverySyncResult) {
   for (const r of res.released) {
     console.log(`[WbDbsSync] гейт разморозил ${r.wbCode}: отзыв ★${r.was.productValuation} → ★${r.review.productValuation}`);
     // 15.11.2026: увед «отзыв исправлен — разморожен» убран — заказ пошёл дальше сам.
+  }
+
+  if (attributed && loaded.complete) {
+    await releaseMisattributed(db, {
+      now,
+      feedbacks: loaded.feedbacks,
+      codes: allCodes,
+      reviewHoldCodes,
+      alreadyReleased: new Set([...res.released.map((r) => r.wbCode), ...res.releasedDeleted.map((r) => r.wbCode)]),
+      toGateOrder,
+    }).catch((error) => {
+      console.error(`[WbDbsSync] чужие отзывы не разобраны: ${safeErrorCode(error)}`);
+    });
   }
 
   await applyDeletedReviews(db, {
@@ -2491,6 +2509,79 @@ async function applyDeletedReviews(db: Db, input: {
 }
 
 /**
+ * Проставляет отзывам `orderCodes` по времени заказа WB (19.11.2026).
+ * Кандидаты — ВСЕ DBS-задания в окне вокруг времён заказа из отзывов, в том
+ * числе выкупленные, отменённые и без кода: иначе «ближайшим» стал бы чужой.
+ * `false` — у отзывов нет времени заказа, привязывать нечего.
+ */
+async function attributeByOrderTime(db: Db, feedbacks: WbFeedback[]): Promise<boolean> {
+  const times = feedbacks.map(reviewOrderTime).filter((t): t is number => t !== null);
+  if (times.length === 0) return false;
+  const from = new Date(Math.min(...times) - REVIEW_ORDER_WINDOW_MS.before);
+  const to = new Date(Math.max(...times) + REVIEW_ORDER_WINDOW_MS.after);
+  const rows = await db.wbMarketplaceOrder.findMany({
+    where: {
+      OR: [
+        { wbCreatedAt: { gte: from, lte: to } },
+        { wbCreatedAt: null, firstSeenAt: { gte: from, lte: to } },
+      ],
+    },
+    select: { nmId: true, wbCreatedAt: true, firstSeenAt: true, buyerName: true, wbCode: { select: { code: true } } },
+    take: 20_000,
+  });
+  attributeFeedbacks(feedbacks, rows.map((r) => ({
+    code: r.wbCode?.code ?? null,
+    nmId: r.nmId ?? null,
+    at: r.wbCreatedAt ?? r.firstSeenAt,
+    buyerName: r.buyerName ?? null,
+  })));
+  return true;
+}
+
+/**
+ * Отзыв, который прежняя сверка по имени приписала тёзке (19.11.2026, 8ZJ6BRX
+ * получил ★1 другой «Кристины»). Если отзыв на месте и по времени заказа WB
+ * относится к другому заказу: запись в «Рисках» разбираем, а замок самого
+ * гейта снимаем — когда других плохих отзывов у заказа нет. Чужие замки
+ * (руками, заявкой) не трогаем. Только по полной выдаче отзывов.
+ */
+async function releaseMisattributed(db: Db, input: {
+  now: Date;
+  feedbacks: WbFeedback[];
+  codes: string[];
+  reviewHoldCodes: Set<string>;
+  alreadyReleased: Set<string>;
+  toGateOrder: (code: string) => GateOrder;
+}) {
+  if (input.codes.length === 0) return;
+  const byId = new Map(input.feedbacks.filter((f) => f.id).map((f) => [f.id as string, f] as const));
+  const events = await db.riskEvent.findMany({
+    where: { kind: "BAD_REVIEW", resolvedAt: null, feedbackId: { in: [...byId.keys()] }, wbCode: { in: input.codes } },
+    select: { id: true, wbCode: true, feedbackId: true },
+    take: 1000,
+  });
+  const wrong = events.filter((e) => {
+    const f = byId.get(e.feedbackId as string);
+    return Boolean(e.wbCode && f?.orderCodes && !f.orderCodes.includes(e.wbCode));
+  });
+  if (wrong.length === 0) return;
+  await db.riskEvent.updateMany({
+    where: { id: { in: wrong.map((e) => e.id) } },
+    data: { resolvedAt: input.now, resolvedBy: MISATTRIBUTED_ACTOR },
+  });
+  for (const code of new Set(wrong.map((e) => e.wbCode as string))) {
+    const owners = wrong.filter((e) => e.wbCode === code).map((e) => byId.get(e.feedbackId as string)?.orderCodes?.join(", ") || "—");
+    let released = false;
+    if (input.reviewHoldCodes.has(code) && !input.alreadyReleased.has(code)
+      && !matchBadReview(input.toGateOrder(code), input.feedbacks)) {
+      await releaseByCode(db, { wbCode: code, actor: GATE_ACTOR });
+      released = true;
+    }
+    console.log(`[WbDbsSync] отзыв не этого заказа: ${code} → ${owners.join("; ")}${released ? " — гейт разморозил" : ""}`);
+  }
+}
+
+/**
  * Лента «Риски»: события по DBS-заказам окна (30.10.2026). Не трогает ни
  * заказы, ни заморозки — только пишет, что видит, и разбирает то, по чему
  * делать больше нечего. Ошибка здесь не должна валить гейт.
@@ -2532,7 +2623,6 @@ async function syncRiskFeed(db: Db, input: {
       refunded: Boolean(meta.cancelledAt && meta.claimOpenedAt),
     };
     events.push(...claimEvents(order, input.now));
-    if (!meta.buyerName) continue;
     const gate = input.toGateOrder(code);
     const bad = matchBadReview(gate, input.feedbacks);
     if (bad && reviewBelongsInFeed(order, bad)) {

@@ -26,6 +26,7 @@
 
 import { classifyBuyerMessage } from "./buyer-contact";
 import { isRobuxSupportContext } from "./support-metric";
+import { MISATTRIBUTED_ACTOR } from "./buyout-gate";
 
 type VkLabelKey =
   | "human" | "badReview" | "held" | "queue" | "pass" | "stale" | "pay" | "bought" | "ready"
@@ -469,6 +470,8 @@ export const BAD_REVIEW_STARS_SQL = `(select min(t.stars) from (
          select distinct on (r."wbCode") r.kind, r.stars from "RiskEvent" r
          join "WbOrder" c on c."wbCode" = r."wbCode" and c."userId" = u.id
          where r.kind in ('BAD_REVIEW','REVIEW_FIXED','REVIEW_DELETED')
+           -- отзыв тёзки, отнесённый по времени заказа к чужому заказу (19.11.2026)
+           and r."resolvedBy" is distinct from '${MISATTRIBUTED_ACTOR}'
          order by r."wbCode", r."occurredAt" desc) t where t.kind = 'BAD_REVIEW')::int`;
 
 const VK_LABEL_SNAPSHOT_SQL = `

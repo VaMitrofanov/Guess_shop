@@ -55,6 +55,7 @@ import { offerExpired, payTokenFor } from "@/lib/codes/orders";
 import ProfileHero, { type HeroBadge } from "@/components/account/profile-hero";
 import { parseProfileStyle, type NameSources } from "@/lib/profile-style";
 import { loadAvatarRenders } from "@/lib/roblox-avatar-renders";
+import { avatar3dEnabled } from "@/lib/roblox-avatar-3d";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -204,6 +205,7 @@ async function ProfileHeroSection({
       stats={stats}
       badges={badges}
       isAdmin={isAdmin}
+      has3d={Boolean(profile) && avatar3dEnabled()}
     />
   );
 }

@@ -43,7 +43,7 @@ const commonCsp = [
   // login.vk.ru), NOT vk.com — both families must stay whitelisted or the
   // OAuth code exchange is blocked client-side with no server-side trace
   // (docs/security.md, риск №16). Contract test: src/__tests__/csp-vk-hosts.test.ts
-  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://api.vk.ru https://login.vk.ru https://telegram.org",
+  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://api.vk.ru https://login.vk.ru https://telegram.org https://*.rbxcdn.com",
   "frame-src 'self' https://id.vk.com https://oauth.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://login.vk.ru https://oauth.telegram.org https://telegram.org",
   "form-action 'self'",
 ].join("; ");
@@ -104,7 +104,7 @@ const reportOnlyCsp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://api.vk.ru https://login.vk.ru https://telegram.org",
+  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://api.vk.ru https://login.vk.ru https://telegram.org https://*.rbxcdn.com",
   "frame-src 'self' https://id.vk.com https://oauth.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://login.vk.ru https://oauth.telegram.org https://telegram.org",
   "form-action 'self'",
   "report-uri /api/observability/csp-report",

@@ -18,6 +18,12 @@
 /* Без overflow:hidden: кончик крыла ниже ног ложится на подиум, а не срезается. */
 .figureCropped { position:absolute; max-width:none; height:auto; pointer-events:none; }
 .figureLoading { visibility:hidden; display:block; width:100%; }
+/* 🧊 3D-персонаж (avatar-3d.tsx): сцена той же высоты, что 2D, и ногами на подиум. */
+.podium3d { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:100%; max-width:340px; --fig3d-h:280px; }
+.stage3d, .stage3dHidden { display:block; width:min(100%, 320px); height:var(--fig3d-h); }
+.stage3d { position:relative; z-index:1; margin-bottom:-22px; cursor:grab; filter:drop-shadow(0 14px 20px rgba(0,0,0,.42)); }
+.stage3d:active { cursor:grabbing; }
+.stage3dHidden { position:absolute; left:0; bottom:0; visibility:hidden; pointer-events:none; }
 .podiumBase { width:72%; height:46px; border-radius:50%; background:radial-gradient(ellipse at center, rgba(255,255,255,.5), rgba(255,255,255,.12) 58%, transparent 72%); box-shadow:inset 0 0 0 2px rgba(255,255,255,.22); }
 .bustFrame, .portraitFrame { display:block; overflow:hidden; border:3px solid rgba(255,255,255,.55); background:rgba(11,9,18,.25); box-shadow:5px 5px 0 #45d6aa; }
 .bustFrame { width:230px; height:230px; border-radius:34px; align-self:center; }
@@ -96,6 +102,8 @@
   .avatarTall { padding-bottom:18px; }
   .podium { max-width:230px; }
   .figureBox { --fig-h:180px; margin-bottom:-16px; }
+  .podium3d { --fig3d-h:220px; }
+  .stage3d { margin-bottom:-16px; }
   .bustFrame { width:170px; height:170px; border-radius:28px; }
   .portraitFrame { width:130px; height:130px; border-radius:26px; }
   .badgeAvatar { width:110px; height:110px; border-radius:28px; font-size:46px; }

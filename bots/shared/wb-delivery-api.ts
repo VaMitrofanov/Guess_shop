@@ -143,6 +143,8 @@ const FeedbackSchema = z.object({
   // Правка отзыва у WB — НОВЫЙ отзыв, связанный со старым: parent → child.
   parentFeedbackId: z.string().nullable().optional(),
   childFeedbackId: z.string().nullable().optional(),
+  // Момент заказа автора — по нему гейт находит заказ отзыва (19.11.2026).
+  lastOrderCreatedAt: z.string().nullable().optional(),
 }).passthrough();
 const FeedbacksListSchema = z.object({
   data: z.object({ feedbacks: z.array(FeedbackSchema).optional().default([]) }).partial().optional(),
