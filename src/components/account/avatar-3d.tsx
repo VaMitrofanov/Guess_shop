@@ -90,6 +90,30 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
       const materials = mtl.parse(mtlText, "");
       materials.preload();
       const model = new OBJLoader(manager).setMaterials(materials).parse(objText);
+      // В mtl Roblox `map_d` = та же текстура, что и цвет: MTLLoader делает из
+      // неё alphaMap (зелёный канал!) и тело становится полупрозрачным
+      // «призраком» (19.11.2026). Альфа текстуры у тела — это «где рисунок,
+      // а где цвет части» (Kd), у аксессуаров — вырез (перья, цепи).
+      model.traverse((object) => {
+        const mesh = object as unknown as { material?: unknown };
+        const list = (Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []) as InstanceType<typeof THREE.MeshPhongMaterial>[];
+        for (const material of list) {
+          if (!material.map) continue;
+          material.alphaMap = null;
+          material.transparent = false;
+          if (/^Player/.test(material.name)) {
+            material.onBeforeCompile = (shader) => {
+              shader.fragmentShader = shader.fragmentShader.replace(
+                "#include <map_fragment>",
+                "vec4 rbxTex = texture2D(map, vMapUv); diffuseColor.rgb = mix(diffuse, rbxTex.rgb, rbxTex.a);",
+              );
+            };
+          } else {
+            material.alphaTest = 0.5;
+          }
+          material.needsUpdate = true;
+        }
+      });
       await new Promise<void>((resolve) => {
         manager.onLoad = () => resolve();
         // Текстур может не быть вовсе — тогда onLoad не придёт.
@@ -107,8 +131,8 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
       renderer.domElement.setAttribute("aria-label", alt);
 
       const scene = new THREE.Scene();
-      scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-      const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+      scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.5);
       sun.position.set(-1, 2, 3);
       scene.add(sun);
       scene.add(model);
