@@ -14,7 +14,12 @@ jest.mock("@/lib/telegram", () => ({
 }));
 jest.mock("@/lib/prisma", () => ({
   prisma: {
-    codeOrder: { findUnique: async () => ({ id: "o1", deliveryMode: "EMAIL", channel: "SITE", giftSendAt: null }) },
+    codeOrder: { findUnique: async () => ({
+      id: "o1", deliveryMode: "EMAIL", channel: "TG", giftSendAt: null,
+      publicId: "CODE-DA9VG478", denomination: 500, finalAmountKopecks: 65300,
+      issuedAt: new Date(Date.now() - 134 * 60_000), chatDeliveredAt: new Date(Date.now() - 134 * 60_000),
+      emailSentAt: null, giftTo: null, creator: { username: "buyer_1", name: "Покупатель", tgId: "1", vkId: null },
+    }) },
     codeOrderEvent: { create: async () => ({}), findFirst: async () => null },
   },
 }));
@@ -22,7 +27,7 @@ jest.mock("../../bots/shared/admin-route", () => ({
   adminTargets: async () => [{ key: "g#5", chatId: "-100", extra: { message_thread_id: 5 }, group: true }],
 }));
 
-import { deliveryLine, notifyCodeAdmins, plainForTelegram } from "@/lib/codes/admin-notify";
+import { deliveryLine, elapsedRu, notifyCodeAdmins, notifyCodeOpened, plainForTelegram } from "@/lib/codes/admin-notify";
 
 describe("алерт заказа кода", () => {
   beforeEach(() => { send.mockReset(); process.env.TG_TOKEN = "t"; });
@@ -94,5 +99,36 @@ describe("письмо с кодом — подарочная карта (16.11.
 
   it("код экранируется", () => {
     expect(buildCodeEmail({ ...base, code: "<b>X1</b>" }).html).toContain("&lt;b&gt;X1");
+  });
+});
+
+describe("покупатель открыл код (21.11.2026)", () => {
+  beforeEach(() => { send.mockReset().mockResolvedValue(true); process.env.TG_TOKEN = "t"; });
+
+  it("увед в «Коды»: где открыт, через сколько после выдачи и что код уже был в чате", async () => {
+    await notifyCodeOpened("o1", "cabinet");
+    const text = String(send.mock.calls[0][2]);
+    expect(text).toContain("покупатель открыл код");
+    expect(text).toContain("CODE-DA9VG478");
+    expect(text).toContain("Открыт в кабинете");
+    expect(text).toMatch(/через 2 ч 1[34] мин после выдачи/);
+    expect(text).toContain("в чат бота TG");
+    expect(text).toContain("@buyer_1");
+    // Значения кода в уведе не бывает.
+    expect(text).not.toMatch(/[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}/);
+  });
+
+  it("elapsedRu", () => {
+    expect(elapsedRu(5 * 60_000)).toBe("5 мин");
+    expect(elapsedRu(134 * 60_000)).toBe("2 ч 14 мин");
+    expect(elapsedRu((3 * 24 + 4) * 3_600_000)).toBe("3 дн 4 ч");
+  });
+
+  it("кабинет и подарок зовут увед только при ПЕРВОМ показе, через защёлку", () => {
+    for (const f of ["src/app/api/codes/reveal/route.ts", "src/app/api/codes/gift/route.ts"]) {
+      const src = fs.readFileSync(path.join(process.cwd(), f), "utf8");
+      expect(src).toMatch(/updateMany\(\{ where: \{ id: order\.id, (revealedAt|giftOpenedAt): null \}/);
+      expect(src).toContain("if (first.count === 1) void notifyCodeOpened(");
+    }
   });
 });

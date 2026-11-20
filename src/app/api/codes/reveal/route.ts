@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { CODE_LIST_SEPARATOR, issuedCodesForOrder } from "@/lib/codes/order-codes";
 import { noStore, sessionUserId } from "@/lib/codes/http";
+import { notifyCodeOpened } from "@/lib/codes/admin-notify";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Код временно недоступен. Напишите в поддержку." }, { status: 500 });
   }
   if (!order.revealedAt) {
-    await prisma.codeOrder.update({ where: { id: order.id }, data: { revealedAt: new Date() } });
+    // updateMany с условием — защёлка: два параллельных показа дают один увед.
+    const first = await prisma.codeOrder.updateMany({ where: { id: order.id, revealedAt: null }, data: { revealedAt: new Date() } });
+    if (first.count === 1) void notifyCodeOpened(order.id, "cabinet");
   }
   // Набор (2 × 1 000) — коды строками: клиент показывает каждый со своей кнопкой.
   return NextResponse.json({ code: codes.join(CODE_LIST_SEPARATOR), codes }, { headers: noStore });

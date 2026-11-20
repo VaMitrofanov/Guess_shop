@@ -4,6 +4,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { hashGiftToken, isGiftTokenShape } from "@/lib/codes/gift";
 import { CODE_LIST_SEPARATOR, issuedCodesForOrder } from "@/lib/codes/order-codes";
 import { noStore } from "@/lib/codes/http";
+import { notifyCodeOpened } from "@/lib/codes/admin-notify";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,9 @@ export async function POST(req: NextRequest) {
     console.error("[codes] gift decrypt failed", { orderId: order.id });
     return NextResponse.json({ error: "Подарок временно недоступен. Напишите в поддержку." }, { status: 500 });
   }
-  if (!order.giftOpenedAt) await prisma.codeOrder.update({ where: { id: order.id }, data: { giftOpenedAt: new Date() } });
+  if (!order.giftOpenedAt) {
+    const first = await prisma.codeOrder.updateMany({ where: { id: order.id, giftOpenedAt: null }, data: { giftOpenedAt: new Date() } });
+    if (first.count === 1) void notifyCodeOpened(order.id, "gift");
+  }
   return NextResponse.json({ code: codes.join(CODE_LIST_SEPARATOR), codes }, { headers: noStore });
 }

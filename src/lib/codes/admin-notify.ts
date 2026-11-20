@@ -1,6 +1,6 @@
 import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
 import { adminTargets } from "../../../bots/shared/admin-route";
-import { formatAdminNotice } from "../../../bots/shared/notify-format";
+import { formatAdminNotice, mskTime } from "../../../bots/shared/notify-format";
 import { codeComponents, formatRubKopecks } from "@/lib/codes-pricing";
 import { prisma } from "@/lib/prisma";
 
@@ -80,6 +80,75 @@ export async function notifyCodeAdmins(input: {
     if (input.issueButton && Object.keys(sent).length > 0) await rememberAlert(input.orderPublicId, sent);
   } catch {
     // Уведомление не должно ломать обработку платежа.
+  }
+}
+
+/** «2 ч 14 мин», «5 мин», «3 дн 4 ч» — сколько прошло от выдачи до открытия. */
+export function elapsedRu(ms: number): string {
+  const min = Math.max(0, Math.round(ms / 60_000));
+  if (min < 60) return `${min} мин`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} ч ${min % 60} мин`;
+  return `${Math.floor(h / 24)} дн ${h % 24} ч`;
+}
+
+const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * Покупатель впервые открыл код (21.11.2026, владелец: «надо для понимания,
+ * когда он ±его ввёл — код может быть плохой, либо он хочет нас обмануть»).
+ *
+ * Ловим два места, где показ — отдельное действие: кабинет (`revealedAt`) и
+ * открытка по ссылке (`giftOpenedAt`). В чате бота и в письме код стоит прямо в
+ * тексте — момент прочтения там не узнать, поэтому увед называет, когда код
+ * туда ушёл: с этой минуты покупатель мог его ввести. Без звука, ответом на
+ * алерт «выдать код», чтобы вся история заказа была одной веткой.
+ */
+export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift"): Promise<void> {
+  const token = process.env.TG_TOKEN;
+  if (!token) return;
+  try {
+    const order = await prisma.codeOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        publicId: true, denomination: true, finalAmountKopecks: true, issuedAt: true,
+        chatDeliveredAt: true, emailSentAt: true, channel: true, giftTo: true,
+        creator: { select: { username: true, name: true, tgId: true, vkId: true } },
+      },
+    });
+    if (!order) return;
+    const now = new Date();
+    const where = via === "gift" ? `по ссылке-подарку${order.giftTo ? ` (для «${esc(order.giftTo)}»)` : ""}` : "в кабинете";
+    const after = order.issuedAt ? `, через ${elapsedRu(now.getTime() - order.issuedAt.getTime())} после выдачи` : "";
+    const earlier = [
+      order.chatDeliveredAt ? `в чат бота ${order.channel === "VK" ? "ВК" : "TG"} ${mskTime(order.chatDeliveredAt)}` : null,
+      order.emailSentAt ? `письмом ${mskTime(order.emailSentAt)}` : null,
+    ].filter(Boolean);
+    const c = order.creator;
+    const who = c?.username ? `@${esc(c.username)}`
+      : c?.tgId ? `<a href="tg://user?id=${c.tgId}">${esc(c.name ?? "покупатель")}</a>`
+      : c?.vkId ? `<a href="https://vk.com/id${c.vkId}">${esc(c.name ?? "покупатель")}</a>`
+      : null;
+    const text = formatAdminNotice({
+      marker: "progress",
+      zone: "САЙТ",
+      title: "код активации: покупатель открыл код",
+      lines: [
+        `🎟 <code>${order.publicId}</code> · ${order.denomination.toLocaleString("ru-RU")} R$ · ${formatRubKopecks(order.finalAmountKopecks)}`,
+        `👁 Открыт ${where} · ${mskTime(now)} МСК${after}`,
+        earlier.length ? `📨 Код уже видел раньше: ${earlier.join(", ")} — вводить мог с того момента` : null,
+        who ? `👤 ${who}` : null,
+      ],
+    });
+    const roots = await alertRoots(order.publicId);
+    const targets = await adminTargets("codes", { loud: false });
+    await Promise.allSettled(targets.map(async (target) => {
+      const reply = roots[target.key] ? { reply_to_message_id: roots[target.key], allow_sending_without_reply: true } : {};
+      const id = await sendTelegramMessageId(token, target.chatId, text, { ...target.extra, ...reply });
+      if (id === null) await sendTelegramMessage(token, target.chatId, plainForTelegram(text), { ...target.extra, ...reply });
+    }));
+  } catch {
+    // Увед не должен ломать показ кода покупателю.
   }
 }
 
