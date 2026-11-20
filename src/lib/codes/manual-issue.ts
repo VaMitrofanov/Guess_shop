@@ -5,7 +5,7 @@ import { deliverIssuedCode, sendGiftEmail, type CodeEmailResult } from "@/lib/co
 import { sendCodeToChat, sendPayReminderToChat } from "@/lib/codes/chat-notify";
 import { buildPayReminderEmail } from "@/lib/codes/delivery";
 import { payUrlFor } from "@/lib/codes/orders";
-import { formatRubKopecks } from "@/lib/codes-pricing";
+import { codeComponents, formatRubKopecks } from "@/lib/codes-pricing";
 import { sendMail } from "@/lib/mailer";
 
 /**
@@ -18,44 +18,77 @@ import { sendMail } from "@/lib/mailer";
  *
  * Повторный вызов по уже выданному заказу ничего не меняет (`already`):
  * второй код за одни деньги не выдаём никогда.
+ *
+ * Набор (20.11.2026, `codeComponents`): «2 000 R$» = два кода по 1 000 —
+ * админ присылает оба одним сообщением (каждый с новой строки, через запятую
+ * или пробел), выдаются оба разом или ни один. «199 R$» — код поставщика на 200.
  */
 
 export type ManualIssueResult =
   | { ok: true; status: "issued"; publicId: string; email: CodeEmailResult; chat: boolean | null }
-  | { ok: false; status: "not_found" | "not_paid" | "already" | "refunded" | "duplicate_code" | "bad_code" | "denomination_mismatch" };
+  | { ok: false; status: "not_found" | "not_paid" | "already" | "refunded" | "duplicate_code" | "bad_code" | "denomination_mismatch" | "count_mismatch"; expected?: number };
 
 const CODE_SHAPE = /^[A-Z0-9]{6,40}$/;
 
+/**
+ * Коды из одного сообщения админа. Один код может быть с пробелами/дефисами
+ * («ABCD 1234 EFGH»), поэтому для заказа из одного кода текст — целиком. Для
+ * набора — сначала по строкам, запятым и «;», а если строка одна — по пробелам.
+ */
+export function splitIssuedCodes(raw: string, expected: number): string[] {
+  const text = raw.trim();
+  if (expected <= 1) return text ? [text] : [];
+  let parts = text.split(/[\n,;]+/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 1) parts = text.split(/\s+/).filter(Boolean);
+  return parts;
+}
+
 export async function issueCodeManually(input: { publicId: string; code: string; denomination?: number; label?: string }): Promise<ManualIssueResult> {
-  const value = input.code.trim();
-  if (!CODE_SHAPE.test(normalizeActivationCode(value))) return { ok: false, status: "bad_code" };
   const order = await prisma.codeOrder.findUnique({
     where: { publicId: input.publicId.trim().toUpperCase() },
-    select: { id: true, publicId: true, status: true, paidAt: true, denomination: true, activationCodeId: true },
+    select: { id: true, publicId: true, status: true, paidAt: true, denomination: true, pricingVersion: true, activationCodeId: true },
   });
   if (!order) return { ok: false, status: "not_found" };
   if (order.status === "REFUNDED") return { ok: false, status: "refunded" };
   if (order.status === "ISSUED" || order.activationCodeId) return { ok: false, status: "already" };
   if (order.status !== "PAID" || !order.paidAt) return { ok: false, status: "not_paid" };
-  if (input.denomination !== undefined && input.denomination !== order.denomination) {
+  const components = codeComponents(order.denomination, order.pricingVersion);
+  const values = splitIssuedCodes(input.code, components.length);
+  if (values.length !== components.length) return { ok: false, status: "count_mismatch", expected: components.length };
+  if (values.some((value) => !CODE_SHAPE.test(normalizeActivationCode(value)))) return { ok: false, status: "bad_code" };
+  if (new Set(values.map(normalizeActivationCode)).size !== values.length) return { ok: false, status: "duplicate_code" };
+  // Сверка номинала: годится и номинал заказа («2 000»), и номинал кода поставщика («1 000», «200»).
+  if (input.denomination !== undefined && input.denomination !== order.denomination && !components.includes(input.denomination)) {
     return { ok: false, status: "denomination_mismatch" };
   }
 
   const now = new Date();
   try {
     await prisma.$transaction(async (tx) => {
-      const code = await tx.activationCode.create({
-        data: {
-          denomination: order.denomination,
-          encryptedValue: encryptActivationCode(value),
-          codeHmac: activationCodeHmac(value),
-          status: "ISSUED",
-          batchLabel: input.label?.slice(0, 60) || `manual-${now.toISOString().slice(0, 10)}`,
-          reservedForOrderId: order.id,
-          issuedAt: now,
-        },
-        select: { id: true },
+      // Резерв со склада, если он был (код не нашёлся целиком при оплате), — отпустить:
+      // заказ закрывается присланными кодами, а не складскими.
+      await tx.activationCode.updateMany({
+        where: { reservedForOrderId: order.id, status: "RESERVED" },
+        data: { status: "IN_STOCK", reservedForOrderId: null, reservedUntil: null },
       });
+      const ids: string[] = [];
+      for (const [index, value] of values.entries()) {
+        const code = await tx.activationCode.create({
+          data: {
+            denomination: components[index],
+            encryptedValue: encryptActivationCode(value),
+            codeHmac: activationCodeHmac(value),
+            status: "ISSUED",
+            batchLabel: input.label?.slice(0, 60) || `manual-${now.toISOString().slice(0, 10)}`,
+            reservedForOrderId: order.id,
+            // Миллисекунда на код — порядок в письме совпадает с порядком в сообщении админа.
+            issuedAt: new Date(now.getTime() + index),
+          },
+          select: { id: true },
+        });
+        ids.push(code.id);
+      }
+      const code = { id: ids[0] };
       const moved = await tx.codeOrder.updateMany({
         where: { id: order.id, status: "PAID", activationCodeId: null },
         data: { status: "ISSUED", issuedAt: now, activationCodeId: code.id, attentionReason: null },
@@ -66,7 +99,7 @@ export async function issueCodeManually(input: { publicId: string; code: string;
           orderId: order.id,
           type: "MANUAL_ISSUED",
           idempotencyKey: `code-manual-issue:${order.id}`,
-          payload: { codeId: code.id },
+          payload: { codeId: code.id, codeIds: ids },
         },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

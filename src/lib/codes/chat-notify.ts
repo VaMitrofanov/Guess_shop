@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { decryptActivationCode } from "@/lib/codes/secrets";
+import { issuedCodesForOrder } from "@/lib/codes/order-codes";
 import { codeChatIssuedText, codeChatPaidText, CODES_CB, ROBLOX_REDEEM_LINK } from "../../../bots/shared/codes-shop";
 import { FLAIR_IMAGE, copyButton, effectExtra, hasCodeImage, isEffectRefusal } from "../../../bots/shared/tg-flair";
 import { telegramRequestInit } from "../../../bots/shared/telegram-photo";
@@ -94,10 +94,10 @@ async function vkPost(userId: string, message: string, keyboard: unknown, attach
   }
 }
 
-function tgKeyboard(issued: boolean, code?: string) {
+function tgKeyboard(issued: boolean, codes: readonly string[] = []) {
   return {
     inline_keyboard: [
-      ...(issued && code ? [[copyButton("📋 Скопировать код", code)]] : []),
+      ...(issued ? codes.map((code, index) => [copyButton(codes.length > 1 ? `📋 Скопировать код ${index + 1}` : "📋 Скопировать код", code)]) : []),
       ...(issued ? [[{ text: "🚀 Активировать на Roblox", url: ROBLOX_REDEEM_LINK }]] : []),
       [{ text: "🤝 Скидка за друзей", callback_data: CODES_CB.invite }, { text: "🎟 Ещё код", callback_data: CODES_CB.open }],
     ],
@@ -122,7 +122,7 @@ async function chatTarget(orderId: string) {
     where: { id: orderId },
     select: {
       id: true, channel: true, status: true, denomination: true, publicId: true, chatDeliveredAt: true,
-      activationCode: { select: { encryptedValue: true } },
+      activationCodeId: true,
       creator: { select: { tgId: true, vkId: true } },
     },
   });
@@ -141,15 +141,16 @@ async function vkWithPhoto(vkId: string, plain: string, keyboard: unknown, photo
 export async function sendCodeToChat(orderId: string): Promise<boolean | null> {
   const order = await chatTarget(orderId);
   if (!order || (order.channel !== "TG" && order.channel !== "VK")) return null;
-  if (order.status !== "ISSUED" || !order.activationCode || order.chatDeliveredAt) return null;
-  let code: string;
+  if (order.status !== "ISSUED" || !order.activationCodeId || order.chatDeliveredAt) return null;
+  let codes: string[];
   try {
-    code = decryptActivationCode(order.activationCode.encryptedValue);
+    codes = await issuedCodesForOrder(order.id);
+    if (!codes.length) throw new Error("no issued codes");
   } catch {
     console.error("[codes] chat: cannot decrypt", { orderId: order.id });
     return false;
   }
-  const text = codeChatIssuedText({ denomination: order.denomination, code, publicId: order.publicId });
+  const text = codeChatIssuedText({ denomination: order.denomination, code: codes[0], codes, publicId: order.publicId });
   const image = hasCodeImage(order.denomination) ? FLAIR_IMAGE.code(order.denomination) : null;
   let ok: boolean | null = null;
   if (order.channel === "TG" && order.creator?.tgId) {
@@ -158,7 +159,7 @@ export async function sendCodeToChat(orderId: string): Promise<boolean | null> {
     const paid = await prisma.codeOrderEvent.findFirst({ where: { orderId: order.id, type: PAID_MESSAGE_EVENT }, select: { payload: true } }).catch(() => null);
     const paidMessageId = Number((paid?.payload as { messageId?: number } | null)?.messageId) || null;
     if (paidMessageId) await tgCall({ method: "deleteMessage", chat_id: tgId, message_id: paidMessageId }).catch(() => undefined);
-    const sent = await tgPost(tgId, text.html, tgKeyboard(true, code), { photo: image ? await brandPhoto(image) : null, effect: effectExtra("party") });
+    const sent = await tgPost(tgId, text.html, tgKeyboard(true, codes), { photo: image ? await brandPhoto(image) : null, effect: effectExtra("party") });
     ok = sent.ok;
   } else if (order.channel === "VK" && order.creator?.vkId) {
     ok = await vkWithPhoto(order.creator.vkId, text.plain, vkKeyboard(true), image);

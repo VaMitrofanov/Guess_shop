@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { decryptActivationCode } from "@/lib/codes/secrets";
+import { CODE_LIST_SEPARATOR, issuedCodesForOrder } from "@/lib/codes/order-codes";
 import { noStore, sessionUserId } from "@/lib/codes/http";
 
 export const dynamic = "force-dynamic";
@@ -20,17 +20,18 @@ export async function POST(req: NextRequest) {
 
   const order = await prisma.codeOrder.findFirst({
     where: { publicId: body.orderId, creatorUserId: userId, status: "ISSUED" },
-    select: { id: true, revealedAt: true, deliveryMode: true, giftOpenTokenHash: true, activationCode: { select: { encryptedValue: true } } },
+    select: { id: true, revealedAt: true, deliveryMode: true, giftOpenTokenHash: true, activationCodeId: true },
   });
-  if (!order?.activationCode) return NextResponse.json({ error: "Заказ не найден." }, { status: 404 });
+  if (!order?.activationCodeId) return NextResponse.json({ error: "Заказ не найден." }, { status: 404 });
   // Подаренный из кабинета код открывает получатель (19.11.2026): иначе его
   // легко ввести самому и подарить «пустышку». «Вернуть себе» снимает запрет.
   if (order.deliveryMode !== "GIFT" && order.giftOpenTokenHash) {
     return NextResponse.json({ error: "Этот код подарен — его откроет получатель. Чтобы забрать, нажмите «Вернуть себе»." }, { status: 409 });
   }
-  let code: string;
+  let codes: string[];
   try {
-    code = decryptActivationCode(order.activationCode.encryptedValue);
+    codes = await issuedCodesForOrder(order.id);
+    if (!codes.length) throw new Error("no issued codes");
   } catch {
     console.error("[codes] reveal decrypt failed", { orderId: order.id });
     return NextResponse.json({ error: "Код временно недоступен. Напишите в поддержку." }, { status: 500 });
@@ -38,5 +39,6 @@ export async function POST(req: NextRequest) {
   if (!order.revealedAt) {
     await prisma.codeOrder.update({ where: { id: order.id }, data: { revealedAt: new Date() } });
   }
-  return NextResponse.json({ code }, { headers: noStore });
+  // Набор (2 × 1 000) — коды строками: клиент показывает каждый со своей кнопкой.
+  return NextResponse.json({ code: codes.join(CODE_LIST_SEPARATOR), codes }, { headers: noStore });
 }

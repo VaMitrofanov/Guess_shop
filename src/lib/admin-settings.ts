@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { forgetCodesUsdRub } from "@/lib/codes/usd-rate";
 
 type AdminSettingsUpdate = {
   purchaseRate?: number | null;
@@ -143,5 +144,7 @@ export async function updateAdminSettings(input: unknown): Promise<AdminSettings
       autoBuyRate: true,
     },
   });
+  // Курс «USD → RUB» двигает цены кодов — новая цена должна появиться сразу.
+  if (update.usdToRub !== undefined) forgetCodesUsdRub();
   return serializeSettings(settings);
 }

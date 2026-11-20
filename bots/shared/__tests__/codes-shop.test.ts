@@ -16,15 +16,29 @@ import { isShowcaseReview, reviewAuthorName, toReviewRow } from "../wb-reviews-f
 describe("коды в ботах", () => {
   const viewer = { discountPercent: 1, invitedCount: 0, salesOpen: true, instant: true };
 
-  test("витрина укладывается в лимиты VK: ≤10 кнопок, у каждой номинал и цена", () => {
-    const screen = codesStoreScreen(viewer, "https://robloxbank.ru");
+  test("витрина ВК укладывается в лимиты VK: ≤10 кнопок, у каждой номинал и цена", () => {
+    const screen = codesStoreScreen(viewer, "https://robloxbank.ru", "VK");
     const buttons = screen.rows.flat();
     expect(buttons.length).toBeLessThanOrEqual(10);
     expect(screen.rows.length).toBeLessThanOrEqual(6);
     expect(buttons.find((b) => b.command === "codes_p:800")?.label).toBe("800 R$ · 989 ₽ 🔥");
     expect(buttons.some((b) => b.label.includes("10 000 R$") && b.label.includes("💎"))).toBe(true);
+    // Не влезшие в кнопки номиналы — строкой со ссылкой на сайт.
+    expect(screen.plain).toContain("10 R$ — 59 ₽");
+    expect(screen.plain).toContain("2 000 R$");
     expect(screen.plain).not.toMatch(/<[a-z/]/);
     expect(screen.html).toContain("1%");
+  });
+
+  test("в TG — все 12 номиналов кнопками, 199 вместо 200; цены идут за курсом", () => {
+    const screen = codesStoreScreen(viewer, "https://robloxbank.ru");
+    const picks = screen.rows.flat().filter((b) => b.command?.startsWith("codes_p:"));
+    expect(picks).toHaveLength(12);
+    expect(picks.some((b) => b.command === "codes_p:199")).toBe(true);
+    expect(picks.some((b) => b.command === "codes_p:200")).toBe(false);
+    expect(CODES_PICK_RE.exec("codes_p:10")?.[1]).toBe("10");
+    const pricier = codesStoreScreen({ ...viewer, discountPercent: 0, usdRub: 86 }, "https://robloxbank.ru");
+    expect(pricier.rows.flat().find((b) => b.command === "codes_p:1000")?.label).toContain("1 209 ₽");
   });
 
   test("callback_data короче 64 байт и разбирается обратно", () => {

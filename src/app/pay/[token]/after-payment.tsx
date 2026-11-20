@@ -44,7 +44,8 @@ export default function AfterPayment(props: {
   const issued = view.status === "ISSUED";
   const amount = view.denomination.toLocaleString("ru-RU");
   const [code, setCode] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  /** Номер скопированного кода (1, 2…), 0 — ничего. */
+  const [copied, setCopied] = useState(0);
   const [linkCopied, setLinkCopied] = useState(false);
   const [stars, setStars] = useState<number | null>(view.rating);
   const [rateError, setRateError] = useState("");
@@ -124,14 +125,19 @@ export default function AfterPayment(props: {
         {issued && !view.gift && extras.isCreator ? (
           code ? (
             <>
-              <span className={styles.codeLabel}>Код активации · заказ {view.publicId}</span>
-              <div className={styles.code}>{code}</div>
-              <div className={styles.codeActions}>
-                <button type="button" className={styles.copy} onClick={() => copy(code, setCopied)}>
-                  {copied ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> Скопировать</>}
-                </button>
-                <a className={styles.activate} href={REDEEM} target="_blank" rel="noopener noreferrer">Активировать <ArrowUpRight size={18} /></a>
-              </div>
+              <span className={styles.codeLabel}>{code.includes("\n") ? "Коды активации — введите каждый по очереди" : "Код активации"} · заказ {view.publicId}</span>
+              {/* Набор (2 000 = 2 × 1 000, 20.11.2026): каждый код — своей строкой и своей кнопкой. */}
+              {code.split("\n").map((one, index, all) => (
+                <div key={one}>
+                  <div className={styles.code}>{one}</div>
+                  <div className={styles.codeActions}>
+                    <button type="button" className={styles.copy} onClick={() => copy(one, (v) => setCopied(v ? index + 1 : 0))}>
+                      {copied === index + 1 ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> {all.length > 1 ? `Скопировать код ${index + 1}` : "Скопировать"}</>}
+                    </button>
+                    {index === all.length - 1 && <a className={styles.activate} href={REDEEM} target="_blank" rel="noopener noreferrer">Активировать <ArrowUpRight size={18} /></a>}
+                  </div>
+                </div>
+              ))}
             </>
           ) : (
             <>

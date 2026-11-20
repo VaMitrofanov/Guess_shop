@@ -62,8 +62,8 @@ async function sorry(ctx: MessageContext): Promise<void> {
 export async function openVkCodesStore(ctx: MessageContext, vkUserId: number): Promise<void> {
   const view = await botCodesView("VK", String(vkUserId)).catch(() => null);
   if (!view?.ok) return sorry(ctx);
-  const screen = codesStoreScreen(view, siteUrl());
-  // 4 ряда номиналов по 2 + «Подарок» (ссылка) и «Скидка» — подарок в отдельный ряд: 6 рядов, 10 кнопок.
+  const screen = codesStoreScreen(view, siteUrl(), "VK");
+  // 4 ряда номиналов по 2 (8 ходовых) + «Подарок» (ссылка) и «Скидка» — подарок в отдельный ряд: 6 рядов, 10 кнопок.
   await send(ctx, screen);
 }
 
@@ -92,6 +92,8 @@ async function pickVk(ctx: MessageContext, vkUserId: number, denomination: numbe
   const screen = codePickScreen({
     denomination: order.denomination,
     discountPercent: order.discountPercent,
+    baseAmountKopecks: order.baseAmountKopecks,
+    finalAmountKopecks: order.finalAmountKopecks,
     giftApplied: order.giftApplied,
     instant: order.instant,
     payUrl: order.payUrl,

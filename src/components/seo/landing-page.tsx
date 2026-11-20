@@ -5,7 +5,8 @@ import { ArrowRight, CircleCheck } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { LANDINGS, landingBySlug } from "@/lib/seo/landings";
-import { CODE_DENOMINATIONS, CODE_PRICES } from "@/lib/codes-pricing";
+import { CODE_DENOMINATIONS, codePriceTable } from "@/lib/codes-pricing";
+import { codesUsdRub } from "@/lib/codes/usd-rate";
 import { directPrice } from "@/lib/retail-pricing";
 import styles from "./landing.module.css";
 
@@ -27,7 +28,8 @@ export function landingMetadata(slug: string): Metadata {
 
 const GAMEPASS_AMOUNTS = [500, 1000, 2000, 5000];
 
-export default function LandingPage({ slug }: { slug: string }) {
+export default async function LandingPage({ slug }: { slug: string }) {
+  const codePrices = codePriceTable(await codesUsdRub());
   const landing = landingBySlug(slug);
   if (!landing) notFound();
   const faqLd = {
@@ -55,7 +57,7 @@ export default function LandingPage({ slug }: { slug: string }) {
               <Link key={denomination} href={`/?pack=${denomination}#codes`} className={styles.price}>
                 <b>{denomination.toLocaleString("ru-RU")}</b>
                 <span>Robux</span>
-                <small>{CODE_PRICES[denomination].toLocaleString("ru-RU")} ₽</small>
+                <small>{codePrices[denomination].toLocaleString("ru-RU")} ₽</small>
               </Link>
             ))}
           </div>

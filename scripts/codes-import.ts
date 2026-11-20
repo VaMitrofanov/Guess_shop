@@ -11,7 +11,7 @@
  */
 import { readFileSync } from "node:fs";
 import { prisma } from "../src/lib/prisma";
-import { isCodeDenomination } from "../bots/shared/codes-pricing";
+import { isSupplierCodeDenomination } from "../bots/shared/codes-pricing";
 import { activationCodeHmac, activationCryptoReady, encryptActivationCode, normalizeActivationCode } from "../src/lib/codes/secrets";
 
 async function main() {
@@ -19,7 +19,7 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const [file, denominationRaw, batchLabel] = args;
   const denomination = Number(denominationRaw);
-  if (!file || !isCodeDenomination(denomination)) {
+  if (!file || !isSupplierCodeDenomination(denomination)) {
     console.error("Использование: node --import tsx scripts/codes-import.ts <файл> <номинал> [метка] [--dry-run]");
     process.exit(2);
   }

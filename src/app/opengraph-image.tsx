@@ -10,8 +10,8 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const PACKS: { amount: string; price: string; hit?: boolean; dark?: boolean; rotate: number; top: number; left: number }[] = [
-  { amount: "100", price: "239 ₽", rotate: -8, top: 40, left: 800 },
-  { amount: "10 000", price: "10 529 ₽", rotate: 5, top: 425, left: 870 },
+  { amount: "100", price: "229 ₽", rotate: -8, top: 40, left: 800 },
+  { amount: "10 000", price: "10 499 ₽", rotate: 5, top: 425, left: 870 },
   { amount: "800", price: "999 ₽", hit: true, dark: true, rotate: -3, top: 238, left: 830 },
 ];
 

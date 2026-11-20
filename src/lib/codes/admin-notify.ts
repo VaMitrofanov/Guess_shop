@@ -1,7 +1,7 @@
 import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
 import { adminTargets } from "../../../bots/shared/admin-route";
 import { formatAdminNotice } from "../../../bots/shared/notify-format";
-import { formatRubKopecks } from "@/lib/codes-pricing";
+import { codeComponents, formatRubKopecks } from "@/lib/codes-pricing";
 import { prisma } from "@/lib/prisma";
 
 /** Кнопка «🎟 Выдать код» под алертом — её ловит TG-бот (`bots/tg/codes-issue-reply.ts`). */
@@ -51,6 +51,7 @@ export async function notifyCodeAdmins(input: {
     title: `код активации: ${input.title}`,
     lines: [
       `🎟 <code>${input.orderPublicId}</code> · ${input.denomination.toLocaleString("ru-RU")} R$ · ${formatRubKopecks(input.amountKopecks)}`,
+      input.issueButton && supplierLabel(input.denomination) !== null ? `📦 нужно: ${supplierLabel(input.denomination)}` : null,
       order ? deliveryLine(order) : null,
       // У 🟠 формат прячет `next`, а для ручной выдачи подсказка про «ответом» нужна.
       input.marker !== "urgent" && input.issueButton ? `👉 ${input.next}` : null,
@@ -58,7 +59,7 @@ export async function notifyCodeAdmins(input: {
     next: input.next,
   });
   const markup = input.issueButton
-    ? { reply_markup: { inline_keyboard: [[{ text: `🎟 Выдать код ${input.denomination.toLocaleString("ru-RU")} R$`, callback_data: `${CODE_ISSUE_CB}:${input.orderPublicId}` }]] } }
+    ? { reply_markup: { inline_keyboard: [[{ text: `🎟 Выдать ${supplierLabel(input.denomination) ?? `код ${input.denomination.toLocaleString("ru-RU")} R$`}`, callback_data: `${CODE_ISSUE_CB}:${input.orderPublicId}` }]] } }
     : {};
   try {
     // Своя тема «Коды» (16.11.2026). Её ещё нет (бот не перезапускался) — адресат
@@ -111,4 +112,18 @@ async function alertRoots(publicId: string): Promise<Record<string, number>> {
   }).catch(() => null);
   const messages = (event?.payload as { messages?: Record<string, unknown> } | null)?.messages ?? {};
   return Object.fromEntries(Object.entries(messages).filter((entry): entry is [string, number] => typeof entry[1] === "number"));
+}
+
+/**
+ * Какие коды поставщика закрывают заказ, если это не «один код того же
+ * номинала» (20.11.2026): «2 000» → «2 кода по 1 000 R$», «199» → «код 200 R$».
+ */
+export function supplierLabel(denomination: number): string | null {
+  const parts = codeComponents(denomination);
+  if (parts.length === 1 && parts[0] === denomination) return null;
+  if (parts.length === 1) return `код ${parts[0].toLocaleString("ru-RU")} R$`;
+  const same = parts.every((part) => part === parts[0]);
+  return same
+    ? `${parts.length} кода по ${parts[0].toLocaleString("ru-RU")} R$`
+    : `коды ${parts.map((part) => part.toLocaleString("ru-RU")).join(" + ")} R$`;
 }

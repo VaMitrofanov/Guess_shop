@@ -208,7 +208,7 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
   const [code, setCode] = useState<string | null>(null);
   const [busy, setBusy] = useState<"reveal" | "resend" | null>(null);
   const [message, setMessage] = useState("");
-  const [copied, setCopied] = useState<"code" | "link" | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [giftLink, setGiftLink] = useState<string | null>(order.giftLink ?? null);
   const [shared, setShared] = useState(order.shared ?? null);
   const [sharing, setSharing] = useState(false);
@@ -245,7 +245,7 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
     setBusy(null);
   };
 
-  const flash = (kind: "code" | "link") => {
+  const flash = (kind: string) => {
     setCopied(kind);
     window.setTimeout(() => setCopied(null), 2200);
   };
@@ -277,15 +277,18 @@ function CodeRow({ order }: { order: DashboardCodeOrder }) {
         <div className={styles.codeBox}>
           {code ? (
             <>
-              <div className={styles.codeLine}>
-                <code aria-label="Код активации">{code}</code>
-                <button type="button" onClick={async () => { if (await copy(code)) flash("code"); }}>
-                  {copied === "code" ? <><Check size={16} /> Скопировано</> : <><Copy size={16} /> Копировать</>}
-                </button>
-              </div>
+              {/* Набор (2 000 = 2 × 1 000, 20.11.2026): каждый код — своей строкой. */}
+              {code.split("\n").map((one, index) => (
+                <div key={one} className={styles.codeLine}>
+                  <code aria-label={`Код активации ${index + 1}`}>{one}</code>
+                  <button type="button" onClick={async () => { if (await copy(one)) flash(`code${index}`); }}>
+                    {copied === `code${index}` ? <><Check size={16} /> Скопировано</> : <><Copy size={16} /> Копировать</>}
+                  </button>
+                </div>
+              ))}
               <ol className={styles.steps}>
                 <li>Откройте roblox.com/redeem и войдите в нужный аккаунт.</li>
-                <li>Введите код и нажмите «Активировать» — Robux придут сразу.</li>
+                <li>{code.includes("\n") ? "Введите коды по очереди, после каждого — «Активировать»." : "Введите код и нажмите «Активировать» — Robux придут сразу."}</li>
               </ol>
             </>
           ) : (

@@ -82,7 +82,7 @@ export default function ScratchReveal({ fetchCode, onRevealed }: { fetchCode: ()
   return (
     <div>
       <div className={css.wrap}>
-        <div className={css.under} aria-live="polite">{code ?? (failed ? "Не открылся — нажмите «Открыть сразу»" : "•••• •••• ••••")}</div>
+        <div className={css.under} style={{ whiteSpace: "pre-line" }} aria-live="polite">{code ?? (failed ? "Не открылся — нажмите «Открыть сразу»" : "•••• •••• ••••")}</div>
         <canvas
           ref={canvasRef}
           className={`${css.canvas} ${done ? css.gone : ""}`}

@@ -6,6 +6,7 @@
  *       — кто оплатил и ждёт код (+ последние выданные). Без почт и кодов.
  *   node scripts/codes-issue.mjs issue CODE-XXXXXXXX <код> [номинал]
  *       — закрепить код за заказом и доставить: письмо / открытка / чат бота.
+ *         Набор «2 000 R$» = два кода по 1 000: «КОД1,КОД2» одним аргументом.
  *         Номинал (необязательно) — сверка: не совпал с заказом → отказ.
  *
  * Нужны env: BOT_PAYMENT_API_SECRET (как у Web/ботов) и CODES_WEB_URL
@@ -61,6 +62,7 @@ if (command === "queue") {
       not_found: "заказа нет", not_paid: "заказ не оплачен", already: "код уже выдан (второй не выдаём)",
       refunded: "деньги возвращены", duplicate_code: "этот код уже есть в базе", bad_code: "код странной формы",
       denomination_mismatch: "номинал не совпал с заказом", bad_request: "проверь номер заказа",
+      count_mismatch: `в заказе ${data.expected ?? "несколько"} кода — передай их одной строкой через запятую`,
     };
     console.error(`✗ ${status}: ${reasons[data.status] ?? data.status ?? "ошибка"}`);
     process.exit(1);

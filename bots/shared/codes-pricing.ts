@@ -11,30 +11,53 @@
  * denominations a supplier actually sells, so an arbitrary amount is not a
  * product we can deliver.
  *
- * v2 (14.11.2026): owner price list for the live site sale. The base price is
- * what a guest pays; a registered customer pays it minus their PERSONAL discount
- * (1 % on sign-up, up to 5 % for invited buyers — `CODE_DISCOUNT_TIERS`). On
- * 2500/4500/10000 the maximum discount is already priced in: 5 % off the base
- * lands near the former 2849/4949/9999 ₽.
+ * v3 (20.11.2026, owner): twelve packs, and the price FOLLOWS THE DOLLAR. The
+ * owner's list is computed at 85 ₽/$ (`CODES_REFERENCE_USD_RUB`); the supplier
+ * is paid in dollars, bank fee and tax are a percentage of the price, so a
+ * price scaled by `rate / 85` keeps every pack's margin in percent exactly as
+ * in the owner's table. The rate is the admin setting «USD → RUB»
+ * (`GlobalSettings.usdToRub`), set by hand — the owner chose that over the
+ * central bank rate. Rounding (owner): small packs move smoothly to the whole
+ * ruble, packs from 1 000 R$ snap to the nearest price ending in 9.
  *
- * Rounding (owner, 14.11.2026): kopecks look cheap, so the discounted sum is a
- * whole ruble — rounded UP, unless the ruble part already ends in 9 (rounding up
- * would carry into the next digit and spoil the "…9" look): 3 999,03 → 3 999,
- * 3 542,04 → 3 543. See `roundCodePriceKopecks`.
+ * Product vs supplier code (`CODE_COMPONENTS`):
+ *   - «199 R$» is the supplier's 200 R$ code: a Russian account receives 199
+ *     after Roblox's regional conversion, so we sell what actually arrives;
+ *   - «2 000 R$» is two 1 000 R$ codes (owner: cheaper than a 2 000 code).
+ * Stock (`ActivationCode.denomination`) always holds SUPPLIER denominations.
+ *
+ * Personal discount on top: 1 % on sign-up, up to 5 % for invited buyers
+ * (`CODE_DISCOUNT_TIERS`). Rounding of the discounted sum (owner, 14.11.2026):
+ * kopecks look cheap, so it is a whole ruble — rounded UP, unless the ruble
+ * part already ends in 9: 3 999,03 → 3 999, 3 542,04 → 3 543.
  */
 
-export const CODES_PRICING_POLICY_VERSION = "retail-codes-v2";
+export const CODES_PRICING_POLICY_VERSION = "retail-codes-v3";
+/** Orders created before 20.11.2026: one code of `denomination` R$ each. */
+export const CODES_LEGACY_POLICY_VERSION = "retail-codes-v2";
 
-/** Owner-approved 2026-11-14. Denomination in R$ -> base price in whole ₽. */
+/** The rate the owner's price list is computed at. */
+export const CODES_REFERENCE_USD_RUB = 85;
+/** A rate outside this band is a typo («8.5», «850»), not the market: fall back to the reference. */
+export const CODES_USD_RUB_MIN = 60;
+export const CODES_USD_RUB_MAX = 150;
+/** From this pack up the price ends in 9; below it moves to the whole ruble. */
+export const CODES_SNAP_TO_NINE_FROM = 1000;
+
+/** Owner-approved 2026-11-20 at 85 ₽/$. Pack in R$ -> base price in whole ₽. */
 export const CODE_PRICES: Readonly<Record<number, number>> = Object.freeze({
-  100: 239,
-  200: 349,
+  10: 59,
+  50: 189,
+  100: 229,
+  199: 359,
+  500: 659,
   800: 999,
   1000: 1199,
-  2000: 2399,
+  2000: 2349,
   2500: 2999,
-  4500: 5219,
-  10000: 10529,
+  4500: 5299,
+  5250: 5999,
+  10000: 10499,
 });
 
 export const CODE_DENOMINATIONS: readonly number[] = Object.freeze(
@@ -42,6 +65,49 @@ export const CODE_DENOMINATIONS: readonly number[] = Object.freeze(
     .map(Number)
     .sort((a, b) => a - b),
 );
+
+/** Packs that are not one supplier code of the same face value. */
+export const CODE_COMPONENTS: Readonly<Record<number, readonly number[]>> = Object.freeze({
+  199: Object.freeze([200]),
+  2000: Object.freeze([1000, 1000]),
+});
+
+/**
+ * Supplier codes an order consists of. Orders priced by the v2 policy were
+ * sold as one code of their own face value (a «2 000» then was one code).
+ */
+export function codeComponents(denomination: number, pricingVersion?: string | null): number[] {
+  if (pricingVersion === CODES_LEGACY_POLICY_VERSION) return [denomination];
+  return [...(CODE_COMPONENTS[denomination] ?? [denomination])];
+}
+
+/** Supplier denominations the stock may hold (import, manual issue). */
+export const CODE_SUPPLIER_DENOMINATIONS: readonly number[] = Object.freeze(
+  [...new Set(CODE_DENOMINATIONS.flatMap((denomination) => codeComponents(denomination)))].sort((a, b) => a - b),
+);
+
+export function isSupplierCodeDenomination(amount: number): boolean {
+  return CODE_SUPPLIER_DENOMINATIONS.includes(amount);
+}
+
+/** How many packs the stock can serve: each component taken with multiplicity. */
+export function packsAvailable(denomination: number, stock: ReadonlyMap<number, number>): number {
+  const need = new Map<number, number>();
+  for (const part of codeComponents(denomination)) need.set(part, (need.get(part) ?? 0) + 1);
+  let packs = Infinity;
+  for (const [part, count] of need) packs = Math.min(packs, Math.floor((stock.get(part) ?? 0) / count));
+  return Number.isFinite(packs) ? packs : 0;
+}
+
+/**
+ * A word under the e-mail field (and on the bot's order card) for packs that
+ * are not «one code of that face value»: why 199 and not 200, and that 2 000
+ * arrives as two codes.
+ */
+export const CODE_REGION_NOTES: Readonly<Record<number, string>> = Object.freeze({
+  199: "Из-за региональных особенностей каждой страны аккаунты РФ получат 199 Robux после конвертации.",
+  2000: "Придут 2 кода по 1 000 Robux — введите оба по очереди на roblox.com/redeem.",
+});
 
 export interface CodePriceBreakdown {
   amountRobux: number;
@@ -54,21 +120,41 @@ export function isCodeDenomination(amount: number): boolean {
   return Number.isInteger(amount) && CODE_PRICES[amount] !== undefined;
 }
 
+/** The admin rate, or the reference when it is missing or obviously mistyped. */
+export function sanitizeCodesUsdRub(value: unknown): number {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= CODES_USD_RUB_MIN && rate <= CODES_USD_RUB_MAX ? rate : CODES_REFERENCE_USD_RUB;
+}
+
+function nearestNine(rubles: number): number {
+  return Math.max(9, Math.round((rubles - 9) / 10) * 10 + 9);
+}
+
 /**
- * Base price in whole rubles for a supported denomination.
+ * Base price in whole rubles at a dollar rate (default: the reference 85 ₽/$,
+ * where it equals the owner's list exactly).
  *
  * Returns 0 for anything else — including amounts the gamepass flow accepts —
  * so a UI preview stays safe. Callers that take money must gate on
  * `isCodeDenomination` first rather than treating 0 as free.
  */
-export function codePrice(amount: number): number {
+export function codePrice(amount: number, usdRub: number = CODES_REFERENCE_USD_RUB): number {
   if (!isCodeDenomination(amount)) return 0;
-  return CODE_PRICES[amount];
+  const reference = CODE_PRICES[amount];
+  const rate = sanitizeCodesUsdRub(usdRub);
+  if (rate === CODES_REFERENCE_USD_RUB) return reference;
+  const scaled = (reference * rate) / CODES_REFERENCE_USD_RUB;
+  return amount >= CODES_SNAP_TO_NINE_FROM ? nearestNine(scaled) : Math.max(1, Math.round(scaled));
 }
 
-export function getCodePriceBreakdown(amount: number): CodePriceBreakdown {
+/** Every pack's base price at a rate — what the storefront renders. */
+export function codePriceTable(usdRub: number = CODES_REFERENCE_USD_RUB): Record<number, number> {
+  return Object.fromEntries(CODE_DENOMINATIONS.map((denomination) => [denomination, codePrice(denomination, usdRub)]));
+}
+
+export function getCodePriceBreakdown(amount: number, usdRub: number = CODES_REFERENCE_USD_RUB): CodePriceBreakdown {
   const supported = isCodeDenomination(amount);
-  const rubles = supported ? CODE_PRICES[amount] : 0;
+  const rubles = supported ? codePrice(amount, usdRub) : 0;
   return {
     amountRobux: supported ? amount : 0,
     rubles,
@@ -146,6 +232,8 @@ export interface CodeQuote {
   discountPercent: number;
   discountKopecks: number;
   finalAmountKopecks: number;
+  /** The dollar rate the base price was computed at (after sanity bounds). */
+  usdRub: number;
 }
 
 /**
@@ -153,12 +241,12 @@ export interface CodeQuote {
  * whole ruble (`roundCodePriceKopecks`); `discountKopecks` is the real
  * difference between base and payable sum after rounding.
  */
-export function quoteCode(denomination: number, discountPercent: number): CodeQuote {
+export function quoteCode(denomination: number, discountPercent: number, usdRub: number = CODES_REFERENCE_USD_RUB): CodeQuote {
   if (!isCodeDenomination(denomination)) throw new RangeError(`Unsupported code denomination: ${denomination}`);
   if (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > CODE_MAX_DISCOUNT_PERCENT) {
     throw new RangeError(`Unsupported code discount: ${discountPercent}`);
   }
-  const baseAmountKopecks = CODE_PRICES[denomination] * 100;
+  const baseAmountKopecks = codePrice(denomination, usdRub) * 100;
   const exact = baseAmountKopecks - Math.round((baseAmountKopecks * discountPercent) / 100);
   const finalAmountKopecks = roundCodePriceKopecks(exact);
   return {
@@ -168,6 +256,7 @@ export function quoteCode(denomination: number, discountPercent: number): CodeQu
     discountPercent,
     discountKopecks: baseAmountKopecks - finalAmountKopecks,
     finalAmountKopecks,
+    usdRub: sanitizeCodesUsdRub(usdRub),
   };
 }
 

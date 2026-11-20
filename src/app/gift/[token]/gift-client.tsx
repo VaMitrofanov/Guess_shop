@@ -45,7 +45,8 @@ export default function GiftClient(props: {
   const [code, setCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  /** Номер скопированного кода (1, 2…), 0 — ничего. */
+  const [copied, setCopied] = useState(0);
   const [thanked, setThanked] = useState(props.thanked);
   const [thanking, setThanking] = useState(false);
 
@@ -68,14 +69,13 @@ export default function GiftClient(props: {
     }
   };
 
-  const copy = async () => {
-    if (!code) return;
+  const copy = async (value: string, index: number) => {
     try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2500);
+      await navigator.clipboard.writeText(value);
+      setCopied(index);
+      window.setTimeout(() => setCopied(0), 2500);
     } catch {
-      window.prompt("Скопируйте код", code);
+      window.prompt("Скопируйте код", value);
     }
   };
 
@@ -176,12 +176,15 @@ export default function GiftClient(props: {
                     {heart}
                   </div>
                 )}
-                <p className={styles.label}>Ваш код активации</p>
-                <div className={styles.code}>{code}</div>
+                <p className={styles.label}>{code.includes("\n") ? "Ваши коды — введите каждый по очереди" : "Ваш код активации"}</p>
+                {code.split("\n").map((one) => <div key={one} className={styles.code}>{one}</div>)}
                 <div className={styles.actions}>
-                  <button type="button" className={styles.primary} onClick={copy}>
-                    {copied ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> Скопировать</>}
-                  </button>
+                  {/* Набор (2 000 = 2 × 1 000, 20.11.2026): кнопка на каждый код. */}
+                  {code.split("\n").map((one, index, all) => (
+                    <button key={one} type="button" className={styles.primary} onClick={() => copy(one, index + 1)}>
+                      {copied === index + 1 ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> {all.length > 1 ? `Скопировать код ${index + 1}` : "Скопировать"}</>}
+                    </button>
+                  ))}
                   <a className={styles.secondary} href="https://www.roblox.com/redeem" target="_blank" rel="noopener noreferrer">
                     Активировать <ArrowUpRight size={18} />
                   </a>

@@ -21,7 +21,7 @@ import {
   Sparkles,
   UserPlus,
 } from "lucide-react";
-import { CODE_DENOMINATIONS, CODE_PRICES, quoteCode } from "@/lib/codes-pricing";
+import { CODE_DENOMINATIONS, CODE_MAX_DISCOUNT_PERCENT, CODE_REGION_NOTES, CODE_SIGNUP_DISCOUNT_PERCENT, quoteCode } from "@/lib/codes-pricing";
 import GiftArt from "@/components/gift-art";
 import styles from "./codes-store.module.css";
 import { trackSiteEvent } from "@/lib/site-track";
@@ -44,6 +44,10 @@ type Pack = {
   baseAmountKopecks: number;
   finalAmountKopecks: number;
   signupAmountKopecks: number;
+  /** Цена с максимальной скидкой за друзей (считает сервер — по курсу). */
+  maxDiscountAmountKopecks?: number;
+  /** Пояснение под полем почты («199 R$» — почему не 200). */
+  note?: string | null;
   available: boolean;
 };
 
@@ -148,7 +152,7 @@ function whenLabel(local: string): string {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-export default function CodesStore({ instant: instantProp = true, festive = false }: { instant?: boolean; festive?: boolean }) {
+export default function CodesStore({ instant: instantProp = true, festive = false, usdRub }: { instant?: boolean; festive?: boolean; usdRub?: number }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<number>(DEFAULT_PACK);
@@ -250,8 +254,11 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
   }, []);
 
   const instant = catalog?.instant ?? instantProp;
-  const packs = catalog?.packs ?? FALLBACK_PACKS;
+  const packs = catalog?.packs ?? fallbackPacks(usdRub);
   const pack = packs.find((item) => item.denomination === selected) ?? null;
+  // «199 R$» (20.11.2026, владелец): пояснение под полем почты, почему не 200.
+  const regionNoteText = pack ? pack.note ?? CODE_REGION_NOTES[pack.denomination] ?? null : null;
+  const regionNote = regionNoteText ? <p className={styles.hint} role="note">{regionNoteText}</p> : null;
   const viewer = catalog?.viewer;
   const registered = Boolean(viewer?.registered);
   const hit = catalog?.hit ?? DEFAULT_PACK;
@@ -498,7 +505,7 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
               )
             ) : (
               <p className={styles.summaryGreen}>
-                С регистрацией и подпиской на канал — {rub(pack.signupAmountKopecks)}, до {rub(quoteCode(pack.denomination, 5).finalAmountKopecks)} за друзей
+                С регистрацией и подпиской на канал — {rub(pack.signupAmountKopecks)}, до {rub(pack.maxDiscountAmountKopecks ?? quoteCode(pack.denomination, CODE_MAX_DISCOUNT_PERCENT).finalAmountKopecks)} за друзей
               </p>
             )}
           </>
@@ -604,6 +611,7 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
                 <small className={styles.hint}>Получатель чек не увидит — сюрприз останется сюрпризом.</small>
               </label>
             )}
+            {regionNote}
             <Consent agreed={agreed} onChange={setAgreed} />
             <button type="button" className={`${styles.primary} ${styles.giftButton}`} disabled={blocked || !giftReady || busy !== null} onClick={() => submit("self")}>
               {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <Gift size={18} />}
@@ -623,6 +631,7 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
                 <span className={styles.input}><Mail size={18} /><input type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} /></span>
               </label>
             )}
+            {regionNote}
             <Consent agreed={agreed} onChange={setAgreed} />
             <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={blocked || !agreed || !receiptValid || busy !== null} onClick={() => submit("self")}>
               {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <CreditCard size={18} />}
@@ -657,7 +666,8 @@ export default function CodesStore({ instant: instantProp = true, festive = fals
                   </span>
                   {email && !emailValid && <small className={styles.fieldError}>Проверьте адрес — в нём ошибка.</small>}
                 </label>
-                <Consent agreed={agreed} onChange={setAgreed} />
+                {regionNote}
+            <Consent agreed={agreed} onChange={setAgreed} />
                 <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={blocked || !emailValid || !agreed || busy !== null} onClick={() => submit("self")}>
                   {busy === "self" ? <Loader2 size={18} className={styles.spin} /> : <CreditCard size={18} />}
                   Оплатить {pack ? rub(pack.finalAmountKopecks) : ""}
@@ -744,11 +754,21 @@ function Consent({ agreed, onChange }: { agreed: boolean; onChange: (value: bool
   );
 }
 
-/** До ответа сервера — гостевые цены из того же прайса, что у сервера. */
-const FALLBACK_PACKS: Pack[] = CODE_DENOMINATIONS.map((denomination) => ({
-  denomination,
-  baseAmountKopecks: CODE_PRICES[denomination] * 100,
-  finalAmountKopecks: CODE_PRICES[denomination] * 100,
-  signupAmountKopecks: quoteCode(denomination, 1).finalAmountKopecks,
-  available: true,
-}));
+/**
+ * До ответа сервера — гостевые цены по курсу, который передала главная
+ * (`usdRub`; без него — опорный 85 ₽/$). Та же функция, что у сервера.
+ */
+function fallbackPacks(usdRub?: number): Pack[] {
+  return CODE_DENOMINATIONS.map((denomination) => {
+    const base = quoteCode(denomination, 0, usdRub);
+    return {
+      denomination,
+      baseAmountKopecks: base.baseAmountKopecks,
+      finalAmountKopecks: base.finalAmountKopecks,
+      signupAmountKopecks: quoteCode(denomination, CODE_SIGNUP_DISCOUNT_PERCENT, usdRub).finalAmountKopecks,
+      maxDiscountAmountKopecks: quoteCode(denomination, CODE_MAX_DISCOUNT_PERCENT, usdRub).finalAmountKopecks,
+      note: CODE_REGION_NOTES[denomination] ?? null,
+      available: true,
+    };
+  });
+}

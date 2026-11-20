@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendMail } from "@/lib/mailer";
-import { decryptActivationCode } from "@/lib/codes/secrets";
+import { issuedCodesForOrder } from "@/lib/codes/order-codes";
 import { GIFT_THEME_META, giftOpenTokenFor, isGiftTheme, type GiftTheme } from "@/lib/codes/gift";
 import { sendCodeToChat } from "@/lib/codes/chat-notify";
 import { issueBindToken } from "../../../bots/shared/bot-bind";
@@ -45,6 +45,8 @@ export function escapeHtml(value: string): string {
 export function buildCodeEmail(input: {
   denomination: number;
   code: string;
+  /** Набор (2 000 = 2 × 1 000, 20.11.2026): все коды заказа; иначе — `code`. */
+  codes?: readonly string[];
   publicId: string;
   account: boolean;
   waited?: boolean;
@@ -53,12 +55,18 @@ export function buildCodeEmail(input: {
 }): { subject: string; text: string; html: string } {
   const amount = input.denomination.toLocaleString("ru-RU");
   const tgUrl = input.telegramUrl ? escapeHtml(input.telegramUrl) : null;
-  const subject = `🎁 Ваш код на ${amount} Robux — заказ ${input.publicId}`;
+  const codes = input.codes?.length ? input.codes : [input.code];
+  const several = codes.length > 1;
+  const part = Math.round(input.denomination / codes.length).toLocaleString("ru-RU");
+  const subject = several
+    ? `🎁 Ваши коды на ${amount} Robux — заказ ${input.publicId}`
+    : `🎁 Ваш код на ${amount} Robux — заказ ${input.publicId}`;
   const cabinet = input.account ? `\nКод также сохранён в личном кабинете: ${APP_URL}/dashboard#codes\n` : "";
   const text = [
-    `Ваш код на ${amount} Robux готов!`,
+    several ? `Ваши коды на ${amount} Robux готовы — ${codes.length} кода по ${part} Robux.` : `Ваш код на ${amount} Robux готов!`,
     "",
-    `Код: ${input.code}`,
+    ...(several ? codes.map((code, index) => `Код ${index + 1}: ${code}`) : [`Код: ${input.code}`]),
+    ...(several ? ["Введите на roblox.com/redeem каждый код по очереди."] : []),
     `Заказ: ${input.publicId}`,
     ...(input.waited ? ["", "Спасибо за терпение — этот код мы готовили для вас вручную."] : []),
     "",
@@ -75,7 +83,6 @@ export function buildCodeEmail(input: {
     APP_URL,
   ].join("\n");
 
-  const code = escapeHtml(input.code);
   const order = escapeHtml(input.publicId);
   const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif";
   const mono = "SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace";
@@ -104,9 +111,9 @@ export function buildCodeEmail(input: {
 <tr><td bgcolor="#ffffff" style="background:#ffffff;padding:0 18px"><div style="border-top:2px dashed #d8cffa;height:0;line-height:0;font-size:0">&nbsp;</div></td></tr>
 
 <tr><td bgcolor="#ffffff" style="background:#ffffff;border-radius:${tgUrl ? "0" : "0 0 22px 22px"};padding:22px 26px 26px">
-  <div style="font-size:12px;font-weight:700;letter-spacing:.1em;color:#706780">ВАШ КОД</div>
-  <div style="margin:8px 0 6px;padding:18px 12px;border:2px dashed #7556e8;border-radius:14px;background:#f6f3ff;text-align:center;font-family:${mono};font-size:25px;font-weight:700;letter-spacing:.08em;color:#251b3f;user-select:all;-webkit-user-select:all">${code}</div>
-  <div style="font-size:12px;color:#706780;text-align:center;margin-bottom:18px">Нажмите и удерживайте, чтобы скопировать</div>
+  <div style="font-size:12px;font-weight:700;letter-spacing:.1em;color:#706780">${several ? `ВАШИ КОДЫ · ${codes.length} × ${part} ROBUX` : "ВАШ КОД"}</div>
+  ${codes.map((code, index) => `${several ? `<div style="margin:12px 0 0;font-size:12px;font-weight:700;color:#706780">Код ${index + 1}</div>` : ""}<div style="margin:8px 0 6px;padding:18px 12px;border:2px dashed #7556e8;border-radius:14px;background:#f6f3ff;text-align:center;font-family:${mono};font-size:25px;font-weight:700;letter-spacing:.08em;color:#251b3f;user-select:all;-webkit-user-select:all">${escapeHtml(code)}</div>`).join("")}
+  <div style="font-size:12px;color:#706780;text-align:center;margin-bottom:18px">${several ? "Введите каждый код по очереди. Нажмите и удерживайте, чтобы скопировать" : "Нажмите и удерживайте, чтобы скопировать"}</div>
   <a href="${ROBLOX_REDEEM_URL}" style="display:block;text-align:center;background:#7556e8;color:#ffffff;text-decoration:none;font-weight:800;font-size:16px;padding:16px 18px;border-radius:14px">Активировать на Roblox →</a>
   ${input.waited ? `<div style="margin-top:18px;padding:12px 14px;border-radius:12px;background:#f6f3ff;font-size:14px;line-height:1.5;color:#3b2a8f">Спасибо за терпение — этот код мы готовили для вас вручную.</div>` : ""}
   <div style="margin:24px 0 12px;font-size:16px;font-weight:800">Как активировать</div>
@@ -148,7 +155,7 @@ async function deliveryAddress(orderId: string) {
     select: {
       id: true, publicId: true, denomination: true, status: true, deliveryMode: true, recipientEmail: true, emailAttempts: true,
       paidAt: true, issuedAt: true,
-      activationCode: { select: { encryptedValue: true } },
+      activationCodeId: true,
       createdVia: true, creatorUserId: true,
       creator: { select: { email: true, emailVerifiedAt: true, tgId: true } },
     },
@@ -170,15 +177,16 @@ export async function sendCodeEmail(orderId: string, reason: "issued" | "resend"
   const found = await deliveryAddress(orderId);
   if (!found) return "not_issued";
   const { order, to } = found;
-  if (order.status !== "ISSUED" || !order.activationCode) return "not_issued";
+  if (order.status !== "ISSUED" || !order.activationCodeId) return "not_issued";
   // Подарок — своё письмо-открытка без кода в тексте (`sendGiftEmail`).
   if (order.deliveryMode === "GIFT") return sendGiftEmail(order.id, reason);
   if (!to) return "no_address";
   if (order.emailAttempts >= MAX_EMAIL_ATTEMPTS) return "exhausted";
 
-  let code: string;
+  let codes: string[];
   try {
-    code = decryptActivationCode(order.activationCode.encryptedValue);
+    codes = await issuedCodesForOrder(order.id);
+    if (!codes.length) throw new Error("no issued codes");
   } catch {
     await prisma.codeOrder.update({ where: { id: order.id }, data: { emailLastError: "decrypt_failed", emailAttempts: { increment: 1 } } });
     console.error("[codes] cannot decrypt issued code", { orderId: order.id });
@@ -190,7 +198,7 @@ export async function sendCodeEmail(orderId: string, reason: "issued" | "resend"
   const telegramUrl = order.deliveryMode === "ACCOUNT" && order.createdVia === "SELF" && order.creatorUserId && !order.creator?.tgId
     ? (await issueBindToken(prisma, order.creatorUserId).catch(() => null))?.url ?? null
     : null;
-  const mail = buildCodeEmail({ denomination: order.denomination, code, publicId: order.publicId, account: order.deliveryMode === "ACCOUNT", waited, telegramUrl });
+  const mail = buildCodeEmail({ denomination: order.denomination, code: codes[0], codes, publicId: order.publicId, account: order.deliveryMode === "ACCOUNT", waited, telegramUrl });
   const result = await sendMail({ to, ...mail });
   await prisma.codeOrder.update({
     where: { id: order.id },

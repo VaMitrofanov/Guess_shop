@@ -30,11 +30,16 @@ export function normalizeGiftCode(raw: string): string {
   return raw.trim().toUpperCase().replace(/[\s-]+/g, "");
 }
 
-/** Текст похож на сам код: латиница и цифры, без слов вокруг. */
+/**
+ * Текст похож на сам код: латиница и цифры, без слов вокруг. Набор «2 000 =
+ * 2 × 1 000» (20.11.2026) приходит несколькими строками — каждая строка код.
+ */
 export function looksLikeGiftCode(text: string): boolean {
   const t = text.trim();
-  if (!t || t.split(/\s+/).length > 4 || t.startsWith("/")) return false;
-  return CODE_SHAPE.test(normalizeGiftCode(t)) && /\d/.test(t);
+  if (!t || t.startsWith("/")) return false;
+  const lines = t.split(/[\n,;]+/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0 || lines.length > 4) return false;
+  return lines.every((line) => line.split(/\s+/).length <= 4 && CODE_SHAPE.test(normalizeGiftCode(line)) && /\d/.test(line));
 }
 
 /** `/issue CODE-XXXXXXXX код` → части; иначе null. */
@@ -51,6 +56,7 @@ const REASON: Record<Exclude<CodeIssueStatus, "issued">, string> = {
   duplicate_code: "этот код уже есть в базе (выдан раньше) — нужен другой",
   bad_code: "код странной формы — пришлите только сам код",
   denomination_mismatch: "номинал не совпал с заказом",
+  count_mismatch: "в этом заказе несколько кодов (2 000 = 2 × 1 000) — пришлите все одним сообщением, каждый с новой строки",
   bad_request: "проверьте номер заказа",
   error: "сайт не ответил — попробуйте ещё раз",
 };
@@ -110,7 +116,7 @@ function prunePrompts(now = Date.now()): void {
 async function askForCode(ctx: Context, publicId: string, alert: { id: number; text?: string } | null, threadId?: number): Promise<void> {
   prunePrompts();
   const sent = await ctx.reply(
-    `🎟 Код для <code>${publicId}</code> — ответьте на это сообщение самим кодом.`,
+    `🎟 Код для <code>${publicId}</code> — ответьте на это сообщение самим кодом. Набор (2 000 = 2 × 1 000) — оба кода одним сообщением, каждый с новой строки.`,
     {
       parse_mode: "HTML",
       disable_notification: true,

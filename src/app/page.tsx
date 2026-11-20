@@ -10,7 +10,8 @@ import CodesInfo from "@/components/codes-info";
 import GiftArt from "@/components/gift-art";
 import { HeroProof, HeroPulse, ReviewsMarquee, WbReviewsLink } from "@/components/storefront-pulse";
 import { storefrontPulseCached } from "@/lib/storefront-pulse";
-import { CODE_DISCOUNT_TIERS, CODE_PRICES } from "@/lib/codes-pricing";
+import { CODE_DISCOUNT_TIERS, codePriceTable } from "@/lib/codes-pricing";
+import { codesUsdRub } from "@/lib/codes/usd-rate";
 import { codesInstantDelivery } from "@/lib/codes/fulfillment";
 import { Garland, NewYearScene, Snowfall } from "@/components/new-year";
 import { isNewYearSeason } from "@/lib/new-year";
@@ -29,8 +30,6 @@ export const metadata: Metadata = {
 // иначе «код за минуту» вшился бы в статику на момент сборки.
 export const dynamic = "force-dynamic";
 
-const minCodePrice = Math.min(...Object.values(CODE_PRICES));
-
 /**
  * 🏠 Главная — витрина 2.0 (макет утверждён владельцем 14.11.2026,
  * docs/storefront-2-plan.md). Главная мысль: маркетинг в сторону кодов.
@@ -39,6 +38,10 @@ const minCodePrice = Math.min(...Object.values(CODE_PRICES));
  */
 export default async function Home({ searchParams }: { searchParams: Promise<{ ny?: string }> }) {
   const instant = codesInstantDelivery();
+  // Цены кодов идут за курсом доллара (20.11.2026): тот же расчёт, что в заказе.
+  const usdRub = await codesUsdRub();
+  const codePrices = codePriceTable(usdRub);
+  const minCodePrice = Math.min(...Object.values(codePrices));
   // Пульс (счётчик, лента выдач, отзывы WB) — готовый из кэша, без ожидания базы:
   // блок виден сразу вместе со страницей (16.11.2026). `null` — сразу после старта.
   const pulse = storefrontPulseCached();
@@ -148,7 +151,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
 
       {/* ── Покупка: код первым и крупнее, геймпасс — вторым ───────────── */}
       <section data-section="codes" className={styles.buy}>
-        <CodesStore instant={instant} festive={ny} />
+        <CodesStore instant={instant} festive={ny} usdRub={usdRub} />
         <div id="calculator" data-section="calculator" className={styles.passColumn}>
           <div className={styles.passHead}>
             <div className={styles.passTitle}>
@@ -161,7 +164,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
             <span>Robux приходят не сразу: Roblox держит их в ожидании</span>
             <Link href="/guide?source=site&amount=1000" className={styles.passGuide}>Как создать геймпасс — инструкция</Link>
           </div>
-          <Calculator />
+          <Calculator codePrices={codePrices} />
         </div>
       </section>
 

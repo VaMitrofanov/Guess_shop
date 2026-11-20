@@ -6,7 +6,7 @@ import { ArrowRight, Check, Gamepad2, Loader2, LockKeyhole, WalletCards } from "
 import { usePricing } from "@/hooks/usePricing";
 import CorridorNotice from "@/components/corridor-notice";
 import { gamepassPriceMatches } from "@/lib/gamepass-search-view";
-import { CODE_PRICES } from "@/lib/codes-pricing";
+import { codePriceTable } from "@/lib/codes-pricing";
 import styles from "@/app/storefront.module.css";
 import { trackSiteEvent } from "@/lib/site-track";
 
@@ -26,7 +26,8 @@ type LookupState = {
   passes?: Array<{ id: string | number; price: number }>;
 };
 
-export default function Calculator() {
+/** `codePrices` — цены кодов по текущему курсу (главная считает их на сервере). */
+export default function Calculator({ codePrices = codePriceTable() }: { codePrices?: Record<number, number> }) {
   const [robux, setRobux] = useState("1000");
   const [username, setUsername] = useState("");
   const [lookup, setLookup] = useState<LookupState>({ status: "idle" });
@@ -147,7 +148,7 @@ export default function Calculator() {
       )}
       {/* Мостик в коды (витрина 2.0): без «вы экономите» — только честная альтернатива. */}
       <a href="#codes" className={styles.codeBridge}>
-        {CODE_PRICES[amount] ? `Кодом — ${CODE_PRICES[amount].toLocaleString("ru-RU")} ₽, зато сразу на баланс →` : "Кодом — сразу на баланс, без геймпасса →"}
+        {codePrices[amount] ? `Кодом — ${codePrices[amount].toLocaleString("ru-RU")} ₽, зато сразу на баланс →` : "Кодом — сразу на баланс, без геймпасса →"}
       </a>
       <CorridorNotice className={styles.corridorNotice} linkClassName={styles.corridorNoticeLink} />
       <label className={styles.nicknameLabel} htmlFor="calculator-username">Куда зачислить Robux</label>

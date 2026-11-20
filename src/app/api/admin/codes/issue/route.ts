@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  */
 const Schema = z.object({
   publicId: z.string().trim().regex(/^CODE-[A-Z0-9]{8}$/i),
-  code: z.string().trim().min(6).max(64),
+  code: z.string().trim().min(6).max(300),
 });
 
 const REASON: Record<string, string> = {
@@ -30,6 +30,7 @@ const REASON: Record<string, string> = {
   duplicate_code: "этот код уже есть в базе — нужен другой",
   bad_code: "не похоже на код Roblox (латиница и цифры, 6–40 знаков)",
   denomination_mismatch: "номинал не совпал с заказом",
+  count_mismatch: "в этом заказе несколько кодов (2 000 = 2 × 1 000) — впишите все в одно поле через запятую",
 };
 
 export async function POST(req: NextRequest) {

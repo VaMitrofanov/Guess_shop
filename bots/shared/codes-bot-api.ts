@@ -47,6 +47,8 @@ export type BotCodesView = {
   siteLink: string;
   subscribed: boolean;
   channelUrl: string;
+  /** Курс ₽/$ для цен кодов (20.11.2026). Старый Web его не шлёт — тогда опорный. */
+  usdRub?: number;
 };
 
 export type BotCodeOrder = {
@@ -97,7 +99,7 @@ export function botOrderKey(platform: string, subject: string, denomination: num
 
 export type CodeIssueStatus =
   | "issued" | "not_found" | "not_paid" | "already" | "refunded"
-  | "duplicate_code" | "bad_code" | "denomination_mismatch" | "bad_request" | "error";
+  | "duplicate_code" | "bad_code" | "denomination_mismatch" | "count_mismatch" | "bad_request" | "error";
 
 /**
  * Ручная выдача кода из беседы админов (16.11.2026) — тот же

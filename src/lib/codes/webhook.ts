@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import { Prisma, type PaymentAttemptStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { notificationStatus, paymentTransitionAllowed } from "@/lib/payment-notification";
-import { issueCodeForOrder } from "@/lib/codes/stock";
+import { issueCodesForOrder } from "@/lib/codes/stock";
+import { codeComponents } from "@/lib/codes-pricing";
 import { deliverIssuedCode, sendPaidAwaitingEmail } from "@/lib/codes/delivery";
 import { notifyCodeAdmins } from "@/lib/codes/admin-notify";
 import { sendPaidToChat } from "@/lib/codes/chat-notify";
@@ -72,7 +73,7 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
 
       const order = await tx.codeOrder.findUniqueOrThrow({
         where: { id: payment.orderId },
-        select: { id: true, denomination: true, status: true, paidAt: true, activationCodeId: true },
+        select: { id: true, denomination: true, pricingVersion: true, status: true, paidAt: true, activationCodeId: true },
       });
 
       if (nextStatus === "CONFIRMED" && !order.paidAt) {
@@ -86,7 +87,12 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
           attention = "DOUBLE_PAYMENT";
           await tx.codeOrder.update({ where: { id: order.id }, data: { attentionReason: "DOUBLE_PAYMENT" } });
         } else {
-          const codeId = order.activationCodeId ?? await issueCodeForOrder(tx, order.id, order.denomination);
+          // Набор (2 000 = 2 × 1 000) выдаётся целиком или уходит на ручную выдачу.
+          // `activationCodeId` — первый код набора; все коды заказа — по `reservedForOrderId`.
+          const codeIds = order.activationCodeId
+            ? [order.activationCodeId]
+            : await issueCodesForOrder(tx, order.id, codeComponents(order.denomination, order.pricingVersion));
+          const codeId = codeIds?.[0] ?? null;
           if (codeId) {
             issued = true;
             await tx.codeOrder.update({

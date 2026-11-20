@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { CODE_DENOMINATIONS, CODE_DISCOUNT_TIERS, CODE_PRICES, quoteCode } from "@/lib/codes-pricing";
+import { CODE_DENOMINATIONS, CODE_DISCOUNT_TIERS, CODE_MAX_DISCOUNT_PERCENT, CODE_REGION_NOTES, packsAvailable, quoteCode } from "@/lib/codes-pricing";
+import { codesUsdRub } from "@/lib/codes/usd-rate";
 import { availableStock } from "@/lib/codes/stock";
 import { codesSalesOpen } from "@/lib/codes/orders";
 import { viewerCodeDiscount } from "@/lib/codes/referral";
@@ -19,24 +20,27 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await sessionUserId();
   if (userId) await claimReferralFromCookies(userId);
-  const [stock, discount, account] = await Promise.all([
+  const [stock, discount, account, usdRub] = await Promise.all([
     availableStock().catch(() => new Map<number, number>()),
     viewerCodeDiscount(userId),
     userId ? prisma.user.findUnique({ where: { id: userId }, select: { email: true } }) : Promise.resolve(null),
+    codesUsdRub(),
   ]);
   const salesOpen = codesSalesOpen();
   const backorder = codesBackorderEnabled();
   return NextResponse.json({
     salesOpen,
     packs: CODE_DENOMINATIONS.map((denomination) => {
-      const own = quoteCode(denomination, discount.percent);
+      const own = quoteCode(denomination, discount.percent, usdRub);
       return {
         denomination,
-        baseAmountKopecks: CODE_PRICES[denomination] * 100,
+        baseAmountKopecks: own.baseAmountKopecks,
         finalAmountKopecks: own.finalAmountKopecks,
-        signupAmountKopecks: quoteCode(denomination, 1).finalAmountKopecks,
+        signupAmountKopecks: quoteCode(denomination, 1, usdRub).finalAmountKopecks,
+        maxDiscountAmountKopecks: quoteCode(denomination, CODE_MAX_DISCOUNT_PERCENT, usdRub).finalAmountKopecks,
+        note: CODE_REGION_NOTES[denomination] ?? null,
         // Ручной режим: склад пуст, а купить можно — код выдадим после оплаты.
-        available: salesOpen && (backorder || (stock.get(denomination) ?? 0) > 0),
+        available: salesOpen && (backorder || packsAvailable(denomination, stock) > 0),
       };
     }),
     viewer: {

@@ -266,9 +266,13 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
             <NumInput value={purchaseRateStr} onChange={setPurchaseRateStr} placeholder="авто" step={0.1} />
           </SettingRow>
           <SettingRow label="USD → RUB" last>
-            <NumInput value={usdToRubStr} onChange={setUsdToRubStr} placeholder="90" step={1} />
+            <NumInput value={usdToRubStr} onChange={setUsdToRubStr} placeholder="85" step={0.01} />
           </SettingRow>
         </Card>
+        {/* 20.11.2026: от этого курса считаются цены кодов (прайс владельца — при 85 ₽/$). */}
+        <div style={{ fontSize: 14, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
+          По этому курсу считаются цены кодов на сайте и в ботах: при 85 — прайс как в таблице, выше — дороже. Меняется в течение минуты.
+        </div>
         {settings.purchaseRate === null && (
           <div style={{ fontSize: 14, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
             Курс закупа не задан — используется рыночный

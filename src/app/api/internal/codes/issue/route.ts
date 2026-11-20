@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 const Schema = z.object({
   publicId: z.string().trim().regex(/^CODE-[A-Z0-9]{8}$/i),
-  code: z.string().trim().min(6).max(64),
+  code: z.string().trim().min(6).max(300),
   denomination: z.number().int().positive().optional(),
   label: z.string().trim().max(60).optional(),
 });

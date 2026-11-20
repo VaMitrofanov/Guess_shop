@@ -3,9 +3,10 @@ import { Prisma, type CodeOrder, type CodePayment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isSiteAcquiringEnabled } from "@/lib/site-acquiring";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
-import { isCodeDenomination, quoteCode, type CodeQuote } from "@/lib/codes-pricing";
+import { codeComponents, isCodeDenomination, quoteCode, type CodeQuote } from "@/lib/codes-pricing";
+import { codesUsdRub } from "@/lib/codes/usd-rate";
 import { viewerCodeDiscount } from "@/lib/codes/referral";
-import { hasStock, reserveCodeForOrder } from "@/lib/codes/stock";
+import { hasStock, reserveCodesForOrder } from "@/lib/codes/stock";
 import { activationCryptoReady, hashPayToken, maskEmail, newCodeOrderPublicId } from "@/lib/codes/secrets";
 import { codesBackorderEnabled } from "@/lib/codes/fulfillment";
 import { giftOpenTokenFor, hashGiftToken, type GiftInput, type GiftTheme } from "@/lib/codes/gift";
@@ -76,8 +77,12 @@ function normalizeEmail(email: string | null | undefined): string | null {
 }
 
 async function quoteFor(denomination: number, userId: string | null): Promise<CodeQuote & { giftId: string | null }> {
-  const discount = await viewerCodeDiscount(userId);
-  return { ...quoteCode(denomination, discount.percent), giftId: discount.giftApplied ? discount.gift?.id ?? null : null };
+  // Номинал снят с продажи (старый «200» стал «199» 20.11.2026) — новой цены у него нет.
+  if (!isCodeDenomination(denomination)) {
+    throw new CodeOrderError("BAD_DENOMINATION", "Этого номинала больше нет — выберите код в магазине заново.", 410);
+  }
+  const [discount, usdRub] = await Promise.all([viewerCodeDiscount(userId), codesUsdRub()]);
+  return { ...quoteCode(denomination, discount.percent, usdRub), giftId: discount.giftApplied ? discount.gift?.id ?? null : null };
 }
 
 export type CodeOrderChannel = "SITE" | "TG" | "VK";
@@ -152,7 +157,7 @@ export async function createCodeOrder(input: CreateCodeOrderInput): Promise<{ or
             create: {
               type: "CREATED",
               idempotencyKey: `code-created:${id}`,
-              payload: { via: input.createdVia, discountPercent: quote.discountPercent, finalAmountKopecks: quote.finalAmountKopecks },
+              payload: { via: input.createdVia, discountPercent: quote.discountPercent, finalAmountKopecks: quote.finalAmountKopecks, usdRub: quote.usdRub },
             },
           },
         },
@@ -229,14 +234,14 @@ export async function startCodePayment(order: OrderWithPayments, receiptEmailInp
     && payment.amountKopecks === order.finalAmountKopecks
     && now - payment.createdAt.getTime() < REUSE_PAYMENT_MS);
   if (reusable?.paymentUrl) {
-    await reserveCodeForOrder(prisma, order.id, order.denomination);
+    await reserveCodesForOrder(prisma, order.id, codeComponents(order.denomination, order.pricingVersion));
     return { paymentUrl: reusable.paymentUrl, reused: true };
   }
   const backorder = codesBackorderEnabled();
 
   const attemptNumber = order.payments.length + 1;
   const payment = await prisma.$transaction(async (tx) => {
-    const reserved = await reserveCodeForOrder(tx, order.id, order.denomination);
+    const reserved = await reserveCodesForOrder(tx, order.id, codeComponents(order.denomination, order.pricingVersion));
     if (!reserved && !backorder) throw new CodeOrderError("OUT_OF_STOCK", "Коды этого номинала только что закончились. Выберите другой номинал или попробуйте позже.", 409);
     return tx.codePayment.create({
       data: {
@@ -310,7 +315,7 @@ export async function refreshCodeOffer(order: OrderWithPayments): Promise<void> 
         create: {
           type: "OFFER_REFRESHED",
           idempotencyKey: `code-refresh:${order.id}:${Date.now()}`,
-          payload: { from: order.finalAmountKopecks, to: quote.finalAmountKopecks, discountPercent: quote.discountPercent },
+          payload: { from: order.finalAmountKopecks, to: quote.finalAmountKopecks, discountPercent: quote.discountPercent, usdRub: quote.usdRub },
         },
       },
     },
@@ -357,8 +362,8 @@ export async function publicCodeOrderView(order: OrderWithPayments): Promise<Pub
   const receipt = defaultReceiptEmail(order);
   let quoteIfRefreshed: PublicCodeOrder["quoteIfRefreshed"] = null;
   if (expired) {
-    const quote = await quoteFor(order.denomination, order.creatorUserId);
-    quoteIfRefreshed = { finalAmountKopecks: quote.finalAmountKopecks, discountPercent: quote.discountPercent };
+    const quote = await quoteFor(order.denomination, order.creatorUserId).catch(() => null);
+    quoteIfRefreshed = quote ? { finalAmountKopecks: quote.finalAmountKopecks, discountPercent: quote.discountPercent } : null;
   }
   return {
     publicId: order.publicId,

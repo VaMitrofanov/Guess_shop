@@ -6,6 +6,10 @@ describe("выдача кода из беседы (16.11.2026)", () => {
   it("код распознаётся в разных записях, обычная речь — нет", () => {
     for (const t of ["ABCD-1234-EFGH", "abcd1234efgh", "1234 5678 9012", "R0BUX1234567"]) expect(looksLikeGiftCode(t)).toBe(true);
     for (const t of ["ок, сейчас найду код", "спасибо", "/issue", "ABCDEFGH", ""]) expect(looksLikeGiftCode(t)).toBe(false);
+    // Набор 2 000 = 2 × 1 000 (20.11.2026): два кода в одном сообщении.
+    expect(looksLikeGiftCode("ABCD-1234-EFGH\nWXYZ-5678-QRST")).toBe(true);
+    expect(looksLikeGiftCode("ABCD12345678, WXYZ56781234")).toBe(true);
+    expect(looksLikeGiftCode("ABCD-1234-EFGH\nспасибо")).toBe(false);
   });
 
   it("/issue — номер заказа и код", () => {

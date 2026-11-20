@@ -19,6 +19,7 @@ import {
   CODE_DENOMINATIONS,
   CODE_DISCOUNT_TIERS,
   CODE_PRICES,
+  CODE_REGION_NOTES,
   codeDiscountProgress,
   formatRubKopecks,
   quoteCode,
@@ -37,7 +38,7 @@ export const CODES_CB = {
   subscribed: "codes_sub",
 } as const;
 
-export const CODES_PICK_RE = /^codes_p:(\d{3,5})$/;
+export const CODES_PICK_RE = /^codes_p:(\d{2,5})$/;
 
 /** Префикс deep-link приглашения: `t.me/<бот>?start=r_<код>`, `vk.me/<группа>?ref=r_<код>`. */
 export const REFERRAL_START_PREFIX = "r_";
@@ -60,12 +61,19 @@ export function gamepassHitAmount(env: Record<string, string | undefined> = proc
   return Number.isInteger(value) && value >= 100 ? value : 1000;
 }
 
+/**
+ * ВК: inline-клавиатура — не больше 10 кнопок (`project_vk_keyboard_limits`).
+ * 12 номиналов + 2 действия туда не влезают — в ВК кнопками 8 ходовых, а
+ * остальные (10, 50, 2 000, 5 250) перечислены текстом со ссылкой на сайт.
+ */
+export const CODES_VK_DENOMINATIONS: readonly number[] = Object.freeze([100, 199, 500, 800, 1000, 2500, 4500, 10000]);
+
 /** Пакет с самой низкой ценой за 1 R$ при данной скидке. */
-export function bestValueDenomination(discountPercent: number): number {
-  let best = CODE_DENOMINATIONS[0];
+export function bestValueDenomination(discountPercent: number, usdRub?: number, among: readonly number[] = CODE_DENOMINATIONS): number {
+  let best = among[0];
   let bestRate = Infinity;
-  for (const denomination of CODE_DENOMINATIONS) {
-    const rate = quoteCode(denomination, discountPercent).finalAmountKopecks / denomination;
+  for (const denomination of among) {
+    const rate = quoteCode(denomination, discountPercent, usdRub).finalAmountKopecks / denomination;
     if (rate < bestRate) { best = denomination; bestRate = rate; }
   }
   return best;
@@ -97,6 +105,8 @@ export interface CodesViewer {
   subscribed?: boolean;
   /** Куда подписываться: TG-канал для TG, группа для ВК. */
   channelUrl?: string;
+  /** Курс ₽/$ для цен (из Web); нет — опорный прайс. */
+  usdRub?: number;
 }
 
 export interface CodesButton {
@@ -114,10 +124,15 @@ export interface CodesScreen {
   rows: CodesButton[][];
 }
 
-/** Витрина: 8 номиналов по два в ряд + «Подарок» и «Скидка за друзей». 5 рядов × 2 = 10 кнопок (лимит VK). */
-export function codesStoreScreen(viewer: CodesViewer, siteUrl: string): CodesScreen {
+/**
+ * Витрина: номиналы по два в ряд + «Подарок» и «Скидка за друзей». В TG — все
+ * 12; в ВК (`platform: "VK"`) — 8 ходовых, чтобы уложиться в 10 кнопок, а
+ * остальные — строкой текста.
+ */
+export function codesStoreScreen(viewer: CodesViewer, siteUrl: string, platform: "TG" | "VK" = "TG"): CodesScreen {
   const hit = codesHitDenomination();
-  const best = bestValueDenomination(viewer.discountPercent);
+  const shown = platform === "VK" ? CODES_VK_DENOMINATIONS : CODE_DENOMINATIONS;
+  const best = bestValueDenomination(viewer.discountPercent, viewer.usdRub, shown);
   const lines: string[] = [];
   lines.push("🎟 <b>Коды Roblox — Robux сразу на баланс</b>");
   lines.push("");
@@ -139,13 +154,18 @@ export function codesStoreScreen(viewer: CodesViewer, siteUrl: string): CodesScr
     lines.push("");
     lines.push("⏳ Продажа кодов откроется совсем скоро — цены уже здесь.");
   }
+  const hidden = CODE_DENOMINATIONS.filter((denomination) => !shown.includes(denomination));
+  if (hidden.length) {
+    lines.push("");
+    lines.push(`Ещё ${hidden.map((denomination) => `${robux(denomination)} R$ — ${rub(quoteCode(denomination, viewer.discountPercent, viewer.usdRub).finalAmountKopecks)}`).join(" · ")} — на сайте: ${siteUrl}/#codes`);
+  }
   lines.push("");
   lines.push("Выберите номинал 👇");
 
   const rows: CodesButton[][] = [];
-  for (let index = 0; index < CODE_DENOMINATIONS.length; index += 2) {
-    rows.push(CODE_DENOMINATIONS.slice(index, index + 2).map((denomination) => {
-      const price = quoteCode(denomination, viewer.discountPercent).finalAmountKopecks;
+  for (let index = 0; index < shown.length; index += 2) {
+    rows.push(shown.slice(index, index + 2).map((denomination) => {
+      const price = quoteCode(denomination, viewer.discountPercent, viewer.usdRub).finalAmountKopecks;
       const mark = denomination === hit ? " 🔥" : denomination === best ? " 💎" : "";
       return {
         label: `${robux(denomination)} R$ · ${rub(price)}${mark}`,
@@ -179,6 +199,9 @@ function friendsWord(n: number): string {
 export function codePickScreen(input: {
   denomination: number;
   discountPercent: number;
+  /** Суммы из созданного заказа — их и спишет банк (курс мог сдвинуться). */
+  baseAmountKopecks?: number;
+  finalAmountKopecks?: number;
   /** Цену дал подарок — так и пишем, а не «ваша скидка». */
   giftApplied?: boolean;
   instant: boolean;
@@ -186,9 +209,15 @@ export function codePickScreen(input: {
   shareUrl: string;
   publicId: string;
 }): CodesScreen {
-  const quote = quoteCode(input.denomination, input.discountPercent);
+  const computed = quoteCode(input.denomination, input.discountPercent);
+  const quote = {
+    discountPercent: input.discountPercent,
+    baseAmountKopecks: input.baseAmountKopecks ?? computed.baseAmountKopecks,
+    finalAmountKopecks: input.finalAmountKopecks ?? computed.finalAmountKopecks,
+  };
   const lines: string[] = [];
   lines.push(`🎟 <b>Код на ${robux(input.denomination)} Robux</b>`);
+  if (CODE_REGION_NOTES[input.denomination]) lines.push(`<i>${CODE_REGION_NOTES[input.denomination]}</i>`);
   lines.push("");
   lines.push(quote.discountPercent > 0
     ? `💳 К оплате: <s>${rub(quote.baseAmountKopecks)}</s> <b>${rub(quote.finalAmountKopecks)}</b> · ${input.giftApplied ? "🎁 подарок" : "ваша скидка"} ${quote.discountPercent}%`
@@ -264,26 +293,34 @@ export function vkShareFallback(rows: CodesButton[][], siteLink: string): CodesB
  * Код — под спойлером (не подсмотрят из-за плеча), скопировать — кнопкой
  * «📋 Скопировать код» (`copyButton`). ВК спойлеров не умеет — там код текстом.
  */
-export function codeChatIssuedText(input: { denomination: number; code: string; publicId: string }): { html: string; plain: string } {
+export function codeChatIssuedText(input: { denomination: number; code: string; publicId: string; codes?: readonly string[] }): { html: string; plain: string } {
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const amount = robux(input.denomination);
+  const codes = input.codes?.length ? input.codes : [input.code];
+  // Набор (2 000 = 2 × 1 000, 20.11.2026): каждый код вводится отдельно.
+  const several = codes.length > 1;
+  const part = several ? robux(Math.round(input.denomination / codes.length)) : amount;
+  const tail = [
+    "",
+    several
+      ? `Откройте roblox.com/redeem (кнопка ниже), войдите в аккаунт, куда нужны Robux, и введите коды по очереди — каждый на ${part} Robux.`
+      : "Откройте roblox.com/redeem (кнопка ниже), войдите в аккаунт, куда нужны Robux, и вставьте код.",
+    "",
+    several
+      ? "Коды сохранены и в кабинете на сайте. Никому их не показывайте: кто ввёл, тот и получил Robux."
+      : "Код сохранён и в кабинете на сайте. Никому его не показывайте: кто ввёл, тот и получил Robux.",
+  ];
   const html = [
-    `🎉 <b>Код на ${amount} Robux готов!</b>`,
+    several ? `🎉 <b>${codes.length} кода на ${amount} Robux готовы!</b>` : `🎉 <b>Код на ${amount} Robux готов!</b>`,
     "Коснитесь, чтобы показать:",
-    `<tg-spoiler><code>${escape(input.code)}</code></tg-spoiler>`,
-    "",
-    "Откройте roblox.com/redeem (кнопка ниже), войдите в аккаунт, куда нужны Robux, и вставьте код.",
-    "",
-    "Код сохранён и в кабинете на сайте. Никому его не показывайте: кто ввёл, тот и получил Robux.",
+    ...codes.map((code, index) => `${several ? `${index + 1}. ` : ""}<tg-spoiler><code>${escape(code)}</code></tg-spoiler>`),
+    ...tail,
   ].join("\n");
   const plain = [
-    `🎉 Код на ${amount} Robux готов!`,
+    several ? `🎉 ${codes.length} кода на ${amount} Robux готовы!` : `🎉 Код на ${amount} Robux готов!`,
     "",
-    input.code,
-    "",
-    "Откройте roblox.com/redeem (кнопка ниже), войдите в аккаунт, куда нужны Robux, и вставьте код.",
-    "",
-    "Код сохранён и в кабинете на сайте. Никому его не показывайте: кто ввёл, тот и получил Robux.",
+    ...codes.map((code, index) => `${several ? `${index + 1}. ` : ""}${code}`),
+    ...tail,
   ].join("\n");
   return { html, plain };
 }
