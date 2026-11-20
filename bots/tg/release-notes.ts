@@ -160,7 +160,9 @@ async function postToVkWall(note: ReleaseNote): Promise<string> {
   });
   const data = await response.json().catch(() => ({})) as { error?: { error_msg?: string } };
   if (data.error) throw new Error(`ВК: ${data.error.error_msg ?? "ошибка"}`);
-  return "ВК ✅";
+  // Пост без картинки не оставляем (20.11.2026), а загрузить фото на стену токен
+  // сообщества не может — напоминаем прикрепить обложку из превью руками.
+  return note.public?.cover ? "ВК ✅ — прикрепите обложку из превью (пост → ⋯ → Редактировать → фото)" : "ВК ✅";
 }
 
 const busy = new Set<string>();

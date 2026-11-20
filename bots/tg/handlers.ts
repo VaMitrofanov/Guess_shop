@@ -4718,6 +4718,26 @@ async function askCodeOwner(
  * площадки только что связаны. `"handled"` — человеку ответили и ждать больше
  * нечего (спросили владельца или это настоящий второй аккаунт).
  */
+/**
+ * Код, на котором человек упёрся в «активирован другим» (20.11.2026). Кнопка
+ * «Оспорить»/«Это мой заказ» несёт только этап, а не код, — и обращение
+ * цеплялось к ПОСЛЕДНЕМУ заказу самого человека: админам приходил его старый
+ * выкупленный заказ с «с нашей стороны всё» вместо спорного кода.
+ */
+const claimedCodeHint = new Map<number, { wbCode: string; denomination?: number; at: number }>();
+const CLAIMED_HINT_TTL_MS = 6 * 60 * 60 * 1000;
+
+function rememberClaimedCode(ctx: any, code: string, denomination: number | null): void {
+  const now = Date.now();
+  for (const [k, v] of claimedCodeHint) if (now - v.at > CLAIMED_HINT_TTL_MS) claimedCodeHint.delete(k);
+  if (ctx?.from?.id) claimedCodeHint.set(ctx.from.id, { wbCode: code, denomination: denomination ?? undefined, at: now });
+}
+
+function claimedCodeFor(ctx: any): { wbCode: string; denomination?: number } | null {
+  const hit = ctx?.from?.id ? claimedCodeHint.get(ctx.from.id) : undefined;
+  return hit && Date.now() - hit.at <= CLAIMED_HINT_TTL_MS ? hit : null;
+}
+
 async function settleForeignCodeClaim(
   ctx: any,
   tgId: string,
@@ -4734,6 +4754,7 @@ async function settleForeignCodeClaim(
     provider: "TG",
   });
   if (verdict.kind === "free" || verdict.kind === "mine") return "proceed";
+  rememberClaimedCode(ctx, code, denomination);
 
   const claimantLabel = tgClaimantLabel(ctx, tgId);
   const notifyAdmins = (kind: "linked" | "asked" | "conflict", reason?: ConflictReason) =>
@@ -6230,7 +6251,9 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 🆘 sup: — user tapped a support button ────────────────────────────
     if (data.startsWith("sup:")) {
       const ctxKey = data.slice(4);
-      const { wbCode, denomination } = await supportOrderHint(ctx);
+      // «Код активирован другим» — речь о спорном коде, а не о прошлом заказе человека.
+      const claimed = ctxKey === "code_claimed" ? claimedCodeFor(ctx) : null;
+      const { wbCode, denomination } = claimed ?? await supportOrderHint(ctx);
 
       /* Алерта здесь больше НЕТ.
          Сначала человек описывает проблему, и уже с его словами уведомление

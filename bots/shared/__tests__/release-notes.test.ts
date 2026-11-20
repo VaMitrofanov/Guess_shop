@@ -72,6 +72,12 @@ describe("release notes catalogue", () => {
     expect(unsentNotes([], later, new Date("2099-12-01T09:00:00Z")).map((n) => n.id)).toContain("2099-12-01-x");
   });
 
+  test("every public post has a cover — channel posts go out only with a picture", () => {
+    for (const note of RELEASE_NOTES) {
+      if (note.public) expect({ id: note.id, cover: note.public.cover ?? null }).toEqual({ id: note.id, cover: expect.any(String) });
+    }
+  });
+
   test("covers referenced by notes exist in bots/shared/assets/updates", () => {
     for (const note of RELEASE_NOTES) {
       if (note.public?.cover) expect(existsSync(`${__dirname}/../assets/updates/${note.public.cover}`)).toBe(true);

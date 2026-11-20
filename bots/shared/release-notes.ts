@@ -28,7 +28,8 @@ export interface PublicPost {
   tgHtml: string;
   /** Тот же смысл для стены ВК — без разметки. */
   vkText: string;
-  /** Файл обложки в `bots/shared/assets/updates/` (scripts/render-update-cover.mjs). */
+  /** Файл обложки в `bots/shared/assets/updates/` (scripts/render-update-cover.mjs).
+   *  Обязателен (20.11.2026): посты в канал и ВК — только с картинкой, тест следит. */
   cover?: string;
   /** Кнопки-ссылки под постом в Telegram, по рядам. */
   buttons?: { label: string; url: string }[][];
@@ -338,6 +339,7 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       "Если Telegram не доставил уведомление (бот заблокирован), оно уходит во ВК — раньше клиент просто ничего не узнавал.",
     ],
     public: {
+      cover: "2026-11-18-one-profile-telegram-first.png",
       tgHtml: [
         "<b>📲 Все заказы — в одном месте</b>",
         "",
@@ -382,6 +384,7 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       "Приветствие по времени на устройстве клиента. Смена ника для заказов и ключ — в блоке «Аккаунт Roblox» справа.",
     ],
     public: {
+      cover: "2026-11-18-new-cabinet.png",
       tgHtml: [
         "<b>✨ Новый личный кабинет RobloxBank</b>",
         "",
@@ -428,6 +431,7 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       "Если спрашивают «как подарить уже купленный код» — Кабинет → Мои коды → «Подарить».",
     ],
     public: {
+      cover: "2026-11-19-gift-by-link.png",
       tgHtml: [
         "<b>🎁 Подарить Robux теперь можно одной ссылкой</b>",
         "",
@@ -454,6 +458,7 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
     ],
     todo: "Держать «USD → RUB» в Настройках актуальным — от него теперь зависят цены кодов.",
     public: {
+      cover: "2026-11-20-codes-12-packs-usd.png",
       tgHtml: [
         "<b>🎟 Коды Robux — теперь от 10 Robux</b>",
         "",
