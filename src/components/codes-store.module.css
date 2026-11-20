@@ -298,3 +298,9 @@
   .packCheck { animation:none; }
   .packActive, .packActive:hover { transform:none; }
 }
+
+/* Три колонки на телефоне (20.11.2026): плашки компактнее и не вылезают за край карточки.
+   В конце файла — иначе базовое правило .packHit ниже по файлу перебивает. */
+@media (max-width: 720px) {
+  .packBadge,.packHit { left:6px; max-width:calc(100% - 4px); padding:3px 6px; font-size:10px; letter-spacing:0; overflow:hidden; text-overflow:ellipsis; }
+}
