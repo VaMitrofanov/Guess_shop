@@ -157,7 +157,29 @@ export async function handleCodePaymentNotification(body: Record<string, unknown
         amountKopecks: payment.amountKopecks,
         next: "код выдан и лежит в заказе; переотправка — со страницы заказа или кабинета",
       });
+    } else {
+      // Продажа со склада тоже продажа (21.11.2026): до этого админы узнавали
+      // о ней, только если письмо падало, — «кто-то купил» не видел никто.
+      await notifyCodeAdmins({
+        marker: "done",
+        title: "оплачен и выдан автоматически",
+        orderPublicId: payment.order.publicId,
+        denomination: payment.order.denomination,
+        amountKopecks: payment.amountKopecks,
+        next: "",
+      });
     }
+  }
+  if (refund && nextStatus === "REFUNDED") {
+    // Возврат за код — деньги ушли назад, код (если был выдан) админ гасит сам.
+    await notifyCodeAdmins({
+      marker: "done",
+      title: "возврат подтверждён банком",
+      orderPublicId: payment.order.publicId,
+      denomination: payment.order.denomination,
+      amountKopecks: payment.amountKopecks,
+      next: "",
+    });
   }
   if (attention === "MANUAL_ISSUE") {
     // Покупатель не должен видеть списание и тишину: письмо и (бот) сообщение.

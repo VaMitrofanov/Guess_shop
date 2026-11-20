@@ -59,6 +59,15 @@ describe("алерт заказа кода", () => {
     expect(nexts.length).toBeGreaterThan(0);
     for (const n of nexts) expect(n.replace(/\$\{[^}]*\}/g, "")).not.toMatch(/<[^a/]/);
   });
+
+  it("каждая продажа и возврат кода видны админам (21.11.2026)", () => {
+    // Автовыдача со склада и возврат банком проходили молча: увед был только
+    // у ручной выдачи и у сбоя письма.
+    const src = fs.readFileSync(path.join(process.cwd(), "src/lib/codes/webhook.ts"), "utf8");
+    expect(src).toContain('title: "оплачен и выдан автоматически"');
+    expect(src).toContain('title: "возврат подтверждён банком"');
+    expect(src).toContain('title: "оплачен — выдать код вручную"');
+  });
 });
 
 import { buildCodeEmail } from "@/lib/codes/delivery";
