@@ -20,7 +20,18 @@ jest.mock("../notify", () => ({
   }),
   vkSend: jest.fn(async () => ({ ok: true })),
   stripHtml: (s: string) => s,
+  escapeHtml: (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"),
 }));
+
+const cards: Record<string, unknown>[] = [];
+jest.mock("../admin-route", () => ({
+  adminTargets: jest.fn(async () => (process.env.ADMIN_IDS ?? "").split(",").filter(Boolean)
+    .map((id) => ({ key: id, chatId: id, extra: {}, group: false }))),
+}));
+jest.mock("../admin", () => ({
+  sendAdminOrderCard: jest.fn(async (card: Record<string, unknown>) => { cards.push(card); return 1; }),
+}));
+jest.mock("../order-loyalty", () => ({ countPreviousOrders: jest.fn(async () => 0) }));
 
 type OrderRow = Record<string, unknown>;
 const state: { order: OrderRow | null } = { order: null };
@@ -52,7 +63,13 @@ function baseOrder(overrides: OrderRow = {}): OrderRow {
     amount: 1000,
     paymentAmountKopecks: 160_00,
     robloxUsername: "TestNick",
-    user: { tgId: "555", vkId: null, name: "Клиент" },
+    user: { tgId: "555", vkId: null, name: "Клиент", username: null },
+    userId: "u1",
+    platform: "VK",
+    orderSource: "DIRECT",
+    gamepassUrl: null,
+    createdAt: new Date(),
+    splitGamepasses: [],
     paymentAttempts: [{ amountKopecks: 160_00, refundedAmountKopecks: 0, status: "PENDING" }],
     ...overrides,
   };
@@ -60,6 +77,7 @@ function baseOrder(overrides: OrderRow = {}): OrderRow {
 
 beforeEach(() => {
   sent.length = 0;
+  cards.length = 0;
   customerMessages.length = 0;
   bot.telegram.sendMessage.mockClear();
   process.env.ADMIN_IDS = "111,222";
@@ -71,10 +89,10 @@ describe("web.order.created", () => {
     await dispatch({ topic: "web.order.created", payload: { orderId: ORDER_ID } }, bot);
 
     expect(sent.map((s) => s.chatId)).toEqual(["111", "222"]);
-    expect(sent[0].text).toContain("ЗАКАЗ С САЙТА СОЗДАН");
+    expect(sent[0].text).toContain("ПРЯМОЙ · заказ с сайта — ждёт оплаты");
     expect(sent[0].text).toContain("WEB-DEADBEEF");
     expect(sent[0].text).toContain("160.00 ₽");
-    expect(sent[0].text).toContain("1000 R$");
+    expect(sent[0].text).toMatch(/1\s?000 R\$/);
     expect(sent[0].text).toContain("TestNick");
     // Клиент в этот момент на странице оплаты — сообщение только помешает.
     expect(customerMessages).toHaveLength(0);
@@ -120,7 +138,8 @@ describe("payment.confirmed reconciliation", () => {
 
     await dispatch({ topic: "payment.confirmed", payload: { orderId: ORDER_ID } }, bot);
 
-    expect(sent[0].text).toContain("ОПЛАТА ИЗ РУЧНОГО ПЕРЕВОДА ПОДТВЕРЖДЕНА");
+    expect(sent[0].text).toContain("оплачен — ждём геймпасс");
+    expect(sent[0].text).toContain("Оплачено переводом");
     expect(customerMessages).toHaveLength(1);
   });
 
@@ -132,10 +151,34 @@ describe("payment.confirmed reconciliation", () => {
       payload: { orderId: ORDER_ID, needsReconciliation: true },
     }, bot);
 
-    expect(sent[0].text).toContain("НУЖНА СВЕРКА ЛЬГОТ");
+    expect(sent[0].text).toContain("нужна сверка льгот");
     expect(sent[0].text).toContain("не выкупать");
     expect(customerMessages[0]).toContain("вручную сверяем");
     expect(customerMessages[0]).not.toContain("появился в работе");
+  });
+});
+
+describe("payment.confirmed → карточка выкупа в «Прямые заказы» (21.11.2026)", () => {
+  it("оплаченный картой заказ с пассом даёт обычную карточку выкупа со строкой оплаты", async () => {
+    state.order = baseOrder({
+      status: "PENDING",
+      publicOrderId: "BOT-4B1B86E3B3162245C8A9",
+      wbCode: "BOT-4B1B86E3B3162245C8A9",
+      gamepassUrl: "https://www.roblox.com/game-pass/2040129371",
+      robloxUsername: "Saharok3506",
+      user: { tgId: null, vkId: "278949891", name: "Покупатель", username: null },
+      paymentAttempts: [{ provider: "TBANK", amountKopecks: 870_00, refundedAmountKopecks: 0, status: "CONFIRMED" }],
+    });
+
+    await dispatch({ topic: "payment.confirmed", payload: { orderId: ORDER_ID } }, bot);
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      orderSource: "DIRECT", amount: 1000, title: "оплачен — к выкупу", creatorName: "Saharok3506",
+    });
+    expect(String(cards[0].paidLine)).toContain("картой: <b>870.00 ₽</b>");
+    // Голого текста в личку больше нет — только карточка.
+    expect(sent).toHaveLength(0);
   });
 });
 

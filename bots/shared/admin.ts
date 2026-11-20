@@ -880,6 +880,10 @@ interface OrderCardPayload {
   viaChat?:            boolean | "support";
   /** Заказ закрывается несколькими пассами: каждую часть покупает ОТДЕЛЬНЫЙ донор. */
   splitParts?:         { gamepassId: string; amount: number }[];
+  /** Оплата прямого заказа (эквайринг/перевод) — строка «💳 оплачено …» в карточке (21.11.2026). */
+  paidLine?:           string | null;
+  /** Заголовок вместо «ждёт выкупа»: «оплачен — к выкупу». */
+  title?:              string;
 }
 
 interface ReviewCardPayload {
@@ -923,7 +927,8 @@ interface PaymentScreenshotCardPayload {
  * Broadcast a new-order card to all Telegram admins.
  * Each admin gets an independent message with [✅ ВЫКУПЛЕНО] / [❌ ОШИБКА] buttons.
  */
-export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void> {
+/** Возвращает, сколько получателей Telegram принял (0 — карточка не дошла никуда). */
+export async function sendAdminOrderCard(order: OrderCardPayload): Promise<number> {
   // Одним запросом: откуда продажа, номер заказа на WB и id живой карточки DBS
   // у каждого админа. Номер WB нужен шапке, id карточки — ветке: без них
   // карточка выкупа выглядела отдельным делом, хотя это тот же самый заказ.
@@ -1009,7 +1014,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const text = formatAdminNotice({
     marker: order.isAgeRestricted ? "urgent" : "action",
     zone: orderSource === "WB_DBS" ? "DBS" : orderSource === "DIRECT" ? "ПРЯМОЙ" : "WB",
-    title: order.replacedGamepassUrl ? "заменён геймпасс" : "ждёт выкупа",
+    title: order.replacedGamepassUrl ? "заменён геймпасс" : order.title ?? "ждёт выкупа",
     lines: [
       orderRef({
         wbOrderId: wbRef.wbOrderId,
@@ -1025,6 +1030,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       manualLinkLine.trim() || null,
       loyaltyLine.trim() || null,
       ageRestrictLine.trim() || null,
+      order.paidLine || null,
       whoLine,
       passLine,
     ],
@@ -1049,7 +1055,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // выкупа читается как продолжение того же заказа, а не как новое дело.
   // `allow_sending_without_reply` — карточку могли удалить или переслать заново.
   const targets = await adminTargets(orderSource === "DIRECT" ? "direct" : "buyout", { loud: true });
-  await Promise.allSettled(
+  const sent = await Promise.allSettled(
     targets.map((t) => {
       const rootId = wbRef.cardMessages?.[t.key] ?? threadRoots?.[t.key];
       return tgSend(t.chatId, text, {
@@ -1063,6 +1069,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // Живая карточка DBS обязана догнать заказ: ссылка получена — значит её
   // заголовок больше не «покупатель активирует код в боте».
   if (wbRef.source === "WB_DBS") await refreshDbsCardByCode(db, order.wbCode);
+  return sent.filter((r) => r.status === "fulfilled" && (r.value as { ok?: boolean })?.ok === true).length;
 }
 
 

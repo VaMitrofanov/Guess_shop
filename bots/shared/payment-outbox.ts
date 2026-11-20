@@ -1,6 +1,11 @@
 import { db } from "./db";
 import { tgSend, vkSend, stripHtml } from "./notify";
 import { touchPaymentOutboxHeartbeat } from "./worker-heartbeat";
+import { adminTargets } from "./admin-route";
+import { sendAdminOrderCard } from "./admin";
+import { formatAdminNotice, orderRef } from "./notify-format";
+import { countPreviousOrders } from "./order-loyalty";
+import { vkDialogLink } from "./vk-links";
 
 type TelegramSender = {
   telegram: { sendMessage(chatId: string, text: string, extra: { parse_mode: "HTML" }): Promise<unknown> };
@@ -86,19 +91,29 @@ export async function dispatch(message: OutboxMessageLike, bot: TelegramSender) 
   const order = await db.wbOrder.findUnique({
     where: { id: orderId },
     include: {
-      user: { select: { tgId: true, vkId: true, name: true } },
+      user: { select: { tgId: true, vkId: true, name: true, username: true } },
       paymentAttempts: { orderBy: { createdAt: "desc" }, take: 1 },
+      splitGamepasses: { orderBy: { position: "asc" }, select: { gamepassId: true, amount: true } },
     },
   });
   if (!order) throw new Error("outbox order not found");
   const payment = order.paymentAttempts[0];
-  const adminIds = [...new Set(
-    (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
-      .split(",").map((id) => id.trim()).filter(Boolean),
-  )];
-  if (adminIds.length === 0) throw new Error("ADMIN_IDS/TG_CHAT_ID is not configured");
+  const ref = order.publicOrderId ?? order.wbCode;
+  const rub = (kopecks: number | null | undefined) => `${((kopecks ?? 0) / 100).toFixed(2)} ₽`;
 
-  let adminText: string;
+  /* Всё админам — в тему «Прямые заказы» привычным форматом (21.11.2026).
+     До этого воркер слал голый текст «💳 ОПЛАТА ИЗ БОТА ПОДТВЕРЖДЕНА» каждому
+     из ADMIN_IDS в личку: в теме не появлялось ничего, а карточки выкупа у
+     оплаченного картой заказа не было вовсе (BOT-4B1B86E3…, 1000 R$). */
+  const notice = async (text: string, loud: boolean, urgent = false) => {
+    const targets = await adminTargets("direct", { loud, urgent });
+    if (targets.length === 0) return;
+    const results = await Promise.all(targets.map((t) => tgSend(t.chatId, text, { ...t.extra })));
+    if (!results.some((result) => result.ok === true || Boolean(result.result))) {
+      throw new Error("admin notification was not accepted by Telegram");
+    }
+  };
+
   if (message.topic === "web.order.created" || message.topic === "bot.order.created") {
     // Заказ создан, деньги ещё не приняты. Клиенту здесь не пишем: он прямо
     // сейчас на странице оплаты, сообщение «заказ создан» только помешает.
@@ -106,28 +121,68 @@ export async function dispatch(message: OutboxMessageLike, bot: TelegramSender) 
     // тогда карточка неактуальна, и доставлять её не нужно (но и падать нельзя).
     if (!AWAITING_PAYMENT_STATUSES.has(order.status)) return;
     const kopecks = order.paymentAmountKopecks ?? payment?.amountKopecks ?? 0;
-    adminText =
-      `🆕 <b>${message.topic === "bot.order.created" ? "ЗАКАЗ ИЗ БОТА СОЗДАН" : "ЗАКАЗ С САЙТА СОЗДАН"}</b>\n` +
-      `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
-      `Сумма: <b>${(kopecks / 100).toFixed(2)} ₽</b> · <b>${order.amount} R$</b>\n` +
-      `Ник: ${escapeHtml(order.robloxUsername ?? "—")}\n` +
-      `Статус: ожидает оплаты`;
-  } else if (message.topic === "payment.confirmed") {
+    await notice(formatAdminNotice({
+      marker: "waiting",
+      zone: "ПРЯМОЙ",
+      title: message.topic === "bot.order.created" ? "заказ из бота — ждёт оплаты" : "заказ с сайта — ждёт оплаты",
+      lines: [
+        orderRef({ code: ref, denomination: order.amount }, [escapeHtml(order.robloxUsername ?? "—")]),
+        `💰 К оплате: <b>${rub(kopecks)}</b>`,
+      ],
+    }), false);
+    return;
+  }
+
+  if (message.topic === "payment.confirmed") {
     const needsReconciliation = payloadFlag(message.payload, "needsReconciliation") || order.status === "ERROR";
-    const paymentOrigin = payment?.provider === "MANUAL_TRANSFER"
-      ? "РУЧНОГО ПЕРЕВОДА"
-      : order.orderSource === "DIRECT" ? "БОТА" : "САЙТА";
-    adminText = needsReconciliation
-      ? `🚨 <b>ОПЛАТА ПОДТВЕРЖДЕНА — НУЖНА СВЕРКА ЛЬГОТ</b>\n` +
-        `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
-        `Сумма: <b>${((payment?.amountKopecks ?? 0) / 100).toFixed(2)} ₽</b>\n` +
-        `Robux: <b>${order.amount} R$</b>\n` +
-        `Статус: ERROR, не выкупать до ручной сверки`
-      : `💳 <b>ОПЛАТА ИЗ ${paymentOrigin} ПОДТВЕРЖДЕНА</b>\n` +
-        `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
-        `Сумма: <b>${((payment?.amountKopecks ?? 0) / 100).toFixed(2)} ₽</b>\n` +
-        `Robux: <b>${order.amount} R$</b>\n` +
-        `Статус: ожидает выкупа`;
+    const how = payment?.provider === "MANUAL_TRANSFER" ? "переводом" : "картой";
+    const paidLine = `💳 Оплачено ${how}: <b>${rub(payment?.amountKopecks)}</b>`;
+    if (needsReconciliation) {
+      await notice(formatAdminNotice({
+        marker: "urgent",
+        zone: "ПРЯМОЙ",
+        title: "оплачен — нужна сверка льгот",
+        lines: [orderRef({ code: ref, denomination: order.amount }, [escapeHtml(order.robloxUsername ?? "—")]), paidLine],
+        next: "статус ERROR — не выкупать до ручной сверки",
+      }), true, true);
+    } else if (order.gamepassUrl) {
+      // Обычная карточка выкупа (как у заказа из ботов и с сайта) + строка оплаты.
+      const u = order.user;
+      const safeName = escapeHtml(u?.name ?? "Покупатель");
+      const userDisplay = u?.username
+        ? `@${escapeHtml(u.username)}`
+        : u?.vkId ? vkDialogLink(u.vkId, safeName)
+        : u?.tgId ? `<a href="tg://user?id=${u.tgId}">${safeName}</a>` : safeName;
+      const previousOrderCount = order.userId
+        ? await countPreviousOrders(db as never, { userId: order.userId, excludeOrderId: order.id }).catch(() => 0)
+        : 0;
+      const delivered = await sendAdminOrderCard({
+        id: order.id,
+        amount: order.amount,
+        gamepassUrl: order.gamepassUrl,
+        platform: order.platform === "VK" ? "VK" : "TG",
+        orderSource: order.orderSource,
+        wbCode: order.wbCode,
+        userDisplay,
+        createdAt: order.createdAt,
+        previousOrderCount,
+        creatorName: order.robloxUsername ?? undefined,
+        splitParts: order.splitGamepasses.length > 1 ? order.splitGamepasses : undefined,
+        paidLine,
+        title: "оплачен — к выкупу",
+      });
+      if (delivered === 0) {
+        const targets = await adminTargets("direct");
+        if (targets.length > 0) throw new Error("buyout card was not accepted by Telegram");
+      }
+    } else {
+      await notice(formatAdminNotice({
+        marker: "action",
+        zone: "ПРЯМОЙ",
+        title: "оплачен — ждём геймпасс",
+        lines: [orderRef({ code: ref, denomination: order.amount }, [escapeHtml(order.robloxUsername ?? "—")]), paidLine],
+      }), true);
+    }
     await notifyCustomer(
       order.user,
       needsReconciliation
@@ -135,21 +190,24 @@ export async function dispatch(message: OutboxMessageLike, bot: TelegramSender) 
         : "✅ <b>Оплата подтверждена.</b> Заказ появился в работе — статус можно смотреть в личном кабинете.",
       bot,
     );
-  } else if (message.topic === "payment.refund.recorded") {
-    adminText =
-      `↩️ <b>ВОЗВРАТ ПОДТВЕРЖДЕН БАНКОМ</b>\n` +
-      `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
-      `Возвращено: <b>${((payment?.refundedAmountKopecks ?? 0) / 100).toFixed(2)} ₽</b>\n` +
-      `Статус платежа: <b>${escapeHtml(payment?.status ?? "—")}</b>`;
-    await notifyCustomer(order.user, "↩️ <b>Возврат подтверждён банком.</b> Срок зачисления зависит от банка вашей карты.", bot);
-  } else {
-    throw new UnsupportedTopicError(String(message.topic));
+    return;
   }
 
-  const results = await Promise.all(adminIds.map((id) => tgSend(id, adminText)));
-  if (!results.some((result) => result.ok === true || Boolean(result.result))) {
-    throw new Error("admin notification was not accepted by Telegram");
+  if (message.topic === "payment.refund.recorded") {
+    await notice(formatAdminNotice({
+      marker: "done",
+      zone: "ПРЯМОЙ",
+      title: "возврат подтверждён банком",
+      lines: [
+        orderRef({ code: ref, denomination: order.amount }, [escapeHtml(order.robloxUsername ?? "—")]),
+        `↩️ Возвращено: <b>${rub(payment?.refundedAmountKopecks)}</b> · платёж ${escapeHtml(payment?.status ?? "—")}`,
+      ],
+    }), true);
+    await notifyCustomer(order.user, "↩️ <b>Возврат подтверждён банком.</b> Срок зачисления зависит от банка вашей карты.", bot);
+    return;
   }
+
+  throw new UnsupportedTopicError(String(message.topic));
 }
 
 async function claimOne() {
