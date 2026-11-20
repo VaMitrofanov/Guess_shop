@@ -22,7 +22,7 @@ jest.mock("../order-audit", () => ({
   ORDER_AUDIT_TYPE: {},
 }));
 
-import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "../wb-chat-gamepass";
+import { attachGamepassFromSupport, findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "../wb-chat-gamepass";
 
 /**
  * Геймпасс, присланный покупателем в чат Wildberries.
@@ -338,5 +338,38 @@ describe("воркер зовёт разбор", () => {
     // Дешёвый разбор стоит ДО похода в базу за карточкой заказа.
     expect(source.indexOf("findGamepassRefInChatText(rawText, order.nmId)"))
       .toBeLessThan(source.indexOf("tryAttachGamepassFromChat(db"));
+  });
+});
+
+/* 20.11.2026 A7NT83T: заказ на 2000 R$ встал в выкуп под ОДИН пасс за 2858 R$,
+   присланный в поддержку. Такой пасс не выкупит ни один аккаунт (потолок 1500),
+   правило NEEDS_SPLIT знали все входы, кроме чата WB и поддержки. */
+describe("заказ больше донора — одиночный пасс не принимаем ни из чата, ни из поддержки", () => {
+  const big = { ...order, amount: 2000, wbCode: "A7NT83T" };
+  const pass2858 = { id: "1595350420", name: "Pass", price: 2858, creatorId: 1, creatorName: "BOBIK_2155", isActive: true };
+
+  test("чат WB: пасс по цене, но заказ 2000 — не подставляем, оператору причина", async () => {
+    mockDetails.mockResolvedValue(pass2858);
+    const db = makeDb({ wbOrder: { findFirst: jest.fn().mockResolvedValue(big), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } });
+    const out = await tryAttachGamepassFromChat(asDb(db), { ref, wbCode: "A7NT83T", text: "1595350420" });
+    expect(out).toMatchObject({ kind: "rejected" });
+    expect((out as { reason: string }).reason).toMatch(/разбивк/);
+    expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("поддержка: не подставляем, покупателю — какой набор прислать", async () => {
+    mockDetails.mockResolvedValue(pass2858);
+    const db = makeDb({ wbOrder: { findMany: jest.fn().mockResolvedValue([big]), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } });
+    const out = await attachGamepassFromSupport(db as never, { orderIds: ["ord_1"], gamepassId: "1595350420" });
+    expect(out).toMatchObject({ kind: "rejected", toBuyer: true });
+    expect((out as { buyerText?: string }).buyerText).toMatch(/одним геймпассом не закрыть/);
+    expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("1500 — ещё одним пассом", async () => {
+    mockDetails.mockResolvedValue({ ...pass2858, price: 2143 });
+    const db = makeDb({ wbOrder: { findMany: jest.fn().mockResolvedValue([{ ...big, amount: 1500 }]), updateMany: jest.fn().mockResolvedValue({ count: 1 }), count: jest.fn().mockResolvedValue(0) } });
+    const out = await attachGamepassFromSupport(db as never, { orderIds: ["ord_1"], gamepassId: "1595350420" });
+    expect(out.kind).toBe("attached");
   });
 });

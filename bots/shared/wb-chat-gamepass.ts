@@ -35,6 +35,7 @@
  */
 
 import { getGamepassDetails } from "./roblox";
+import { DONOR_NET_CAPACITY, splitRequiredMessage } from "./gamepass-plan";
 import { auditGamepassSubmitted, type OrderAuditClient } from "./order-audit";
 import { countPreviousOrders } from "./order-loyalty";
 import { sendAdminOrderCard } from "./admin";
@@ -210,7 +211,7 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
   if (details.validationSkipped) return { kind: "skipped" };
 
   const expectedPrice = Math.ceil(order.amount / 0.7);
-  const verdict = checkChatPass(details, expectedPrice);
+  const verdict = checkChatPass(details, expectedPrice, order.amount);
   if (!verdict.ok) {
     notifyDbsChatGamepassRejected(input.ref, { gamepassId, reason: verdict.reason, expectedPrice });
     return { kind: "rejected", gamepassId, reason: verdict.reason };
@@ -279,7 +280,16 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
 type PassDetails = NonNullable<Awaited<ReturnType<typeof getGamepassDetails>>>;
 type PassVerdict = { ok: true; creator: string } | { ok: false; reason: string };
 
-function checkChatPass(details: PassDetails, expectedPrice: number): PassVerdict {
+/**
+ * Заказ дороже донора одним пассом не закрыть (правило `NEEDS_SPLIT` из
+ * `gamepass-acceptance.ts`). Чат WB и поддержка проверяли пасс сами и этого
+ * правила не знали: 20.11.2026 A7NT83T (2000 R$) встал в выкуп под пасс за
+ * 2858 R$, который не купит ни один аккаунт.
+ */
+const NEEDS_SPLIT_REASON = (amount: number) => `заказ на ${amount} R$ одним пассом не закрыть — нужна разбивка (потолок ${DONOR_NET_CAPACITY} R$)`;
+
+function checkChatPass(details: PassDetails, expectedPrice: number, orderAmount: number): PassVerdict {
+  if (orderAmount > DONOR_NET_CAPACITY) return { ok: false, reason: NEEDS_SPLIT_REASON(orderAmount) };
   // Закрытый плейс сам по себе больше не отказ: выкуп ручной, и если Roblox
   // подтверждает продажу и цену, заказ собирается (решение владельца 13.09.2026,
   // проверка первоисточника — в `getGamepassDetailsDirect`). Признаки остаются
@@ -341,7 +351,7 @@ async function createOrderFromChat(
   const details = await getGamepassDetails(gamepassId).catch(() => null);
   if (!details) return { kind: "skipped" };
   if (details.validationSkipped) return { kind: "skipped" };
-  const verdict = checkChatPass(details, expectedPrice);
+  const verdict = checkChatPass(details, expectedPrice, denomination);
   if (!verdict.ok) return reject(verdict.reason);
 
   const busy = await db.wbOrder
@@ -470,7 +480,11 @@ export type SupportPassOutcome =
   | { kind: "skipped"; why: "no_orders" | "not_a_pass" | "roblox_down" | "ambiguous" | "race" }
   | { kind: "attached"; order: ChatOrderRow; gamepassId: string; price: number; nick: string }
   /** `toBuyer` — причину можно сказать покупателю (цена, не в продаже); иначе только оператору. */
-  | { kind: "rejected"; order: ChatOrderRow; gamepassId: string; reason: string; expectedPrice: number; toBuyer: boolean };
+  | {
+      kind: "rejected"; order: ChatOrderRow; gamepassId: string; reason: string; expectedPrice: number; toBuyer: boolean;
+      /** Готовый текст покупателю вместо стандартного «нужен пасс за N R$» (заказ требует набора). */
+      buyerText?: string;
+    };
 
 export async function attachGamepassFromSupport(
   db: ChatGamepassDb & { wbOrder: ChatGamepassDb["wbOrder"] & { findMany: (args: Args) => Promise<ChatOrderRow[]> } },
@@ -511,7 +525,15 @@ export async function attachGamepassFromSupport(
   }
 
   const expectedPrice = Math.ceil(order.amount / 0.7);
-  const verdict = checkChatPass(details, expectedPrice);
+  // Заказ больше донора: одиночный пасс не годится при любой цене. Покупателю —
+  // какой набор прислать, оператору — что пасс не подставлен.
+  if (order.amount > DONOR_NET_CAPACITY) {
+    return {
+      kind: "rejected", order, gamepassId: input.gamepassId, expectedPrice, toBuyer: true,
+      reason: NEEDS_SPLIT_REASON(order.amount), buyerText: splitRequiredMessage(order.amount),
+    };
+  }
+  const verdict = checkChatPass(details, expectedPrice, order.amount);
   if (!verdict.ok) {
     return { kind: "rejected", order, gamepassId: input.gamepassId, reason: verdict.reason, expectedPrice, toBuyer: verdict.reason !== "Roblox не отдал владельца пасса" };
   }
