@@ -3,6 +3,7 @@ import { basketLabel } from "@/lib/wb-basket";
 import { flagsConfirmText } from "@/lib/order-signals";
 import { collapseFeed, orderChronology, orderFeed, orderHeadline, orderNow, orderStateWord, type ChronologyJourneyItem } from "@/lib/order-feed";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import type React from "react";
 import { RefreshCw } from "lucide-react";
 import { C, SHADOW, tabular, MONO } from "../theme";
@@ -1771,10 +1772,23 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
 
   const hasPurchased = (order.splitGamepasses ?? []).some(p => p.purchasedAt);
 
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+  /* Портал в body обязателен (20.11.2026): модалка открывается из листа
+     заказа, а у `.twa-sheet` после анимации остаётся `transform` — для
+     `position: fixed` внутри он становится рамкой вместо экрана. Окно
+     высотой 84vh вылезало за лист, шапку и кнопку «Разбить на N» срезало,
+     и при длинном списке пассов разбиение было не сохранить. Высота — от
+     видимой части экрана (клавиатура, панель Telegram), не от `vh`. */
+  return createPortal(
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "calc(env(safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px) + 12px) 16px calc(env(safe-area-inset-bottom, 0px) + 12px)",
+    }}
       onClick={e => { if (e.target === e.currentTarget && !saving) onClose(); }}>
-      <div style={{ background: C.card, borderRadius: 18, width: "100%", maxWidth: 400, maxHeight: "84vh", display: "flex", flexDirection: "column" }}>
+      <div style={{
+        background: C.card, borderRadius: 18, width: "100%", maxWidth: 400,
+        maxHeight: "min(84dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 32px))",
+        minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
         <div style={{ padding: "18px 20px 10px" }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>🧩 Разбить выкуп</div>
           <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>
@@ -1805,7 +1819,7 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
           </div>
         )}
 
-        <div style={{ overflowY: "auto", flex: 1, padding: "0 20px" }}>
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "0 20px", overscrollBehavior: "contain" }}>
           {loading ? (
             <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>Ищу геймпассы…</div>
           ) : passes.length === 0 ? (
@@ -1906,7 +1920,8 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
