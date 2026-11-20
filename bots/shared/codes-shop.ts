@@ -36,9 +36,12 @@ export const CODES_CB = {
   myCodes: "codes_my",
   /** «Я подписался» — перепроверить подписку на канал (скидка 1 %). */
   subscribed: "codes_sub",
+  /** «👁 Показать код» под запечатанным кодом в чате (21.11.2026). */
+  reveal: (publicId: string) => `codes_rv:${publicId}`,
 } as const;
 
 export const CODES_PICK_RE = /^codes_p:(\d{2,5})$/;
+export const CODES_REVEAL_RE = /^codes_rv:(CODE-[A-Z0-9]{8})$/;
 
 /** Префикс deep-link приглашения: `t.me/<бот>?start=r_<код>`, `vk.me/<группа>?ref=r_<код>`. */
 export const REFERRAL_START_PREFIX = "r_";
@@ -293,7 +296,7 @@ export function vkShareFallback(rows: CodesButton[][], siteLink: string): CodesB
  * Код — под спойлером (не подсмотрят из-за плеча), скопировать — кнопкой
  * «📋 Скопировать код» (`copyButton`). ВК спойлеров не умеет — там код текстом.
  */
-export function codeChatIssuedText(input: { denomination: number; code: string; publicId: string; codes?: readonly string[] }): { html: string; plain: string } {
+export function codeChatIssuedText(input: { denomination: number; code: string; publicId: string; codes?: readonly string[]; opened?: boolean }): { html: string; plain: string } {
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const amount = robux(input.denomination);
   const codes = input.codes?.length ? input.codes : [input.code];
@@ -310,19 +313,84 @@ export function codeChatIssuedText(input: { denomination: number; code: string; 
       ? "Коды сохранены и в кабинете на сайте. Никому их не показывайте: кто ввёл, тот и получил Robux."
       : "Код сохранён и в кабинете на сайте. Никому его не показывайте: кто ввёл, тот и получил Robux.",
   ];
-  const html = [
-    several ? `🎉 <b>${codes.length} кода на ${amount} Robux готовы!</b>` : `🎉 <b>Код на ${amount} Robux готов!</b>`,
-    "Коснитесь, чтобы показать:",
-    ...codes.map((code, index) => `${several ? `${index + 1}. ` : ""}<tg-spoiler><code>${escape(code)}</code></tg-spoiler>`),
-    ...tail,
-  ].join("\n");
+  // `opened` — код открыт кнопкой «👁 Показать код» (21.11.2026): второй
+  // спойлер поверх уже открытого конверта был бы лишним шагом.
+  const html = input.opened
+    ? [
+        several ? `🔓 <b>Ваши коды на ${amount} Robux</b>` : `🔓 <b>Ваш код на ${amount} Robux</b>`,
+        "",
+        ...codes.map((code, index) => `${several ? `${index + 1}. ` : "👉 "}<code>${escape(code)}</code>`),
+        "",
+        several ? "Нажмите на код — он скопируется." : "Нажмите на код — он скопируется.",
+        ...tail,
+      ].join("\n")
+    : [
+        several ? `🎉 <b>${codes.length} кода на ${amount} Robux готовы!</b>` : `🎉 <b>Код на ${amount} Robux готов!</b>`,
+        "Коснитесь, чтобы показать:",
+        ...codes.map((code, index) => `${several ? `${index + 1}. ` : ""}<tg-spoiler><code>${escape(code)}</code></tg-spoiler>`),
+        ...tail,
+      ].join("\n");
   const plain = [
-    several ? `🎉 ${codes.length} кода на ${amount} Robux готовы!` : `🎉 Код на ${amount} Robux готов!`,
+    input.opened
+      ? (several ? `🔓 Ваши коды на ${amount} Robux:` : `🔓 Ваш код на ${amount} Robux:`)
+      : (several ? `🎉 ${codes.length} кода на ${amount} Robux готовы!` : `🎉 Код на ${amount} Robux готов!`),
     "",
     ...codes.map((code, index) => `${several ? `${index + 1}. ` : ""}${code}`),
     ...tail,
   ].join("\n");
   return { html, plain };
+}
+
+/**
+ * Код в чате — запечатанный (21.11.2026). Значение не приходит в сообщении:
+ * его открывает кнопка «👁 Показать код», и этот момент видят админы (спор
+ * «код не работает» без него не разобрать). Для покупателя это «конверт»:
+ * код ждёт, пока он будет готов ввести, и не светится в превью уведомления.
+ */
+export function codeChatSealedText(input: { denomination: number; publicId: string; count?: number }): { html: string; plain: string } {
+  const amount = robux(input.denomination);
+  const several = (input.count ?? 1) > 1;
+  const head = several ? `${input.count} кода на ${amount} Robux готовы!` : `Код на ${amount} Robux готов!`;
+  const steps = [
+    `1. Нажмите «👁 Показать ${several ? "коды" : "код"}»`,
+    "2. «🚀 Активировать на Roblox» → войдите в аккаунт, куда нужны Robux",
+    several ? "3. Введите коды по очереди — и Robux на балансе 🎉" : "3. Вставьте код — и Robux на балансе 🎉",
+  ];
+  const html = [
+    `🎉 <b>${head}</b>`,
+    `🔒 ${several ? "Коды запечатаны" : "Код запечатан"} и ${several ? "ждут" : "ждёт"} вас — откройте, когда будете готовы ввести.`,
+    "",
+    "<b>Как получить Robux:</b>",
+    ...steps,
+    "",
+    `<i>${several ? "Коды сохранены" : "Код сохранён"} и в кабинете на сайте. Никому не показывайте: кто ввёл, тот и получил Robux.</i>`,
+  ].join("\n");
+  const plain = [
+    `🎉 ${head}`,
+    `🔒 ${several ? "Коды запечатаны" : "Код запечатан"} и ${several ? "ждут" : "ждёт"} вас — откройте, когда будете готовы ввести.`,
+    "",
+    "Как получить Robux:",
+    ...steps,
+    "",
+    `${several ? "Коды сохранены" : "Код сохранён"} и в кабинете на сайте. Никому не показывайте: кто ввёл, тот и получил Robux.`,
+  ].join("\n");
+  return { html, plain };
+}
+
+/** Кнопки под кодом в TG: запечатан — «Показать»; открыт — «Скопировать». */
+export function codeChatTgKeyboard(input: { publicId: string; codes?: readonly string[]; count?: number }) {
+  const codes = input.codes ?? [];
+  const several = (codes.length || input.count || 1) > 1;
+  const top = codes.length
+    ? codes.map((code, index) => [{ text: codes.length > 1 ? `📋 Скопировать код ${index + 1}` : "📋 Скопировать код", copy_text: { text: code.slice(0, 256) } }])
+    : [[{ text: several ? "👁 Показать коды" : "👁 Показать код", callback_data: CODES_CB.reveal(input.publicId) }]];
+  return {
+    inline_keyboard: [
+      ...top,
+      [{ text: "🚀 Активировать на Roblox", url: ROBLOX_REDEEM_LINK }],
+      [{ text: "🤝 Скидка за друзей", callback_data: CODES_CB.invite }, { text: "🎟 Ещё код", callback_data: CODES_CB.open }],
+    ],
+  };
 }
 
 /** Ручная выдача (З2): подпись к картинке «Готовим ваш код». Код придёт сюда же. */

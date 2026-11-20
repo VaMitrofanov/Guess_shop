@@ -1,5 +1,6 @@
 import { sendTelegramMessage, sendTelegramMessageId } from "@/lib/telegram";
 import { adminTargets } from "../../../bots/shared/admin-route";
+import { vkDialogLink } from "../../../bots/shared/vk-links";
 import { formatAdminNotice, mskTime } from "../../../bots/shared/notify-format";
 import { codeComponents, formatRubKopecks } from "@/lib/codes-pricing";
 import { prisma } from "@/lib/prisma";
@@ -104,7 +105,7 @@ const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
  * туда ушёл: с этой минуты покупатель мог его ввести. Без звука, ответом на
  * алерт «выдать код», чтобы вся история заказа была одной веткой.
  */
-export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift"): Promise<void> {
+export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift" | "chat_tg" | "chat_vk"): Promise<void> {
   const token = process.env.TG_TOKEN;
   if (!token) return;
   try {
@@ -118,16 +119,21 @@ export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift")
     });
     if (!order) return;
     const now = new Date();
-    const where = via === "gift" ? `по ссылке-подарку${order.giftTo ? ` (для «${esc(order.giftTo)}»)` : ""}` : "в кабинете";
+    const where = via === "gift" ? `по ссылке-подарку${order.giftTo ? ` (для «${esc(order.giftTo)}»)` : ""}`
+      : via === "chat_tg" ? "в чате бота TG (кнопка «Показать код»)"
+      : via === "chat_vk" ? "в чате бота ВК (кнопка «Показать код»)"
+      : "в кабинете";
+    // В чат с 21.11.2026 уходит «конверт» без кода — доставка туда не значит, что код видели.
+    const sealed = await prisma.codeOrderEvent.findFirst({ where: { orderId, type: "CHAT_SEALED_SENT" }, select: { id: true } }).catch(() => null);
     const after = order.issuedAt ? `, через ${elapsedRu(now.getTime() - order.issuedAt.getTime())} после выдачи` : "";
     const earlier = [
-      order.chatDeliveredAt ? `в чат бота ${order.channel === "VK" ? "ВК" : "TG"} ${mskTime(order.chatDeliveredAt)}` : null,
+      order.chatDeliveredAt && !sealed ? `в чат бота ${order.channel === "VK" ? "ВК" : "TG"} ${mskTime(order.chatDeliveredAt)}` : null,
       order.emailSentAt ? `письмом ${mskTime(order.emailSentAt)}` : null,
     ].filter(Boolean);
     const c = order.creator;
     const who = c?.username ? `@${esc(c.username)}`
       : c?.tgId ? `<a href="tg://user?id=${c.tgId}">${esc(c.name ?? "покупатель")}</a>`
-      : c?.vkId ? `<a href="https://vk.com/id${c.vkId}">${esc(c.name ?? "покупатель")}</a>`
+      : c?.vkId ? vkDialogLink(c.vkId, esc(c.name ?? "покупатель"))
       : null;
     const text = formatAdminNotice({
       marker: "progress",

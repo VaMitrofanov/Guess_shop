@@ -6,6 +6,9 @@ import {
   CODES_MENU_BTN,
   CODES_MENU_BTN_LEGACY,
   CODES_PICK_RE,
+  CODES_REVEAL_RE,
+  codeChatIssuedText,
+  codeChatTgKeyboard,
   codePickScreen,
   codesStoreScreen,
   inviteScreen,
@@ -14,7 +17,7 @@ import {
   type CodesButton,
   type CodesScreen,
 } from "../shared/codes-shop";
-import { botAttachReferral, botCodeOrder, botCodesView, botOrderKey, codesTick, siteUrl } from "../shared/codes-bot-api";
+import { botAttachReferral, botCodeOrder, botCodesView, botOrderKey, botRevealCode, codesTick, revealFailText, siteUrl } from "../shared/codes-bot-api";
 import { storeReviews } from "../shared/wb-reviews-feed";
 import { flushAdminDigest } from "../shared/admin-digest";
 import { adminTargets } from "../shared/admin-route";
@@ -150,6 +153,25 @@ export function registerCodesShop(bot: Telegraf): void {
     }
     await ctx.answerCbQuery(view.subscribed ? "✅ Подписка есть — скидка 1% уже в ценах" : "Пока не вижу подписки — подпишитесь и нажмите ещё раз", { show_alert: !view.subscribed }).catch(() => undefined);
     if (view.subscribed) await show(ctx, codesStoreScreen(view, siteUrl()), true);
+  });
+  // «👁 Показать код» (21.11.2026): конверт превращается в код в том же
+  // сообщении; первое открытие сайт отмечает и шлёт админам в «Коды».
+  bot.action(CODES_REVEAL_RE, async (ctx) => {
+    const res = await botRevealCode("TG", String(ctx.from?.id ?? ""), ctx.match[1]);
+    if (!res.ok) {
+      await ctx.answerCbQuery(revealFailText(res.status), { show_alert: true }).catch(() => undefined);
+      return;
+    }
+    await ctx.answerCbQuery("🔓 Код открыт").catch(() => undefined);
+    const text = codeChatIssuedText({ denomination: res.denomination, code: res.codes[0], codes: res.codes, publicId: res.publicId, opened: true });
+    // `copy_text` у Telegraf в типах нет — Bot API его знает (как и в tg-flair).
+    const reply_markup = codeChatTgKeyboard({ publicId: res.publicId, codes: res.codes }) as never;
+    const msg = ctx.callbackQuery?.message as { photo?: unknown } | undefined;
+    const edited = msg?.photo
+      ? await ctx.editMessageCaption(text.html, { parse_mode: "HTML", reply_markup }).then(() => true).catch(() => false)
+      : await ctx.editMessageText(text.html, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }).then(() => true).catch(() => false);
+    // Сообщение старое/удалено — код всё равно нужен человеку: новым сообщением.
+    if (!edited) await ctx.reply(text.html, { parse_mode: "HTML", reply_markup }).catch(() => undefined);
   });
   bot.action(CODES_PICK_RE, async (ctx) => {
     await ctx.answerCbQuery("Собираю заказ…").catch(() => undefined);

@@ -1,5 +1,8 @@
 import type { MessageContext } from "vk-io";
 import {
+  CODES_REVEAL_RE,
+  codeChatIssuedText,
+  ROBLOX_REDEEM_LINK,
   CODES_CB,
   CODES_PICK_RE,
   codePickScreen,
@@ -10,7 +13,7 @@ import {
   type CodesButton,
   type CodesScreen,
 } from "../shared/codes-shop";
-import { botAttachReferral, botCodeOrder, botCodesView, botOrderKey, siteUrl } from "../shared/codes-bot-api";
+import { botAttachReferral, botCodeOrder, botCodesView, botOrderKey, botRevealCode, revealFailText, siteUrl } from "../shared/codes-bot-api";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { VK_COMMUNITY_ID } from "../shared/vk-links";
 
@@ -130,6 +133,20 @@ export async function tryVkCodesShop(ctx: MessageContext, vkUserId: number, rawR
     }
     await ctx.reply("✅ Подписка есть — скидка 1% уже в ценах.");
     await openVkCodesStore(ctx, vkUserId);
+    return true;
+  }
+  // «👁 Показать код» (21.11.2026): ВК не правит чужое сообщение с картинкой
+  // красиво — код приходит новым сообщением с кнопкой активации.
+  const reveal = command ? CODES_REVEAL_RE.exec(command) : null;
+  if (reveal) {
+    const res = await botRevealCode("VK", String(vkUserId), reveal[1]);
+    if (!res.ok) { await ctx.reply(revealFailText(res.status)); return true; }
+    const text = codeChatIssuedText({ denomination: res.denomination, code: res.codes[0], codes: res.codes, publicId: res.publicId, opened: true });
+    await ctx.reply({
+      message: text.plain,
+      keyboard: vkKeyboard([[{ label: "🚀 Активировать на Roblox", url: ROBLOX_REDEEM_LINK }]] as CodesButton[][]),
+      dont_parse_links: 1,
+    });
     return true;
   }
   const picked = command ? CODES_PICK_RE.exec(command) : null;

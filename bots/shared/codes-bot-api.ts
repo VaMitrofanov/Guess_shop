@@ -135,3 +135,28 @@ export async function fetchCodesQueue(): Promise<CodesQueueItem[] | null> {
     return null;
   }
 }
+
+export type CodeRevealResult =
+  | { ok: true; publicId: string; denomination: number; codes: string[] }
+  | { ok: false; status: "not_found" | "refunded" | "not_issued" | "gifted" | "bad_request" | "error" };
+
+/** «👁 Показать код» в чате (21.11.2026): код — только создателю заказа; первое открытие видят админы. */
+export async function botRevealCode(platform: "TG" | "VK", subject: string, publicId: string): Promise<CodeRevealResult> {
+  try {
+    const { data } = await signedPost<CodeRevealResult>("/api/internal/codes/reveal", { platform, subject, publicId });
+    return data && typeof data === "object" && "ok" in data ? data : { ok: false, status: "error" };
+  } catch {
+    return { ok: false, status: "error" };
+  }
+}
+
+/** Что сказать покупателю, если код не открылся. */
+export function revealFailText(status: string): string {
+  switch (status) {
+    case "not_found": return "Этот код открывается только в аккаунте, который его купил.";
+    case "gifted": return "Код подарен — его откроет получатель по ссылке. Чтобы забрать, нажмите «Вернуть себе» в кабинете.";
+    case "refunded": return "Заказ отменён, деньги вернулись на карту — код больше не действует.";
+    case "not_issued": return "Код ещё готовится — пришлём его сюда, как только будет готов.";
+    default: return "Не получилось открыть код — попробуйте через минуту. Он есть и в кабинете на сайте.";
+  }
+}

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { issuedCodesForOrder } from "@/lib/codes/order-codes";
-import { codeChatIssuedText, codeChatPaidText, CODES_CB, ROBLOX_REDEEM_LINK } from "../../../bots/shared/codes-shop";
+import { codeChatPaidText, codeChatSealedText, codeChatTgKeyboard, CODES_CB, ROBLOX_REDEEM_LINK } from "../../../bots/shared/codes-shop";
 import { FLAIR_IMAGE, copyButton, effectExtra, hasCodeImage, isEffectRefusal } from "../../../bots/shared/tg-flair";
 import { telegramRequestInit } from "../../../bots/shared/telegram-photo";
 import { vkUploadMessagePhoto } from "../../../bots/shared/vk-photo";
@@ -104,10 +104,11 @@ function tgKeyboard(issued: boolean, codes: readonly string[] = []) {
   };
 }
 
-function vkKeyboard(issued: boolean) {
+function vkKeyboard(issued: boolean, revealId?: string, several = false) {
   return {
     inline: true,
     buttons: [
+      ...(revealId ? [[{ action: { type: "text", label: several ? "👁 Показать коды" : "👁 Показать код", payload: JSON.stringify({ command: CODES_CB.reveal(revealId) }) }, color: "positive" }]] : []),
       ...(issued ? [[{ action: { type: "open_link", link: ROBLOX_REDEEM_LINK, label: "🚀 Активировать на Roblox" } }]] : []),
       [
         { action: { type: "text", label: "🤝 Скидка за друзей", payload: JSON.stringify({ command: CODES_CB.invite }) }, color: "secondary" },
@@ -129,6 +130,7 @@ async function chatTarget(orderId: string) {
 }
 
 const PAID_MESSAGE_EVENT = "CHAT_PAID_MESSAGE";
+export const CHAT_SEALED_EVENT = "CHAT_SEALED_SENT";
 
 /** VK: картинка вложением (не загрузилась — без неё) и текст. */
 async function vkWithPhoto(vkId: string, plain: string, keyboard: unknown, photoName: string | null): Promise<boolean> {
@@ -150,7 +152,9 @@ export async function sendCodeToChat(orderId: string): Promise<boolean | null> {
     console.error("[codes] chat: cannot decrypt", { orderId: order.id });
     return false;
   }
-  const text = codeChatIssuedText({ denomination: order.denomination, code: codes[0], codes, publicId: order.publicId });
+  // Код уходит запечатанным (21.11.2026): значение — по кнопке «👁 Показать код»,
+  // момент открытия видят админы (`/api/internal/codes/reveal`).
+  const text = codeChatSealedText({ denomination: order.denomination, publicId: order.publicId, count: codes.length });
   const image = hasCodeImage(order.denomination) ? FLAIR_IMAGE.code(order.denomination) : null;
   let ok: boolean | null = null;
   if (order.channel === "TG" && order.creator?.tgId) {
@@ -159,12 +163,19 @@ export async function sendCodeToChat(orderId: string): Promise<boolean | null> {
     const paid = await prisma.codeOrderEvent.findFirst({ where: { orderId: order.id, type: PAID_MESSAGE_EVENT }, select: { payload: true } }).catch(() => null);
     const paidMessageId = Number((paid?.payload as { messageId?: number } | null)?.messageId) || null;
     if (paidMessageId) await tgCall({ method: "deleteMessage", chat_id: tgId, message_id: paidMessageId }).catch(() => undefined);
-    const sent = await tgPost(tgId, text.html, tgKeyboard(true, codes), { photo: image ? await brandPhoto(image) : null, effect: effectExtra("party") });
+    const sent = await tgPost(tgId, text.html, codeChatTgKeyboard({ publicId: order.publicId, count: codes.length }), { photo: image ? await brandPhoto(image) : null, effect: effectExtra("party") });
     ok = sent.ok;
   } else if (order.channel === "VK" && order.creator?.vkId) {
-    ok = await vkWithPhoto(order.creator.vkId, text.plain, vkKeyboard(true), image);
+    ok = await vkWithPhoto(order.creator.vkId, text.plain, vkKeyboard(true, order.publicId, codes.length > 1), image);
   }
-  if (ok) await prisma.codeOrder.update({ where: { id: order.id }, data: { chatDeliveredAt: new Date() } });
+  if (ok) {
+    await prisma.codeOrder.update({ where: { id: order.id }, data: { chatDeliveredAt: new Date() } });
+    // Метка «в чат ушёл конверт, а не код»: увед об открытии не должен считать
+    // доставку в чат моментом, с которого покупатель видел код.
+    await prisma.codeOrderEvent.create({
+      data: { orderId: order.id, type: CHAT_SEALED_EVENT, idempotencyKey: `code-chat-sealed:${order.id}`, payload: {} },
+    }).catch(() => undefined);
+  }
   else if (ok === false) console.warn("[codes] chat delivery failed", { order: order.publicId, channel: order.channel });
   return ok;
 }
