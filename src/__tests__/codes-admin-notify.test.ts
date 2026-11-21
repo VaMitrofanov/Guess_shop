@@ -62,8 +62,9 @@ describe("алерт заказа кода", () => {
     const text = String(send.mock.calls[0][2]);
     expect(text).toContain("TG @buyer_1");
     expect(text).toContain("vk.com/gim237309399?sel=77");
+    expect(text).not.toContain("(Покупатель)");
     expect(text).toContain("Roblox: <code>Nick_&lt;1&gt;</code>");
-    expect(text).toContain("Раньше покупал: кодов 2, робуксов (ГП) 2");
+    expect(text).toContain("Покупок раньше: кодов 2, робуксов (ГП) 2");
     expect(text).toContain('<a href="tg://user?id=9">Друг</a>');
     expect(text).not.toContain("buyer@mail.ru");
   });

@@ -198,7 +198,8 @@ export function buyerLines(order: BuyerOrder): string[] {
   if (!c) return [`👤 Гость без входа · оформлен ${ACCOUNT_WORD[order.channel] ?? order.channel}${share}`];
   const links = personLinks(c);
   if (!links.length) links.push(c.email ? `вход по почте${c.emailVerifiedAt ? " (подтверждена)" : " (не подтверждена)"}` : "без TG и ВК");
-  const nameTail = c.name && c.username ? ` (${esc(c.name)})` : "";
+  // Имя ВК уже стоит в ссылке — второй раз не повторяем.
+  const nameTail = c.name && c.username && !c.vkId ? ` (${esc(c.name)})` : "";
   const lines = [`👤 ${links.join(" · ")}${nameTail}${share}`];
   if (c.robloxUsername) lines.push(`🎮 Roblox: <code>${esc(c.robloxUsername)}</code>`);
   // Текущий заказ уже может быть ISSUED — его из «раньше» вычитаем.
@@ -208,7 +209,7 @@ export function buyerLines(order: BuyerOrder): string[] {
     c._count.wbOrders ? `робуксов (ГП) ${c._count.wbOrders}` : null,
   ].filter(Boolean);
   const since = c.createdAt.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "short", year: "numeric" });
-  lines.push(`🧾 ${history.length ? `Раньше покупал: ${history.join(", ")}` : "Первая покупка у нас"} · с нами с ${since}`);
+  lines.push(`🧾 ${history.length ? `Покупок раньше: ${history.join(", ")}` : "Первая покупка у нас"} · с нами с ${since}`);
   if (c.referredBy) {
     const ref = personLinks(c.referredBy);
     lines.push(`🤝 Пришёл по приглашению: ${ref.length ? ref.join(" · ") : esc(c.referredBy.name ?? "аккаунт без TG/ВК")}`);
