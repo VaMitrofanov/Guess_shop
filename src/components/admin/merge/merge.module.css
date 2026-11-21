@@ -1,0 +1,23 @@
+/* Раздел «Склейка» (18.11.2026). Тёмная админка на --admin-*. */
+.root { --ok: #4fd18b; --weak: #f4b545; display: grid; gap: 14px; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--admin-muted); font-size: 14px; }
+.refresh { margin-left: auto; border: 1px solid var(--admin-line); background: var(--admin-panel); color: var(--admin-text); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+.list { display: grid; gap: 12px; }
+.pair { background: var(--admin-panel); border: 1px solid var(--admin-line); border-radius: 18px; padding: 16px; display: grid; gap: 14px; }
+.pairStrong { border-color: #0a84ff; }
+.sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .sides { grid-template-columns: minmax(0, 1fr); } }
+.side { display: grid; gap: 4px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.03); min-width: 0; }
+.label { font-size: 12px; font-weight: 650; letter-spacing: .04em; color: var(--admin-muted); }
+.name { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.meta { font-size: 14px; color: var(--admin-muted); overflow-wrap: anywhere; }
+.evidence { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.evidence li { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.strong { color: var(--ok); font-weight: 650; white-space: nowrap; }
+.weak { color: var(--weak); font-weight: 650; white-space: nowrap; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.primary { min-height: 40px; padding: 0 18px; border: 0; border-radius: 10px; background: #0a84ff; color: #fff; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
+.ghost { min-height: 40px; padding: 0 16px; border: 1px solid var(--admin-line); border-radius: 10px; background: none; color: var(--admin-text); font: inherit; font-size: 14px; cursor: pointer; }
+.primary:disabled, .ghost:disabled { opacity: .5; cursor: wait; }
+.error { color: #ff6b6b; font-size: 14px; margin: 0; }
+.empty { color: var(--admin-muted); font-size: 15px; padding: 24px 0; }

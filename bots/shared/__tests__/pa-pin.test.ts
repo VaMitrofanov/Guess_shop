@@ -1,0 +1,101 @@
+import { pinText, pinWorthCreating, type PinOrder } from "../pa-pin";
+
+const NOW = new Date("2026-11-15T12:00:00Z").getTime();
+const o = (p: Partial<PinOrder>): PinOrder => ({
+  wbCode: "ZT8BW8D", amount: 500, status: "AWAITING_GAMEPASS", createdAt: new Date(NOW - 3600_000),
+  completedAt: null, heldAt: null, robloxUsername: "Misha2010", ...p,
+});
+
+describe("закреп заказа в чате поддержки", () => {
+  it("показывает код, номинал, ник и этап", () => {
+    const text = pinText([o({})], NOW)!;
+    expect(text).toContain("500 R$ · код <code>ZT8BW8D</code>");
+    expect(text).toContain("<code>Misha2010</code>");
+    expect(text).toContain("t.me/RobloxBankBot?start=order");
+    expect(text).toMatch(/ждём ваш геймпасс/i);
+  });
+
+  it("не выдаёт клиенту заморозку и не называет срок", () => {
+    const text = pinText([o({ heldAt: new Date(NOW), status: "PENDING" })], NOW)!;
+    expect(text).not.toMatch(/замор|флаг|пометк/i);
+    expect(pinText([o({ status: "COMPLETED", completedAt: new Date(NOW - 3600_000) })], NOW)).not.toMatch(/\d+\s*(дн|час|ч\b|сут)/);
+  });
+
+  it("живые заказы впереди, старый выкупленный не показывается", () => {
+    const text = pinText([
+      o({ wbCode: "OLD0001", status: "COMPLETED", completedAt: new Date(NOW - 60 * 86_400_000), createdAt: new Date(NOW - 61 * 86_400_000) }),
+      o({ wbCode: "NEW0001" }),
+    ], NOW)!;
+    expect(text).toContain("NEW0001");
+    expect(text).not.toContain("OLD0001");
+  });
+
+  it("старый выкупленный — без обещания Pending", () => {
+    const text = pinText([o({ status: "COMPLETED", completedAt: new Date(NOW - 200 * 86_400_000) })], NOW)!;
+    expect(text).toContain("✅ Выкуплен");
+    expect(text).not.toContain("Pending");
+  });
+
+  it("несколько заказов: одна строка на заказ, ник и общий этап — один раз, прямым — без номера", () => {
+    const done = (code: string, amount: number, day: number) => o({
+      wbCode: code, amount, status: "COMPLETED",
+      createdAt: new Date(NOW - day * 86_400_000), completedAt: new Date(NOW - day * 86_400_000),
+    });
+    const text = pinText([done("DIR-2DCA477B", 590, 3), done("DIR-8ACC6FA1", 300, 5), done("DIR-992C5BF7", 2000, 7)], NOW)!;
+    expect(text.startsWith("📌 Ваши заказы")).toBe(true);
+    expect(text).not.toContain("DIR-");
+    expect(text).not.toContain("Код WB");
+    expect(text.match(/Misha2010/g)).toHaveLength(1);
+    expect(text.match(/Pending/g)).toHaveLength(1);
+    expect(text).toMatch(/✅ 2\s000 R\$ · от /u);
+    expect(text.split("\n").length).toBeLessThanOrEqual(9);
+  });
+
+  it("новый закреп — по живому или выкупленному заказу", () => {
+    expect(pinWorthCreating([o({})], NOW)).toBe(true);
+    // «выкупили 23 октября, а робуксов нет» — закреп любому, кто пишет, с любым выкупленным.
+    expect(pinWorthCreating([o({ status: "COMPLETED", completedAt: new Date(NOW - 24 * 86_400_000) })], NOW)).toBe(true);
+    expect(pinWorthCreating([o({ status: "COMPLETED", completedAt: new Date(NOW - 200 * 86_400_000) })], NOW)).toBe(true);
+    expect(pinWorthCreating([o({ status: "REJECTED" })], NOW)).toBe(false);
+  });
+});
+
+import { paBotRedirectReply } from "../pa-business-reply";
+
+describe("«загляните в бота» в чате поддержки", () => {
+  const order = { wbCode: "ZT8BW8D", amount: 500, status: "PENDING", createdAt: new Date(NOW - 3600_000), completedAt: null, heldAt: null };
+  it("на «где заказ» — этап и ссылка на карточку", () => {
+    const text = paBotRedirectReply("где мой заказ?", [order], new Date(NOW))!;
+    expect(text).toContain("ZT8BW8D");
+    expect(text).toContain("t.me/RobloxBankBot?start=order");
+  });
+  it("заморожен — молчим, отвечает человек", () => {
+    expect(paBotRedirectReply("где мой заказ?", [{ ...order, heldAt: new Date(NOW) }], new Date(NOW))).toBeNull();
+  });
+  it("не вопрос о заказе — не трогаем", () => {
+    expect(paBotRedirectReply("хочу вернуть деньги", [order], new Date(NOW))).toBeNull();
+  });
+});
+
+describe("заказы кодов Robux в закрепе (17.11.2026)", () => {
+  const code = (p: Partial<PinOrder>): PinOrder => o({ wbCode: "JKTTGD5S", amount: 1000, status: "CODE_PAID", robloxUsername: null, ...p });
+
+  it("клиент не видит номер CODE-…, заказ узнаётся по номиналу и дате", () => {
+    const text = pinText([code({})], NOW)!;
+    expect(text).toMatch(/^📌 Ваш заказ · 1\s000 R\$ · код Robux от \d+ ноября/);
+    expect(text).not.toMatch(/JKTTGD5S|CODE-/);
+    expect(text).toMatch(/готовим код/);
+  });
+
+  it("два кода рядом: отличаются номиналом, этап общий одной строкой не врёт", () => {
+    const text = pinText([code({}), code({ wbCode: "5WHYH8DF", amount: 200, status: "CODE_ISSUED", completedAt: new Date(NOW) })], NOW)!;
+    expect(text).toContain("📌 Ваши заказы");
+    expect(text).toMatch(/🎟 1\s000 R\$ · код Robux от .* — оплачен, готовим код/);
+    expect(text).toMatch(/✅ 200 R\$ · код Robux от .* — код выдан/);
+    expect(text).not.toMatch(/Все выкуплены/);
+  });
+
+  it("выданный код — повод для нового закрепа, как выкупленный заказ", () => {
+    expect(pinWorthCreating([code({ status: "CODE_ISSUED", completedAt: new Date(NOW) })], NOW)).toBe(true);
+  });
+});

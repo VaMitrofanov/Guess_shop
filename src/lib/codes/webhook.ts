@@ -1,0 +1,219 @@
+import crypto from "node:crypto";
+import { Prisma, type PaymentAttemptStatus } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { notificationStatus, paymentTransitionAllowed } from "@/lib/payment-notification";
+import { issueCodesForOrder } from "@/lib/codes/stock";
+import { codeComponents } from "@/lib/codes-pricing";
+import { deliverIssuedCode, sendPaidAwaitingEmail } from "@/lib/codes/delivery";
+import { notifyCodeAdmins } from "@/lib/codes/admin-notify";
+import { sendPaidToChat } from "@/lib/codes/chat-notify";
+import { codesBackorderEnabled, MANUAL_ISSUE_REASON } from "@/lib/codes/fulfillment";
+
+/**
+ * Уведомление Т-Банка по заказу кода (OrderId `CODE-…`).
+ *
+ * Подпись и терминал уже проверены в `/api/webhooks/tinkoff`. Здесь —
+ * сверка с НАШИМ платежом (PaymentId, сумма, допустимый переход статуса) и
+ * идемпотентность: повтор того же уведомления ничего не меняет, а код
+ * выдаётся ровно один раз — в той же транзакции, что фиксирует оплату.
+ * Возврат браузера со страницы банка оплату не подтверждает: подтверждает
+ * только этот обработчик.
+ */
+
+export const CODE_PROVIDER_ORDER_PREFIX = "CODE-";
+
+type Outcome = { status: number; body: string };
+const ok: Outcome = { status: 200, body: "OK" };
+
+export async function handleCodePaymentNotification(body: Record<string, unknown>, rawBody: string): Promise<Outcome> {
+  const providerOrderId = String(body.OrderId ?? "");
+  const paymentId = String(body.PaymentId ?? "");
+  const amountKopecks = Number(body.Amount);
+  const nextStatus = notificationStatus(body.Status);
+  if (!providerOrderId || !paymentId || !Number.isSafeInteger(amountKopecks) || !nextStatus) {
+    return { status: 422, body: "unsupported notification" };
+  }
+
+  const payment = await prisma.codePayment.findUnique({
+    where: { providerOrderId },
+    include: { order: { select: { id: true, publicId: true, denomination: true, status: true, paidAt: true, finalAmountKopecks: true } } },
+  });
+  if (!payment) return { status: 404, body: "payment attempt not found" };
+  if (!payment.paymentId) return { status: 503, body: "payment initialization is not durable yet" };
+  if (payment.paymentId !== paymentId) return { status: 409, body: "payment id mismatch" };
+  if (payment.amountKopecks !== amountKopecks) return { status: 409, body: "amount mismatch" };
+  // Т-Банк работает только в рублях; валюта, если пришла, обязана быть 643.
+  if (body.Currency !== undefined && String(body.Currency) !== "643") return { status: 409, body: "currency mismatch" };
+  if (!paymentTransitionAllowed(payment.status, nextStatus)) return { status: 409, body: "invalid status transition" };
+
+  const eventHash = crypto.createHash("sha256").update(rawBody, "utf8").digest("hex");
+  const refund = nextStatus === "PARTIALLY_REFUNDED" || nextStatus === "REFUNDED";
+  const eventKey = refund
+    ? `code-tbank:${paymentId}:${String(body.Status)}:${eventHash}`
+    : `code-tbank:${paymentId}:${String(body.Status)}:${amountKopecks}`;
+  const duplicate = await prisma.codeOrderEvent.findUnique({ where: { idempotencyKey: eventKey }, select: { id: true } });
+  if (duplicate) return ok;
+
+  let issued = false;
+  let attention: "NO_STOCK" | "MANUAL_ISSUE" | "DOUBLE_PAYMENT" | null = null;
+  const backorder = codesBackorderEnabled();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const moved = await tx.codePayment.updateMany({
+        where: { id: payment.id, status: payment.status, paymentId, amountKopecks },
+        data: {
+          status: nextStatus,
+          rawEventHash: eventHash,
+          ...(nextStatus === "REFUNDED" ? { refundedAmountKopecks: payment.amountKopecks } : {}),
+          ...(isFinal(nextStatus) ? { finalizedAt: new Date() } : {}),
+        },
+      });
+      if (moved.count !== 1) throw new Error("concurrent code payment transition");
+
+      const order = await tx.codeOrder.findUniqueOrThrow({
+        where: { id: payment.orderId },
+        select: { id: true, denomination: true, pricingVersion: true, status: true, paidAt: true, activationCodeId: true },
+      });
+
+      if (nextStatus === "CONFIRMED" && !order.paidAt) {
+        // 🎁 Подарочная скидка потрачена этой оплатой (если резерв за этим заказом).
+        await tx.codeDiscountGrant.updateMany({ where: { usedOrderId: order.id, usedAt: null }, data: { usedAt: new Date() } });
+      }
+      if (nextStatus === "CONFIRMED") {
+        if (order.paidAt) {
+          // Второй успешный платёж по уже оплаченному заказу (старая сессия
+          // банка). Второй код НЕ выдаём: деньги — на ручной возврат.
+          attention = "DOUBLE_PAYMENT";
+          await tx.codeOrder.update({ where: { id: order.id }, data: { attentionReason: "DOUBLE_PAYMENT" } });
+        } else {
+          // Набор (2 000 = 2 × 1 000) выдаётся целиком или уходит на ручную выдачу.
+          // `activationCodeId` — первый код набора; все коды заказа — по `reservedForOrderId`.
+          const codeIds = order.activationCodeId
+            ? [order.activationCodeId]
+            : await issueCodesForOrder(tx, order.id, codeComponents(order.denomination, order.pricingVersion));
+          const codeId = codeIds?.[0] ?? null;
+          if (codeId) {
+            issued = true;
+            await tx.codeOrder.update({
+              where: { id: order.id },
+              data: { status: "ISSUED", paidAt: new Date(), issuedAt: new Date(), activationCodeId: codeId, attentionReason: null },
+            });
+          } else {
+            // Ручной режим: это не авария, а обычный заказ «выдать руками».
+            attention = backorder ? "MANUAL_ISSUE" : "NO_STOCK";
+            await tx.codeOrder.update({
+              where: { id: order.id },
+              data: { status: "PAID", paidAt: new Date(), attentionReason: backorder ? MANUAL_ISSUE_REASON : "NO_STOCK" },
+            });
+          }
+        }
+      } else if ((nextStatus === "REJECTED" || nextStatus === "CANCELED") && !order.paidAt) {
+        // Платёж не завершён: заказ снова ждёт оплату, ссылка остаётся рабочей.
+        const live = await tx.codePayment.count({
+          where: { orderId: order.id, id: { not: payment.id }, status: { in: ["INITIATED", "AUTHORIZED", "CONFIRMED"] } },
+        });
+        if (live === 0) await tx.codeOrder.update({ where: { id: order.id }, data: { status: "AWAITING_PAYMENT" } });
+      } else if (nextStatus === "REFUNDED") {
+        await tx.codeOrder.update({ where: { id: order.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
+      }
+
+      await tx.codeOrderEvent.create({
+        data: {
+          orderId: order.id,
+          type: `PAYMENT_${nextStatus}`,
+          idempotencyKey: eventKey,
+          payload: { paymentId: payment.id, eventHash, ...(attention ? { attention } : {}), ...(issued ? { issued: true } : {}) },
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return ok;
+    console.error("[codes webhook] durable processing failed", { order: payment.order.publicId });
+    return { status: 503, body: "temporary processing error" };
+  }
+
+  // ✉️ Почта из чека → в профиль покупателя, если там пусто (18.11.2026): её
+  // указал сам плательщик-владелец, и следующий чек подставится сам. Только
+  // для своих (не подарок и не оплата по ссылке другим человеком).
+  if (nextStatus === "CONFIRMED" && payment.receiptEmail) {
+    await prisma.codeOrder.findUnique({ where: { id: payment.orderId }, select: { creatorUserId: true, createdVia: true, deliveryMode: true } })
+      .then((o) => o?.creatorUserId && o.createdVia === "SELF" && o.deliveryMode !== "GIFT"
+        ? prisma.user.updateMany({ where: { id: o.creatorUserId, email: null, contactEmail: null }, data: { contactEmail: payment.receiptEmail } })
+        : null)
+      .catch(() => undefined);
+  }
+
+  // Письмо — после фиксации оплаты и кода. Его сбой не трогает ни деньги, ни
+  // код: заказ ISSUED, письмо можно переотправить.
+  if (issued) {
+    const { email: mail } = await deliverIssuedCode(payment.orderId, "issued");
+    if (mail === "failed" || mail === "exhausted") {
+      await notifyCodeAdmins({
+        marker: "action",
+        title: "письмо с кодом не ушло",
+        orderPublicId: payment.order.publicId,
+        denomination: payment.order.denomination,
+        amountKopecks: payment.amountKopecks,
+        next: "код выдан и лежит в заказе; переотправка — со страницы заказа или кабинета",
+      });
+    } else {
+      // Продажа со склада тоже продажа (21.11.2026): до этого админы узнавали
+      // о ней, только если письмо падало, — «кто-то купил» не видел никто.
+      await notifyCodeAdmins({
+        marker: "done",
+        title: "оплачен и выдан автоматически",
+        orderPublicId: payment.order.publicId,
+        denomination: payment.order.denomination,
+        amountKopecks: payment.amountKopecks,
+        next: "",
+      });
+    }
+  }
+  if (refund && nextStatus === "REFUNDED") {
+    // Возврат за код — деньги ушли назад, код (если был выдан) админ гасит сам.
+    await notifyCodeAdmins({
+      marker: "done",
+      title: "возврат подтверждён банком",
+      orderPublicId: payment.order.publicId,
+      denomination: payment.order.denomination,
+      amountKopecks: payment.amountKopecks,
+      next: "",
+    });
+  }
+  if (attention === "MANUAL_ISSUE") {
+    // Покупатель не должен видеть списание и тишину: письмо и (бот) сообщение.
+    await sendPaidAwaitingEmail(payment.orderId).catch(() => undefined);
+    await sendPaidToChat(payment.orderId).catch(() => undefined);
+    // 🟠, а не 🔴 (17.11.2026, владелец): оплата прошла, всё в порядке — это
+    // обычная работа «выдать код», а красный значок оставлен для аварий
+    // (NO_STOCK, двойной платёж ниже).
+    await notifyCodeAdmins({
+      marker: "action",
+      title: "оплачен — выдать код вручную",
+      orderPublicId: payment.order.publicId,
+      denomination: payment.order.denomination,
+      amountKopecks: payment.amountKopecks,
+      // Текст уходит как HTML: голое «<код>» Telegram считал неизвестным тегом и
+      // отклонял сообщение целиком — алерт о ручной выдаче не дошёл ни разу
+      // (CODE-827TX8XJ, 15.11.2026). Угловые скобки — только экранированные.
+      next: "нажмите «🎟 Выдать код» и пришлите код ответом — бот выдаст его покупателю",
+      issueButton: true,
+    });
+  } else if (attention) {
+    await notifyCodeAdmins({
+      marker: "urgent",
+      title: attention === "NO_STOCK" ? "оплачен, а кода на складе нет" : "второй платёж по оплаченному заказу",
+      orderPublicId: payment.order.publicId,
+      denomination: payment.order.denomination,
+      amountKopecks: payment.amountKopecks,
+      next: attention === "NO_STOCK" ? "нажмите «🎟 Выдать код» и пришлите код ответом — или верните деньги" : "вернуть второй платёж через Т-Банк",
+      issueButton: attention === "NO_STOCK",
+    });
+  }
+  return ok;
+}
+
+function isFinal(status: PaymentAttemptStatus): boolean {
+  return status === "CONFIRMED" || status === "REJECTED" || status === "CANCELED" || status === "REFUNDED";
+}

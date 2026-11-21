@@ -1,0 +1,646 @@
+/**
+ * ❄️ Заморозка заказа — «не выкупать, но и не удалять».
+ *
+ * Зачем отдельный признак, а не статус
+ * ────────────────────────────────────
+ * `ERROR` — рабочий статус: в нём живут ПОЧИНИМЫЕ заказы (региональная цена,
+ * снятый с продажи пасс), кнопка «↩ Вернуть к выкупу» и «Повторить выкуп».
+ * Заказ, который нельзя выкупать никогда, лежал в той же куче и отличался
+ * только текстом заметки — одного нажатия хватало, чтобы вернуть его в очередь
+ * и потратить робуксы. Заморозка — признак ПОВЕРХ статуса: заказ остаётся, где
+ * был, но физически выключен из всех путей выкупа.
+ *
+ * Почему ключ — код, а не id заказа
+ * ─────────────────────────────────
+ * Код выдаётся покупателю раньше, чем бот создаёт заказ. Случай 84CR7UZ: код на
+ * руках, заказа ещё нет, а выкупать его уже нельзя. Заморозка по id заставила
+ * бы ловить момент создания вручную; по коду она ставится заранее и садится на
+ * заказ сама. `WbOrder.wbCode` уникален — у одной заморозки не больше одного
+ * заказа, поэтому все операции здесь работают через `findUnique`.
+ *
+ * Этот файл — ЕДИНСТВЕННЫЙ источник правил. Боты не умеют импортировать из
+ * `src/`, а веб из `bots/shared` умеет (так же живёт `wb-order-source.ts`),
+ * поэтому ядро лежит здесь, а `src/lib/order-hold.ts` его переэкспортирует.
+ */
+
+import { setFlag, type OrderFlagKind } from "./order-flags";
+
+/** Маркеры строк заметки. По ним TWA красит строку заморозки отдельно. */
+export const HOLD_NOTE_MARK = "[ЗАМОРОЗКА";
+export const UNHOLD_NOTE_MARK = "[РАЗМОРОЗКА";
+
+/** Причина обязательна: через месяц «почему нельзя» не вспомнит никто. */
+export const HOLD_REASON_MAX = 300;
+
+/** Заготовки причин в модалке TWA. Текст можно дописать руками. */
+export const HOLD_PRESETS = [
+  "1 звезда на WB — не выкупать",
+  "Подозрение на фрод",
+  "Спор / чарджбэк",
+  "Разбор вручную",
+] as const;
+
+/**
+ * Предикат «не заморожен» для КАЖДОЙ очереди выкупа.
+ *
+ * Держится отдельной константой, чтобы новая вкладка не забыла его добавить:
+ * тест `order-hold.test.ts` проверяет, что все рабочие ветки `buildTabWhere`
+ * его содержат.
+ */
+export const NOT_HELD = { heldAt: null } as const;
+
+/** Тот же предикат для сырых SQL-счётчиков вкладок (зеркало `NOT_HELD`). */
+export const NOT_HELD_SQL = `"heldAt" IS NULL`;
+
+interface HeldFields {
+  heldAt?: Date | string | null;
+  heldReason?: string | null;
+  heldBy?: string | null;
+}
+
+export function isHeld(order: HeldFields | null | undefined): boolean {
+  return !!order?.heldAt;
+}
+
+/** Текст отказа. Один и тот же в TWA, в TG-боте и в автовыкупе. */
+export function heldRefusal(reason?: string | null): string {
+  const why = (reason ?? "").trim() || "причина не указана";
+  return `❄️ Заказ заморожен — выкуп заблокирован.\nПричина: ${why}\nСними заморозку в карточке, если это ошибка.`;
+}
+
+/** Нормализация причины: пустую не принимаем, длинную режем. */
+export function normalizeHoldReason(raw: unknown): string | null {
+  const reason = typeof raw === "string" ? raw.trim() : "";
+  if (!reason) return null;
+  return reason.slice(0, HOLD_REASON_MAX);
+}
+
+/** Код в верхнем регистре без пробелов — так он лежит и в WbOrder, и в WbCode. */
+export function normalizeHoldCode(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toUpperCase() : "";
+}
+
+function stamp(): string {
+  return new Date().toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+/** Дописать строку в начало заметки — свежее сверху, история не затирается. */
+export function prependNote(existing: string | null | undefined, line: string): string {
+  return (existing ? `${line}\n${existing}` : line).slice(0, 2000);
+}
+
+function holdNoteLine(reason: string, actor: string): string {
+  return `${HOLD_NOTE_MARK} ${stamp()} · ${actor}] ${reason}`;
+}
+
+/**
+ * Уже есть строка заморозки с этой причиной?
+ *
+ * Штамп меняется каждую минуту, поэтому сравнивать целые строки бесполезно —
+ * сравниваем причину внутри строки заморозки. Нужно, если заказ помечается
+ * повторно при живой заморозке: заметка не должна расти на строку за раз.
+ */
+export function hasHoldNoteFor(note: string | null | undefined, reason: string): boolean {
+  if (!note) return false;
+  return note
+    .split("\n")
+    .some((line) => line.startsWith(HOLD_NOTE_MARK) && line.endsWith(`] ${reason}`));
+}
+
+/**
+ * Проставить заморозку на заказ. Общая точка для крон-свипа и гарда выкупа —
+ * оба сажают на заказ заморозку, поставленную на код раньше него.
+ */
+export async function stampHoldOnOrder(
+  db: any,
+  order: { id: string; adminNote: string | null },
+  hold: { reason: string; createdBy: string },
+): Promise<void> {
+  await db.wbOrder.update({
+    where: { id: order.id },
+    data: {
+      heldAt: new Date(),
+      heldReason: hold.reason,
+      heldBy: hold.createdBy,
+      ...(hasHoldNoteFor(order.adminNote, hold.reason)
+        ? {}
+        : { adminNote: prependNote(order.adminNote, holdNoteLine(hold.reason, hold.createdBy)) }),
+    },
+  });
+}
+
+/** Заметка человека из поля «Добавить заметку» (11.11.2026). */
+export function humanNoteLine(text: string, actor: string): string {
+  return `[ЗАМЕТКА ${stamp()} · ${actor}] ${text.replace(/\s+/g, " ").trim()}`;
+}
+
+function unholdNoteLine(actor: string): string {
+  return `${UNHOLD_NOTE_MARK} ${stamp()} · ${actor}] заморозка снята`;
+}
+
+/* ── Работа с БД ───────────────────────────────────────────────────────────
+   `db` типизирован как `any`: у ботов и у веба разные инстансы PrismaClient, а
+   до `prisma generate` новых полей нет ни в одном из них (см. bots/shared/db.ts).
+   ───────────────────────────────────────────────────────────────────────── */
+
+interface HoldResult {
+  ok: boolean;
+  error?: string;
+  /** Заморозка села на существующий заказ (а не только на код). */
+  orderAffected?: boolean;
+  /** Заказа по коду ещё нет — заморозка ждёт его создания. */
+  awaitingOrder?: boolean;
+  /** Автоматика не стала морозить: админ уже разморозил вручную. */
+  skippedByManualRelease?: boolean;
+  /** Заморозили снова, хотя админ размораживал (новый отзыв / деньги ушли). */
+  afterManualRelease?: boolean;
+}
+
+/* ── 🛡 Разморозка админом сильнее автоматики (11.11.2026) ─────────────────
+   Требование владельца: «если админ вручную разморозил — его больше не
+   морозит». До этого каждая проверка, увидевшая открытую заявку WB, морозила
+   заказ снова (79PT6B3: три разморозки за вечер 05.11 — три возврата
+   заморозки). Решение админа покрывает всё, что было известно в момент
+   разморозки. Морозить снова автоматика может только по НОВОМУ событию из
+   короткого списка: плохой отзыв или деньги ушли покупателю.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/** Почему автоматика хочет заморозить. Ручная заморозка `auto` не передаёт. */
+type AutoHoldKind = ProblemKind | "BAD_REVIEW" | "STALE";
+
+/** Что пробивает ручную разморозку — и то лишь если случилось ПОСЛЕ неё. */
+const BREAKS_MANUAL_RELEASE = new Set<AutoHoldKind>([
+  "BAD_REVIEW",
+  "WB_CANCELLED",
+  "WB_CLAIM_REFUNDED",
+  "PAYMENT_REFUNDED",
+  "CODE_REVOKED",
+]);
+
+/**
+ * Можно ли автоматике заморозить заказ, который админ уже размораживал.
+ *
+ * `eventAt` — когда случилось событие (отзыв, отмена, возврат). Неизвестно —
+ * считаем свежим: про деньги лучше переспросить, чем выкупить в минус.
+ */
+export function autoHoldAllowed(
+  manualReleaseAt: Date | string | null | undefined,
+  kind: AutoHoldKind,
+  eventAt?: Date | string | null,
+): boolean {
+  if (!manualReleaseAt) return true;
+  if (!BREAKS_MANUAL_RELEASE.has(kind)) return false;
+  if (!eventAt) return true;
+  return new Date(eventAt).getTime() > new Date(manualReleaseAt).getTime();
+}
+
+/** Подпись к пометке в карточке и в заметке. */
+const MANUAL_RELEASE_NOTE =
+  "автоматика не морозит, кроме нового плохого отзыва и возврата денег";
+
+/**
+ * Заморозить по коду. Идемпотентна: повторный вызов обновляет причину и автора,
+ * но не плодит записи и не дублирует строку в заметке.
+ *
+ * `auto` — заморозку ставит автоматика. Тогда она уважает ручную разморозку
+ * (`autoHoldAllowed`) и не стирает её отметку. Без `auto` это решение человека:
+ * отметка ручной разморозки снимается — админ передумал.
+ */
+export async function holdByCode(
+  db: any,
+  input: {
+    wbCode: string;
+    reason: string;
+    actor: string;
+    auto?: { kind: AutoHoldKind; eventAt?: Date | string | null };
+  },
+): Promise<HoldResult> {
+  const wbCode = normalizeHoldCode(input.wbCode);
+  const reason = normalizeHoldReason(input.reason);
+  const actor = (input.actor || "админ").trim();
+
+  if (!wbCode) return { ok: false, error: "Не указан код" };
+  if (!reason) return { ok: false, error: "Причина заморозки обязательна" };
+
+  let afterManualRelease = false;
+  if (input.auto) {
+    const prev = await db.orderHold.findUnique({
+      where: { wbCode },
+      select: { manualReleaseAt: true, releasedAt: true },
+    });
+    if (prev?.manualReleaseAt) {
+      if (!autoHoldAllowed(prev.manualReleaseAt, input.auto.kind, input.auto.eventAt)) {
+        return { ok: true, skippedByManualRelease: true };
+      }
+      // Заморозка уже стоит — это обновление причины, а не «снова».
+      afterManualRelease = !!prev.releasedAt;
+    }
+  }
+  const manualReset = input.auto ? {} : { manualReleaseAt: null, manualReleaseBy: null };
+
+  const now = new Date();
+  await db.orderHold.upsert({
+    where:  { wbCode },
+    create: { wbCode, reason, createdBy: actor },
+    // Разморозили и морозим снова — это та же запись с новой причиной, а не
+    // висящий `releasedAt` от прошлого раза.
+    update: { reason, createdBy: actor, createdAt: now, releasedAt: null, releasedBy: null, ...manualReset },
+  });
+
+  const order = await db.wbOrder.findUnique({
+    where:  { wbCode },
+    select: { id: true, adminNote: true, heldAt: true },
+  });
+  if (!order) return { ok: true, orderAffected: false, awaitingOrder: true, afterManualRelease };
+
+  const line = afterManualRelease
+    ? holdNoteLine(`${reason} — снова, хотя заказ размораживали вручную`, actor)
+    : holdNoteLine(reason, actor);
+  await db.wbOrder.update({
+    where: { id: order.id },
+    data: {
+      heldAt: now,
+      heldReason: reason,
+      heldBy: actor,
+      ...manualReset,
+      // Уже замороженный заказ не получает вторую строку в заметке — иначе
+      // правка причины засоряет историю.
+      ...(order.heldAt ? {} : { adminNote: prependNote(order.adminNote, line) }),
+    },
+  });
+
+  return { ok: true, orderAffected: true, awaitingOrder: false, afterManualRelease };
+}
+
+/** Снять заморозку. Запись `OrderHold` остаётся — помечается `releasedAt`. */
+export async function releaseByCode(
+  db: any,
+  input: { wbCode: string; actor: string; manual?: boolean },
+): Promise<HoldResult> {
+  const wbCode = normalizeHoldCode(input.wbCode);
+  const actor = (input.actor || "админ").trim();
+  if (!wbCode) return { ok: false, error: "Не указан код" };
+
+  const hold = await db.orderHold.findUnique({ where: { wbCode }, select: { id: true, releasedAt: true } });
+  const order = await db.wbOrder.findUnique({
+    where:  { wbCode },
+    select: { id: true, adminNote: true, heldAt: true },
+  });
+
+  if (!hold && !order?.heldAt) return { ok: false, error: "Заморозки на этом коде нет" };
+
+  const now = new Date();
+  // Кнопка «Разморозить» — решение человека, и оно переживает автоматику.
+  const manual = input.manual ? { manualReleaseAt: now, manualReleaseBy: actor } : {};
+  if (hold && !hold.releasedAt) {
+    await db.orderHold.update({ where: { wbCode }, data: { releasedAt: now, releasedBy: actor, ...manual } });
+  } else if (hold && input.manual) {
+    await db.orderHold.update({ where: { wbCode }, data: manual });
+  }
+  if (order?.heldAt) {
+    await db.wbOrder.update({
+      where: { id: order.id },
+      data: {
+        heldAt: null, heldReason: null, heldBy: null,
+        ...manual,
+        adminNote: prependNote(
+          order.adminNote,
+          input.manual ? `${unholdNoteLine(actor)} вручную — ${MANUAL_RELEASE_NOTE}` : unholdNoteLine(actor),
+        ),
+      },
+    });
+  } else if (order && input.manual) {
+    await db.wbOrder.update({ where: { id: order.id }, data: manual });
+  }
+  return { ok: true, orderAffected: !!order?.heldAt };
+}
+
+/**
+ * Гард перед тратой робуксов. Стоит во ВСЕХ путях выкупа.
+ *
+ * Смотрит не только на денормализованное поле заказа, но и на `OrderHold` —
+ * это закрывает окно между «бот создал заказ по заранее замороженному коду» и
+ * «крон-свип его пометил». Если заморозка нашлась только в `OrderHold` —
+ * заодно проставляет её на заказ (само-починка).
+ */
+export async function assertOrderNotHeld(
+  db: any,
+  orderId: string,
+): Promise<{ held: false } | { held: true; reason: string; message: string }> {
+  const order = await db.wbOrder.findUnique({
+    where:  { id: orderId },
+    select: { id: true, wbCode: true, adminNote: true, heldAt: true, heldReason: true },
+  });
+  if (!order) return { held: false };
+
+  if (order.heldAt) {
+    const reason = order.heldReason ?? "";
+    return { held: true, reason, message: heldRefusal(reason) };
+  }
+
+  const hold = await db.orderHold.findUnique({
+    where:  { wbCode: order.wbCode },
+    select: { reason: true, createdBy: true, releasedAt: true },
+  });
+  if (!hold || hold.releasedAt) return { held: false };
+
+  await stampHoldOnOrder(db, order, hold)
+    .catch(() => { /* пометка — не повод пропустить блокировку */ });
+
+  return { held: true, reason: hold.reason, message: heldRefusal(hold.reason) };
+}
+
+/**
+ * Крон-свип: активные заморозки садятся на заказы, созданные после них.
+ *
+ * Покрывает все 11 мест, где рождается `WbOrder`, не трогая ни одно из них.
+ * Гонку «заказ создан, свип ещё не прошёл» закрывает `assertOrderNotHeld`
+ * прямо в путях выкупа — свип отвечает за то, чтобы заказ выглядел
+ * замороженным в ленте, а не за безопасность траты.
+ */
+export async function sweepPendingHolds(db: any): Promise<number> {
+  const holds = await db.orderHold.findMany({
+    where:  { releasedAt: null },
+    select: { wbCode: true, reason: true, createdBy: true },
+  });
+  // Разморозку по коду могли сделать раньше, чем родился заказ: пометка
+  // должна доехать и до него, иначе карточка о ней не знает.
+  const manual = await db.orderHold.findMany({
+    where:  { manualReleaseAt: { not: null }, releasedAt: { not: null } },
+    select: { wbCode: true, manualReleaseAt: true, manualReleaseBy: true },
+    take: 2000,
+  }).catch(() => []);
+  if (manual.length > 0) {
+    const missing = await db.wbOrder.findMany({
+      where:  { wbCode: { in: manual.map((h: { wbCode: string }) => h.wbCode) }, manualReleaseAt: null },
+      select: { id: true, wbCode: true },
+    }).catch(() => []);
+    for (const order of missing) {
+      const h = manual.find((m: { wbCode: string }) => m.wbCode === order.wbCode);
+      if (!h) continue;
+      await db.wbOrder.update({
+        where: { id: order.id },
+        data:  { manualReleaseAt: h.manualReleaseAt, manualReleaseBy: h.manualReleaseBy },
+      }).catch(() => undefined);
+    }
+  }
+  if (holds.length === 0) return 0;
+
+  let applied = 0;
+  for (const hold of holds) {
+    const order = await db.wbOrder.findUnique({
+      where:  { wbCode: hold.wbCode },
+      select: { id: true, adminNote: true, heldAt: true },
+    });
+    if (!order || order.heldAt) continue;
+    await stampHoldOnOrder(db, order, hold);
+    applied++;
+  }
+  return applied;
+}
+
+/** Активные заморозки для набора кодов — пакетная проверка автовыкупа. */
+export async function activeHoldCodes(db: any, codes: string[]): Promise<Set<string>> {
+  if (codes.length === 0) return new Set();
+  const rows = await db.orderHold.findMany({
+    where:  { wbCode: { in: codes }, releasedAt: null },
+    select: { wbCode: true },
+  });
+  return new Set(rows.map((r: { wbCode: string }) => r.wbCode));
+}
+
+/* ── Автозаморозка проблемных заказов (24.10.2026) ─────────────────────────
+   Требование владельца: «любой проблемный, отменённый заказ не будет
+   выкуплен». До этого дня заявка на возврат на WB (JR7HTSW) только присылала
+   алерт: заказ оставался в очереди выкупа, а автобай его не отличал от
+   обычного. Теперь каждое событие «деньги уходят от нас» ставит заморозку
+   по коду, а перед любой тратой робуксов стоит `assertOrderBuyable`.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type ProblemKind =
+  | "WB_CLAIM"
+  | "WB_CLAIM_REFUNDED"
+  | "WB_CANCELLED"
+  | "CODE_REVOKED"
+  | "PAYMENT_REFUNDED"
+  | "PAYMENT_PARTIAL_REFUND"
+  /** Покупатель сам написал «верните деньги / отмените» (01.11.2026, buyer-contact-sweep). */
+  | "BUYER_REFUND_REQUEST";
+
+/** Кто ставит автозаморозку — так она подписана в заметке и в карточке. */
+export const PROBLEM_HOLD_ACTOR = "автозащита";
+
+/** Начало причины — по нему видно, что заморозку поставила автоматика. */
+const PROBLEM_REASON_HEAD: Record<ProblemKind, string> = {
+  WB_CLAIM: "Возврат на WB: покупатель открыл заявку",
+  WB_CLAIM_REFUNDED: "Возврат на WB одобрен — деньги уходят покупателю",
+  WB_CANCELLED: "Заказ отменён на WB — деньги вернулись покупателю",
+  CODE_REVOKED: "Код аннулирован",
+  PAYMENT_REFUNDED: "Платёж возвращён покупателю",
+  PAYMENT_PARTIAL_REFUND: "Частичный возврат платежа — решить вручную",
+  BUYER_REFUND_REQUEST: "Покупатель просит отмену и возврат денег",
+};
+
+export function problemHoldReason(kind: ProblemKind, detail?: string | null): string {
+  const head = PROBLEM_REASON_HEAD[kind];
+  const tail = (detail ?? "").replace(/\s+/g, " ").trim();
+  return normalizeHoldReason(tail ? `${head}: «${tail}»` : head) ?? head;
+}
+
+/** Проблемы, которые с 11.11.2026 ставят пометку вместо заморозки. */
+const PROBLEM_FLAG: Partial<Record<ProblemKind, OrderFlagKind>> = {
+  WB_CLAIM: "CLAIM",
+  PAYMENT_PARTIAL_REFUND: "PARTIAL_REFUND",
+  BUYER_REFUND_REQUEST: "CANCEL_ASK",
+};
+
+export interface ProblemHoldResult extends HoldResult {
+  /** Вместо заморозки повешена пометка — заказ остаётся в очереди. */
+  flagged?: boolean;
+  /** Заказ уже выкуплен — морозить нечего, робуксы потрачены. */
+  alreadyCompleted?: boolean;
+  /** Статус нашего заказа на момент события (`null` — заказа ещё нет). */
+  internalStatus?: string | null;
+}
+
+/**
+ * Заморозить заказ из-за проблемы. Идемпотентна (как `holdByCode`).
+ *
+ * Выкупленный заказ не морозим: тратить уже нечего, а во вкладке «Заморожены»
+ * он только мешал бы. Его исход решает человек по алерту.
+ */
+export async function holdForProblem(
+  db: any,
+  input: {
+    wbCode: string | null | undefined;
+    kind: ProblemKind;
+    detail?: string | null;
+    actor?: string;
+    /** Когда случилось событие — сверяется с ручной разморозкой. */
+    eventAt?: Date | string | null;
+  },
+): Promise<ProblemHoldResult> {
+  const wbCode = normalizeHoldCode(input.wbCode);
+  if (!wbCode) return { ok: false, error: "Не указан код" };
+  const order = await db.wbOrder.findUnique({ where: { wbCode }, select: { status: true } });
+  if (order?.status === "COMPLETED") {
+    return { ok: true, alreadyCompleted: true, internalStatus: "COMPLETED" };
+  }
+  /* 🏷 С 11.11.2026 заявка без решения, частичный возврат и просьба об отмене
+     — пометка, а не заморозка: заказ остаётся в очереди, админ решает в чате. */
+  const flagKind = PROBLEM_FLAG[input.kind];
+  if (flagKind) {
+    const res = await setFlag(db, { wbCode, kind: flagKind, detail: input.detail, at: input.eventAt ? new Date(input.eventAt) : null });
+    return { ok: res.ok, flagged: true, awaitingOrder: res.awaitingOrder, internalStatus: order?.status ?? null };
+  }
+  const res = await holdByCode(db, {
+    wbCode,
+    reason: problemHoldReason(input.kind, input.detail),
+    actor: input.actor ?? PROBLEM_HOLD_ACTOR,
+    auto: { kind: input.kind, eventAt: input.eventAt },
+  });
+  return { ...res, internalStatus: order?.status ?? null };
+}
+
+/** Статусы, в которых выкуп невозможен ни при каких условиях. */
+const NEVER_BUYABLE = new Set(["REJECTED"]);
+
+/** Платёж жив — есть деньги, за которые выкупаем. */
+const LIVE_PAYMENT = new Set(["AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED"]);
+
+/**
+ * Найти «жёсткую» проблему заказа — ту, при которой выкуп запрещён, даже если
+ * заморозку кто-то снял: отмена на WB,
+ * аннулированный код, полностью возвращённый платёж.
+ *
+ * Мягкие проблемы (открытая заявка, частичный возврат) — пометки, сюда не входят: их
+ * решает человек, и после ручной разморозки заказ должен выкупаться.
+ */
+export async function findHardProblem(
+  db: any,
+  order: { id: string; wbCode: string },
+): Promise<{ kind: ProblemKind; detail?: string | null; at?: Date | null } | null> {
+  const [code, dbs, payments, hold] = await Promise.all([
+    db.wbCode?.findUnique({ where: { code: order.wbCode }, select: { status: true } }).catch(() => null),
+    db.wbMarketplaceOrder?.findFirst({
+      where: { wbCode: { code: order.wbCode } },
+      select: { cancelledAt: true },
+    }).catch(() => null),
+    db.paymentAttempt?.findMany({ where: { orderId: order.id }, select: { status: true, updatedAt: true } }).catch(() => []),
+    db.orderHold?.findUnique({ where: { wbCode: order.wbCode }, select: { manualReleaseAt: true } }).catch(() => null),
+  ]);
+  /* Админ разморозил вручную — его решение покрывает всё, что было известно
+     в тот момент. Проблема держит выкуп, только если она из списка «деньги
+     ушли» и случилась ПОСЛЕ разморозки (`autoHoldAllowed`). */
+  const manualAt = hold?.manualReleaseAt ?? null;
+  const pick = (p: { kind: ProblemKind; detail?: string | null; at?: Date | null }) =>
+    autoHoldAllowed(manualAt, p.kind, p.at) ? p : null;
+  const found: Array<{ kind: ProblemKind; detail?: string | null; at?: Date | null }> = [];
+  if (code?.status === "REVOKED") found.push({ kind: "CODE_REVOKED" });
+  if (dbs?.cancelledAt) found.push({ kind: "WB_CANCELLED", at: dbs.cancelledAt });
+  // Открытая заявка WB с 11.11.2026 — пометка, а не блок (`order-flags.ts`).
+  const rows: Array<{ status: string; updatedAt?: Date | null }> = payments ?? [];
+  const statuses = rows.map((p) => String(p.status));
+  if (statuses.includes("REFUNDED") && !statuses.some((s) => LIVE_PAYMENT.has(s))) {
+    const at = rows.filter((p) => p.status === "REFUNDED")
+      .map((p) => p.updatedAt).filter(Boolean).sort().pop() ?? null;
+    found.push({ kind: "PAYMENT_REFUNDED", at });
+  }
+  for (const p of found) {
+    const hit = pick(p);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Единственный гард перед тратой робуксов (24.10.2026).
+ *
+ * Поверх `assertOrderNotHeld` проверяет то, о чём заморозка могла ещё не
+ * узнать: заявку на возврат, отмену на WB, аннулированный код, возврат
+ * платежа. Найдя такую проблему, сам ставит заморозку — дальше заказ виден в
+ * ленте как замороженный, а не «почему-то не выкупается».
+ *
+ * Тест `buyable-guard.test.ts` требует его в КАЖДОМ пути выкупа.
+ */
+export async function assertOrderBuyable(
+  db: any,
+  orderId: string,
+  opts: { allowRejected?: boolean } = {},
+): Promise<{ held: false } | { held: true; reason: string; message: string }> {
+  const held = await assertOrderNotHeld(db, orderId);
+  if (held.held) return held;
+
+  const order = await db.wbOrder.findUnique({
+    where: { id: orderId },
+    select: { id: true, wbCode: true, status: true },
+  });
+  if (!order) return { held: false };
+  // Привязка пасса законно поднимает отклонённый заказ (пасса не было —
+  // теперь есть). Отмену на WB это не обходит: её ловит заморозка и
+  // `findHardProblem` ниже.
+  if (NEVER_BUYABLE.has(order.status) && !opts.allowRejected) {
+    const reason = "заказ отклонён";
+    return { held: true, reason, message: `⛔ Заказ отклонён — выкуп невозможен.` };
+  }
+
+  const problem = await findHardProblem(db, order);
+  if (!problem) return { held: false };
+  const reason = problemHoldReason(problem.kind, problem.detail);
+  await holdByCode(db, {
+    wbCode: order.wbCode, reason, actor: PROBLEM_HOLD_ACTOR,
+    auto: { kind: problem.kind, eventAt: problem.at },
+  }).catch(() => { /* пометка — не повод пропустить блокировку */ });
+  return { held: true, reason, message: heldRefusal(reason) };
+}
+
+/* ── Признак «замороженный клиент» для алертов поддержки ─────────────────── */
+
+interface HeldCustomer {
+  /** Причина самой свежей заморозки — её и показываем в шапке алерта. */
+  reason: string;
+  /** Все коды этого клиента под заморозкой. */
+  codes: string[];
+}
+
+/**
+ * Замороженный ли это клиент.
+ *
+ * Ищем по ВСЕМ заказам пользователя, а не по одному: человек может написать
+ * про другой свой заказ, а помечать его надо всё равно. Никогда не бросает —
+ * алерт поддержки важнее, чем эта пометка в нём.
+ */
+export async function heldCustomerFor(
+  db: any,
+  where: { tgId?: string | null; vkId?: string | null },
+): Promise<HeldCustomer | null> {
+  try {
+    const tgId = where.tgId ? String(where.tgId) : null;
+    const vkId = where.vkId ? String(where.vkId) : null;
+    if (!tgId && !vkId) return null;
+
+    const user = await db.user.findFirst({
+      where:  tgId ? { tgId } : { vkId },
+      select: { id: true },
+    });
+    if (!user) return null;
+
+    const orders = await db.wbOrder.findMany({
+      where:   { userId: user.id, heldAt: { not: null } },
+      orderBy: { heldAt: "desc" },
+      select:  { wbCode: true, heldReason: true },
+      take:    10,
+    });
+    if (orders.length === 0) return null;
+
+    return {
+      reason: orders[0].heldReason ?? "причина не указана",
+      codes:  orders.map((o: { wbCode: string }) => o.wbCode),
+    };
+  } catch {
+    return null;
+  }
+}

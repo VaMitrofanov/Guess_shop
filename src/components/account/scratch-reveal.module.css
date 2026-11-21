@@ -1,0 +1,13 @@
+/* 🎨 З5 (18.11.2026): код как скретч-карта. */
+.wrap { position:relative; border-radius:14px; overflow:hidden; min-height:64px; }
+.under { padding:16px 12px; border:2px dashed #a68bff; border-radius:14px; text-align:center; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:clamp(19px,5.4vw,24px); font-weight:800; letter-spacing:.08em; min-height:64px; box-sizing:border-box; display:grid; place-items:center; }
+.canvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:grab; transition:opacity .45s ease; }
+.gone { opacity:0; pointer-events:none; }
+.hint { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; font-size:16px; font-weight:900; color:#3b2a8f; letter-spacing:.01em; transition:opacity .2s ease; }
+.hintHidden { opacity:0; }
+.skip { margin-top:8px; padding:6px 2px; border:0; background:none; color:#c8bfdf; font:inherit; font-size:14px; font-weight:700; text-decoration:underline; cursor:pointer; }
+.skip:focus-visible { outline:3px solid #45d6aa; outline-offset:2px; border-radius:6px; }
+.burst { position:absolute; inset:0; pointer-events:none; overflow:visible; }
+.burst i { position:absolute; top:50%; left:50%; width:9px; height:13px; border-radius:2px; opacity:0; animation:rbBurst .9s ease-out forwards; }
+@keyframes rbBurst { 0% { transform:translate(-50%,-50%) rotate(0); opacity:1 } 100% { transform:translate(calc(-50% + var(--x)), calc(-50% + var(--y))) rotate(var(--r)); opacity:0 } }
+@media (prefers-reduced-motion: reduce) { .burst { display:none; } .canvas { transition:none; } }

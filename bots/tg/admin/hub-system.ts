@@ -5,55 +5,15 @@
  * in-memory log ring buffer, and restart stubs.
  */
 
-import { Markup, type Context } from "telegraf";
-import { CB, ADMIN_IDS } from "../../shared/admin";
+import { ADMIN_IDS } from "../../shared/admin";
 import { db } from "../../shared/db";
 import { tgSend } from "../../shared/notify";
-import { sendOrEditWidget, editWidget } from "./widgets";
+import { adminTargets } from "../../shared/admin-route";
 
 // ── Service config from env ──────────────────────────────────────────────────
 
-interface ServiceConfig {
-  name: string;
-  url:  string; // health endpoint
-  icon: string;
-}
-
-function getServices(): ServiceConfig[] {
-  const containers = (process.env.DOCKER_CONTAINERS ?? "").split(",").map(s => s.trim()).filter(Boolean);
-
-  // Default services pointing to production URLs
-  const defaults: ServiceConfig[] = [
-    { name: "Main (Web)",  url: process.env.MAIN_HEALTH_URL  ?? "https://www.robloxbank.ru", icon: "🌐" },
-    { name: "Guide (Web)", url: process.env.GUIDE_HEALTH_URL ?? "https://www.robloxbank.ru/guide", icon: "🌐" },
-    { name: "VK Bot",      url: process.env.VK_BOT_HEALTH_URL ?? "http://5.223.95.11:3000", icon: "🤖" },
-  ];
-
-  if (containers.length > 0) {
-    return containers.map(name => ({
-      name,
-      url: process.env[`${name.toUpperCase().replace(/-/g, "_")}_HEALTH_URL`] ?? "",
-      icon: name.includes("bot") ? "🤖" : "🌐",
-    }));
-  }
-
-  return defaults;
-}
 
 // ── Health check ─────────────────────────────────────────────────────────────
-
-async function checkHealth(url: string): Promise<{ ok: boolean; ms: number }> {
-  if (!url) return { ok: false, ms: 0 };
-  const start = Date.now();
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    // The VK bridge server returns 404 for the root URL, so we accept it as "online"
-    const isOk = res.ok || (res.status === 404 && url.includes(":3000"));
-    return { ok: isOk, ms: Date.now() - start };
-  } catch {
-    return { ok: false, ms: Date.now() - start };
-  }
-}
 
 // ── Ring buffer for logs (max 50 lines) ──────────────────────────────────────
 
@@ -80,125 +40,9 @@ export function initLogCapture(): void {
 
 // ── Main widget ──────────────────────────────────────────────────────────────
 
-export async function showSystemHub(ctx: Context): Promise<void> {
-  const text = await buildSystemText();
-  const services = getServices();
-
-  const logButtons = services
-    .filter(s => s.url)
-    .map(s => Markup.button.callback(`📋 ${s.name}`, CB.sysLogs(s.name)));
-
-  const restartButtons = services
-    .filter(s => s.url)
-    .map(s => Markup.button.callback(`🔄 ${s.name}`, CB.sysRestart(s.name)));
-
-  const keyboard = [
-    logButtons.length > 0 ? logButtons : [],
-    restartButtons.length > 0 ? restartButtons : [],
-    [Markup.button.callback("🔄 Обновить", CB.sysRefresh)],
-  ].filter(row => row.length > 0);
-
-  await sendOrEditWidget(ctx, text, Markup.inlineKeyboard(keyboard));
-}
-
-async function buildSystemText(): Promise<string> {
-  const services = getServices();
-
-  // Parallel: health checks + servers + Neon
-  const [checks, serversSection, neonSection] = await Promise.all([
-    Promise.all(services.map(async (s) => ({ ...s, ...await checkHealth(s.url) }))),
-    buildServersSection(),
-    buildNeonSection(),
-  ]);
-
-  // DB check
-  let dbOk = false;
-  try {
-    await (db as any).$queryRaw`SELECT 1`;
-    dbOk = true;
-  } catch { /* */ }
-
-  // Process info
-  const mem = process.memoryUsage();
-  const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
-  const rssMB = Math.round(mem.rss / 1024 / 1024);
-  const uptimeH = Math.floor(process.uptime() / 3600);
-  const uptimeM = Math.floor((process.uptime() % 3600) / 60);
-
-  // Last order time
-  const lastOrder = await (db as any).wbOrder.findFirst({
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  const lastOrderAgo = lastOrder
-    ? `${Math.floor((Date.now() - new Date(lastOrder.createdAt).getTime()) / 60_000)} мин назад`
-    : "нет заказов";
-
-  let serviceLines = "";
-  for (const c of checks) {
-    if (!c.url) {
-      serviceLines += `${c.icon} ${c.name}: ⚪ <i>не настроен</i>\n`;
-    } else {
-      const status = c.ok ? `🟢 Online (${c.ms}ms)` : `🔴 Offline`;
-      serviceLines += `${c.icon} ${c.name}: ${status}\n`;
-    }
-  }
-
-  return (
-    `🛠 <b>СОСТОЯНИЕ СИСТЕМЫ</b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    serviceLines +
-    `🤖 TG Bot: 🟢 Online (${uptimeH}ч ${uptimeM}м)\n\n` +
-    `📊 База данных: ${dbOk ? "🟢 Connected" : "🔴 Disconnected"}\n` +
-    `⏰ Последний заказ: <b>${lastOrderAgo}</b>\n` +
-    `💾 Память: <b>${heapMB} MB</b> heap / <b>${rssMB} MB</b> RSS` +
-    serversSection +
-    neonSection
-  );
-}
-
 // ── Logs view ────────────────────────────────────────────────────────────────
 
-export async function showLogs(ctx: Context, serviceName: string): Promise<void> {
-  const last10 = logBuffer.slice(-10);
-
-  const logsText = last10.length > 0
-    ? last10.map(l => l.substring(0, 120)).join("\n")
-    : "Логов пока нет.";
-
-  await editWidget(
-    ctx,
-    `📋 <b>ЛОГИ: ${serviceName}</b>\n━━━━━━━━━━━━━━━━\n\n<code>${logsText}</code>`,
-    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Назад", CB.hubSystem)]])
-  );
-  await ctx.answerCbQuery();
-}
-
 // ── Restart stub ─────────────────────────────────────────────────────────────
-
-export async function showRestartConfirm(ctx: Context, serviceName: string): Promise<void> {
-  await editWidget(
-    ctx,
-    `⚠️ Перезагрузить <b>${serviceName}</b>?\n\n<i>Эта функция будет доступна после подключения Docker API.</i>`,
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback("✅ Подтвердить", CB.sysConfirmRestart(serviceName)),
-        Markup.button.callback("❌ Отмена", CB.hubSystem),
-      ],
-    ])
-  );
-  await ctx.answerCbQuery();
-}
-
-export async function handleRestartConfirm(ctx: Context, serviceName: string): Promise<void> {
-  // Stub — Docker API integration will be added later
-  await editWidget(
-    ctx,
-    `⚠️ Перезагрузка <b>${serviceName}</b> пока недоступна.\n\n<i>Подключи Docker API или Coolify webhook для управления контейнерами.</i>`,
-    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Назад", CB.hubSystem)]])
-  );
-  await ctx.answerCbQuery("Функция в разработке");
-}
 
 // ── Hetzner Cloud API ─────────────────────────────────────────────────────────
 
@@ -350,7 +194,7 @@ interface NeonDbStats {
 
 async function fetchNeonDbStats(): Promise<NeonDbStats | null> {
   try {
-    const result = await (db as any).$queryRaw`
+    const result = await db.$queryRaw`
       SELECT
         pg_database_size(current_database())                                    AS size_bytes,
         (SELECT count(*) FROM "WbOrder")                                        AS order_count,
@@ -369,89 +213,7 @@ async function fetchNeonDbStats(): Promise<NeonDbStats | null> {
   }
 }
 
-async function buildNeonSection(): Promise<string> {
-  const stats = await fetchNeonDbStats();
-  if (!stats) return `\n🐘 <b>Neon DB</b>: <i>ошибка запроса</i>\n`;
-
-  const sizeMB = Number(stats.sizeBytes) / (1024 ** 2);
-  const sizeStr = sizeMB >= 100
-    ? `${(sizeMB / 1024).toFixed(2)} GB`
-    : `${sizeMB.toFixed(0)} MB`;
-
-  // Billing countdown from NEON_BILLING_DAY (default: 1st of month)
-  const billingDay = parseInt(process.env.NEON_BILLING_DAY ?? "1");
-  const now = new Date();
-  let nextBillDate = new Date(now.getFullYear(), now.getMonth(), billingDay);
-  if (nextBillDate.getTime() <= now.getTime()) {
-    nextBillDate = new Date(now.getFullYear(), now.getMonth() + 1, billingDay);
-  }
-  const daysLeft   = Math.ceil((nextBillDate.getTime() - now.getTime()) / 86_400_000);
-  const billWarn   = daysLeft <= 5 ? " ⚠️" : "";
-  const nextBillStr = nextBillDate.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-
-  return (
-    `\n🐘 <b>Neon DB</b>\n` +
-    `💾 ${sizeStr} · 📦 ${stats.orderCount} заказов · 🎫 ${stats.unusedCodes} кодов\n` +
-    `📅 оплата ${nextBillStr} (через ${daysLeft}д${billWarn})\n`
-  );
-}
-
 // ── Combined servers section ──────────────────────────────────────────────────
-
-async function buildServersSection(): Promise<string> {
-  const hasHetzner = !!process.env.HETZNER_API_TOKEN;
-  const hasVdsina  = !!(process.env.VDSINA_EMAIL && process.env.VDSINA_PASSWORD);
-  if (!hasHetzner && !hasVdsina) return "";
-
-  let out = `\n🖥 <b>СЕРВЕРЫ</b>\n`;
-
-  // Hetzner: bills on the 1st of every month (postpay)
-  if (hasHetzner) {
-    const servers = await fetchHetznerServers();
-    if (servers.length === 0) {
-      out += `🇩🇪 Hetzner: <i>нет серверов / ошибка API</i>\n`;
-    } else {
-      let totalEur = 0;
-      for (const srv of servers) {
-        const emoji  = hetznerStatusEmoji(srv.status);
-        const city   = srv.datacenter?.location?.city ?? srv.datacenter?.name ?? "?";
-        const dcLoc  = srv.datacenter?.location?.name;
-        const price  = srv.server_type?.prices?.find(p => p.location === dcLoc) ?? srv.server_type?.prices?.[0];
-        const eur    = price ? parseFloat(price.price_monthly.gross) : 0;
-        const spec   = srv.server_type ? ` ${srv.server_type.cores}vCPU ${srv.server_type.memory}GB` : "";
-        totalEur += eur;
-        out += `🇩🇪 <b>${srv.name}</b> [${city}]: ${emoji} ${srv.status}${spec}\n`;
-      }
-      // Days until Hetzner billing (1st of next month)
-      const now  = new Date();
-      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const days = Math.ceil((next.getTime() - now.getTime()) / 86_400_000);
-      const daysStr = days <= 5 ? ` ⚠️ через <b>${days}д</b>` : ` через ${days}д`;
-      out += `   💶 Оплата: ~€${totalEur.toFixed(2)}/мес · 1-е числа${daysStr}\n`;
-    }
-  }
-
-  if (hasVdsina) {
-    const result = await fetchVdsinaBalance();
-    if (!result) {
-      out += `🇷🇺 VDSina: <i>ошибка API</i>\n`;
-    } else {
-      const low    = parseFloat(process.env.VDSINA_LOW_BALANCE ?? "500");
-      // Estimate days left: daily burn ≈ monthly cost / 30
-      // VDSINA_MONTHLY_COST env var lets user set the monthly cost for ETA
-      const monthly = parseFloat(process.env.VDSINA_MONTHLY_COST ?? "0");
-      const dailyBurn = monthly > 0 ? monthly / 30 : 0;
-      const daysLeft  = dailyBurn > 0 ? Math.floor(result.balance / dailyBurn) : null;
-      const etaStr    = daysLeft !== null
-        ? (daysLeft <= 7 ? ` ⚠️ <b>~${daysLeft}д осталось!</b>` : ` · ~${daysLeft}д`)
-        : "";
-      const warn = result.balance < low && etaStr === "" ? ` ⚠️ <b>ПОПОЛНИТЕ!</b>` : "";
-      out += `🇷🇺 VDSina: 💰 <b>${result.balance.toFixed(2)} ₽</b>${etaStr}${warn}\n`;
-    }
-  }
-
-  return out;
-}
 
 // ── Background server monitor ─────────────────────────────────────────────────
 
@@ -498,7 +260,8 @@ async function runServerCheck(): Promise<void> {
 
   if (alerts.length > 0) {
     const text = `🚨 <b>СЕРВЕРНЫЙ АЛЕРТ</b>\n━━━━━━━━━━━━━━━━\n` + alerts.join("\n");
-    await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
+    const targets = await adminTargets("system", { loud: true });
+    await Promise.allSettled(targets.map((t) => tgSend(t.chatId, text, t.extra)));
   }
 }
 

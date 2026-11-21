@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RobloxBank — Rework Concept 01</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@600;700&display=swap');
+    :root {
+      --ink:#11130f; --paper:#f5f5ec; --lime:#c9ff56; --violet:#7a5cff;
+      --mint:#a8f0d2; --muted:#6d7168; --line:rgba(17,19,15,.13); --white:#fff;
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;background:#d9dbd1;color:var(--ink);font-family:Manrope,system-ui,sans-serif}
+    button,input{font:inherit} button{color:inherit}
+    .concept-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 20px;background:rgba(17,19,15,.94);color:#fff;backdrop-filter:blur(18px)}
+    .concept-meta{display:flex;align-items:center;gap:11px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.concept-dot{width:9px;height:9px;background:var(--lime);border-radius:50%;box-shadow:0 0 18px var(--lime)}
+    .switcher{display:flex;gap:4px;background:#282b25;padding:4px;border-radius:999px}.switcher button{border:0;background:transparent;color:#9da197;padding:8px 14px;border-radius:999px;font-size:12px;font-weight:800;cursor:pointer}.switcher button.active{background:var(--lime);color:var(--ink)}
+    .view{display:none}.view.active{display:block}
+
+    /* MAIN */
+    .site{min-height:100vh;background:var(--paper);overflow:hidden}
+    .nav{height:78px;display:flex;align-items:center;justify-content:space-between;max-width:1240px;margin:auto;padding:0 28px;border-bottom:1px solid var(--line)}
+    .logo{display:flex;align-items:center;gap:12px;font-weight:900;letter-spacing:-.04em;font-size:21px}.logo-mark{display:grid;place-items:center;width:36px;height:36px;border:2px solid var(--ink);border-radius:10px;transform:rotate(-7deg);background:var(--lime);font-family:Unbounded,sans-serif;font-size:13px;box-shadow:3px 3px 0 var(--ink)}
+    .nav-links{display:flex;gap:28px;color:#54584f;font-size:13px;font-weight:700}.nav-actions{display:flex;align-items:center;gap:8px}.btn{border:1.5px solid var(--ink);border-radius:13px;padding:12px 17px;background:transparent;font-weight:800;font-size:13px;cursor:pointer}.btn.dark{background:var(--ink);color:#fff;box-shadow:3px 3px 0 var(--lime)}
+    .hero{position:relative;max-width:1240px;margin:auto;padding:72px 28px 38px;display:grid;grid-template-columns:1.08fr .92fr;gap:70px;align-items:center}.hero:before{content:"";position:absolute;width:520px;height:520px;right:-290px;top:-210px;border:1px solid var(--line);border-radius:50%;box-shadow:0 0 0 70px rgba(122,92,255,.04),0 0 0 140px rgba(122,92,255,.025)}
+    .eyebrow{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.65);font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.pulse{width:7px;height:7px;background:#49bd70;border-radius:50%;box-shadow:0 0 0 5px rgba(73,189,112,.13)}
+    h1{margin:25px 0 22px;font-family:Unbounded,sans-serif;font-size:clamp(54px,6.6vw,90px);line-height:.98;letter-spacing:-.075em;max-width:780px}.accent-word{position:relative;display:inline-block;z-index:1}.accent-word:after{content:"";position:absolute;height:.33em;left:-.04em;right:-.08em;bottom:.04em;background:var(--lime);z-index:-1;transform:rotate(-1.5deg);border-radius:3px}
+    .hero-copy{max-width:560px;color:#555a50;font-size:18px;line-height:1.65}.trustline{display:flex;align-items:center;gap:18px;margin-top:30px}.avatars{display:flex}.avatar{width:34px;height:34px;margin-left:-7px;border:3px solid var(--paper);border-radius:50%;display:grid;place-items:center;background:#1c201b;color:white;font-size:12px;font-weight:900}.avatar:first-child{margin-left:0}.avatar:nth-child(2){background:var(--violet)}.avatar:nth-child(3){background:#ec7a55}.trust-copy{font-size:12px;color:var(--muted);line-height:1.4}.trust-copy b{display:block;color:var(--ink);font-size:13px}
+    .buy-card{position:relative;background:#fff;border:1.5px solid var(--ink);border-radius:28px;padding:28px;box-shadow:11px 11px 0 var(--ink);transform:rotate(1.2deg)}.buy-card:before{content:"КАЛЬКУЛЯТОР";position:absolute;top:-13px;right:26px;padding:7px 11px;background:var(--violet);color:white;border:1.5px solid var(--ink);border-radius:999px;font-size:9px;font-weight:900;letter-spacing:.12em}.card-head{display:flex;justify-content:space-between;align-items:start;margin-bottom:26px}.card-head strong{font-size:22px;letter-spacing:-.04em}.rate{font-size:11px;color:var(--muted);text-align:right}.rate b{display:block;color:#31854d;font-size:12px}.field-label{display:flex;justify-content:space-between;font-size:12px;font-weight:800;margin:16px 0 9px}.amount-field{display:flex;align-items:center;justify-content:space-between;border:1.5px solid var(--ink);border-radius:16px;padding:16px 17px;background:#f7f7f1}.amount-field span{font-family:Unbounded;font-size:28px}.amount-field i{font-style:normal;background:var(--lime);border:1px solid var(--ink);border-radius:9px;padding:7px 9px;font-weight:900}.chips{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:9px}.chip{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 4px;font-size:11px;font-weight:800;cursor:pointer}.chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}.summary{margin:22px 0 14px;padding:17px;background:#f0f1e9;border-radius:16px}.sum-row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:7px 0}.sum-row.total{padding-top:11px;border-top:1px solid var(--line);color:var(--ink);font-size:15px;font-weight:900}.buy-now{width:100%;border:1.5px solid var(--ink);border-radius:14px;background:var(--lime);padding:16px;font-weight:900;cursor:pointer;box-shadow:4px 4px 0 var(--ink)}.safe-note{text-align:center;font-size:10px;color:var(--muted);margin-top:13px}
+    .ticker{border-block:1px solid var(--line);background:#fff;overflow:hidden}.ticker-inner{display:flex;justify-content:center;gap:52px;padding:15px;font-size:11px;font-weight:900;letter-spacing:.06em;white-space:nowrap}.ticker-item:before{content:"✦";color:var(--violet);margin-right:14px}
+    .section{max-width:1240px;margin:auto;padding:92px 28px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:30px;margin-bottom:38px}.section h2{font-family:Unbounded;margin:0;font-size:43px;letter-spacing:-.055em;line-height:1.05}.section-head p{max-width:390px;margin:0;color:var(--muted);line-height:1.6;font-size:14px}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.step-card{min-height:278px;border:1px solid var(--line);border-radius:22px;padding:24px;background:#eeefe7;display:flex;flex-direction:column;justify-content:space-between;transition:.2s}.step-card:hover{transform:translateY(-4px);border-color:var(--ink)}.step-card:nth-child(2){background:var(--violet);color:white}.step-card:nth-child(3){background:var(--ink);color:white}.step-top{display:flex;justify-content:space-between;align-items:start}.step-num{font-family:Unbounded;font-size:12px}.step-icon{font-size:27px}.step-card h3{font-size:25px;line-height:1.08;letter-spacing:-.045em;margin:0 0 12px}.step-card p{font-size:13px;line-height:1.55;opacity:.7;margin:0}.inline-link{display:inline-flex;align-items:center;gap:7px;margin-top:18px;font-size:12px;font-weight:900;color:inherit}.progress-line{height:3px;background:rgba(128,128,128,.25);margin:22px 0}.progress-line i{display:block;height:100%;background:var(--lime)}
+    .confidence{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.big-panel,.side-panel{border-radius:26px;padding:34px;background:#fff;border:1px solid var(--line)}.big-panel{background:var(--mint);position:relative;overflow:hidden}.big-panel h3{font-family:Unbounded;font-size:36px;letter-spacing:-.06em;margin:0 0 80px;max-width:600px}.order-pill{display:inline-flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--ink);border-radius:999px;padding:10px 13px;font-size:11px;font-weight:900}.order-visual{display:flex;gap:4px;margin-top:18px}.order-visual span{height:7px;flex:1;background:rgba(17,19,15,.16);border-radius:99px}.order-visual span.done{background:var(--ink)}.big-r{position:absolute;right:-18px;bottom:-70px;font-family:Unbounded;font-size:230px;line-height:1;color:rgba(17,19,15,.08);transform:rotate(-8deg)}.side-panel{display:flex;flex-direction:column;justify-content:space-between;background:#fff}.side-panel blockquote{font-size:20px;line-height:1.45;letter-spacing:-.03em;margin:0}.quote-user{display:flex;align-items:center;gap:12px;font-size:12px}.quote-user .avatar{margin:0;border:0;background:#ec7a55}.stars{color:#eea900;letter-spacing:2px}
+    .footer-strip{max-width:1184px;margin:0 auto 40px;background:var(--ink);color:#fff;border-radius:26px;padding:42px;display:flex;align-items:center;justify-content:space-between}.footer-strip h3{font-family:Unbounded;font-size:32px;letter-spacing:-.05em;margin:0}.footer-strip .btn{border-color:var(--lime);background:var(--lime);color:var(--ink);padding:15px 21px}
+
+    /* GUIDE */
+    .guide-stage{min-height:100vh;background:#171816;padding:36px 20px 70px;justify-content:center;align-items:flex-start}.view.guide-stage.active{display:flex}.phone{width:min(100%,430px);background:var(--paper);border:1px solid #4b4f48;border-radius:34px;overflow:hidden;box-shadow:0 36px 90px rgba(0,0,0,.45)}
+    .phone-top{background:var(--ink);color:#fff;padding:17px 18px 14px}.phone-brand{display:flex;align-items:center;justify-content:space-between}.phone-logo{display:flex;align-items:center;gap:9px;font-weight:900;font-size:13px}.phone-logo .logo-mark{width:27px;height:27px;font-size:9px;border-color:#fff;box-shadow:2px 2px 0 var(--lime);color:var(--ink)}.wb-pill{background:linear-gradient(90deg,#a63ae8,#f40087);font-size:9px;letter-spacing:.08em;font-weight:900;padding:7px 9px;border-radius:999px}.guide-progress{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:15px}.guide-progress span{height:3px;background:#41433d;border-radius:99px}.guide-progress span.on{background:var(--lime)}.progress-copy{display:flex;justify-content:space-between;margin-top:7px;font-size:9px;color:#9da197;font-weight:800}.phone-main{padding:25px 18px 18px}.guide-kicker{font-size:10px;font-weight:900;color:var(--violet);letter-spacing:.11em;text-transform:uppercase}.phone h2{font-family:Unbounded;font-size:31px;line-height:1.05;letter-spacing:-.06em;margin:10px 0 12px}.phone-lead{font-size:13px;line-height:1.55;color:var(--muted);margin:0 0 18px}.mission-card{background:var(--lime);border:1.5px solid var(--ink);border-radius:19px;padding:17px;box-shadow:4px 4px 0 var(--ink)}.mission-head{display:flex;align-items:center;gap:11px;font-weight:900;font-size:14px}.mission-num{width:30px;height:30px;background:var(--ink);color:white;border-radius:10px;display:grid;place-items:center;font-family:Unbounded;font-size:11px}.mission-card p{font-size:12px;line-height:1.5;margin:10px 0 0}.quickfacts{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:16px 0}.fact{border:1px solid var(--line);background:#fff;border-radius:13px;padding:11px 7px;text-align:center}.fact strong{display:block;font-size:13px}.fact span{font-size:8px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.07em}.start-btn{width:100%;border:1.5px solid var(--ink);background:var(--ink);color:#fff;border-radius:15px;padding:15px;font-weight:900;box-shadow:4px 4px 0 var(--violet);cursor:pointer}.micro{text-align:center;font-size:9px;color:var(--muted);margin:11px 0 2px}.continue{border-top:1px solid var(--line);padding:21px 18px 28px}.step-label{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:900;color:var(--violet);letter-spacing:.08em;text-transform:uppercase}.step-label i{width:22px;height:22px;background:var(--violet);color:#fff;display:grid;place-items:center;border-radius:7px;font-style:normal}.continue h3{font-size:21px;letter-spacing:-.04em;margin:11px 0 8px}.continue p{font-size:12px;line-height:1.55;color:var(--muted)}.action-link{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);background:#fff;border-radius:14px;padding:12px 13px;font-size:11px;font-weight:900}.action-link b{display:grid;place-items:center;width:28px;height:28px;background:var(--lime);border:1px solid var(--ink);border-radius:9px}.guide-image{margin-top:12px;height:155px;border-radius:16px;overflow:hidden;border:1px solid var(--line);position:relative;background:#ddd}.guide-image img{width:100%;height:100%;object-fit:cover;object-position:50% 20%}.tap{position:absolute;right:14px;bottom:13px;background:var(--lime);border:1px solid var(--ink);border-radius:999px;padding:7px 10px;font-size:9px;font-weight:900;box-shadow:2px 2px 0 var(--ink)}.warning{margin-top:12px;border:1px solid #f2b649;background:#fff7df;border-radius:14px;padding:12px;display:flex;gap:10px}.warning i{font-style:normal}.warning strong{display:block;font-size:11px}.warning span{display:block;font-size:9px;line-height:1.45;color:#766237;margin-top:3px}
+    .guide-note{max-width:420px;margin:20px auto 0;color:#aeb1a9;font-size:11px;line-height:1.6;text-align:center}.guide-note b{color:var(--lime)}
+
+    @media(max-width:900px){.nav-links{display:none}.hero{grid-template-columns:1fr;padding-top:50px}.buy-card{max-width:520px;transform:none}.steps,.confidence{grid-template-columns:1fr}.section-head{align-items:start;flex-direction:column}.ticker-inner{justify-content:flex-start}.footer-strip{margin-inline:18px}.footer-strip{align-items:flex-start;flex-direction:column;gap:22px}.nav-actions .btn:first-child{display:none}}
+    @media(max-width:560px){.concept-bar{align-items:flex-start;flex-direction:column;gap:9px}.nav{height:66px;padding:0 18px}.hero{padding:42px 18px 28px}.hero h1{font-size:48px}.hero-copy{font-size:15px}.buy-card{padding:22px;box-shadow:7px 7px 0 var(--ink)}.section{padding:66px 18px}.section h2{font-size:33px}.trustline{align-items:flex-start}.nav-actions .btn{padding:10px 12px}.guide-stage{padding:18px 8px 50px}.phone{border-radius:27px}}
+  </style>
+</head>
+<body>
+  <div class="concept-bar">
+    <div class="concept-meta"><span class="concept-dot"></span> RobloxBank · Rework concept 01</div>
+    <div class="switcher" role="tablist">
+      <button class="active" data-view="main">Главная</button>
+      <button data-view="guide">WB guide</button>
+    </div>
+  </div>
+
+  <main id="main" class="view active site">
+    <nav class="nav">
+      <div class="logo"><span class="logo-mark">R$</span> ROBLOXBANK</div>
+      <div class="nav-links"><span>Как это работает</span><span>Гарантии</span><span>Отзывы</span><span>Помощь</span></div>
+      <div class="nav-actions"><button class="btn">Войти</button><button class="btn dark">Купить Robux</button></div>
+    </nav>
+    <section class="hero">
+      <div>
+        <div class="eyebrow"><span class="pulse"></span> Выдача работает · 24/7</div>
+        <h1>Robux. Быстро. <span class="accent-word">По-честному.</span></h1>
+        <p class="hero-copy">Покупай Robux без передачи пароля. Показываем финальную цену сразу и держим тебя в курсе на каждом этапе.</p>
+        <div class="trustline">
+          <div class="avatars"><span class="avatar">AK</span><span class="avatar">MI</span><span class="avatar">+9k</span></div>
+          <div class="trust-copy"><b>4.9 из 5 — средняя оценка</b>Проверенные заказы и живая поддержка</div>
+        </div>
+      </div>
+      <div class="buy-card">
+        <div class="card-head"><strong>Сколько Robux нужно?</strong><span class="rate"><b>● Курс обновлён</b>сегодня, 12:40</span></div>
+        <div class="field-label"><span>Получишь на аккаунт</span><span>R$</span></div>
+        <div class="amount-field"><span id="robuxValue">1 000</span><i>R$</i></div>
+        <div class="chips"><button class="chip">500</button><button class="chip active">1 000</button><button class="chip">2 000</button><button class="chip">5 000</button></div>
+        <div class="summary"><div class="sum-row"><span>Robux</span><span id="summaryRobux">1 000 R$</span></div><div class="sum-row"><span>Комиссии</span><span>Уже учтены</span></div><div class="sum-row total"><span>К оплате</span><span id="rubValue">899 ₽</span></div></div>
+        <button class="buy-now">Продолжить покупку →</button>
+        <div class="safe-note">🔒 Пароль Roblox не нужен · Оплата защищена</div>
+      </div>
+    </section>
+    <div class="ticker"><div class="ticker-inner"><span class="ticker-item">БЕЗ ПАРОЛЯ</span><span class="ticker-item">ФИНАЛЬНАЯ ЦЕНА СРАЗУ</span><span class="ticker-item">СТАТУС ЗАКАЗА В РЕАЛЬНОМ ВРЕМЕНИ</span><span class="ticker-item">ПОДДЕРЖКА ЧЕЛОВЕКОМ</span></div></div>
+    <section class="section">
+      <div class="section-head"><h2>Три шага —<br>и всё готово</h2><p>Мы убрали технический жаргон и оставили только то, что нужно для результата.</p></div>
+      <div class="steps">
+        <article class="step-card"><div><div class="step-top"><span class="step-num">01 / 03</span><span class="step-icon">🎯</span></div><div class="progress-line"><i style="width:33%"></i></div></div><div><h3>Выбери количество</h3><p>Сразу увидишь, сколько получишь и сколько заплатишь — без сюрпризов.</p></div></article>
+        <article class="step-card"><div><div class="step-top"><span class="step-num">02 / 03</span><span class="step-icon">🎮</span></div><div class="progress-line"><i style="width:66%"></i></div></div><div><h3>Создай геймпасс</h3><p>Пошаговая инструкция проведёт по Roblox Creator Hub за 5–7 минут.</p><span class="inline-link">Открыть инструкцию ↗</span></div></article>
+        <article class="step-card"><div><div class="step-top"><span class="step-num">03 / 03</span><span class="step-icon">⚡</span></div><div class="progress-line"><i style="width:100%"></i></div></div><div><h3>Следи за статусом</h3><p>Мы выкупим геймпасс и сообщим о каждом изменении заказа.</p></div></article>
+      </div>
+    </section>
+    <section class="section" style="padding-top:0">
+      <div class="confidence">
+        <div class="big-panel"><h3>Всегда понятно,<br>что с заказом</h3><span class="order-pill">● Заказ #RB-2048 · Выкупаем</span><div class="order-visual"><span class="done"></span><span class="done"></span><span></span><span></span></div><div class="big-r">R$</div></div>
+        <aside class="side-panel"><div><div class="stars">★★★★★</div><blockquote>«Инструкция реально понятная. Создал пасс с телефона, а дальше всё сделали сами»</blockquote></div><div class="quote-user"><span class="avatar">К</span><span><b>Кирилл, Москва</b><br>Покупка подтверждена</span></div></aside>
+      </div>
+    </section>
+    <div class="footer-strip"><h3>Готов пополнить баланс?</h3><button class="btn">Рассчитать стоимость →</button></div>
+  </main>
+
+  <main id="guide" class="view guide-stage">
+    <div>
+      <article class="phone">
+        <header class="phone-top">
+          <div class="phone-brand"><div class="phone-logo"><span class="logo-mark">R$</span> ROBLOXBANK</div><span class="wb-pill">WILDBERRIES</span></div>
+          <div class="guide-progress"><span class="on"></span><span></span><span></span><span></span></div>
+          <div class="progress-copy"><span>Подготовка</span><span>Шаг 1 из 9</span></div>
+        </header>
+        <div class="phone-main">
+          <div class="guide-kicker">Твоя карта активирована · 500 R$</div>
+          <h2>Получить Robux — легко</h2>
+          <p class="phone-lead">Сейчас создадим один геймпасс. Ничего скачивать и никому передавать пароль не нужно.</p>
+          <div class="mission-card"><div class="mission-head"><span class="mission-num">!</span>Главное правило</div><p>Поставь цену <b>715 R$</b> и оставь <b>Managed pricing выключенным</b>. Мы напомним об этом на нужном шаге.</p></div>
+          <div class="quickfacts"><div class="fact"><strong>5–7 мин</strong><span>весь процесс</span></div><div class="fact"><strong>9 шагов</strong><span>по картинкам</span></div><div class="fact"><strong>0 ₽</strong><span>доплат</span></div></div>
+          <button class="start-btn" id="startGuide">Начать инструкцию →</button>
+          <div class="micro">Можно проходить прямо с телефона</div>
+        </div>
+        <section class="continue" id="guideStep">
+          <div class="step-label"><i>1</i> Первый шаг</div>
+          <h3>Открой Creator Hub</h3>
+          <p>Это официальный сайт Roblox. Кнопка сразу откроет раздел с твоими играми.</p>
+          <div class="action-link"><span>Открыть create.roblox.com</span><b>↗</b></div>
+          <div class="guide-image"><img src="../public/guide/wb-step2-place.png" alt="Карточка игры в Roblox Creator Hub"><span class="tap">Нажми на свою игру ↑</span></div>
+          <div class="warning"><i>💡</i><div><strong>Открылось внутри Telegram или VK?</strong><span>Нажми «⋯» вверху и выбери «Открыть в браузере».</span></div></div>
+        </section>
+      </article>
+      <p class="guide-note"><b>Идея:</b> пользователь всегда видит прогресс, одно главное действие и только одно предупреждение в тот момент, когда оно нужно.</p>
+    </div>
+  </main>
+
+  <script>
+    const views = document.querySelectorAll('.view');
+    document.querySelectorAll('.switcher button').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.switcher button').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      views.forEach(view => view.classList.toggle('active', view.id === button.dataset.view));
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }));
+    const prices = {500:499,1000:899,2000:1699,5000:3999};
+    document.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip').forEach(item => item.classList.remove('active'));
+      chip.classList.add('active');
+      const value = Number(chip.textContent.replace(/\s/g,''));
+      document.querySelector('#robuxValue').textContent = value.toLocaleString('ru-RU');
+      document.querySelector('#summaryRobux').textContent = value.toLocaleString('ru-RU') + ' R$';
+      document.querySelector('#rubValue').textContent = prices[value].toLocaleString('ru-RU') + ' ₽';
+    }));
+    document.querySelector('#startGuide').addEventListener('click', () => document.querySelector('#guideStep').scrollIntoView({behavior:'smooth'}));
+  </script>
+</body>
+</html>

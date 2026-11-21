@@ -30,6 +30,17 @@ ARG NODE_VERSION=22-bookworm-slim
 # either changes.
 # ────────────────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS deps
+
+# Prisma без сети (02.11.2026). `prisma generate` и postinstall `@prisma/engines`
+# качают schema-engine с binaries.prisma.sh, хотя для генерации клиента он не
+# нужен (Prisma 7 — wasm-компилятор запросов внутри пакета). С RF-хоста эта
+# загрузка то проходит, то ВИСИТ без тайм-аута: 01.11 так встали сборки Guide
+# (npm ci) и VK-бота (prisma generate) — отсюда вечное «Guide отстал».
+# Путь к «движку» задан — значит, качать нечего. Только на этапах СБОРКИ:
+# в рабочем контейнере миграции не запускаются (их гоняют с ноутбука), а
+# фальшивый движок там превратил бы `prisma migrate` в тихий «успех».
+ENV PRISMA_SCHEMA_ENGINE_BINARY=/bin/true \
+    PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 WORKDIR /app
 
 # OpenSSL is a runtime dep of the Prisma library engine on Debian.
@@ -40,18 +51,16 @@ RUN apt-get update -y \
 # Cap install-time memory — `prisma generate` spawns its own node process.
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-# Copy bot manifest first for max layer-cache reuse.
-COPY bots/vk/package.json ./package.json
+# Copy bot manifests first for max layer-cache reuse and reproducible installs.
+COPY bots/vk/package.json bots/vk/package-lock.json ./
 
 # Copy the shared Prisma schema *before* install so we can run `prisma
 # generate` deterministically inside the image (matches the schema we just
 # committed, not whatever was on the dev machine).
 COPY prisma ./prisma
 
-# `npm install` (not `ci`) — the per-bot lockfile may not yet be committed
-# on first deploy. Switch to `npm ci` once bots/vk/package-lock.json lands.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm ci --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 # Generate the Prisma client against the *image's* schema path. The
 # bot script's relative path (../../prisma) is meant for local dev; here
@@ -67,8 +76,17 @@ RUN npx prisma generate --schema ./prisma/schema.prisma
 FROM node:${NODE_VERSION} AS runner
 WORKDIR /app
 
+# curl — не для кода, а для пробы живости. Coolify собирает healthcheck сам и
+# зовёт `curl … || wget … || exit 1`; в `bookworm-slim` нет ни того, ни другого,
+# поэтому включённая проба падала бы всегда и держала контейнер «нездоровым»
+# честнее, чем он есть. ~1 МБ на образ (07.09.2026).
+# tesseract-ocr — автопроверка скриншота Transactions после «в Pending меньше
+# суммы» (bots/shared/pending-ocr.ts, 27.10.2026): число в строке Pending Robux
+# читаем локально, без внешних сервисов. eng + rus — Roblox бывает в обеих
+# локализациях. ~25 МБ на образ.
 RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates curl \
+       tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/*
 
 # Build-time defaults only.
@@ -105,9 +123,16 @@ COPY --from=deps /app/package.json ./package.json
 # Bot source, preserving the on-disk repo layout. Order: shared first
 # (most stable), bot-specific last (changes most often).
 COPY bots/shared            ./bots/shared
-COPY bots/vk/bot.ts         ./bots/vk/bot.ts
-COPY bots/vk/handlers.ts    ./bots/vk/handlers.ts
-COPY bots/vk/session.ts     ./bots/vk/session.ts
+# Весь верхний уровень `bots/vk`, а не три файла поимённо.
+#
+# 15.09.2026: `support-pause.ts` появился 13.09 и в образ не попал — контейнер
+# падал на старте `Cannot find module './support-pause'`, Coolify откатывался на
+# прошлый образ, и «деплой прошёл» означал «VK-бот остался на старом коде».
+# Молча, потому что сборка-то зелёная: ломается запуск, а не build.
+#
+# `*.ts` берёт только верхний уровень: `__tests__` и `*.test.ts` и так отрезаны
+# в `.dockerignore`, `package.json`/`Dockerfile` под маску не попадают.
+COPY bots/vk/*.ts           ./bots/vk/
 COPY bots/tsconfig.json     ./bots/tsconfig.json
 
 # Explicit ownership transfer for the entire app tree AFTER all COPYs.

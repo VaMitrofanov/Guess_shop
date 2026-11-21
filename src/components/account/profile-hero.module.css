@@ -1,0 +1,120 @@
+/* 🪪 Карточка профиля в кабинете (18.11.2026). Карточка — фирменный градиент
+   (тёмная и светлая тема одинаковы), панель настройки — на токенах `--rb-*`. */
+
+.wrap { display:grid; gap:14px; }
+.card { position:relative; overflow:hidden; display:grid; grid-template-columns:minmax(260px, 360px) minmax(0, 1fr); min-height:340px; border-radius:30px; color:#fff; box-shadow:7px 7px 0 #45d6aa; isolation:isolate; }
+.ringA, .ringB { position:absolute; z-index:-1; border-radius:50%; pointer-events:none; }
+.ringA { left:-90px; top:-130px; width:420px; height:420px; border:40px solid rgba(255,255,255,.06); }
+.ringB { right:90px; bottom:-170px; width:360px; height:360px; border:30px solid rgba(69,214,170,.1); }
+
+.avatarSlot { display:flex; align-items:flex-end; justify-content:center; padding:28px 12px 22px; min-width:0; }
+.podium { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:100%; max-width:340px; }
+/* У рендера Roblox прозрачные поля ~25% сверху и снизу — срезаем отступами,
+   иначе персонаж висит над подиумом. */
+.figure { position:relative; z-index:1; width:100%; height:auto; margin:-16% 0 -27%; filter:drop-shadow(0 14px 20px rgba(0,0,0,.42)); }
+/* Кадр по видимым пикселям (см. PodiumFigure): коробка с пропорциями фигуры,
+   высота одна для всех персонажей, широкие (крылья) упираются в ширину слота. */
+.figureBox { position:relative; z-index:1; display:block; aspect-ratio:var(--ar); width:min(100%, calc(var(--fig-h) * var(--ar))); margin-bottom:-22px; filter:drop-shadow(0 14px 20px rgba(0,0,0,.42)); --fig-h:230px; }
+/* Без overflow:hidden: кончик крыла ниже ног ложится на подиум, а не срезается. */
+.figureCropped { position:absolute; max-width:none; height:auto; pointer-events:none; }
+.figureLoading { visibility:hidden; display:block; width:100%; }
+/* 🧊 3D-персонаж (avatar-3d.tsx): сцена той же высоты, что 2D, и ногами на подиум. */
+.podium3d { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:100%; max-width:340px; --fig3d-h:280px; }
+.stage3d, .stage3dHidden { display:block; width:min(100%, 320px); height:var(--fig3d-h); }
+.stage3d { position:relative; z-index:1; margin-bottom:-22px; cursor:grab; filter:drop-shadow(0 14px 20px rgba(0,0,0,.42)); }
+.stage3d:active { cursor:grabbing; }
+.stage3dHidden { position:absolute; left:0; bottom:0; visibility:hidden; pointer-events:none; }
+.podiumBase { width:72%; height:46px; border-radius:50%; background:radial-gradient(ellipse at center, rgba(255,255,255,.5), rgba(255,255,255,.12) 58%, transparent 72%); box-shadow:inset 0 0 0 2px rgba(255,255,255,.22); }
+.bustFrame, .portraitFrame { display:block; overflow:hidden; border:3px solid rgba(255,255,255,.55); background:rgba(11,9,18,.25); box-shadow:5px 5px 0 #45d6aa; }
+.bustFrame { width:230px; height:230px; border-radius:34px; align-self:center; }
+.portraitFrame { width:180px; height:180px; border-radius:32px; align-self:center; }
+.bustFrame img, .portraitFrame img { width:100%; height:100%; object-fit:cover; display:block; }
+.badgeAvatar { align-self:center; width:150px; height:150px; display:grid; place-items:center; border-radius:36px; border:3px solid rgba(255,255,255,.5); background:rgba(11,9,18,.28); box-shadow:5px 5px 0 #45d6aa; font-family:var(--font-display), sans-serif; font-size:64px; font-weight:800; }
+
+.info { display:flex; flex-direction:column; justify-content:space-between; gap:22px; padding:36px 40px 32px 8px; min-width:0; }
+.head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+.who { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.greeting { font-size:16px; color:rgba(255,255,255,.82); }
+.name { margin:0; font-family:var(--font-display), sans-serif; font-weight:800; font-size:clamp(30px, 3.6vw, 46px); line-height:1; letter-spacing:-.05em; overflow-wrap:anywhere; }
+.sub { display:inline-flex; align-items:center; gap:8px; font-size:15px; font-weight:600; color:rgba(255,255,255,.88); overflow-wrap:anywhere; }
+.check { flex:none; width:20px; height:20px; border-radius:50%; background:#45d6aa; color:#0b0912; display:grid; place-items:center; }
+.headActions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.ghost { min-height:44px; padding:0 16px; display:inline-flex; align-items:center; gap:8px; border-radius:14px; border:1px solid rgba(255,255,255,.32); background:rgba(255,255,255,.14); color:#fff; font:inherit; font-size:15px; font-weight:800; cursor:pointer; white-space:nowrap; }
+.ghost:hover { background:rgba(255,255,255,.22); }
+
+.tiles { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+.tiles > div { padding:16px 18px; border-radius:18px; background:rgba(11,9,18,.3); display:flex; flex-direction:column; gap:4px; min-width:0; }
+.tiles b { font-family:var(--font-display), sans-serif; font-size:24px; letter-spacing:-.04em; overflow-wrap:anywhere; }
+.tiles span { font-size:14px; color:rgba(255,255,255,.8); }
+.mint { color:#7ff0cc; }
+
+.badges { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:8px; }
+.badges li { padding:7px 12px; border-radius:999px; font-size:13px; font-weight:700; }
+.badge_violet { background:rgba(255,255,255,.18); }
+.badge_mint { background:rgba(69,214,170,.26); }
+.badge_orange { background:rgba(255,179,92,.3); }
+.badge_muted { border:1px dashed rgba(255,255,255,.4); color:rgba(255,255,255,.8); }
+.connect { align-self:flex-start; color:#fff; font-weight:800; text-decoration:underline; text-underline-offset:4px; }
+
+/* ── Панель настройки ─────────────────────────────────────────────────── */
+.editor { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; padding:20px; border:1px solid var(--rb-border); border-radius:24px; background:var(--rb-surface); color:var(--rb-text); }
+.block { margin:0; padding:0; border:0; display:flex; flex-direction:column; gap:10px; min-width:0; }
+.block legend { padding:0; margin-bottom:10px; font-size:17px; font-weight:800; }
+.options { display:grid; gap:8px; }
+.option, .optionOn { position:relative; min-height:56px; padding:8px 14px; display:flex; align-items:center; border-radius:14px; cursor:pointer; }
+.option { border:1px solid var(--rb-border); }
+.optionOn { border:2px solid var(--rb-accent); background:var(--rb-accent-soft); }
+.option input, .optionOn input, .thumb input, .thumbOn input, .swatch input, .swatchOn input { position:absolute; opacity:0; width:1px; height:1px; }
+.option span, .optionOn span { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.option strong, .optionOn strong { font-size:15px; }
+.option small, .optionOn small { color:var(--rb-muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.option:has(input:focus-visible), .optionOn:has(input:focus-visible), .thumb:has(input:focus-visible), .thumbOn:has(input:focus-visible), .swatch:has(input:focus-visible), .swatchOn:has(input:focus-visible) { outline:3px solid var(--rb-accent); outline-offset:2px; }
+.field { display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--rb-muted); }
+.field input { height:48px; padding:0 14px; border-radius:14px; border:2px solid var(--rb-accent); background:var(--rb-bg); color:var(--rb-text); font:inherit; font-size:16px; }
+.hint { margin:0; font-size:13px; color:var(--rb-muted); }
+.err { margin:0; color:#e5484d; font-size:13px; font-weight:700; }
+
+.avatars { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.thumb, .thumbOn { position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; padding:8px; border-radius:16px; cursor:pointer; font-size:13px; font-weight:700; }
+.thumb { border:1px solid var(--rb-border); background:var(--rb-bg); }
+.thumbOn { border:2px solid var(--rb-accent); background:var(--rb-accent-soft); }
+.thumb img, .thumbOn img { width:88px; height:88px; object-fit:contain; }
+.thumbLetter { width:88px; height:88px; display:grid; place-items:center; border-radius:22px; background:var(--rb-accent); color:#fff; font-family:var(--font-display), sans-serif; font-size:36px; }
+
+.swatches { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+.swatch, .swatchOn { position:relative; height:60px; border-radius:14px; cursor:pointer; }
+.swatch { border:2px solid var(--rb-border); }
+.swatchOn { border:3px solid var(--rb-text); box-shadow:0 0 0 3px var(--rb-accent); }
+
+.editorActions { grid-column:1 / -1; display:flex; justify-content:flex-end; align-items:center; gap:10px; flex-wrap:wrap; }
+.editorActions .err { margin-right:auto; }
+.primaryBtn, .secondaryBtn { min-height:48px; padding:0 22px; display:inline-flex; align-items:center; gap:8px; border-radius:14px; font:inherit; font-size:15px; font-weight:800; cursor:pointer; }
+.primaryBtn { border:0; background:#7556e8; color:#fff; box-shadow:3px 3px 0 #45d6aa; }
+.secondaryBtn { border:1px solid var(--rb-border); background:transparent; color:var(--rb-text); }
+.primaryBtn:disabled, .secondaryBtn:disabled { opacity:.55; cursor:not-allowed; }
+
+@media (max-width: 980px) {
+  .editor { grid-template-columns:1fr; }
+}
+@media (max-width: 720px) {
+  .card { grid-template-columns:minmax(0, 1fr); min-height:0; border-radius:24px; box-shadow:5px 5px 0 #45d6aa; }
+  .avatarSlot { order:-1; padding:20px 16px 4px; }
+  .avatarTall { padding-bottom:18px; }
+  .podium { max-width:230px; }
+  .figureBox { --fig-h:180px; margin-bottom:-16px; }
+  .podium3d { --fig3d-h:220px; }
+  .stage3d { margin-bottom:-16px; }
+  .bustFrame { width:170px; height:170px; border-radius:28px; }
+  .portraitFrame { width:130px; height:130px; border-radius:26px; }
+  .badgeAvatar { width:110px; height:110px; border-radius:28px; font-size:46px; }
+  .info { padding:8px 18px 20px; gap:16px; }
+  .head { flex-direction:column; }
+  .headActions { justify-content:flex-start; }
+  .name { font-size:clamp(24px, 8vw, 32px); }
+  .tiles { gap:8px; }
+  .tiles > div { padding:12px; border-radius:14px; }
+  .tiles b { font-size:17px; }
+  .tiles span { font-size:12px; }
+  .editor { padding:16px; border-radius:20px; }
+  .editorActions > button { flex:1; justify-content:center; }
+}

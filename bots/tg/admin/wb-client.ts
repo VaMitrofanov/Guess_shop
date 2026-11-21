@@ -1,30 +1,10 @@
 import { z } from "zod";
-import { db } from "../../shared/db";
+
 
 const wbCodeEnv = process.env.WB_API_TOKEN || "";
 
 // ── Zod Schemas ─────────────────────────────────────────────────────────────
 
-const OrderSchema = z.object({
-  date: z.string(),
-  lastChangeDate: z.string(),
-  supplierArticle: z.string(),
-  barcode: z.string(),
-  totalPrice: z.number(),
-  discountPercent: z.number(),
-  priceWithDisc: z.number(),
-  isCancel: z.boolean(),
-});
-
-const SaleSchema = z.object({
-  date: z.string(),
-  lastChangeDate: z.string(),
-  supplierArticle: z.string(),
-  barcode: z.string(),
-  totalPrice: z.number(),
-  discountPercent: z.number(),
-  priceWithDisc: z.number(),
-});
 
 const StockSchema = z.object({
   lastChangeDate:  z.string(),
@@ -38,17 +18,6 @@ const StockSchema = z.object({
   Discount: z.number(),
 });
 
-const AdvertCountSchema = z.object({
-  all: z.number().optional().default(0),
-  adverts: z.array(z.object({
-    type:   z.number().optional().default(0),
-    status: z.number().optional().default(0),
-    count:  z.number().optional().default(0),
-    advert_list: z.array(z.object({
-      advertId: z.number(),
-    })).optional().default([]),
-  })).optional().default([]),
-});
 
 const FeedbackItemSchema = z.object({
   id: z.string(),
@@ -76,80 +45,6 @@ const QuestionsResponseSchema = z.object({
   }).optional(),
 });
 
-const CardsListSchema = z.object({
-  cards: z.array(
-    z.object({
-      nmID: z.number(),
-      vendorCode: z.string(),
-      title: z.string().optional().default(""),
-      photos: z.array(z.object({ big: z.string() })).optional().default([]),
-    })
-  ).optional().default([]),
-});
-
-const PriceSchema = z.object({
-  data: z.object({
-    listGoods: z.array(z.object({
-      nmID: z.number(),
-      vendorCode: z.string(),
-      sizes: z.array(z.object({
-        price:           z.number(),
-        discountedPrice: z.number(),
-        discount:        z.number().optional().default(0),
-      })),
-    })).optional().default([]),
-  }),
-});
-
-// Реализация report row
-const RealizationRowSchema = z.object({
-  rrd_id:                     z.number().optional().default(0),
-  nm_id:                      z.number().optional().default(0),
-  sa_name:                    z.string().optional().default(""),
-  doc_type_name:              z.string().optional().default(""),
-  quantity:                   z.number().optional().default(0),
-  retail_price:               z.number().optional().default(0),
-  retail_amount:              z.number().optional().default(0),
-  retail_price_withdisc_rub:  z.number().optional().default(0),
-  ppvz_kvw_prc:               z.number().optional().default(0),
-  ppvz_sales_commission:      z.number().optional().default(0),
-  ppvz_for_pay:               z.number().optional().default(0),
-  delivery_rub:               z.number().optional().default(0),
-  return_amount:              z.number().optional().default(0),
-  penalty:                    z.number().optional().default(0),
-  additional_payment:         z.number().optional().default(0),
-  storage_fee:           z.number().optional().default(0),
-  deduction:             z.number().optional().default(0),
-  supplier_oper_name:    z.string().optional().default(""),
-  sale_dt:               z.string().optional().default(""),
-  order_dt:              z.string().optional().default(""),
-});
-
-// Advert campaign list item
-const AdvertCampaignSchema = z.object({
-  advertId:  z.number(),
-  name:      z.string().optional().default(""),
-  status:    z.number().optional().default(0),
-  type:      z.number().optional().default(0),
-  dailyBudget: z.number().optional().default(0),
-  budget:    z.number().optional().default(0),
-  createTime: z.string().optional().default(""),
-});
-
-// Advert fullstats v3 response — GET /adv/v3/fullstats (replaced POST v2 on 2025-09-30)
-// Parameters: ids (comma-separated), beginDate, endDate (YYYY-MM-DD)
-const AdvertFullStatsSchema = z.array(z.object({
-  advertId:  z.number(),
-  views:     z.number().optional().default(0),
-  clicks:    z.number().optional().default(0),
-  ctr:       z.number().optional().default(0),
-  cpc:       z.number().optional().default(0),
-  sum:       z.number().optional().default(0),    // total spend ₽
-  orders:    z.number().optional().default(0),
-  cr:        z.number().optional().default(0),
-  sum_price: z.number().optional().default(0),    // revenue from ad orders
-  canceled:  z.number().optional().default(0),
-}));
 
 // ── Cache mechanism ─────────────────────────────────────────────────────────
 
@@ -176,12 +71,6 @@ function setToCache<T>(key: string, data: T, ttlMs: number = 5 * 60 * 1000): voi
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface TodayStats {
-  ordersCount: number;
-  ordersSum: number;
-  salesCount: number;
-  salesSum: number;
-}
 
 export interface WbStock {
   article: string;
@@ -192,14 +81,19 @@ export interface WbStock {
   price: number;
 }
 
-export interface WbProduct {
-  nmID: number;
-  vendorCode: string;
-  title: string;
-  price?: number;
-  discountedPrice?: number;
-  discount?: number;
+
+export interface UnitEconInput {
+  price:          number; // продажная цена ₽ (с учётом скидки продавца)
+  denomination:   number; // номинал Robux
+  commissionPct:  number; // 0–1
+  taxRate:        number; // 0–1
+  logisticsCost:  number; // ₽/ед
+  storagePerUnit: number; // ₽/ед
+  adCostPerUnit:  number; // ₽/ед
+  kursRb:         number;
+  kursUsd:        number;
 }
+
 
 export interface WbReview {
   id: string;
@@ -212,81 +106,16 @@ export interface WbReview {
   kind: "review" | "question";
 }
 
-export interface WbTopProduct {
-  article: string;
-  sum: number;
-  count: number;
-}
 
 export interface WbStockWithRunway extends WbStock {
   avgDailySales: number;
   runwayDays: number;
 }
 
-export interface WbDayStats {
-  date: string;        // "DD.MM" for display
-  dateRaw: string;     // "YYYY-MM-DD" for comparison
-  count: number;
-  sum: number;
-}
 
-export interface WbRealizationArticle {
-  saName:            string;
-  nmId:              number;
-  salesCount:        number;
-  returnCount:       number;
-  returnRate:        number;   // 0–1
-  totalRevenue:      number;   // retail_amount sum for sales
-  totalPayout:       number;   // ppvz_for_pay sum
-  totalLogistics:    number;   // delivery_rub sum
-  totalCommission:   number;   // ppvz_sales_commission sum
-  totalPenalties:    number;
-  avgCommissionPct:  number;   // weighted average ppvz_kvw_prc
-  avgLogisticsPerUnit: number; // totalLogistics / salesCount
-  avgPayoutPerUnit:  number;
-}
-
-export interface WbRealizationSummary {
-  period:            { from: string; to: string };
-  salesCount:        number;
-  returnCount:       number;
-  returnRate:        number;
-  totalRevenue:      number;
-  totalPayout:       number;
-  totalLogistics:    number;
-  totalCommission:   number;
-  totalStorage:      number;
-  totalPenalties:    number;
-  byArticle:         WbRealizationArticle[];
-}
-
-export interface WbAdvertSummary {
-  totalActive:   number;
-  totalPaused:   number;
-  totalBudget:   number;
-  totalSpend:    number;   // 7-day spend from /adv/v3/fullstats
-  totalViews:    number;
-  totalClicks:   number;
-  totalOrders:   number;
-  avgCpo:        number;   // spend / orders
-  avgCtr:        number;   // clicks / views * 100
-  avgCpc:        number;   // spend / clicks
-  campaigns: {
-    id:            number;
-    status:        number;
-    budgetBalance: number;
-    spend7d:       number;
-    views7d:       number;
-    clicks7d:      number;
-    orders7d:      number;
-  }[];
-}
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 
-function formatDate(date: Date): string {
-  return date.toISOString().split(".")[0] + "Z";
-}
 
 async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestInit = {}): Promise<T | null> {
   if (!wbCodeEnv) return null;
@@ -319,99 +148,7 @@ async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestIni
   }
 }
 
-// ── Aggregated Statistics ────────────────────────────────────────────────────
-
-let lastKnownStats: any = null;
-
-/**
- * Fetches and caches orders/sales for the last 30 days.
- * This prevents 429 errors by combining today/weekly/recent requests.
- */
-async function getAggregatedStats(): Promise<{ orders: z.infer<typeof OrderSchema>[], sales: z.infer<typeof SaleSchema>[] } | null> {
-  const cacheKey = "wb_stats_30d";
-  const cached = getFromCache<any>(cacheKey);
-  if (cached) return cached;
-
-  const dateFrom = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-  
-  // Sequential fetching to avoid burst 429
-  const ordersRaw = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema));
-  
-  // Brief pause to satisfy WB rate limiter
-  await new Promise(r => setTimeout(r, 2000));
-
-  const salesRaw = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema));
-
-  if (!ordersRaw || !salesRaw) {
-    // If we hit 429 or other error, fallback to last known good data
-    if (lastKnownStats) {
-      console.log("WB Statistics API Limit reached. Using last known stats fallback.");
-      return lastKnownStats;
-    }
-    return null;
-  }
-
-  const result = {
-    orders: ordersRaw || [],
-    sales: salesRaw || [],
-  };
-
-  lastKnownStats = result;
-  setToCache(cacheKey, result, 10 * 60 * 1000); // Increased to 10 min cache
-  return result;
-}
-
 // ── API Methods ──────────────────────────────────────────────────────────────
-
-/**
- * Get orders and sales for today.
- */
-export async function getTodayStats(): Promise<TodayStats | null> {
-  const aggregated = await getAggregatedStats();
-  if (!aggregated) return null;
-
-  const todayStr = new Date().toISOString().split('T')[0];
-  
-  const orders = aggregated.orders.filter(o => o.date.startsWith(todayStr) && !o.isCancel);
-  const sales = aggregated.sales.filter(s => s.date.startsWith(todayStr));
-
-  return {
-    ordersCount: orders.length,
-    ordersSum: orders.reduce((acc, o) => acc + o.priceWithDisc, 0),
-    salesCount: sales.length,
-    salesSum: sales.reduce((acc, s) => acc + s.priceWithDisc, 0),
-  };
-}
-
-/**
- * Get orders and sales for the last 7 days.
- */
-export async function getWeeklyStats(): Promise<{ orders: number, sales: number } | null> {
-  const aggregated = await getAggregatedStats();
-  if (!aggregated) return null;
-
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  
-  const orders = aggregated.orders.filter(o => new Date(o.date).getTime() >= sevenDaysAgo && !o.isCancel);
-  const sales = aggregated.sales.filter(s => new Date(s.date).getTime() >= sevenDaysAgo);
-
-  return {
-    orders: orders.length,
-    sales: sales.length,
-  };
-}
-
-/**
- * Get the most recent 100 orders.
- */
-export async function getRecentOrders(): Promise<any[] | null> {
-    const aggregated = await getAggregatedStats();
-    if (!aggregated) return null;
-    
-    return [...aggregated.orders]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 100);
-}
 
 /**
  * Get Marketplace (FBS) orders.
@@ -481,175 +218,21 @@ export async function getStocks(): Promise<WbStock[] | null> {
   return res;
 }
 
-/**
- * Get active ad campaigns status.
- */
-export async function getCampaignsStatus(): Promise<string | null> {
-  const cacheKey = "wb_campaigns";
-  const cached = getFromCache<string>(cacheKey);
-  if (cached) return cached;
-
-  if (!wbCodeEnv) return null;
-
-  try {
-    const res = await fetchWb(`https://advert-api.wildberries.ru/adv/v1/promotion/count`, AdvertCountSchema);
-    if (!res) return null;
-
-    const active = res.adverts.filter(a => a.status === 11).reduce((s, a) => s + a.count, 0);
-    const paused = res.adverts.filter(a => a.status === 9).reduce((s, a) => s + a.count, 0);
-    const total  = res.all ?? res.adverts.reduce((s, a) => s + a.count, 0);
-
-    let result = total > 0
-      ? `▶ ${active} акт · ⏸ ${paused} пауза · всего ${total}`
-      : "Кампаний нет";
-
-    setToCache(cacheKey, result, 10 * 60 * 1000);
-    return result;
-  } catch {
-    return "Ошибка загрузки ❌";
-  }
-}
-
-/**
- * Get list of products with their prices.
- */
-export async function getProducts(): Promise<WbProduct[] | null> {
-  const cacheKey = "wb_products";
-  const cached = getFromCache<WbProduct[]>(cacheKey);
-  if (cached) return cached;
-
-  if (!wbCodeEnv) return null;
-
-  // 1. Get cards from Content API
-  const cardsRaw = await fetchWb("https://content-api.wildberries.ru/content/v2/get/cards/list", CardsListSchema, {
-    method: "POST",
-    body: JSON.stringify({
-      settings: { cursor: { limit: 100 }, filter: { withPhoto: -1 } }
-    })
-  });
-
-  if (!cardsRaw || !cardsRaw.cards) return null;
-
-  // 2. Get prices from Price API
-  const pricesRaw = await fetchWb("https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0", PriceSchema);
-  
-  const priceMap = new Map<number, { p: number, dp: number, disc: number }>();
-  if (pricesRaw?.data?.listGoods) {
-    for (const g of pricesRaw.data.listGoods) {
-      if (g.sizes && g.sizes[0]) {
-        priceMap.set(g.nmID, {
-          p:    g.sizes[0].price,
-          dp:   g.sizes[0].discountedPrice,
-          disc: g.sizes[0].discount ?? 0,
-        });
-      }
-    }
-  }
-
-  const result = cardsRaw.cards.map(c => {
-    const priceData = priceMap.get(c.nmID);
-    return {
-      nmID: c.nmID,
-      vendorCode: c.vendorCode,
-      title: c.title,
-      price: priceData?.p,
-      discountedPrice: priceData?.dp,
-      discount: priceData?.disc,
-    };
-  });
-
-  setToCache(cacheKey, result, 15 * 60 * 1000); // 15 min cache
-  return result;
-}
-
-// ── Sync analytics helpers (use lastKnownStats cache, no extra API calls) ───
-
-/** Top N products by revenue for today — derived from cached 30d stats. */
-export function getTopProducts(limit = 5): WbTopProduct[] {
-  if (!lastKnownStats) return [];
-  const todayStr = new Date().toISOString().split("T")[0];
-  const byArticle = new Map<string, { sum: number; count: number }>();
-  for (const o of lastKnownStats.orders) {
-    if (!o.date.startsWith(todayStr) || o.isCancel) continue;
-    const e = byArticle.get(o.supplierArticle) ?? { sum: 0, count: 0 };
-    e.sum += o.priceWithDisc;
-    e.count++;
-    byArticle.set(o.supplierArticle, e);
-  }
-  return [...byArticle.entries()]
-    .map(([article, d]) => ({ article, ...d }))
-    .sort((a, b) => b.sum - a.sum)
-    .slice(0, limit);
-}
-
-/** Stats for yesterday — derived from cached 30d stats. */
-export function getYesterdayStats(): TodayStats | null {
-  if (!lastKnownStats) return null;
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const str = d.toISOString().split("T")[0];
-  const orders = lastKnownStats.orders.filter((o: any) => o.date.startsWith(str) && !o.isCancel);
-  const sales  = lastKnownStats.sales.filter((s: any) => s.date.startsWith(str));
-  return {
-    ordersCount: orders.length,
-    ordersSum:   orders.reduce((a: number, o: any) => a + o.priceWithDisc, 0),
-    salesCount:  sales.length,
-    salesSum:    sales.reduce((a: number, s: any) => a + s.priceWithDisc, 0),
-  };
-}
-
-/** Stats for the previous 7-day window (days -14..-8) — for weekly delta. */
-export function getPrevWeekStats(): { orders: number; salesSum: number } | null {
-  if (!lastKnownStats) return null;
-  const now = Date.now();
-  const from = now - 14 * 864e5;
-  const to   = now - 7  * 864e5;
-  const orders = lastKnownStats.orders.filter((o: any) => {
-    const t = new Date(o.date).getTime();
-    return t >= from && t < to && !o.isCancel;
-  });
-  return { orders: orders.length, salesSum: orders.reduce((a: number, o: any) => a + o.priceWithDisc, 0) };
-}
-
-/** Daily breakdown for the last N days — for bar chart. */
-export function getDailyBreakdown(days: number): WbDayStats[] {
-  const result: WbDayStats[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const day = new Date();
-    day.setDate(day.getDate() - i);
-    const raw = day.toISOString().split("T")[0];
-    const dayOrders = lastKnownStats?.orders.filter((o: any) => o.date.startsWith(raw) && !o.isCancel) ?? [];
-    result.push({
-      date:    day.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
-      dateRaw: raw,
-      count:   dayOrders.length,
-      sum:     dayOrders.reduce((a: number, o: any) => a + o.priceWithDisc, 0),
-    });
-  }
-  return result;
-}
 
 /**
  * Stocks enriched with runway (days of remaining inventory).
  * Runway = current_stock / avg_daily_orders over last 14 days.
+ *
+ * ⚠️ Продажи для среднего брались из кэша статистики, который заполняли только
+ * экраны старого TG-хаба (удалены 11.11.2026; монитор их не вызывал). На проде
+ * кэш был пуст всегда → runway = 999, и алерт «мало кодов» (runway < 7) не
+ * срабатывал никогда. Поведение сохранено; починка — отдельной задачей.
  */
 export async function getStocksWithRunway(): Promise<WbStockWithRunway[] | null> {
   const stocks = await getStocks();
   if (!stocks) return null;
 
-  // avg daily orders per article from last 14 days
   const avgMap = new Map<string, number>();
-  if (lastKnownStats) {
-    const cutoff = Date.now() - 14 * 864e5;
-    const byArticle = new Map<string, number>();
-    for (const o of lastKnownStats.orders) {
-      if (new Date(o.date).getTime() < cutoff || o.isCancel) continue;
-      byArticle.set(o.supplierArticle, (byArticle.get(o.supplierArticle) ?? 0) + 1);
-    }
-    for (const [article, total] of byArticle.entries()) {
-      avgMap.set(article, total / 14);
-    }
-  }
 
   return stocks.map(s => {
     const avg = avgMap.get(s.article) ?? 0;
@@ -762,315 +345,32 @@ export function flushFbsDigest(newOrders: number): number {
   return batch;
 }
 
-/**
- * Update price for a product.
- * @param nmID Product ID
- * @param price New price (base)
- * @param discount New discount percentage
- */
-export async function updatePrice(nmID: number, price: number): Promise<boolean> {
-  if (!wbCodeEnv) return false;
-
-  try {
-    const res = await fetch("https://discounts-prices-api.wildberries.ru/api/v2/upload/price", {
-      method: "POST",
-      headers: {
-        Authorization: wbCodeEnv,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify([{
-        nmID,
-        price
-      }])
-    });
-
-    if (!res.ok) {
-        const err = await res.text();
-        console.error(`WB Price Update Error: ${res.status} - ${err}`);
-        return false;
-    }
-    return true;
-  } catch (err) {
-    console.error("WB API Error (Update Price):", err);
-    return false;
-  }
-}
 
 // ── WB Settings (unit economics global config) ───────────────────────────────
 
-export async function getWbSettings(): Promise<{ kursRb: number; kursUsd: number; fixedCost: number; lastAdAttributedAt: Date | null }> {
-  const s: any = await (db as any).wbSettings.upsert({
-    where:  { id: 1 },
-    update: {},
-    create: { id: 1, kursRb: 4, kursUsd: 75, fixedCost: 87.5 },
-  });
-  return { kursRb: s.kursRb, kursUsd: s.kursUsd, fixedCost: s.fixedCost, lastAdAttributedAt: s.lastAdAttributedAt ?? null };
-}
-
-export async function updateWbSetting(field: "kursRb" | "kursUsd" | "fixedCost", value: number): Promise<void> {
-  await (db as any).wbSettings.upsert({
-    where:  { id: 1 },
-    update: { [field]: value },
-    create: { id: 1, kursRb: 4, kursUsd: 75, fixedCost: 87.5, [field]: value },
-  });
-}
 
 // ── Реализация report ─────────────────────────────────────────────────────────
 
-export async function getRealizationReport(weeks = 4): Promise<WbRealizationSummary | null> {
-  const cacheKey = `wb_realiz_${weeks}w`;
-  const cached = getFromCache<WbRealizationSummary>(cacheKey);
-  if (cached) return cached;
-
-  if (!wbCodeEnv) return null;
-
-  const now    = new Date();
-  const dateTo = now.toISOString().split("T")[0];
-  const dateFrom = new Date(now.getTime() - weeks * 7 * 864e5).toISOString().split("T")[0];
-
-  const rows = await fetchWb(
-    `https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod?dateFrom=${dateFrom}&dateTo=${dateTo}&rrdid=0`,
-    z.array(RealizationRowSchema)
-  );
-
-  if (!rows || rows.length === 0) return null;
-
-  // Aggregate
-  const byArticle = new Map<string, WbRealizationArticle>();
-  let totalRevenue = 0, totalPayout = 0, totalLogistics = 0;
-  let totalCommission = 0, totalStorage = 0, totalPenalties = 0;
-  let salesCount = 0, returnCount = 0;
-
-  for (const row of rows) {
-    // WB uses doc_type_name for sales/returns but supplier_oper_name for services
-    const docType  = row.doc_type_name.toLowerCase();
-    const operName = row.supplier_oper_name.toLowerCase();
-    const key      = row.sa_name || String(row.nm_id);
-
-    // Service rows (хранение, etc.) have empty doc_type — handle before key check
-    if (!key || key === "0") {
-      if (operName.includes("хранение") || row.storage_fee > 0) {
-        totalStorage += row.storage_fee;
-      } else if (operName.includes("штраф") || operName.includes("penalty")) {
-        totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
-      }
-      continue;
-    }
-
-    let art = byArticle.get(key);
-    if (!art) {
-      art = {
-        saName: row.sa_name, nmId: row.nm_id, salesCount: 0, returnCount: 0,
-        returnRate: 0, totalRevenue: 0, totalPayout: 0, totalLogistics: 0,
-        totalCommission: 0, totalPenalties: 0, avgCommissionPct: 0,
-        avgLogisticsPerUnit: 0, avgPayoutPerUnit: 0,
-      };
-      byArticle.set(key, art);
-    }
-
-    if (docType.includes("продажа")) {
-      const qty = Math.abs(row.quantity) || 1;
-      const rowRevenue   = row.retail_price_withdisc_rub * qty;
-      const rowPayout    = row.ppvz_for_pay;
-      const rowLogistics = row.delivery_rub;
-      // Effective commission = what WB actually keeps (revenue minus payout minus logistics)
-      const rowCommission = rowRevenue - rowPayout - rowLogistics;
-      const rowCommPct    = rowRevenue > 0 ? rowCommission / rowRevenue : 0;
-
-      art.salesCount      += qty;
-      art.totalRevenue    += rowRevenue;
-      art.totalPayout     += rowPayout;
-      art.totalLogistics  += rowLogistics;
-      art.totalCommission += rowCommission;
-      art.totalPenalties  += row.penalty;
-      totalRevenue    += rowRevenue;
-      totalPayout     += rowPayout;
-      totalLogistics  += rowLogistics;
-      totalCommission += rowCommission;
-      salesCount      += qty;
-
-      // Weighted average commission %
-      art.avgCommissionPct = art.salesCount > 0
-        ? (art.avgCommissionPct * (art.salesCount - qty) + rowCommPct * qty) / art.salesCount
-        : rowCommPct;
-    } else if (docType.includes("возврат")) {
-      const qty = Math.abs(row.quantity) || 1;
-      art.returnCount  += qty;
-      art.totalPayout  += row.ppvz_for_pay; // negative on returns
-      returnCount      += qty;
-      totalPayout      += row.ppvz_for_pay;
-    } else if (operName.includes("хранение") || row.storage_fee > 0) {
-      totalStorage += row.storage_fee;
-    } else if (docType.includes("штраф") || operName.includes("штраф")) {
-      totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
-    }
-  }
-
-  // Finalize per-article averages
-  for (const art of byArticle.values()) {
-    art.returnRate          = art.salesCount > 0 ? art.returnCount / art.salesCount : 0;
-    art.avgLogisticsPerUnit = art.salesCount > 0 ? art.totalLogistics / art.salesCount : 0;
-    art.avgPayoutPerUnit    = art.salesCount > 0 ? art.totalPayout / art.salesCount : 0;
-  }
-
-  const result: WbRealizationSummary = {
-    period:         { from: dateFrom, to: dateTo },
-    salesCount,
-    returnCount,
-    returnRate:     salesCount > 0 ? returnCount / salesCount : 0,
-    totalRevenue,
-    totalPayout,
-    totalLogistics,
-    totalCommission,
-    totalStorage,
-    totalPenalties,
-    byArticle:      [...byArticle.values()].sort((a, b) => b.totalRevenue - a.totalRevenue),
-  };
-
-  setToCache(cacheKey, result, 30 * 60 * 1000); // 30 min cache — heavy endpoint
-  return result;
-}
 
 // ── Advert statistics ─────────────────────────────────────────────────────────
 // WB removed /adv/v1/promotion/adverts and /adv/v2/fullstats endpoints.
 // Working endpoints: /adv/v1/promotion/count (IDs+statuses) + /adv/v1/budget?id=X
 
-export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
-  const cacheKey = "wb_advert_stats";
-  const cached = getFromCache<WbAdvertSummary>(cacheKey);
-  if (cached) return cached;
 
-  if (!wbCodeEnv) return null;
+// ── Tariffs: category commission + logistics/storage ───────────────────────────
+// These let the unit-economics calculator use REAL WB rates instead of hardcoded
+// defaults, and forecast margin for products without sales history.
 
-  // 1. Get all campaigns with IDs from count endpoint
-  const countData = await fetchWb(
-    `https://advert-api.wildberries.ru/adv/v1/promotion/count`,
-    AdvertCountSchema
-  );
 
-  if (!countData || countData.adverts.length === 0) {
-    setToCache(cacheKey, null as any, 5 * 60 * 1000);
-    return null;
-  }
 
-  // status 11 = активна, 9 = на паузе (advertiser), others = готова/завершена
-  const ACTIVE_STATUS  = 11;
-  const PAUSED_STATUS  = 9;
+// ── Pure unit-economics math (shared by the product loop and the what-if calc) ──
 
-  const allCampaigns: { id: number; status: number }[] = [];
-  let totalActive = 0, totalPaused = 0;
 
-  for (const group of countData.adverts) {
-    const isActive = group.status === ACTIVE_STATUS;
-    const isPaused = group.status === PAUSED_STATUS;
-    if (isActive) totalActive += group.count;
-    if (isPaused) totalPaused += group.count;
-    for (const c of group.advert_list) {
-      allCampaigns.push({ id: c.advertId, status: group.status });
-    }
-  }
-
-  if (allCampaigns.length === 0) {
-    setToCache(cacheKey, null as any, 5 * 60 * 1000);
-    return null;
-  }
-
-  // 2. Fetch budget balance for each campaign (sequential, rate-limit safe)
-  const BudgetSchema = z.object({
-    total: z.number().optional().default(0),
-  });
-
-  let totalBudget = 0;
-  const campaignStats: WbAdvertSummary["campaigns"] = [];
-
-  for (const camp of allCampaigns.slice(0, 20)) {
-    await new Promise(r => setTimeout(r, 300)); // avoid 429
-    const budget = await fetchWb(
-      `https://advert-api.wildberries.ru/adv/v1/budget?id=${camp.id}`,
-      BudgetSchema
-    );
-    const balance = budget?.total ?? 0;
-    totalBudget += balance;
-    campaignStats.push({ id: camp.id, status: camp.status, budgetBalance: balance, spend7d: 0, views7d: 0, clicks7d: 0, orders7d: 0 });
-  }
-
-  // 3. Get 7-day spend/clicks/views via GET /adv/v3/fullstats (single call for all campaigns)
-  let totalSpend = 0, totalViews = 0, totalClicks = 0, totalOrders = 0;
-
-  if (allCampaigns.length > 0) {
-    const endDate   = new Date().toISOString().split("T")[0];
-    const beginDate = new Date(Date.now() - 7 * 864e5).toISOString().split("T")[0];
-    const idsParam  = allCampaigns.slice(0, 50).map(c => c.id).join(",");
-
-    await new Promise(r => setTimeout(r, 300));
-    const fullStats = await fetchWb(
-      `https://advert-api.wildberries.ru/adv/v3/fullstats?ids=${idsParam}&beginDate=${beginDate}&endDate=${endDate}`,
-      AdvertFullStatsSchema
-    );
-
-    if (fullStats) {
-      const spendMap = new Map<number, { spend: number; views: number; clicks: number; orders: number }>();
-      for (const s of fullStats) {
-        spendMap.set(s.advertId, { spend: s.sum, views: s.views, clicks: s.clicks, orders: s.orders });
-        totalSpend  += s.sum;
-        totalViews  += s.views;
-        totalClicks += s.clicks;
-        totalOrders += s.orders;
-      }
-      for (const camp of campaignStats) {
-        const st = spendMap.get(camp.id);
-        if (st) { camp.spend7d = st.spend; camp.views7d = st.views; camp.clicks7d = st.clicks; camp.orders7d = st.orders; }
-      }
-    }
-  }
-
-  const avgCpo = totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0;
-  const avgCtr = totalViews  > 0 ? Math.round((totalClicks / totalViews) * 1000) / 10 : 0;
-  const avgCpc = totalClicks > 0 ? Math.round(totalSpend / totalClicks) : 0;
-
-  const result: WbAdvertSummary = {
-    totalActive,
-    totalPaused,
-    totalBudget,
-    totalSpend,
-    totalViews,
-    totalClicks,
-    totalOrders,
-    avgCpo,
-    avgCtr,
-    avgCpc,
-    campaigns:   campaignStats,
-  };
-
-  setToCache(cacheKey, result, 15 * 60 * 1000);
-  return result;
-}
-
-// Total ad spend from fromDate to today — for attributive UE (delta since last attributed order).
-// Skips budget fetching; only needs fullstats totals.
-export async function getAdvertSpendForPeriod(fromDate: string): Promise<number | null> {
-  if (!wbCodeEnv) return null;
-
-  const countData = await fetchWb(
-    `https://advert-api.wildberries.ru/adv/v1/promotion/count`,
-    AdvertCountSchema
-  );
-  if (!countData || countData.adverts.length === 0) return 0;
-
-  const ids = countData.adverts
-    .flatMap((g: any) => g.advert_list.map((a: any) => a.advertId))
-    .slice(0, 50);
-  if (ids.length === 0) return 0;
-
-  const endDate = new Date().toISOString().split("T")[0];
-  await new Promise(r => setTimeout(r, 300));
-
-  const fullStats = await fetchWb(
-    `https://advert-api.wildberries.ru/adv/v3/fullstats?ids=${ids.join(",")}&beginDate=${fromDate}&endDate=${endDate}`,
-    AdvertFullStatsSchema
-  );
-  if (!fullStats) return null;
-
-  return fullStats.reduce((sum: number, s: any) => sum + (s.sum ?? 0), 0);
+/** Required selling price to hit a target net margin (0–1). 0 if unattainable. */
+export function priceForTargetMargin(i: Omit<UnitEconInput, "price">, targetMargin: number): number {
+  const robuxCost  = i.kursRb * i.kursUsd * i.denomination / 700;
+  const fixedCosts = i.logisticsCost + i.storagePerUnit + i.adCostPerUnit + robuxCost;
+  const k          = (1 - i.commissionPct) * (1 - i.taxRate) - targetMargin;
+  return k > 0 ? Math.round(fixedCosts / k) : 0;
 }
 
