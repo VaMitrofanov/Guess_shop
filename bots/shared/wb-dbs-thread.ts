@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import {
-  wbAutoReceiveWithinWindow,
   wbDeliverySecretIsLive,
   wbGateDelivered,
   wbOrderAgeHours,
 } from "./wb-delivery-policy";
+import { autoReceiveHeld } from "./wb-auto-receive-signals";
 import {
   pushDbsCard,
   renderDbsCard,
@@ -203,7 +203,7 @@ export async function refreshDbsCard(db: Db, orderId: string) {
     denomination: order.denominationSnapshot,
     priceKopecks: order.finalPriceKopecks ?? order.priceKopecks,
     activationCode: order.wbCode?.code ?? null,
-    ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null, buyout),
+    ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null, buyout, autoReceiveHeld(order.events)),
     buyer: cardBuyerOf(order.events),
     // Кто это у нас в TG/VK (12.11.2026): единый профиль покупателя WB ↔ боты.
     related: [
@@ -412,6 +412,8 @@ function dbsCardHeadline(
   hasLiveSecret: boolean,
   codeReceivedAt: Date | null,
   buyout?: BuyoutState | null,
+  /** Воркер придержал доставку для человека (`AUTO_RECEIVE_HELD`, 21.11.2026). */
+  held = false,
 ): Pick<DbsCardState, "marker" | "title" | "next"> {
   if (order.cancelledAt) {
     return { marker: "cancelled", title: "отменён на WB", next: "деньги вернулись покупателю" };
@@ -455,11 +457,11 @@ function dbsCardHeadline(
   if (hasLiveSecret) {
     // Заказ старше окна: бот держит доставку намеренно, и карточка обязана
     // говорить это прямо — иначе оператор ждёт закрытия, которого не будет.
-    if (codeReceivedAt && !wbAutoReceiveWithinWindow(order, codeReceivedAt)) {
+    if (codeReceivedAt && held) {
       return {
         marker: "urgent",
         title: "код получен, доставка НЕ закрыта",
-        next: `<b>решать вручную</b>: заказу ${wbOrderAgeHours(order, codeReceivedAt)} ч — закрыть доставку в кабинете WB или отклонить`,
+        next: `<b>решать вручную</b>: заказу ${wbOrderAgeHours(order, codeReceivedAt)} ч, есть заявка или просьба об отмене — закрыть доставку в кабинете WB или отклонить`,
       };
     }
     return { marker: "progress", title: "код получен", next: "закрываю доставку на WB — гейт уйдёт сразу после этого" };

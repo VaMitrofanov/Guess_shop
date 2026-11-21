@@ -13,6 +13,7 @@
  */
 
 import type { WbOrderStatus } from "@prisma/client";
+import { WB_CHAT_MESSAGE_MAX } from "./wb-gate-link";
 import { robuxWaitText } from "./robux-wait";
 /** Старше этого вопрос уже не про Pending: карточку не показываем. */
 const ROBUX_ETA_LOOKBACK_DAYS = 30;
@@ -42,7 +43,7 @@ function ourPartDoneText(fmt: RobuxEtaFormat): string {
 /** О чём речь: робуксы, баланс, Pending. «рб»/«r$» — только отдельным словом. */
 const ROBUX_RE = /робук|робак|робас|роблокс[а-я]* валют|robux|рбх|(?<![\p{L}\p{N}])(?:рб|r\$)(?![\p{L}\p{N}])|баланс|пендинг|pending|зачисл/iu;
 /** Что спрашивают: где, когда, не пришли… Знак вопроса — тоже вопрос. */
-const ASK_RE = /где|когда|сколько\s+(?:ещ[её]\s+)?ждать|не\s*приш|не\s*приход|не\s*вижу|не\s*видно|нету|(?<![\p{L}])нет(?![\p{L}])|не\s*зачисл|не\s*получ|не\s*дош|не\s*поступ|долго|до\s+сих\s+пор|почему|скоро|\?/iu;
+const ASK_RE = /где|когда|сколько\s+(?:ещ[её]\s+)?(?:ждать|дней|времени|час)|через\s+сколько|пришлите|этап|не\s*приш|не\s*приход|не\s*вижу|не\s*видно|нету|(?<![\p{L}])нет(?![\p{L}])|не\s*зачисл|не\s*получ|не\s*дош|не\s*поступ|долго|до\s+сих\s+пор|почему|скоро|\?/iu;
 
 /**
  * Похоже ли сообщение на «где мои робуксы?».
@@ -304,22 +305,24 @@ export function buildRobuxEtaShort(ordersIn: RobuxEtaOrder[], fmt: RobuxEtaForma
  */
 export const WB_CODES_ARTICLE = "1447864924";
 export const WB_CODES_UPSELL =
-  `⚡ Не хотите ждать в следующий раз? У нас есть коды пополнения Roblox: код вводится на roblox.com/redeem, ` +
-  `и Robux сразу на балансе — без геймпасса и без заморозки Pending. Найдите в поиске WB артикул ${WB_CODES_ARTICLE} — ` +
-  `«Карта пополнения 800 Robux»: код пришлём в чат того заказа.`;
+  `⚡ Чтобы не ждать в следующий раз — коды пополнения Roblox: Robux сразу на балансе, без Pending. Артикул на WB: ${WB_CODES_ARTICLE}.`;
 
+/**
+ * С 19 по 21.11.2026 текст с промо был 1255 символов при лимите WB 1000 —
+ * каждая отправка падала `MESSAGE_TOO_LONG`, и не ушёл ни один ответ. Теперь
+ * текст короче, а промо — только если влезает: ответ про робуксы важнее рекламы.
+ */
 export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new Date()): RobuxEtaReply | null {
   const orders = etaOrders(ordersIn, now);
   if (orders.length === 0) return null;
   const { amount, completedAt } = orders[0];
-  return {
-    text:
-      `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox — в статусе Pending. Выкупили: ${fmtDateRu(completedAt)}.\n\n` +
-      `С нашей стороны всё сделано. Похоже, ваш аккаунт попал под дополнительную проверку Roblox — тогда он держит покупку дольше обычного. Дальше всё зависит от Roblox: он сам решает, когда перевести робуксы на баланс, ускорить это мы не можем. ${robuxWaitText("vy")}\n\n` +
-      `Проверить можно в Roblox: раздел Transactions, строка Pending Robux — в ней должно быть число не меньше ${amount}. ` +
-      `Если там меньше ${amount} и на балансе робуксов тоже нет — пришлите сюда скриншот страницы Transactions, менеджер проверит выкуп.\n\n` +
-      WB_CODES_UPSELL,
-  };
+  const core =
+    `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox — в статусе Pending. Выкупили: ${fmtDateRu(completedAt)}.\n\n` +
+    `С нашей стороны всё сделано. Похоже, ваш аккаунт попал под дополнительную проверку Roblox — тогда он держит покупку дольше обычного. Ускорить это мы не можем. ${robuxWaitText("vy")}\n\n` +
+    `Проверить: Roblox → Transactions → строка Pending Robux, там должно быть не меньше ${amount}. ` +
+    `Если меньше и на балансе тоже нет — пришлите сюда скриншот Transactions, менеджер проверит.`;
+  const full = `${core}\n\n${WB_CODES_UPSELL}`;
+  return { text: full.length <= WB_CHAT_MESSAGE_MAX ? full : core };
 }
 
 /**

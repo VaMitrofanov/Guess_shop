@@ -1,8 +1,10 @@
 import { robuxWaitShort, robuxWaitText } from "../robux-wait";
+import { WB_CHAT_MESSAGE_MAX } from "../wb-gate-link";
 import {
   buildRobuxEtaReply,
   buildRobuxEtaShort,
   buildRobuxEtaWbChat,
+  WB_CODES_ARTICLE,
   isArrivalQuestion,
   isRepeatEtaQuestion,
   isRobuxQuestion,
@@ -108,6 +110,22 @@ describe("ответ", () => {
     expect(wb.text).not.toMatch(/https?:|<b>/);
     expect(wb.text).toContain("С нашей стороны всё сделано");
     expect(stripWait(wb.text)).not.toMatch(NO_DEADLINE);
+  });
+
+  it("ответ для чата WB влезает в лимит WB 1000 символов — вместе с промо кодов (21.11.2026)", () => {
+    // 19–21.11 текст был 1255 символов, WB отклонял каждую отправку.
+    for (const amount of [200, 1200, 10000]) {
+      const wb = buildRobuxEtaWbChat([{ amount, completedAt: new Date("2026-09-16T10:00:00Z") }], new Date("2026-09-20T10:00:00Z"))!;
+      expect(wb.text.length).toBeLessThanOrEqual(WB_CHAT_MESSAGE_MAX);
+      expect(wb.text).toContain(WB_CODES_ARTICLE);
+    }
+  });
+
+  it("вопросы из живого чата WB распознаются (21.11.2026)", () => {
+    for (const t of ["Через сколько дней придут робуксы", "Пришлите робуксы", "Где робуксы уже больше 7 дней прошло"]) {
+      expect(isArrivalQuestion(t)).toBe(true);
+    }
+    expect(isArrivalQuestion("Робуксы пришли, спасибо")).toBe(false);
   });
 
   it("повтор в течение 10 минут распознаётся", () => {

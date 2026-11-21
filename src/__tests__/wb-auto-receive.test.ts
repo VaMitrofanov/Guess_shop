@@ -4,6 +4,7 @@ import {
   canCaptureDeliveryCode,
   canReceiveWbOrder,
   canSendWbGate,
+  wbAutoReceiveAllowed,
   wbAutoReceiveWithinWindow,
   wbOrderAgeHours,
   wbOrderPlacedAt,
@@ -17,6 +18,7 @@ import {
   WB_RECEIVE_RETRY_HORIZON_MS,
   WB_RECEIVE_RETRY_INTERVAL_MS,
 } from "../../bots/shared/wb-delivery-policy";
+import { deliveryCodeAckText } from "../../bots/shared/wb-auto-receive-signals";
 
 const worker = readFileSync(resolve(__dirname, "../../bots/shared/wb-delivery-sync.ts"), "utf8");
 const autoReceive = worker.slice(
@@ -372,7 +374,52 @@ describe("four-hour auto-close window", () => {
       worker.indexOf("async function alertStuckDeliveries"),
       worker.indexOf("async function tryAutoGate"),
     );
-    expect(stuck).toContain("if (receivedAt && !wbAutoReceiveWithinWindow(order, receivedAt)) continue;");
+    expect(stuck).toContain("type: AUTO_RECEIVE_HELD");
+    expect(stuck).toContain("continue;");
+  });
+});
+
+/* 21.11.2026: «бот на WB часами молчит». Код позже 4 ч приходил у 59 из 220
+   заказов за две недели, и каждый ждал человека молча (p90 4 ч, максимум 13 ч,
+   14 отмен). Теперь человек нужен только при тревожном сигнале. */
+describe("за окном 4 ч решают сигналы, а не возраст (21.11.2026)", () => {
+  const HOUR = 60 * 60_000;
+  const placed = new Date("2026-11-20T08:00:00Z");
+  const order = { wbCreatedAt: placed, firstSeenAt: placed };
+  const late = new Date(placed.getTime() + 19 * HOUR);
+  const calm = { corridor: true, claimOpen: false, buyerAskedCancel: false };
+
+  it("заказ коридора без сигналов закрывается сам и через 19 ч", () => {
+    expect(wbAutoReceiveAllowed(order, late, calm)).toBe(true);
+  });
+
+  it("заявка WB или просьба об отмене — решает человек", () => {
+    expect(wbAutoReceiveAllowed(order, late, { ...calm, claimOpen: true })).toBe(false);
+    expect(wbAutoReceiveAllowed(order, late, { ...calm, buyerAskedCancel: true })).toBe(false);
+  });
+
+  it("800code и прочие не-коридорные — по старому правилу 4 ч", () => {
+    expect(wbAutoReceiveAllowed(order, late, { ...calm, corridor: false })).toBe(false);
+    expect(wbAutoReceiveAllowed(order, new Date(placed.getTime() + HOUR), { ...calm, corridor: false })).toBe(true);
+  });
+
+  it("внутри окна сигналы не мешают — как и раньше", () => {
+    expect(wbAutoReceiveAllowed(order, placed, { corridor: true, claimOpen: true, buyerAskedCancel: true })).toBe(true);
+  });
+
+  it("решение «придержать» пишется в аудит, карточка и алерт читают его", () => {
+    expect(autoReceive).toContain("wbAutoReceiveAllowed(order, order.deliverySecret.receivedAt, signals)");
+    expect(autoReceive).toContain("AUTO_RECEIVE_HELD");
+    const thread = readFileSync(resolve(__dirname, "../../bots/shared/wb-dbs-thread.ts"), "utf8");
+    expect(thread).toContain("autoReceiveHeld(order.events)");
+  });
+
+  it("код не закрыли сразу — покупатель слышит «код получили», один раз и не в 800code", () => {
+    expect(worker).toContain("else await acknowledgeDeliveryCode(db, order.id, chatId, skip)");
+    expect(worker).toContain("delivery-code-ack:${orderId}");
+    expect(worker).toContain("if (!order?.denominationSnapshot");
+    expect(deliveryCodeAckText()).toContain("код доставки получили");
+    expect(deliveryCodeAckText()).not.toMatch(/\d+\s*(мин|час|дн)/);
   });
 });
 

@@ -56,6 +56,7 @@ import {
   canReceiveWbOrder,
   canSendWbGate,
   shouldMarkCodeRequested,
+  wbAutoReceiveAllowed,
   wbAutoReceiveWithinWindow,
   wbAutoShipAction,
   wbDeliverySecretIsLive,
@@ -71,6 +72,7 @@ import {
   WB_RECEIVE_RECHECK_AFTER_ATTEMPTS,
   WB_RECEIVE_RETRY_HORIZON_MS,
 } from "./wb-delivery-policy";
+import { AUTO_RECEIVE_HELD, deliveryCodeAckText, loadAutoReceiveSignals } from "./wb-auto-receive-signals";
 import type { ClaimHoldOutcome, WbCancellationOutcome } from "./wb-delivery-admin-notify";
 import {
   notifyDbsBuyerMessage,
@@ -540,8 +542,18 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
   // Старше окна — код у нас есть, но доставку закрывает человек. Это решение
   // владельца, а не оптимизация: заказ, который лежит без кода четвёртый час,
   // уже разбирают руками, и «закрыть или отклонить» — часть того разбора.
+  // С 21.11.2026 за окном решает не возраст, а тревожные сигналы: заявка WB или
+  // просьба покупателя об отмене. Без них заказ коридора закрывается сам.
   if (!wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)) {
-    return { closed: false, skip: "order_too_old" };
+    const signals = await loadAutoReceiveSignals(db, order.id);
+    if (!wbAutoReceiveAllowed(order, order.deliverySecret.receivedAt, signals)) {
+      await audit(db, orderId, AUTO_RECEIVE_HELD, `auto-receive-held:${orderId}`, {
+        claimOpen: signals.claimOpen,
+        buyerAskedCancel: signals.buyerAskedCancel,
+        corridor: signals.corridor,
+      }).catch(() => {});
+      return { closed: false, skip: "order_too_old" };
+    }
   }
   // Пауза после прихода кода: «отмена», пришедшая следом, успевает включить
   // режим отмены. Закроет заказ свип `retryAutoReceive`, как только пауза пройдёт.
@@ -1229,7 +1241,8 @@ async function alertStuckDeliveries(db: Db) {
   });
   for (const order of stuck) {
     const receivedAt = order.deliverySecret?.receivedAt;
-    if (receivedAt && !wbAutoReceiveWithinWindow(order, receivedAt)) continue;
+    // Придержанный для человека заказ уже получил своё сообщение с кодом.
+    if (receivedAt && await db.wbMarketplaceEvent.findFirst({ where: { marketplaceOrderId: order.id, type: AUTO_RECEIVE_HELD }, select: { id: true } })) continue;
     await db.wbMarketplaceOrder.update({
       where: { id: order.id },
       data: { deliveryAlertedAt: new Date() },
@@ -1376,6 +1389,31 @@ async function markCodeRequested(db: Db, order: CaptureTarget & { chatState: str
   await audit(db, order.id, "DELIVERY_CODE_REQUESTED", `seller-message:${eventId}`, { source: "wb-seller-cabinet" });
 }
 
+/** Пропуски, после которых покупатель и так получит ответ или ждать нечего. */
+const ACK_SILENT_SKIPS = new Set<AutoReceiveSkip>(["grace", "cancel_requested", "wb_rejected", "test_order", "already_closed"]);
+
+/**
+ * «Код получили» — если доставку не закрыли сразу (21.11.2026). До этого бот
+ * молчал до закрытия доставки, а это бывало через 3–13 часов: покупатель слал
+ * код снова и снова и писал «АЛОООО» (6313211193). Один раз на заказ, только у
+ * заказов коридора: 800code ведётся вручную, и бот там молчит намеренно.
+ */
+async function acknowledgeDeliveryCode(db: Db, orderId: string, chatId: string, skip: AutoReceiveSkip): Promise<void> {
+  if (process.env.WB_CHAT_SEND_ENABLED !== "true") return;
+  if (ACK_SILENT_SKIPS.has(skip)) return;
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    select: { denominationSnapshot: true, isTest: true, completedAt: true, cancelledAt: true, cancelRequestedAt: true },
+  });
+  if (!order?.denominationSnapshot || order.isTest || order.completedAt || order.cancelledAt || order.cancelRequestedAt) return;
+  const key = `delivery-code-ack:${orderId}`;
+  if (await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: key }, select: { id: true } })) return;
+  const chat = await db.wbBuyerChat.findUnique({ where: { chatId } });
+  if (!chat?.replySignEncrypted) return;
+  await sendBuyerChatMessage(decryptWbSecret(chat.replySignEncrypted, "reply-sign"), deliveryCodeAckText());
+  await audit(db, orderId, "DELIVERY_CODE_ACKED", key, { skip: skip ?? "none" });
+}
+
 /** Capture is deliberately independent of `chatState`: the request may have been
  * sent from the WB cabinet, so the buyer's code must land whatever our own state
  * machine believes. A live secret is never overwritten. */
@@ -1418,6 +1456,9 @@ async function captureDeliveryCode(
   // An unclosed order comes back here through `dispatchGatesForClosedOrders`.
   const { closed, skip } = await tryAutoReceive(db, order.id, order.wbOrderId);
   if (closed) await tryAutoGate(db, order.id, order.wbOrderId);
+  else await acknowledgeDeliveryCode(db, order.id, chatId, skip).catch((e) => {
+    console.warn(`[WbDbsSync] ответ «код получили» для ${order.wbOrderId}:`, safeErrorCode(e));
+  });
   // Тот же код — соседям по корзине. Не в режиме отмены: там код нужен для
   // отказа, а не для закрытия. И не по отклонённому коду: он не подойдёт и там.
   if (skip !== "cancel_requested" && skip !== "wb_rejected") {
@@ -1586,7 +1627,12 @@ async function answerRobuxQuestionInChat(
   });
   if (!buyout || buyout.status !== "COMPLETED" || !buyout.completedAt) return;
   const reply = buildRobuxEtaWbChat([{ amount: buyout.amount, completedAt: buyout.completedAt }]);
-  if (!reply) return;
+  // Выкуп старше 30 дней — автоответу сказать нечего, а молчать нельзя:
+  // сообщения по выкупленному заказу иначе не видит никто (21.11.2026).
+  if (!reply) {
+    notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id, { short: true }));
+    return;
+  }
 
   const bucket = Math.floor(Date.now() / ROBUX_ETA_CHAT_WINDOW_MS);
   const key = `robux-eta:${chatId}:${bucket}`;
@@ -1601,7 +1647,10 @@ async function answerRobuxQuestionInChat(
     await audit(db, order.id, "ROBUX_ETA_ANSWERED", key, { repeat: !!answeredBefore });
   }
   // Барьер: первый вопрос закрывает автоответ; повторный — раз на окно оператору.
-  if (answeredBefore) notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id, { short: true }));
+  // Автоответ не ушёл — вопрос обязан дойти до человека: с 19 по 21.11.2026 текст
+  // был длиннее лимита WB (1255 > 1000), отправка падала, и «где робуксы» по
+  // выкупленным заказам не видел никто — ни покупатель, ни админы.
+  if (answeredBefore || !sent.sent) notifyDbsBuyerMessage(ref, rawText, await identityLinesFor(db, order.id, { short: true }));
 }
 
 /**

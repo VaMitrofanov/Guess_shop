@@ -467,7 +467,7 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   // Запасной текст: обычный путь для этого пропуска — ветка с самим кодом ниже.
   order_too_old: {
     marker: "urgent",
-    text: "заказ старше 4 ч — <b>закрыть доставку вручную</b> или отклонить",
+    text: "заказ старше 4 ч, есть заявка или просьба об отмене — <b>закрыть доставку вручную</b> или отклонить",
   },
   wb_not_in_delivery: {
     marker: "action",
@@ -517,6 +517,8 @@ export function notifyDbsCodeCaptured(
       title: "код доставки — закрыть вручную",
       lines: [
         refLine(ref, [`заказу ${ageLabel(held.ageHours)}`]),
+        // С 21.11.2026 сюда попадает только заказ с тревожным сигналом.
+        "⚠️ есть заявка WB или покупатель просил отмену",
         `🔑 <code>${escapeHtml(held.deliveryCode)}</code>`,
       ],
       next: null,

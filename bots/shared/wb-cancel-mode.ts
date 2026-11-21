@@ -2,11 +2,12 @@ import type { PrismaClient } from "@prisma/client";
 import { sendBuyerChatMessage } from "./wb-delivery-api";
 import { decryptWbSecret } from "./wb-delivery-crypto";
 import {
-  wbAutoReceiveWithinWindow,
+  wbAutoReceiveAllowed,
   wbDeliverySecretIsLive,
   wbOrderAgeHours,
 } from "./wb-delivery-policy";
 import { wbCancelAcceptedMessage } from "./wb-gate-link";
+import { loadAutoReceiveSignals } from "./wb-auto-receive-signals";
 import {
   notifyDbsCancelRequested,
   notifyDbsCodeCaptured,
@@ -200,7 +201,9 @@ export async function resumeWbOrderCancel(
   // 15.11.2026: увед «отмена снята» убран — человеку делать нечего.
   // Код у нас, но окно автозакрытия прошло — закрывать будет человек, и без
   // этого сообщения код просто пролежал бы до истечения.
-  if (code && order.deliverySecret && !wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)) {
+  // С 21.11.2026 за окном без тревожных сигналов доставку закроет свип сам.
+  if (code && order.deliverySecret
+    && !wbAutoReceiveAllowed(order, order.deliverySecret.receivedAt, await loadAutoReceiveSignals(db, order.id))) {
     notifyDbsCodeCaptured(ref, "order_too_old", {
       deliveryCode: code,
       ageHours: wbOrderAgeHours(order, order.deliverySecret.receivedAt),

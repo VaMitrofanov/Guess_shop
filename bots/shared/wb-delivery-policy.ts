@@ -390,6 +390,32 @@ export function wbAutoReceiveWithinWindow(
   return received - placed <= WB_AUTO_RECEIVE_ORDER_AGE_MS;
 }
 
+/** Что заставляет отдать заказ старше окна человеку (21.11.2026).
+ *
+ * До 21.11 «старше 4 ч» само по себе значило «решает человек» — а код приходит
+ * позже четырёх часов у каждого четвёртого заказа (59 из 220 за две недели),
+ * потому что чат открывается кнопкой в кабинете, часто через полдня. Покупатель
+ * при этом ждал молча: медиана 20 мин, p90 4 ч, максимум 13 ч, 14 отмен. Владелец:
+ * человек нужен, только когда есть тревожный сигнал — открыта заявка или
+ * покупатель сам просил отмену/возврат. */
+export type WbAutoReceiveSignals = {
+  /** Это заказ коридора (есть номинал). 800code и прочие — по старому правилу. */
+  corridor: boolean;
+  claimOpen: boolean;
+  buyerAskedCancel: boolean;
+};
+
+/** Можно ли боту закрыть доставку самому: внутри окна — всегда; за окном —
+ * только заказ коридора без тревожных сигналов. */
+export function wbAutoReceiveAllowed(
+  order: WbOrderPlacement,
+  codeReceivedAt: Date | string,
+  signals: WbAutoReceiveSignals,
+): boolean {
+  if (wbAutoReceiveWithinWindow(order, codeReceivedAt)) return true;
+  return signals.corridor && !signals.claimOpen && !signals.buyerAskedCancel;
+}
+
 /** Пауза между приходом кода и автозакрытием (решение владельца 27.10.2026).
  *
  * Покупатель пишет «отмените» и следом код — а бот закрывал доставку за две
