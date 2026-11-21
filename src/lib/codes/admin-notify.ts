@@ -4,6 +4,7 @@ import { vkDialogLink } from "../../../bots/shared/vk-links";
 import { formatAdminNotice, mskTime } from "../../../bots/shared/notify-format";
 import { codeComponents, formatRubKopecks } from "@/lib/codes-pricing";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 /** Кнопка «🎟 Выдать код» под алертом — её ловит TG-бот (`bots/tg/codes-issue-reply.ts`). */
 export const CODE_ISSUE_CB = "cdi";
@@ -44,7 +45,7 @@ export async function notifyCodeAdmins(input: {
   if (!token) return;
   const order = await prisma.codeOrder.findUnique({
     where: { publicId: input.orderPublicId },
-    select: { deliveryMode: true, channel: true, giftSendAt: true },
+    select: { deliveryMode: true, giftSendAt: true, ...BUYER_SELECT },
   }).catch(() => null);
   const text = formatAdminNotice({
     marker: input.marker,
@@ -54,6 +55,7 @@ export async function notifyCodeAdmins(input: {
       `🎟 <code>${input.orderPublicId}</code> · ${input.denomination.toLocaleString("ru-RU")} R$ · ${formatRubKopecks(input.amountKopecks)}`,
       input.issueButton && supplierLabel(input.denomination) !== null ? `📦 нужно: ${supplierLabel(input.denomination)}` : null,
       order ? deliveryLine(order) : null,
+      ...(order ? buyerLines(order) : []),
       // У 🟠 формат прячет `next`, а для ручной выдачи подсказка про «ответом» нужна.
       input.marker !== "urgent" && input.issueButton ? `👉 ${input.next}` : null,
     ],
@@ -113,8 +115,8 @@ export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift" 
       where: { id: orderId },
       select: {
         publicId: true, denomination: true, finalAmountKopecks: true, issuedAt: true,
-        chatDeliveredAt: true, emailSentAt: true, channel: true, giftTo: true,
-        creator: { select: { username: true, name: true, tgId: true, vkId: true } },
+        chatDeliveredAt: true, emailSentAt: true, giftTo: true,
+        ...BUYER_SELECT,
       },
     });
     if (!order) return;
@@ -130,11 +132,6 @@ export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift" 
       order.chatDeliveredAt && !sealed ? `в чат бота ${order.channel === "VK" ? "ВК" : "TG"} ${mskTime(order.chatDeliveredAt)}` : null,
       order.emailSentAt ? `письмом ${mskTime(order.emailSentAt)}` : null,
     ].filter(Boolean);
-    const c = order.creator;
-    const who = c?.username ? `@${esc(c.username)}`
-      : c?.tgId ? `<a href="tg://user?id=${c.tgId}">${esc(c.name ?? "покупатель")}</a>`
-      : c?.vkId ? vkDialogLink(c.vkId, esc(c.name ?? "покупатель"))
-      : null;
     const text = formatAdminNotice({
       marker: "progress",
       zone: "САЙТ",
@@ -143,7 +140,7 @@ export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift" 
         `🎟 <code>${order.publicId}</code> · ${order.denomination.toLocaleString("ru-RU")} R$ · ${formatRubKopecks(order.finalAmountKopecks)}`,
         `👁 Открыт ${where} · ${mskTime(now)} МСК${after}`,
         earlier.length ? `📨 Код уже видел раньше: ${earlier.join(", ")} — вводить мог с того момента` : null,
-        who ? `👤 ${who}` : null,
+        ...buyerLines(order),
       ],
     });
     const roots = await alertRoots(order.publicId);
@@ -156,6 +153,67 @@ export async function notifyCodeOpened(orderId: string, via: "cabinet" | "gift" 
   } catch {
     // Увед не должен ломать показ кода покупателю.
   }
+}
+
+const SOLD_CODE: Prisma.CodeOrderWhereInput = { status: "ISSUED" };
+const DONE_GP: Prisma.WbOrderWhereInput = { status: "COMPLETED" };
+
+/** Что нужно о покупателе для `buyerLines` — подмешивается в select заказа кода. */
+const BUYER_SELECT = {
+  status: true,
+  channel: true,
+  createdVia: true,
+  creator: {
+    select: {
+      username: true, name: true, tgId: true, vkId: true, robloxUsername: true, createdAt: true,
+      email: true, emailVerifiedAt: true,
+      referredBy: { select: { username: true, name: true, tgId: true, vkId: true } },
+      _count: { select: { codeOrders: { where: SOLD_CODE }, wbOrders: { where: DONE_GP } } },
+    },
+  },
+} satisfies Prisma.CodeOrderSelect;
+
+type BuyerOrder = Prisma.CodeOrderGetPayload<{ select: typeof BUYER_SELECT }>;
+type Person = { username: string | null; name: string | null; tgId: string | null; vkId: string | null };
+
+/** Ссылки на человека: TG (@ник или профиль по id) и диалог сообщества ВК. */
+function personLinks(p: Person): string[] {
+  const name = esc(p.name?.trim() || "профиль");
+  const links: string[] = [];
+  if (p.tgId) links.push(p.username ? `TG @${esc(p.username)}` : `TG <a href="tg://user?id=${p.tgId}">${name}</a>`);
+  if (p.vkId) links.push(`ВК ${vkDialogLink(p.vkId, name)}`);
+  return links;
+}
+
+const ACCOUNT_WORD: Record<string, string> = { SITE: "на сайте", TG: "в боте TG", VK: "в боте ВК" };
+
+/**
+ * Кто купил и откуда (21.11.2026, владелец: «нужно больше инфы про
+ * покупателя, если есть тг или вк — пиши в увед»). Без почты и без кода:
+ * адрес получателя в беседу не выносим — только признак, что вход по почте.
+ */
+export function buyerLines(order: BuyerOrder): string[] {
+  const c = order.creator;
+  const share = order.createdVia === "SHARE" ? " · оплатил другой человек по ссылке" : "";
+  if (!c) return [`👤 Гость без входа · оформлен ${ACCOUNT_WORD[order.channel] ?? order.channel}${share}`];
+  const links = personLinks(c);
+  if (!links.length) links.push(c.email ? `вход по почте${c.emailVerifiedAt ? " (подтверждена)" : " (не подтверждена)"}` : "без TG и ВК");
+  const nameTail = c.name && c.username ? ` (${esc(c.name)})` : "";
+  const lines = [`👤 ${links.join(" · ")}${nameTail}${share}`];
+  if (c.robloxUsername) lines.push(`🎮 Roblox: <code>${esc(c.robloxUsername)}</code>`);
+  // Текущий заказ уже может быть ISSUED — его из «раньше» вычитаем.
+  const codesBefore = Math.max(0, c._count.codeOrders - (order.status === "ISSUED" ? 1 : 0));
+  const history = [
+    codesBefore ? `кодов ${codesBefore}` : null,
+    c._count.wbOrders ? `робуксов (ГП) ${c._count.wbOrders}` : null,
+  ].filter(Boolean);
+  const since = c.createdAt.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "short", year: "numeric" });
+  lines.push(`🧾 ${history.length ? `Раньше покупал: ${history.join(", ")}` : "Первая покупка у нас"} · с нами с ${since}`);
+  if (c.referredBy) {
+    const ref = personLinks(c.referredBy);
+    lines.push(`🤝 Пришёл по приглашению: ${ref.length ? ref.join(" · ") : esc(c.referredBy.name ?? "аккаунт без TG/ВК")}`);
+  }
+  return lines;
 }
 
 /** HTML уведомления → тот же текст без тегов, с экранированными символами. */

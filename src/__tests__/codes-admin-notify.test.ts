@@ -18,7 +18,13 @@ jest.mock("@/lib/prisma", () => ({
       id: "o1", deliveryMode: "EMAIL", channel: "TG", giftSendAt: null,
       publicId: "CODE-DA9VG478", denomination: 500, finalAmountKopecks: 65300,
       issuedAt: new Date(Date.now() - 134 * 60_000), chatDeliveredAt: new Date(Date.now() - 134 * 60_000),
-      emailSentAt: null, giftTo: null, creator: { username: "buyer_1", name: "Покупатель", tgId: "1", vkId: null },
+      emailSentAt: null, giftTo: null, status: "ISSUED", createdVia: "SELF",
+      creator: {
+        username: "buyer_1", name: "Покупатель", tgId: "1", vkId: "77", robloxUsername: "Nick_<1>",
+        createdAt: new Date("2026-08-03T10:00:00Z"), email: "buyer@mail.ru", emailVerifiedAt: null,
+        referredBy: { username: null, name: "Друг", tgId: "9", vkId: null },
+        _count: { codeOrders: 3, wbOrders: 2 },
+      },
     }) },
     codeOrderEvent: { create: async () => ({}), findFirst: async () => null },
   },
@@ -27,7 +33,7 @@ jest.mock("../../bots/shared/admin-route", () => ({
   adminTargets: async () => [{ key: "g#5", chatId: "-100", extra: { message_thread_id: 5 }, group: true }],
 }));
 
-import { deliveryLine, elapsedRu, notifyCodeAdmins, notifyCodeOpened, plainForTelegram } from "@/lib/codes/admin-notify";
+import { buyerLines, deliveryLine, elapsedRu, notifyCodeAdmins, notifyCodeOpened, plainForTelegram } from "@/lib/codes/admin-notify";
 
 describe("алерт заказа кода", () => {
   beforeEach(() => { send.mockReset(); process.env.TG_TOKEN = "t"; });
@@ -45,8 +51,26 @@ describe("алерт заказа кода", () => {
     await notifyCodeAdmins({ marker: "urgent", title: "оплачен — выдать код вручную", orderPublicId: "CODE-827TX8XJ", denomination: 1000, amountKopecks: 119900, next: "x", issueButton: true });
     const [, , text, extra] = send.mock.calls[0] as [string, string, string, { reply_markup?: { inline_keyboard: Array<Array<{ callback_data: string }>> } }];
     expect(text).toContain("📬 Код уйдёт письмом на почту покупателя");
-    expect(text).not.toContain("@");
+    // Адрес почты в беседу не выносим никогда.
+    expect(text).not.toContain("buyer@mail.ru");
     expect(extra.reply_markup?.inline_keyboard[0][0].callback_data).toBe("cdi:CODE-827TX8XJ");
+  });
+
+  it("кто купил: TG, ВК, Roblox, история и приглашение (21.11.2026)", async () => {
+    send.mockResolvedValue(true);
+    await notifyCodeAdmins({ marker: "done", title: "оплачен и выдан автоматически", orderPublicId: "CODE-DA9VG478", denomination: 500, amountKopecks: 65300, next: "" });
+    const text = String(send.mock.calls[0][2]);
+    expect(text).toContain("TG @buyer_1");
+    expect(text).toContain("vk.com/gim237309399?sel=77");
+    expect(text).toContain("Roblox: <code>Nick_&lt;1&gt;</code>");
+    expect(text).toContain("Раньше покупал: кодов 2, робуксов (ГП) 2");
+    expect(text).toContain('<a href="tg://user?id=9">Друг</a>');
+    expect(text).not.toContain("buyer@mail.ru");
+  });
+
+  it("гость и чужая оплата по ссылке", () => {
+    const lines = buyerLines({ status: "PAID", channel: "SITE", createdVia: "SHARE", creator: null } as Parameters<typeof buyerLines>[0]);
+    expect(lines.join("\n")).toBe("👤 Гость без входа · оформлен на сайте · оплатил другой человек по ссылке");
   });
 
   it("строка доставки для бота и подарка", () => {
