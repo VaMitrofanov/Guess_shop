@@ -51,6 +51,31 @@ function strongDevice(): boolean {
   }
 }
 
+/* Адрес манифеста живёт на CDN 30 дней — помним его в браузере, чтобы при
+   повторном заходе не ждать сервер (23.11.2026: «грузит долго»). */
+const MANIFEST_KEY = "rb:avatar3d:manifest";
+function cachedManifestUrl(): string | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MANIFEST_KEY) ?? "null") as { url?: string; at?: number } | null;
+    if (raw?.url && /^https:\/\/[a-z0-9.-]+\.rbxcdn\.com\//i.test(raw.url) && Date.now() - (raw.at ?? 0) < 24 * 3600_000) return raw.url;
+  } catch { /* нет хранилища — просто ждём сервер */ }
+  return null;
+}
+function rememberManifestUrl(url: string | null) {
+  try {
+    if (url) localStorage.setItem(MANIFEST_KEY, JSON.stringify({ url, at: Date.now() }));
+    else localStorage.removeItem(MANIFEST_KEY);
+  } catch { /* не критично */ }
+}
+
+/** Прогрев кэша браузера текстурами, пока качается obj: тот же режим CORS, что у TextureLoader. */
+function warmImage(url: string) {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.decoding = "async";
+  img.src = url;
+}
+
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { mode: "cors", credentials: "omit" });
   if (!res.ok) throw new Error(`cdn ${res.status}`);
@@ -66,16 +91,29 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
     let cancelled = false;
     let cleanup: (() => void) | null = null;
     (async () => {
-      const api = await fetch("/api/account/avatar-3d", { credentials: "same-origin" }).then((r) => r.json()).catch(() => null);
-      if (cancelled || api?.status !== "ready" || typeof api.manifestUrl !== "string") return;
-      const manifest = JSON.parse(await fetchText(api.manifestUrl)) as Manifest;
-      if (!manifest.obj || !manifest.mtl) return;
-      const [THREE, { OBJLoader }, { MTLLoader }, { OrbitControls }] = await Promise.all([
+      // Всё, что не зависит друг от друга, — параллельно: ответ сервера,
+      // three.js (~150 КБ) и файлы модели. Раньше шли цепочкой.
+      const libs = Promise.all([
         import("three"),
         import("three/examples/jsm/loaders/OBJLoader.js"),
         import("three/examples/jsm/loaders/MTLLoader.js"),
         import("three/examples/jsm/controls/OrbitControls.js"),
       ]);
+      const fresh = fetch("/api/account/avatar-3d", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((api) => {
+          const url = api?.status === "ready" && typeof api.manifestUrl === "string" ? api.manifestUrl as string : null;
+          if (api?.status !== "pending") rememberManifestUrl(url);
+          return url;
+        })
+        .catch(() => null);
+      const manifestUrl = cachedManifestUrl() ?? await fresh;
+      if (cancelled || !manifestUrl) return;
+      const manifest = JSON.parse(await fetchText(manifestUrl)) as Manifest;
+      if (!manifest.obj || !manifest.mtl) return;
+      for (const t of manifest.textures ?? []) warmImage(rbxCdnUrl(t));
+      const filesP = Promise.all([fetchText(rbxCdnUrl(manifest.mtl)), fetchText(rbxCdnUrl(manifest.obj))]);
+      const [[THREE, { OBJLoader }, { MTLLoader }, { OrbitControls }], [mtlText, objText]] = await Promise.all([libs, filesP]);
       if (cancelled || !host.current) return;
 
       // Текстуры в mtl названы хешами — подменяем на адреса CDN.
@@ -84,7 +122,6 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
         const last = url.split("/").pop() ?? url;
         return /^[A-Za-z0-9-]+$/.test(last) ? rbxCdnUrl(last) : url;
       });
-      const [mtlText, objText] = await Promise.all([fetchText(rbxCdnUrl(manifest.mtl)), fetchText(rbxCdnUrl(manifest.obj))]);
       const mtl = new MTLLoader(manager);
       mtl.setCrossOrigin("anonymous");
       const materials = mtl.parse(mtlText, "");
@@ -114,9 +151,11 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
           material.needsUpdate = true;
         }
       });
+      let lateRender: (() => void) | null = null;
       await new Promise<void>((resolve) => {
-        manager.onLoad = () => resolve();
-        // Текстур может не быть вовсе — тогда onLoad не придёт.
+        manager.onLoad = () => { resolve(); lateRender?.(); };
+        // Текстур может не быть вовсе — тогда onLoad не придёт. Опоздавшие
+        // текстуры дорисует `lateRender`.
         setTimeout(resolve, 4000);
       });
       if (cancelled || !host.current) return;
@@ -152,8 +191,12 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
       if (side.lengthSq() < 1e-6) side.set(0, 0, 1);
       side.normalize();
       const fitH = size.y / 2 / Math.tan((fov * Math.PI) / 360);
-      const fitW = Math.max(size.x, size.z) / 2 / Math.tan((fov * Math.PI) / 360) / (width / height);
-      const dist = Math.max(fitH, fitW) * 1.08 + Math.max(size.x, size.z) / 2;
+      // Кадр по фигуре анфас (23.11.2026: «мелкий»): раньше запас брался под
+      // самый широкий аксессуар в любом повороте плюс половину глубины — и
+      // персонаж занимал половину сцены. Крылья при повороте могут чуть
+      // выйти за край — это лучше, чем мелкая фигура всегда.
+      const fitW = size.x / 2 / Math.tan((fov * Math.PI) / 360) / (width / height);
+      const dist = Math.max(fitH * 1.04, fitW * 0.88) + size.z / 2;
       camera.position.copy(center).addScaledVector(side, dist);
       camera.lookAt(center);
 
@@ -168,6 +211,7 @@ export default function Avatar3d({ fallback, alt }: { fallback: ReactNode; alt: 
       renderer.domElement.style.touchAction = "pan-y";
       const render = () => renderer.render(scene, camera);
       controls.addEventListener("change", render);
+      lateRender = render;
       controls.update();
       render();
 
