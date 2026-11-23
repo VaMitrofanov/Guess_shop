@@ -944,3 +944,46 @@ export function notifyWbQuestion(input: {
         : "ответить на вопрос в кабинете WB",
   });
 }
+
+/**
+ * 800code (ручной заказ): покупатель написал, а за минуту никто не ответил
+ * (`wb-manual-chat-alert.ts`, 23.11.2026). Бот в таких чатах молчит намеренно,
+ * поэтому сигнал громкий и один на заказ; код доставки — прямо в нём, без него
+ * доставку в кабинете WB не закрыть. Кнопки ответа — те же, что у «покупатель пишет».
+ */
+export function notifyDbsManualChatWaiting(ref: DbsRef, input: {
+  product: string;
+  firstAt: Date;
+  texts: string[];
+  deliveryCode: string | null;
+}) {
+  const notice = {
+    marker: "urgent" as const,
+    zone: "DBS" as const,
+    title: `${input.product} — покупатель ждёт в чате`,
+    lines: [
+      refLine(ref),
+      `💬 пишет с <b>${mskTime(input.firstAt)}</b>, ответа нет`,
+      ...input.texts.map((t) => `«${escapeHtml(t.length > 160 ? `${t.slice(0, 159)}…` : t)}»`),
+      input.deliveryCode ? `🔑 код доставки <code>${escapeHtml(input.deliveryCode)}</code>` : null,
+    ],
+    next: "бот этот заказ не ведёт — <b>ответить и выдать код вручную</b>",
+  };
+  const text = formatAdminNotice(notice);
+  void adminTargetsForNotice(notice).then((targets) => Promise.allSettled(targets.map(async (t) => {
+    const reply = await tgSend(t.chatId, text, {
+      parse_mode: "HTML",
+      reply_markup: wbReplyMarkup(ref.wbOrderId),
+      ...replyToRootFor(ref.cardMessages, t),
+      ...t.extra,
+    });
+    const messageId = tgMessageId(reply);
+    if (messageId === null) {
+      console.warn(`[dbs-notify] «${notice.title}» не доставлено chat_id=${t.chatId}: ${JSON.stringify(reply).slice(0, 200)}`);
+      return;
+    }
+    void import("./db")
+      .then(({ db }) => rememberWbReplyMessage(db as never, t.chatId, messageId, ref.wbOrderId))
+      .catch(() => undefined);
+  })));
+}

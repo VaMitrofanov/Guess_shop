@@ -73,6 +73,8 @@ import {
   WB_RECEIVE_RETRY_HORIZON_MS,
 } from "./wb-delivery-policy";
 import { AUTO_RECEIVE_HELD, deliveryCodeAckText, loadAutoReceiveSignals } from "./wb-auto-receive-signals";
+import { collectManualChatAlerts } from "./wb-manual-chat-alert";
+import { CODE_CARD_NM_IDS } from "./wb-question-templates";
 import type { ClaimHoldOutcome, WbCancellationOutcome } from "./wb-delivery-admin-notify";
 import {
   notifyDbsBuyerMessage,
@@ -83,6 +85,7 @@ import {
   notifyDbsCancelCode,
   notifyDbsOrderCancelled,
   notifyDbsDeliveryStuck,
+  notifyDbsManualChatWaiting,
   notifyDbsGateNotIssued,
   notifyDbsGateUndelivered,
   notifyWbBuyerClaim,
@@ -1252,6 +1255,23 @@ async function alertStuckDeliveries(db: Db) {
       order.supplierStatus,
       order.deliverySecret?.receivedAt ?? new Date(),
     );
+  }
+}
+
+/** 800code и прочие ручные заказы: покупатель пишет, никто не ответил (23.11.2026). */
+async function alertManualOrderChats(db: Db) {
+  const alerts = await collectManualChatAlerts(db as never);
+  for (const alert of alerts) {
+    let deliveryCode: string | null = null;
+    if (alert.deliveryCodeEncrypted && wbDeliveryCryptoReady()) {
+      try { deliveryCode = decryptWbSecret(alert.deliveryCodeEncrypted, "delivery-code"); } catch { deliveryCode = null; }
+    }
+    notifyDbsManualChatWaiting(await dbsRef(db, alert.orderId, alert.wbOrderId), {
+      product: CODE_CARD_NM_IDS.has(alert.nmId) ? "800code" : "ручной заказ",
+      firstAt: alert.firstAt,
+      texts: alert.texts,
+      deliveryCode,
+    });
   }
 }
 
@@ -3014,6 +3034,7 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     await step("auto-gate", () => dispatchGatesForClosedOrders(db));
     if (chatEventsFresh) await step("gate-echo", () => verifyGateDelivery(db));
     await step("stuck-alert", () => alertStuckDeliveries(db));
+    if (chatEventsFresh) await step("manual-chat-alert", () => alertManualOrderChats(db));
 
     if (await streamDue(db, STATUSES_STREAM, 60_000, force)) {
       await step("statuses", () => syncStatuses(db, out), STATUSES_STREAM);
