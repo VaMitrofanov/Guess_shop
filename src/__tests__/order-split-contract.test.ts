@@ -114,7 +114,7 @@ describe("контракт разбитого выкупа", () => {
   it("карточка показывает прогресс, а кнопка называет номер части", () => {
     expect(screen).toContain("SplitPartsBlock");
     expect(screen).toContain("выкуплено");
-    expect(screen).toContain("Выкупить часть ");
+    expect(screen).toContain("`Часть ${nextPartIdx + 1} из ${orderedSplit.length}`");
     // Промежуточный успех не должен читаться как «заказ закрыт».
     expect(screen).toContain("d.splitDone === false");
   });

@@ -805,6 +805,10 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
 }
 
 /* ───────────── ActionPanel per tab ───────────── */
+/* Низ раздела «Где заказ». С 25.11.2026 ошибку, отмену и возврат к выкупу
+   делает выбор места выше (с причиной; старый «✕» отменял без неё, и
+   покупателю уходило «причина: не указана»), заморозку — переключатель.
+   Здесь остаётся только то, чего там нет: «Выкуплено» и статус оплаты. */
 function ActionPanel({
   order, currentTab, onRunAction, showComplete = true,
 }: {
@@ -819,14 +823,8 @@ function ActionPanel({
   const [loading, setLoading] = useState(false);
   const busyRef = useRef(false);
 
-  const showPanel =
-    currentTab === "BUYOUT" ||
-    currentTab === "DIRECT" ||
-    currentTab === "ERROR" ||
-    // ❄️ В своём разделе панель нужна ради одной кнопки — «Разморозить».
-    currentTab === "HELD";
-
-  if (!showPanel) return null;
+  const showPanel = currentTab === "BUYOUT" || currentTab === "DIRECT" || currentTab === "ERROR";
+  if (!showPanel || order.heldAt) return null;
 
   async function doAction(action: string) {
     if (busyRef.current) return;
@@ -837,67 +835,28 @@ function ActionPanel({
     busyRef.current = false;
   }
 
-
-  const showError = currentTab !== "ERROR";
-  const split = order.splitGamepasses ?? [];
-  const splitDone = split.filter(p => p.purchasedAt).length;
-  const splitAllDone = split.length > 0 && splitDone === split.length;
-  // Все части закрыты — покупать больше нечего, остаётся «Выкуплено».
-  // Кнопка «Выкупить часть 3/3» на этом месте предлагала бы купить уже
-  // купленное; сервер такой вызов отвергает, но приглашать к нему не нужно.
-  const hasGamepass = (!!order.gamepassUrl || split.length > 0) && !splitAllDone;
-
-  /* ❄️ Замороженный заказ: кнопок выкупа НЕТ вовсе — не «серые и неактивные»,
-     которые можно продавить двойным тапом, а физически отсутствующие. Сервер
-     всё равно откажет (assertOrderNotHeld), но предлагать нажать то, что
-     заведомо не сработает, — это те же грабли, только вежливые. */
-  if (order.heldAt) {
-    return (
-      <div style={{ display: "flex", gap: 8, padding: "12px 16px 16px" }}>
-        <button className="twa-press" onClick={() => doAction("unhold")} disabled={loading}
-          style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: `${ICE}2e`, color: ICE, fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          {loading ? "⏳…" : "❄ Разморозить"}
-        </button>
-        <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
-          style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          ✕
-        </button>
-      </div>
-    );
-  }
-
   // Прямой заказ до подтверждения оплаты: выкупать/завершать нечего (сервер
-  // отвергнет), оплату подтверждает скриншот в боте. Доступна только отмена.
+  // отвергнет), оплату подтверждает скриншот в боте.
   if (["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) {
     return (
-      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "12px 16px 16px" }}>
+      <div style={{ padding: "12px 16px 16px" }}>
         <span style={{
-          flex: 1, padding: "12px 14px", borderRadius: 12,
+          display: "block", padding: "12px 14px", borderRadius: 12,
           background: `${C.yellow}14`, color: C.yellow, fontSize: 14, fontWeight: 600,
         }}>
           💳 {order.status === "PAYMENT_PENDING" ? "Ждём оплату — скрин придёт в бота" : "Ожидает реквизиты"}
         </span>
-        <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
-          style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          ✕
-        </button>
       </div>
     );
   }
 
-  const isError = currentTab === "ERROR" && order.status === "ERROR";
+  const split = order.splitGamepasses ?? [];
+  const splitAllDone = split.length > 0 && split.every(p => p.purchasedAt);
+  if (!showComplete && !splitAllDone) return null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 16px 16px" }}>
-      {isError && hasGamepass && (
-        <button className="twa-press" onClick={() => doAction("restore-to-buyout")} disabled={loading}
-          style={{ width: "100%", padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.18)", color: C.green, fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          {loading ? "⏳…" : "↩ Вернуть к выкупу"}
-        </button>
-      )}
-      <div style={{ display: "flex", gap: 8 }}>
-      {/* «Выкупить» — автовыкуп с донора. Стоял рядом с «Выкуплено» (одна буква
-          разницы) и звал в мёртвый браузерный сервис; спрятан с донором. */}
+    <div style={{ display: "flex", gap: 8, padding: "12px 16px 16px" }}>
+      {/* «Выкупить» — автовыкуп с донора — спрятан вместе с донором. */}
       {splitAllDone && (
         <span style={{
           flex: 2, display: "flex", alignItems: "center", justifyContent: "center",
@@ -906,12 +865,6 @@ function ActionPanel({
         }}>
           Все {split.length} части отмечены
         </span>
-      )}
-      {showError && (
-        <button className="twa-press" onClick={() => doAction("set-error")} disabled={loading}
-          style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          Ошибка
-        </button>
       )}
       {showComplete && <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
         style={{
@@ -922,11 +875,6 @@ function ActionPanel({
         }}>
         Выкуплено
       </button>}
-      <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
-        style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-        ✕
-      </button>
-      </div>
     </div>
   );
 }
