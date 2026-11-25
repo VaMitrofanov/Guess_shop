@@ -73,3 +73,9 @@ export function parseGamepassRef(input?: string | null): string | null {
   if (BARE_ID_RE.test(trimmed)) return trimmed;
   return parseGamepassUrl(trimmed);
 }
+
+/** Несколько пассов одной вставкой (ID/ссылки через пробел, запятую или с новой строки). Повторы сохраняются. */
+export function parseGamepassRefs(input?: string | null): string[] {
+  if (!input) return [];
+  return input.split(/[\s,;]+/).map((part) => parseGamepassRef(part)).filter((id): id is string => Boolean(id));
+}

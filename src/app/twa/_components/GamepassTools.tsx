@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { C, MONO } from "./theme";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
-import { parseGamepassRef } from "@/lib/gamepass-id";
+import { parseGamepassRefs } from "@/lib/gamepass-id";
 import {
   GAMEPASS_TOOLS,
   gamepassToolsFor,
@@ -65,10 +65,12 @@ export function AttachGamepassForm({ order, token, onDone, onClose }: {
     sellerMatch?: boolean | null;
   } | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const passId = parseGamepassRef(value.trim());
+  const passIds = parseGamepassRefs(value);
+  const passId = passIds.length === 1 ? passIds[0] : null;
+  const multi = passIds.length > 1;
 
   useEffect(() => {
-    const raw = value.trim();
+    const raw = passId ?? "";
     setCheck(null);
     if (!raw) return;
     clearTimeout(debounce.current);
@@ -87,10 +89,49 @@ export function AttachGamepassForm({ order, token, onDone, onClose }: {
     }, 500);
     return () => clearTimeout(debounce.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, token, order.amount]);
+  }, [passId, token, order.amount]);
+
+  const post = async (payload: Record<string, unknown>) => {
+    const r = await fetch("/api/twa/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ...payload, orderId: order.id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error ?? `Сервер ответил ${r.status}`);
+    return d;
+  };
+
+  /** Несколько ID разом = заказ разбит на части, по одной на пасс. */
+  async function submitSplit() {
+    setBusy(true);
+    haptic.impact("light");
+    try {
+      const found = await post({ action: "split-candidates", extraIds: passIds });
+      const byId = new Map<string, { amount: number; busyWith: string | null }>(
+        (found.passes ?? []).map((p: { gamepassId: string; amount: number; busyWith: string | null }) => [p.gamepassId, p]),
+      );
+      const missing = passIds.filter(id => !byId.has(id));
+      if (missing.length) throw new Error(`Roblox не ответил про ${[...new Set(missing)].join(", ")} — попробуй ещё раз`);
+      const busyPass = passIds.find(id => byId.get(id)?.busyWith);
+      if (busyPass) throw new Error(`Пасс ${busyPass} уже привязан к заказу ${byId.get(busyPass)?.busyWith}`);
+      const parts = passIds.map(id => ({ gamepassId: id, amount: byId.get(id)!.amount }));
+      const total = parts.reduce((sum, p) => sum + p.amount, 0);
+      if (total !== order.amount)
+        throw new Error(`Пассы закрывают ${total} R$, а заказ на ${order.amount} R$ — поправь в «🧩 Разбить»`);
+      const d = await post({ action: "set-gamepass-split", parts });
+      haptic.notify(d.warning ? "warning" : "success");
+      toast(d.warning ? `🧩 Разбит на ${parts.length}. ${d.warning}` : `🧩 Разбит на ${parts.length} (${parts.map(p => p.amount).join(" + ")}) — заказ к выкупу`, d.warning ? "error" : "success");
+      onDone();
+    } catch (err) {
+      haptic.notify("error");
+      toast(err instanceof Error ? err.message : "Ошибка сети", "error");
+    } finally { setBusy(false); }
+  }
 
   async function submit() {
-    const raw = value.trim();
+    if (multi) { if (!busy) await submitSplit(); return; }
+    const raw = passId;
     if (!raw || busy) return;
     setBusy(true);
     haptic.impact("light");
@@ -125,21 +166,24 @@ export function AttachGamepassForm({ order, token, onDone, onClose }: {
       display: "flex", flexDirection: "column", gap: 9,
     }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: C.blue }}>🔗 Ссылка на геймпасс</div>
-      <input
+      {/* textarea, а не input: два ID с новой строки однострочное поле склеивает в одно число. */}
+      <textarea
         value={value}
         onChange={e => setValue(e.target.value)}
-        placeholder="roblox.com/game-pass/… или ID"
-        inputMode="url"
+        placeholder={"roblox.com/game-pass/… или ID\nнесколько пассов — каждый с новой строки"}
+        rows={2}
         autoComplete="off"
+        spellCheck={false}
         style={{
           width: "100%", background: C.elevated, border: "none", borderRadius: 10,
           color: "#fff", fontSize: 16, padding: "12px", outline: "none",
-          fontFamily: "inherit", boxSizing: "border-box",
+          fontFamily: "inherit", boxSizing: "border-box", resize: "vertical",
         }}
       />
-      {(hint || passId) && (
+      {(hint || passIds.length > 0) && (
         <div style={{ fontSize: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {passId && <span style={{ color: C.textSecondary, fontFamily: MONO }}>{passId}</span>}
+          {passIds.length > 0 && <span style={{ color: C.textSecondary, fontFamily: MONO }}>{passIds.join(" · ")}</span>}
+          {multi && <span style={{ color: C.blue, fontWeight: 600 }}>{passIds.length} пасса — заказ разобьётся на части</span>}
           {hint && <span style={{ color: hint.color, fontWeight: 600 }}>{hint.text}</span>}
         </div>
       )}
@@ -148,9 +192,9 @@ export function AttachGamepassForm({ order, token, onDone, onClose }: {
           style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
           Отмена
         </button>
-        <button className="twa-press" onClick={submit} disabled={busy || !passId}
-          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.blue, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy || !passId ? 0.5 : 1 }}>
-          {busy ? "…" : "Привязать — заказ к выкупу"}
+        <button className="twa-press" onClick={submit} disabled={busy || passIds.length === 0}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.blue, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy || passIds.length === 0 ? 0.5 : 1 }}>
+          {busy ? "…" : multi ? `Разбить на ${passIds.length} — к выкупу` : "Привязать — заказ к выкупу"}
         </button>
       </div>
     </div>

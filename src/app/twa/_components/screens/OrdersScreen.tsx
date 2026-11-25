@@ -17,7 +17,7 @@ import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import NickGamepasses from "../NickGamepasses";
 import { AskBuyerForm, AttachGamepassForm, GamepassToolRows, KeyCreateForm } from "../GamepassTools";
-import { parseGamepassRef } from "@/lib/gamepass-id";
+import { parseGamepassRef, parseGamepassRefs } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
 import FirstInLineBlock from "../FirstInLineBlock";
@@ -1670,35 +1670,64 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
    *  Добавляется к уже собранным частям, а не заменяет их. */
   preselect?: string | null;
 }) {
-  type Candidate = { gamepassId: string; name: string; price: number; amount: number; busyWith: string | null };
+  type Candidate = { gamepassId: string; name: string; price: number; amount: number; busyWith: string | null; manual?: boolean };
+  const initialChosen = [
+    ...(order.splitGamepasses ?? []).map(p => p.gamepassId),
+    ...(preselect ? [String(preselect)] : []),
+  ];
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [nick, setNick] = useState<string | null>(null);
   const [passes, setPasses] = useState<Candidate[]>([]);
-  const [chosen, setChosen] = useState<string[]>(() => [
-    ...(order.splitGamepasses ?? []).map(p => p.gamepassId),
-    ...(preselect ? [String(preselect)] : []),
-  ]);
+  const [chosen, setChosen] = useState<string[]>(initialChosen);
+  // Пассы, присланные ID-шниками: поиск по нику их может не видеть.
+  const [extraIds, setExtraIds] = useState<string[]>(() => [...new Set(initialChosen)]);
+  const [idInput, setIdInput] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  async function loadCandidates(ids: string[]): Promise<{ passes: Candidate[]; unresolved: string[] } | null> {
+    const r = await fetch("/api/twa/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "split-candidates", orderId: order.id, extraIds: ids }),
+    });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) { toast(d?.error ?? "Не нашли геймпассы", "error"); return null; }
+    setNick(d.nick ?? null);
+    setPasses(d.passes ?? []);
+    return { passes: d.passes ?? [], unresolved: d.unresolved ?? [] };
+  }
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const r = await fetch("/api/twa/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: "split-candidates", orderId: order.id }),
-        });
-        const d = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { toast(d?.error ?? "Не нашли геймпассы", "error"); return; }
-        setNick(d.nick ?? null);
-        setPasses(d.passes ?? []);
-      } catch { if (alive) toast("Ошибка сети", "error"); }
+      try { if (alive) await loadCandidates(extraIds); }
+      catch { if (alive) toast("Ошибка сети", "error"); }
       finally { if (alive) setLoading(false); }
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.id, token]);
+
+  /** «Добавить по ID»: каждый вставленный пасс сразу становится частью. */
+  async function addByIds() {
+    const ids = parseGamepassRefs(idInput);
+    if (ids.length === 0) { toast("Нужен ID или ссылка roblox.com/game-pass/…", "error"); return; }
+    setAdding(true);
+    try {
+      const nextExtra = [...new Set([...extraIds, ...ids])];
+      const res = await loadCandidates(nextExtra);
+      if (!res) return;
+      setExtraIds(nextExtra);
+      const ok = ids.filter(id => res.passes.some(p => p.gamepassId === id && !p.busyWith));
+      setChosen(prev => [...prev, ...ok].slice(0, MAX_SPLIT_PARTS));
+      setIdInput("");
+      const bad = ids.filter(id => !ok.includes(id));
+      if (bad.length) toast(`Не добавлены: ${[...new Set(bad)].join(", ")} — Roblox не ответил или пасс занят`, "error");
+      else haptic.notify("success");
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setAdding(false); }
+  }
 
   const byId = new Map(passes.map(p => [p.gamepassId, p]));
   const picked = chosen.map(id => byId.get(id)).filter(Boolean) as Candidate[];
@@ -1819,12 +1848,32 @@ function SplitModal({ order, token, onDone, onClose, preselect = null }: {
           </div>
         )}
 
+        {!hasPurchased && (
+          <div style={{ display: "flex", gap: 8, margin: "0 20px 10px" }}>
+            <input
+              value={idInput}
+              onChange={e => setIdInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") void addByIds(); }}
+              placeholder="ID пассов через пробел"
+              autoComplete="off"
+              style={{
+                flex: 1, minWidth: 0, background: C.elevated, border: "none", borderRadius: 10,
+                color: "#fff", fontSize: 16, padding: "11px 12px", outline: "none", fontFamily: "inherit",
+              }}
+            />
+            <button className="twa-press" onClick={() => void addByIds()} disabled={adding || !idInput.trim()}
+              style={{ padding: "0 14px", borderRadius: 10, border: "none", background: C.blue, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: adding || !idInput.trim() ? 0.5 : 1 }}>
+              {adding ? "…" : "Добавить"}
+            </button>
+          </div>
+        )}
+
         <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "0 20px", overscrollBehavior: "contain" }}>
           {loading ? (
             <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>Ищу геймпассы…</div>
           ) : passes.length === 0 ? (
             <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 14 }}>
-              У этого ника не нашли пассов на продажу
+              По нику пассов не нашли — добавьте их по ID выше
             </div>
           ) : passes.map(p => {
             const count = chosen.filter(x => x === p.gamepassId).length;

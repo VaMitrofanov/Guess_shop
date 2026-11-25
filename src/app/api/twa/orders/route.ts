@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { getGamepassById } from "@/lib/roblox";
+import { parseGamepassRef } from "@/lib/gamepass-id";
 import { bridgeConfigured, bridgeGamepassDetails } from "@/lib/roblox-bridge";
 import {
   BuyoutError,
@@ -39,6 +40,7 @@ import {
   assertSplitCoversOrder,
   buildSplitParts,
   describeSplitProgress,
+  MAX_SPLIT_PARTS,
   nextUnpurchasedPart,
   partPriceMatches,
   splitChargedTotal,
@@ -2924,17 +2926,39 @@ export async function POST(req: NextRequest) {
   // в двадцатизначном числе проще, чем кажется.
   if (action === "split-candidates") {
     const nick = order.robloxUsername ?? order.probableNick;
-    if (!nick) return NextResponse.json({ error: "У заказа нет ника Roblox" }, { status: 400 });
-    const found = await searchForSalePassesByNick(nick).catch(() => null);
-    if (!found || found.status !== "ok")
-      return NextResponse.json({ ok: true, nick, passes: [], reason: found?.status ?? "unreachable" });
+    // Пассы, которые покупатель прислал ID-шниками: поиск по нику их видит не
+    // всегда (скрытый плейс, другой аккаунт) — а без них разбивку не собрать.
+    const extraIds = [...new Set(
+      (Array.isArray(body.extraIds) ? body.extraIds : [])
+        .map((raw: unknown) => parseGamepassRef(String(raw ?? "").trim()))
+        .filter((id: string | null): id is string => Boolean(id)),
+    )].slice(0, MAX_SPLIT_PARTS) as string[];
+    if (!nick && extraIds.length === 0)
+      return NextResponse.json({ error: "У заказа нет ника Roblox — добавьте пассы по ID" }, { status: 400 });
+
+    const found = nick ? await searchForSalePassesByNick(nick).catch(() => null) : null;
+    const listed: { gamepassId: string; name: string; price: number; manual?: boolean }[] =
+      found?.status === "ok"
+        ? found.passes.map((p: any) => ({ gamepassId: String(p.gamepassId), name: p.name, price: Number(p.price) }))
+        : [];
+
+    const settings = extraIds.some((id) => !listed.some((p) => p.gamepassId === id))
+      ? await prisma.globalSettings.findUnique({ where: { id: "global" } })
+      : null;
+    const unresolved: string[] = [];
+    for (const id of extraIds) {
+      if (listed.some((p) => p.gamepassId === id)) continue;
+      const { info } = await resolveGamepassForBinding(id, settings?.robloxCookie);
+      if (!info || info.basePrice == null) { unresolved.push(id); continue; }
+      listed.push({ gamepassId: id, name: info.name, price: info.basePrice, manual: true });
+    }
 
     const usedByOthers = await prisma.wbOrder.findMany({
       where: {
         id: { not: orderId },
         isTest: false,
         status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
-        gamepassId: { in: found.passes.map((p: any) => String(p.gamepassId)) },
+        gamepassId: { in: listed.map((p) => p.gamepassId) },
       },
       select: { gamepassId: true, wbCode: true },
     });
@@ -2945,14 +2969,17 @@ export async function POST(req: NextRequest) {
       nick,
       // Имя, которым ответил Roblox: в заказе может лежать другой регистр или
       // старый ник, а список подписан аккаунтом, где пассы реально лежат.
-      resolvedName: found.resolvedName ?? nick,
-      passes: found.passes.map((p: any) => ({
-        gamepassId: String(p.gamepassId),
+      resolvedName: found?.status === "ok" ? found.resolvedName ?? nick : nick,
+      ...(found && found.status !== "ok" ? { reason: found.status } : !found && nick ? { reason: "unreachable" } : {}),
+      unresolved,
+      passes: listed.map((p) => ({
+        gamepassId: p.gamepassId,
         name: p.name,
         price: p.price,
         // Номинал, который закрывает этот пасс: обратная сторона ceil(x/0.7).
-        amount: Math.floor(Number(p.price) * 7 / 10),
-        busyWith: busy.get(String(p.gamepassId)) ?? null,
+        amount: Math.floor(p.price * 7 / 10),
+        busyWith: busy.get(p.gamepassId) ?? null,
+        manual: p.manual ?? false,
       })),
     });
   }

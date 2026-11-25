@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MAX_SPLIT_PARTS, planSplitFor } from "@/lib/order-gamepass-split";
+import { parseGamepassRefs } from "@/lib/gamepass-id";
 import { AdminOrder, num } from "./types";
 import styles from "./orders.module.css";
 
@@ -33,6 +34,7 @@ interface Candidate {
   price: number;
   amount: number;
   busyWith: string | null;
+  manual?: boolean;
 }
 
 export default function SplitDialog({
@@ -59,6 +61,14 @@ export default function SplitDialog({
     ...parts.map(part => String(part.gamepassId)),
     ...(preselect ? [String(preselect)] : []),
   ]);
+  // Пассы, присланные ID-шниками: поиск по нику их может не видеть, а уже
+  // сохранённые части без них показывались бы «номинал неизвестен».
+  const [extraIds, setExtraIds] = useState<string[]>(() => [...new Set([
+    ...parts.map(part => String(part.gamepassId)),
+    ...(preselect ? [String(preselect)] : []),
+  ])]);
+  const [idInput, setIdInput] = useState("");
+  const [adding, setAdding] = useState(false);
 
   /** Хотя бы одна часть выкуплена — состав трогать нельзя, робуксы списаны. */
   const hasPurchased = parts.some(part => part.purchasedAt);
@@ -83,7 +93,7 @@ export default function SplitDialog({
     let alive = true;
     void (async () => {
       try {
-        const data = await post({ action: "split-candidates" });
+        const data = await post({ action: "split-candidates", extraIds });
         if (!alive) return;
         setNick(data?.nick ?? null);
         setCandidates(data?.passes ?? []);
@@ -94,7 +104,32 @@ export default function SplitDialog({
       }
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post]);
+
+  /** «Добавить по ID»: каждый вставленный пасс сразу становится частью. */
+  async function addByIds() {
+    const ids = parseGamepassRefs(idInput);
+    if (ids.length === 0) { onToast("Нужен ID или ссылка roblox.com/game-pass/…", true); return; }
+    setAdding(true);
+    try {
+      const nextExtra = [...new Set([...extraIds, ...ids])];
+      const data = await post({ action: "split-candidates", extraIds: nextExtra });
+      const passes: Candidate[] = data?.passes ?? [];
+      setNick(data?.nick ?? null);
+      setCandidates(passes);
+      setExtraIds(nextExtra);
+      const ok = ids.filter(id => passes.some(p => p.gamepassId === id && !p.busyWith));
+      setChosen(prev => [...prev, ...ok].slice(0, MAX_SPLIT_PARTS));
+      setIdInput("");
+      const bad = [...new Set(ids.filter(id => !ok.includes(id)))];
+      if (bad.length) onToast(`Не добавлены: ${bad.join(", ")} — Roblox не ответил или пасс занят`, true);
+    } catch (error) {
+      onToast((error as Error).message, true);
+    } finally {
+      setAdding(false);
+    }
+  }
 
   const byId = useMemo(() => new Map(candidates.map(c => [c.gamepassId, c])), [candidates]);
   const picked = chosen.map(id => byId.get(id)).filter(Boolean) as Candidate[];
@@ -185,6 +220,8 @@ export default function SplitDialog({
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void save(); return; }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (hasPurchased) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       if (event.key === "Backspace") {
         event.preventDefault();
         setChosen(prev => prev.slice(0, -1));
@@ -234,13 +271,33 @@ export default function SplitDialog({
               Пассы покупателя
               <em>{loading ? "ищем…" : `${candidates.length} шт. · клавиши 1…9`}</em>
             </div>
+            {!hasPurchased && (
+              <div style={{ display: "flex", gap: 6, padding: "8px 10px 0" }}>
+                <input
+                  value={idInput}
+                  onChange={event => setIdInput(event.target.value)}
+                  onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void addByIds(); } }}
+                  placeholder="ID или ссылки пассов через пробел"
+                  autoComplete="off"
+                  spellCheck={false}
+                  style={{
+                    flex: 1, minWidth: 0, minHeight: 34, padding: "0 10px", borderRadius: 8,
+                    border: "1px solid var(--o-line, rgba(255,255,255,.12))", background: "rgba(255,255,255,.04)",
+                    color: "#fff", fontSize: 14, outline: "none",
+                  }}
+                />
+                <button type="button" className={styles.btn} onClick={() => void addByIds()} disabled={adding || !idInput.trim()}>
+                  {adding ? "…" : "Добавить"}
+                </button>
+              </div>
+            )}
             <div className={styles.splitColBody}>
               {loading ? (
                 <div className={styles.loading}>Ищем геймпассы на продаже…</div>
               ) : candidates.length === 0 ? (
                 <div className={styles.empty}>
                   <strong>Пассов не нашли</strong>
-                  У этого ника нет геймпассов на продаже — или Roblox сейчас недоступен.
+                  По нику пассов на продаже нет — добавьте их по ID выше.
                 </div>
               ) : candidates.map((candidate, index) => {
                 const count = countOf(candidate.gamepassId);

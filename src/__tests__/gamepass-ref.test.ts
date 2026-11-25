@@ -1,4 +1,4 @@
-import { extractGamepassId, parseGamepassRef, parseGamepassUrl } from "../lib/gamepass-id";
+import { extractGamepassId, parseGamepassRef, parseGamepassRefs, parseGamepassUrl } from "../lib/gamepass-id";
 import * as mirror from "../../bots/shared/gamepass-id";
 
 /**
@@ -91,5 +91,19 @@ describe("gamepass reference parsing", () => {
       expect(mirror.parseGamepassRef(input)).toBe(parseGamepassRef(input));
       expect(mirror.parseGamepassUrl(input)).toBe(parseGamepassUrl(input));
     }
+  });
+});
+
+describe("parseGamepassRefs — несколько пассов одной вставкой", () => {
+  it("ID с новой строки, через пробел и запятую", () => {
+    expect(parseGamepassRefs("2092585403\n\n2096727216")).toEqual(["2092585403", "2096727216"]);
+    expect(parseGamepassRefs("2092585403, https://www.roblox.com/game-pass/2096727216/x")).toEqual(["2092585403", "2096727216"]);
+  });
+  it("повтор одного пасса сохраняется — это две части", () => {
+    expect(parseGamepassRefs("2092585403 2092585403")).toEqual(["2092585403", "2092585403"]);
+  });
+  it("мусор отбрасывается", () => {
+    expect(parseGamepassRefs("получилось")).toEqual([]);
+    expect(parseGamepassRefs("")).toEqual([]);
   });
 });
