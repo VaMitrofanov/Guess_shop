@@ -7,6 +7,7 @@ import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepass
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { getGamepassById } from "@/lib/roblox";
 import { parseGamepassRef } from "@/lib/gamepass-id";
+import { EDITABLE_STATUSES, ERRORABLE_STATUSES, QUEUEABLE_STATUSES, REBINDABLE_STATUSES, REJECTABLE_STATUSES } from "@/lib/order-actions";
 import { bridgeConfigured, bridgeGamepassDetails } from "@/lib/roblox-bridge";
 import {
   BuyoutError,
@@ -44,6 +45,7 @@ import {
   nextUnpurchasedPart,
   partPriceMatches,
   splitChargedTotal,
+  splitEditRefusal,
   splitIsComplete,
   SplitError,
   type StoredPart,
@@ -1557,8 +1559,7 @@ export async function POST(req: NextRequest) {
     // нечего, и «подняли, но он всё равно не выкупается» было бы враньём.
     if (order.heldAt) return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
     // В «Готово» и «Отменено» порядок ничего не значит: там смотрят историю.
-    const QUEUEABLE = ["PENDING", "IN_PROGRESS", "ERROR", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"];
-    if (!QUEUEABLE.includes(order.status))
+    if (!QUEUEABLE_STATUSES.includes(order.status))
       return NextResponse.json({ error: `Заказ в статусе ${order.status} не стоит в очереди — поднимать нечего` }, { status: 400 });
 
     const on = body.priority !== false;
@@ -1573,7 +1574,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "set-error") {
-    if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
+    if (![...ERRORABLE_STATUSES, "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Cannot set error on this order" }, { status: 400 });
     await prisma.wbOrder.update({
       where: { id: orderId },
@@ -1915,7 +1916,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "reject") {
-    if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status))
+    if (!REJECTABLE_STATUSES.includes(order.status))
       return NextResponse.json({ error: "Cannot reject this order" }, { status: 400 });
     const rejectionReason = String(reason ?? "не указана");
     await prisma.wbOrder.update({
@@ -2215,7 +2216,7 @@ export async function POST(req: NextRequest) {
     // заказ снова выглядит рабочим. Разморозка обязана быть отдельным шагом.
     if (order.heldAt)
       return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
-    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"].includes(order.status))
+    if (!EDITABLE_STATUSES.includes(order.status))
       return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
     /* Выкупленный заказ правится с 10.11.2026 (RVAMP3J: покупатель прислал
        другой пасс уже после «Выкуплено»). Это правка записи, а не выкуп:
@@ -2325,6 +2326,9 @@ export async function POST(req: NextRequest) {
 
     if (Object.keys(data).length === 0)
       return NextResponse.json({ error: "Нет изменений" }, { status: 400 });
+
+    const splitBlock = splitEditRefusal(splitParts, { amount: "amount" in data, gamepass: "gamepassUrl" in data });
+    if (splitBlock) return NextResponse.json({ error: splitBlock, split: true }, { status: 409 });
 
     await prisma.wbOrder.update({ where: { id: orderId }, data });
     const stamp = new Date().toISOString().slice(0, 10);
@@ -2489,6 +2493,8 @@ export async function POST(req: NextRequest) {
     if (!idMatch)
       return NextResponse.json({ error: "gamepassId обязателен (ID или URL)" }, { status: 400 });
     const gamepassUrl = `https://www.roblox.com/game-pass/${idMatch[1]}`;
+    const splitBlock = splitEditRefusal(splitParts, { gamepass: true });
+    if (splitBlock) return NextResponse.json({ error: splitBlock, split: true }, { status: 409 });
 
     const ATTACHABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
     if (!ATTACHABLE.includes(order.status))
@@ -3157,8 +3163,7 @@ export async function POST(req: NextRequest) {
     const { targetUserId, note } = body;
     if (!targetUserId) return NextResponse.json({ error: "targetUserId обязателен" }, { status: 400 });
 
-    const REBINDABLE = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"];
-    if (!REBINDABLE.includes(order.status))
+    if (!REBINDABLE_STATUSES.includes(order.status))
       return NextResponse.json({ error: `Нельзя перепривязать заказ в статусе ${order.status}` }, { status: 400 });
 
     const targetUser = await prisma.user.findUnique({

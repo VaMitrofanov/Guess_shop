@@ -27,6 +27,7 @@ import { buildBuyoutSummary, type BuyoutOrderInput, type BuyoutTone } from "@/li
 import OrderRiskBlock from "@/components/admin/risks/review-plaque";
 import { NowBlock, OrderFeed } from "./order-signals";
 import { replyForOrder } from "@/lib/order-reply";
+import { canOrderAction, ORDER_ACTION_OFF_LABEL, ORDER_ACTIONS } from "@/lib/order-actions";
 
 const TONE_CLASS: Record<BuyoutTone, string> = {
   green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
@@ -374,7 +375,9 @@ export default function OrderDossier({
           )}
           {/* Правка — рядом с главным действием: чаще всего в досье приходят
               именно дописать ник или ID пасса, которого не нашёл поиск. */}
-          <button type="button" className={styles.btn} onClick={onEdit}>✏️ Правка <kbd>I</kbd></button>
+          {canOrderAction(order, "edit") && (
+            <button type="button" className={styles.btn} onClick={onEdit}>{ORDER_ACTIONS.edit.icon} {ORDER_ACTIONS.edit.label} <kbd>I</kbd></button>
+          )}
           {/* 📨 Своя кнопка с 28.10.2026: в «Инструментах пасса» о ней не знали. */}
           {hasGamepassTool(order, "ask") && (
             <button type="button" className={styles.btn} onClick={() => {
@@ -383,26 +386,26 @@ export default function OrderDossier({
             }}>📨 Инструкция <kbd>M</kbd></button>
           )}
           <button type="button" className={styles.btn} onClick={onHold}>
-            {order.heldAt ? "❄️ Разморозить" : "❄️ Заморозить"} <kbd>F</kbd>
+            {order.heldAt ? `${ORDER_ACTIONS.unhold.icon} ${ORDER_ACTIONS.unhold.label}` : `${ORDER_ACTIONS.hold.icon} ${ORDER_ACTIONS.hold.label}`} <kbd>F</kbd>
           </button>
-          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onFavorite}>{order.isFavorite ? "★ Из избранного" : "★ В избранное"}</button>
+          <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onFavorite}>{ORDER_ACTIONS.favorite.icon} {order.isFavorite ? ORDER_ACTION_OFF_LABEL.favorite : ORDER_ACTIONS.favorite.label}</button>
           {/* ⚡ Место в очереди. У замороженного заказа очереди нет — кнопки
               тоже: сервер такой заказ поднимать откажется. */}
-          {!order.heldAt && (
+          {canOrderAction(order, "priority") && (
             <button type="button" className={`${styles.btn} ${styles.actionMore} ${order.priorityAt ? styles.btnPrio : ""}`} onClick={onPriority}>
-              {order.priorityAt ? "⚡ Вернуть в очередь" : "⚡ Вперёд очереди"} <kbd>P</kbd>
+              {ORDER_ACTIONS.priority.icon} {order.priorityAt ? ORDER_ACTION_OFF_LABEL.priority : ORDER_ACTIONS.priority.label} <kbd>P</kbd>
             </button>
           )}
-          {["PENDING", "IN_PROGRESS"].includes(order.status) && (
-            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onError}>⚠ Пометить ошибкой <kbd>E</kbd></button>
+          {canOrderAction(order, "error") && (
+            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onError}>{ORDER_ACTIONS.error.icon} {ORDER_ACTIONS.error.label} <kbd>E</kbd></button>
           )}
           {/* 🔁 У выкупленного заказа главного действия нет — эта кнопка стоит
               в основном ряду, а не в «Ещё»: за ней приходят именно сюда. */}
           {onRebuy && canRebuy(order) && (
-            <button type="button" className={styles.btn} onClick={onRebuy}>🔁 Не дошло — выкупить снова</button>
+            <button type="button" className={styles.btn} onClick={onRebuy}>{ORDER_ACTIONS.rebuy.icon} {ORDER_ACTIONS.rebuy.label}</button>
           )}
-          {!["COMPLETED", "REJECTED"].includes(order.status) && (
-            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>✕ Отменить заказ</button>
+          {canOrderAction(order, "reject") && (
+            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>{ORDER_ACTIONS.reject.icon} {ORDER_ACTIONS.reject.label}</button>
           )}
           <a className={`${styles.btn} ${styles.actionMore}`} href={`/admin/orders/${order.id}`}>Полная карточка ↗</a>
           {/* Ряд из девяти кнопок занимал два ряда на десктопе и два-три экрана на

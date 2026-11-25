@@ -309,3 +309,22 @@ export function describeSplitProgress(parts: readonly StoredPart[]): string {
   const done = parts.filter((p) => p.purchasedAt).length;
   return `${done}/${parts.length}`;
 }
+
+/**
+ * Правка заказа с разбивкой (25.11.2026). Номинал и пасс у такого заказа —
+ * это части: поменять их правкой или привязкой одного пасса значит оставить
+ * части от старого состава (сумма не сходится с заказом, а легаси-поле пасса
+ * смотрит мимо них). Состав меняется только целиком — через разбивку.
+ * `null` — правку можно принять.
+ */
+export function splitEditRefusal(
+  parts: readonly Pick<StoredPart, "amount" | "purchasedAt">[],
+  change: { amount?: boolean; gamepass?: boolean },
+): string | null {
+  if (parts.length === 0 || (!change.amount && !change.gamepass)) return null;
+  const what = change.amount && change.gamepass ? "номинал и пасс" : change.amount ? "номинал" : "пасс";
+  const shape = parts.map((p) => p.amount).join(" + ");
+  if (parts.some((p) => p.purchasedAt))
+    return `У заказа разбивка ${shape}, и часть уже выкуплена — ${what} так не поменять. Сначала «Снять разбиение».`;
+  return `У заказа разбивка ${shape} — ${what} меняется через «🧩 Разбить выкуп» (пересобрать состав или снять разбиение).`;
+}

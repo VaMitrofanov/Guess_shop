@@ -33,6 +33,7 @@ import {
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
 import { MAX_SPLIT_PARTS } from "@/lib/order-gamepass-split";
+import { canOrderAction, ORDER_ACTION_OFF_LABEL, ORDER_ACTIONS } from "@/lib/order-actions";
 import { buildBuyoutSummary, type BuyoutOrderInput } from "@/lib/buyout-summary";
 
 /** ❄️ Цвет заморозки. Живёт в теме — здесь только короткий псевдоним. */
@@ -2292,31 +2293,29 @@ function OrderMenuSheet({
           ? `${order.splitGamepasses?.filter(p => p.purchasedAt).length ?? 0}/${splitIds.length}`
           : tool.hint,
       ))}
-      {canEdit && row("edit", "✏️", "Редактировать заказ")}
-      {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && row("rebind", "🔄", "Перепривязать к клиенту")}
-      {canMove && row("move", "↪", "Переместить в другой раздел")}
+      {canEdit && row("edit", ORDER_ACTIONS.edit.icon, ORDER_ACTIONS.edit.label)}
+      {canOrderAction(order, "rebind") && row("rebind", ORDER_ACTIONS.rebind.icon, ORDER_ACTIONS.rebind.label)}
+      {canMove && row("move", ORDER_ACTIONS.move.icon, ORDER_ACTIONS.move.label)}
 
       <div className="twa-oc-menu-group">Статус</div>
-      {order.status !== "ERROR" && !order.heldAt && !["COMPLETED", "REJECTED"].includes(order.status) && row("error", "⚠️", "Пометить ошибкой")}
+      {canOrderAction(order, "error") && row("error", ORDER_ACTIONS.error.icon, ORDER_ACTIONS.error.label)}
       {order.heldAt
-        ? row("unhold", "❄️", "Разморозить", order.heldReason ?? undefined)
-        : !["COMPLETED", "REJECTED"].includes(order.status) && row("hold", "❄️", "Заморозить — не выкупать")}
-      {row("favorite", order.isFavorite ? "★" : "☆", order.isFavorite ? "Убрать из избранного" : "В избранное")}
+        ? row("unhold", ORDER_ACTIONS.unhold.icon, ORDER_ACTIONS.unhold.label, order.heldReason ?? undefined)
+        : canOrderAction(order, "hold") && row("hold", ORDER_ACTIONS.hold.icon, ORDER_ACTIONS.hold.label)}
+      {row("favorite", order.isFavorite ? "★" : "☆", order.isFavorite ? ORDER_ACTION_OFF_LABEL.favorite : ORDER_ACTIONS.favorite.label)}
       {/* ⚡ Место в очереди — такой же признак поверх статуса, как заморозка:
           заказ никуда не переезжает, он просто выкупается первым. */}
-      {canPrioritize && row("priority", "⚡", order.priorityAt ? "Убрать из первых" : "Вперёд очереди",
-        order.priorityAt ? "сейчас первый" : "выкупать первым")}
+      {canPrioritize && row("priority", ORDER_ACTIONS.priority.icon, order.priorityAt ? ORDER_ACTION_OFF_LABEL.priority : ORDER_ACTIONS.priority.label)}
       {/* 🔁 Выкуплен, но покупатель робуксов не получил — обратно в очередь первым. */}
-      {canRebuy(order as never) && row("rebuy", "🔁", "Не дошло — выкупить снова", "первым в очередь")}
+      {canRebuy(order as never) && row("rebuy", ORDER_ACTIONS.rebuy.icon, ORDER_ACTIONS.rebuy.label)}
       {/* Повтор уведомления о выкупе (16.11.2026): карточка выкупленного теперь
           показывает только «Выкуплен, когда, кто», а действие живёт здесь. */}
-      {order.status === "COMPLETED" && row("resend", "📨", "Повторить уведомление о выкупе")}
-      {["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status)
-        && row("reject", "✕", "Отменить заказ", undefined, "red")}
+      {canOrderAction(order, "resend") && row("resend", ORDER_ACTIONS.resend.icon, ORDER_ACTIONS.resend.label)}
+      {canOrderAction(order, "reject") && row("reject", ORDER_ACTIONS.reject.icon, ORDER_ACTIONS.reject.label, undefined, "red")}
 
       <div className="twa-oc-menu-group">Редко</div>
-      {canRefund && row("refund", "↩️", "Оформить возврат", "T-Bank", "dim")}
-      {row("trace", "🕵", "След покупателя", undefined, "dim")}
+      {canRefund && row("refund", ORDER_ACTIONS.refund.icon, ORDER_ACTIONS.refund.label, "T-Bank", "dim")}
+      {row("trace", ORDER_ACTIONS.trace.icon, ORDER_ACTIONS.trace.label, undefined, "dim")}
     </BottomSheet>
   );
 }
@@ -2720,7 +2719,7 @@ function OrderCard({
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   // С 10.11 и выкупленный: поправить пасс/ник записи (статус не меняется).
-  const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED", "COMPLETED"].includes(order.status);
+  const isEditable = canOrderAction(order, "edit");
   /* Что можно сделать с геймпассом этого заказа — общий модуль
      `@/lib/gamepass-tools`. Предусловия списаны с сервера и одинаковы в TWA, в
      досье сайта и в правке; до 19.10.2026 каждая поверхность считала их сама и
@@ -2731,8 +2730,7 @@ function OrderCard({
   const isSplittable = canTool("split");
   // ⚡ Поднять можно то, что стоит в очереди. Замороженный заказ выключен из
   // очередей целиком — «подняли, но не выкупается» было бы враньём.
-  const canPrioritize = !!onTogglePriority && !order.heldAt
-    && ["PENDING", "IN_PROGRESS", "ERROR", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status);
+  const canPrioritize = !!onTogglePriority && canOrderAction(order, "priority");
   const payment = order.paymentAttempts?.[0];
   // Возврат — любому заказу с подтверждённым платежом T-Bank, а не только
   // SITE: с эквайрингом в ботах (orderSource=DIRECT) деньги приходят тем же
@@ -3602,8 +3600,8 @@ function OrderCard({
         {/* Действия с заказом — строками одной группы (редизайн 11.11.2026), а не
             четырьмя контурными кнопками разного цвета. Опасное — отдельно, ниже. */}
         {(() => {
-          const canEditNow = isEditable && order.status !== "COMPLETED" && !editOpen;
-          const canRebind = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && !rebindOpen;
+          const canEditNow = isEditable && !editOpen;
+          const canRebind = canOrderAction(order, "rebind") && !rebindOpen;
           const canMoveNow = showMoveBtn && !moveOpen;
           if (!canEditNow && !canRebind && !canMoveNow) return null;
           const actRow = (icon: string, title: string, sub: string, onTap: () => void) => (
@@ -3615,9 +3613,9 @@ function OrderCard({
           );
           return (
             <div className="twa-os-group">
-              {canEditNow && actRow("✏️", "Редактировать", "номинал, ник, пасс", () => setEditOpen(true))}
-              {canMoveNow && actRow("↪️", "Переместить в раздел", "с записью в ленту", () => setMoveOpen(true))}
-              {canRebind && actRow("🔄", "Перепривязать", "к другому покупателю", () => setRebindOpen(true))}
+              {canEditNow && actRow(ORDER_ACTIONS.edit.icon, ORDER_ACTIONS.edit.label, "номинал, ник, пасс", () => setEditOpen(true))}
+              {canMoveNow && actRow(ORDER_ACTIONS.move.icon, ORDER_ACTIONS.move.label, "с записью в ленту", () => setMoveOpen(true))}
+              {canRebind && actRow(ORDER_ACTIONS.rebind.icon, ORDER_ACTIONS.rebind.label, "к другому покупателю", () => setRebindOpen(true))}
             </div>
           );
         })()}

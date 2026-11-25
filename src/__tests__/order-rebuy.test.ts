@@ -1,4 +1,5 @@
 import { buildRebuyData } from "@/lib/order-recovery";
+import { EDITABLE_STATUSES } from "@/lib/order-actions";
 import { canRebuy, orderBadge, orderFlag, primaryActionFor, type PresentableOrder } from "@/lib/order-presentation";
 
 /* 🔁 Перевыкуп (DNZ5WLR, 01.11.2026): выкупленный заказ, который не дошёл до
@@ -115,7 +116,8 @@ describe("правка выкупленного заказа (10.11.2026)", () =
   const edit = route.slice(route.indexOf('if (action === "edit-order")'), route.indexOf('if (action === "set-source")'));
 
   it("принимает COMPLETED, но статус и номинал не трогает", () => {
-    expect(edit).toContain('"COMPLETED"].includes(order.status)');
+    expect(edit).toContain("EDITABLE_STATUSES.includes(order.status)");
+    expect(EDITABLE_STATUSES).toContain("COMPLETED");
     expect(edit).toContain("if (completedEdit) { /* статус не трогаем */ }");
     expect(edit).toContain("completedEdit && amt !== order.amount");
   });

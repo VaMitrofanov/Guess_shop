@@ -182,3 +182,24 @@ describe("разбиение выкупа на несколько геймпас
     expect(partPriceMatches(part, 1429, 1200).ok).toBe(false);
   });
 });
+
+import { splitEditRefusal } from "../lib/order-gamepass-split";
+
+describe("splitEditRefusal — правка не ломает разбивку", () => {
+  const parts = [
+    { amount: 1200, purchasedAt: null },
+    { amount: 800, purchasedAt: null },
+  ];
+  it("без разбивки и без правки состава — пропускает", () => {
+    expect(splitEditRefusal([], { amount: true, gamepass: true })).toBeNull();
+    expect(splitEditRefusal(parts, {})).toBeNull();
+  });
+  it("номинал или пасс при разбивке — отказ с составом", () => {
+    expect(splitEditRefusal(parts, { amount: true })).toMatch(/1200 \+ 800 — номинал меняется/);
+    expect(splitEditRefusal(parts, { gamepass: true })).toMatch(/пасс меняется через/);
+  });
+  it("часть выкуплена — просит снять разбиение", () => {
+    const bought = [{ amount: 1200, purchasedAt: new Date() }, { amount: 800, purchasedAt: null }];
+    expect(splitEditRefusal(bought, { gamepass: true })).toMatch(/часть уже выкуплена.*Снять разбиение/);
+  });
+});
