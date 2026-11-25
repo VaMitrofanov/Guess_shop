@@ -65,7 +65,8 @@ async function sorry(ctx: MessageContext): Promise<void> {
 export async function openVkCodesStore(ctx: MessageContext, vkUserId: number): Promise<void> {
   const view = await botCodesView("VK", String(vkUserId)).catch(() => null);
   if (!view?.ok) return sorry(ctx);
-  const screen = codesStoreScreen(view, siteUrl(), "VK");
+  const { unavailable: rawUnavail, ...rest } = view;
+  const screen = codesStoreScreen({ ...rest, unavailable: rawUnavail?.length ? new Set(rawUnavail) : undefined }, siteUrl(), "VK");
   // 4 ряда номиналов по 2 (8 ходовых) + «Подарок» (ссылка) и «Скидка» — подарок в отдельный ряд: 6 рядов, 10 кнопок.
   await send(ctx, screen);
 }
@@ -150,7 +151,17 @@ export async function tryVkCodesShop(ctx: MessageContext, vkUserId: number, rawR
     return true;
   }
   const picked = command ? CODES_PICK_RE.exec(command) : null;
-  if (picked) { await pickVk(ctx, vkUserId, Number(picked[1])); return true; }
+  if (picked) {
+    const denom = Number(picked[1]);
+    const peek = await botCodesView("VK", String(vkUserId)).catch(() => null);
+    if (peek?.ok && peek.unavailable?.includes(denom)) {
+      await ctx.reply("Этого номинала сейчас нет в наличии. Выберите другой 👇");
+      await openVkCodesStore(ctx, vkUserId);
+      return true;
+    }
+    await pickVk(ctx, vkUserId, denom);
+    return true;
+  }
 
   const text = (ctx.text ?? "").trim().toLowerCase();
   if (TEXT_STORE.has(text)) { await openVkCodesStore(ctx, vkUserId); return true; }

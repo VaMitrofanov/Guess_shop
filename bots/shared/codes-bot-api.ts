@@ -49,6 +49,7 @@ export type BotCodesView = {
   channelUrl: string;
   /** Курс ₽/$ для цен кодов (20.11.2026). Старый Web его не шлёт — тогда опорный. */
   usdRub?: number;
+  unavailable?: number[];
 };
 
 export type BotCodeOrder = {

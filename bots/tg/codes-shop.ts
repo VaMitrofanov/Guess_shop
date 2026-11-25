@@ -76,7 +76,8 @@ export async function openCodesStore(ctx: Context, edit = false): Promise<void> 
   if (!tgId) return;
   const view = await botCodesView("TG", tgId).catch(() => null);
   if (!view?.ok) return sorry(ctx);
-  await show(ctx, codesStoreScreen(view, siteUrl()), edit);
+  const { unavailable: rawUnavail, ...rest } = view;
+  await show(ctx, codesStoreScreen({ ...rest, unavailable: rawUnavail?.length ? new Set(rawUnavail) : undefined }, siteUrl()), edit);
 }
 
 export async function openInvite(ctx: Context, edit = false): Promise<void> {
@@ -152,7 +153,10 @@ export function registerCodesShop(bot: Telegraf): void {
       return;
     }
     await ctx.answerCbQuery(view.subscribed ? "✅ Подписка есть — скидка 1% уже в ценах" : "Пока не вижу подписки — подпишитесь и нажмите ещё раз", { show_alert: !view.subscribed }).catch(() => undefined);
-    if (view.subscribed) await show(ctx, codesStoreScreen(view, siteUrl()), true);
+    if (view.subscribed) {
+      const { unavailable: ru, ...rv } = view;
+      await show(ctx, codesStoreScreen({ ...rv, unavailable: ru?.length ? new Set(ru) : undefined }, siteUrl()), true);
+    }
   });
   // «👁 Показать код» (21.11.2026): конверт превращается в код в том же
   // сообщении; первое открытие сайт отмечает и шлёт админам в «Коды».
@@ -174,8 +178,14 @@ export function registerCodesShop(bot: Telegraf): void {
     if (!edited) await ctx.reply(text.html, { parse_mode: "HTML", reply_markup }).catch(() => undefined);
   });
   bot.action(CODES_PICK_RE, async (ctx) => {
+    const denomination = Number(ctx.match[1]);
+    const view = await botCodesView("TG", String(ctx.from?.id ?? "")).catch(() => null);
+    if (view?.ok && view.unavailable?.includes(denomination)) {
+      await ctx.answerCbQuery("Этого номинала сейчас нет в наличии", { show_alert: true }).catch(() => undefined);
+      return;
+    }
     await ctx.answerCbQuery("Собираю заказ…").catch(() => undefined);
-    await pick(ctx, Number(ctx.match[1]));
+    await pick(ctx, denomination);
   });
 
   // ⭐ Скрыть отзыв с витрины сайта — только админы.

@@ -110,6 +110,8 @@ export interface CodesViewer {
   channelUrl?: string;
   /** Курс ₽/$ для цен (из Web); нет — опорный прайс. */
   usdRub?: number;
+  /** Номиналы, временно убранные из продажи. */
+  unavailable?: ReadonlySet<number>;
 }
 
 export interface CodesButton {
@@ -166,8 +168,12 @@ export function codesStoreScreen(viewer: CodesViewer, siteUrl: string, platform:
   lines.push("Выберите номинал 👇");
 
   const rows: CodesButton[][] = [];
+  const out = viewer.unavailable ?? new Set<number>();
   for (let index = 0; index < shown.length; index += 2) {
     rows.push(shown.slice(index, index + 2).map((denomination) => {
+      if (out.has(denomination)) {
+        return { label: `${robux(denomination)} R$ · нет`, command: CODES_CB.pick(denomination) };
+      }
       const price = quoteCode(denomination, viewer.discountPercent, viewer.usdRub).finalAmountKopecks;
       const mark = denomination === hit ? " 🔥" : denomination === best ? " 💎" : "";
       return {

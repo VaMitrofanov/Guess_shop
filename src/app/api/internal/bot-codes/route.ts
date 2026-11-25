@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { CodeOrderError, codesSalesOpen, createCodeOrder, payUrlFor } from "@/lib/codes/orders";
 import { claimReferralCode, ensureReferralCode, viewerCodeDiscount } from "@/lib/codes/referral";
-import { codesInstantDelivery } from "@/lib/codes/fulfillment";
+import { codesInstantDelivery, codesUnavailableDenominations } from "@/lib/codes/fulfillment";
 import { internalNoStore, readSignedJson } from "@/lib/codes/internal-auth";
 import { TG_CHANNEL_URL, VK_GROUP_URL } from "@/lib/codes/subscription";
 import { codesUsdRub } from "@/lib/codes/usd-rate";
@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
   try {
     if (input.action === "view") {
       const [discount, referralCode, usdRub] = await Promise.all([viewerCodeDiscount(user.id, { forceSubscriptionCheck: input.recheck }), ensureReferralCode(user.id), codesUsdRub()]);
+      const unavail = [...codesUnavailableDenominations()];
       return NextResponse.json({
         ok: true,
         salesOpen: codesSalesOpen(),
@@ -65,8 +66,8 @@ export async function POST(req: NextRequest) {
         siteLink: `${appUrl()}/r/${referralCode}`,
         subscribed: discount.subscription?.subscribed ?? false,
         channelUrl: input.platform === "VK" ? VK_GROUP_URL : TG_CHANNEL_URL,
-        // Курс для цен в витрине бота — тот же, по которому сервер оформит заказ.
         usdRub,
+        ...(unavail.length > 0 ? { unavailable: unavail } : {}),
       }, { headers: internalNoStore });
     }
 

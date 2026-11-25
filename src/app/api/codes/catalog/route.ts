@@ -6,7 +6,7 @@ import { codesSalesOpen } from "@/lib/codes/orders";
 import { viewerCodeDiscount } from "@/lib/codes/referral";
 import { claimReferralFromCookies, noStore, sessionUserId } from "@/lib/codes/http";
 import { prisma } from "@/lib/prisma";
-import { codesBackorderEnabled, codesInstantDelivery } from "@/lib/codes/fulfillment";
+import { codesBackorderEnabled, codesInstantDelivery, codesUnavailableDenominations } from "@/lib/codes/fulfillment";
 import { TG_CHANNEL_URL, VK_GROUP_URL } from "@/lib/codes/subscription";
 import { codesHitDenomination } from "../../../../../bots/shared/codes-shop";
 
@@ -28,6 +28,7 @@ export async function GET() {
   ]);
   const salesOpen = codesSalesOpen();
   const backorder = codesBackorderEnabled();
+  const unavailable = codesUnavailableDenominations();
   return NextResponse.json({
     salesOpen,
     packs: CODE_DENOMINATIONS.map((denomination) => {
@@ -39,8 +40,7 @@ export async function GET() {
         signupAmountKopecks: quoteCode(denomination, 1, usdRub).finalAmountKopecks,
         maxDiscountAmountKopecks: quoteCode(denomination, CODE_MAX_DISCOUNT_PERCENT, usdRub).finalAmountKopecks,
         note: CODE_REGION_NOTES[denomination] ?? null,
-        // Ручной режим: склад пуст, а купить можно — код выдадим после оплаты.
-        available: salesOpen && (backorder || packsAvailable(denomination, stock) > 0),
+        available: salesOpen && !unavailable.has(denomination) && (backorder || packsAvailable(denomination, stock) > 0),
       };
     }),
     viewer: {

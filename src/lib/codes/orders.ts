@@ -8,7 +8,7 @@ import { codesUsdRub } from "@/lib/codes/usd-rate";
 import { viewerCodeDiscount } from "@/lib/codes/referral";
 import { hasStock, reserveCodesForOrder } from "@/lib/codes/stock";
 import { activationCryptoReady, hashPayToken, maskEmail, newCodeOrderPublicId } from "@/lib/codes/secrets";
-import { codesBackorderEnabled } from "@/lib/codes/fulfillment";
+import { codesBackorderEnabled, codesUnavailableDenominations } from "@/lib/codes/fulfillment";
 import { giftOpenTokenFor, hashGiftToken, type GiftInput, type GiftTheme } from "@/lib/codes/gift";
 
 /**
@@ -116,8 +116,9 @@ export async function createCodeOrder(input: CreateCodeOrderInput): Promise<{ or
     return { order: existing, token: payTokenFor(existing.id), reused: true };
   }
 
-  // Ручной режим (15.11.2026): пустой склад не мешает продаже — код выдаём
-  // руками после оплаты (`src/lib/codes/fulfillment.ts`).
+  if (codesUnavailableDenominations().has(input.denomination)) {
+    throw new CodeOrderError("OUT_OF_STOCK", "Коды этого номинала сейчас не в наличии. Выберите другой номинал.", 409);
+  }
   if (!codesBackorderEnabled() && !(await hasStock(input.denomination))) {
     throw new CodeOrderError("OUT_OF_STOCK", "Коды этого номинала закончились. Выберите другой номинал — пополним склад в ближайшее время.", 409);
   }

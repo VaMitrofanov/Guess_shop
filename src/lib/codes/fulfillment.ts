@@ -23,5 +23,13 @@ export function codesInstantDelivery(): boolean {
   return !codesBackorderEnabled();
 }
 
+/** Номиналы, временно убранные с витрины (env `CODES_UNAVAILABLE`, через запятую). */
+export function codesUnavailableDenominations(): ReadonlySet<number> {
+  const raw = process.env.CODES_UNAVAILABLE ?? "";
+  if (!raw) return EMPTY_SET;
+  return new Set(raw.split(",").map(Number).filter(Number.isFinite));
+}
+const EMPTY_SET: ReadonlySet<number> = new Set();
+
 /** Пометка заказа, которому нужен код руками. */
 export const MANUAL_ISSUE_REASON = "MANUAL_ISSUE";
