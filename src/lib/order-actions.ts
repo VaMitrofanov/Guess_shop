@@ -79,3 +79,61 @@ export function canOrderAction(order: OrderActionOrder, id: OrderActionId): bool
     default: return true;
   }
 }
+
+/* ── «Где заказ» (25.11.2026) ──────────────────────────────────────────────
+   Один выбор вместо шести кнопок: «Пометить ошибкой», «Отменить»,
+   «Переместить в раздел», «Вернуть к выкупу». Каждый переход собирается из
+   существующих серверных действий — их проверки, след и уведомления
+   остаются как были. Причина обязательна: она уходит в хронологию. */
+
+export type OrderPlace = "AWAITING" | "BUYOUT" | "ERROR" | "REJECTED";
+
+export const ORDER_PLACES: { id: OrderPlace; label: string }[] = [
+  { id: "AWAITING", label: "Ждёт пасс" },
+  { id: "BUYOUT", label: "К выкупу" },
+  { id: "ERROR", label: "Ошибка" },
+  { id: "REJECTED", label: "Отменён" },
+];
+
+export function orderPlaceOf(status: string): OrderPlace | null {
+  if (status === "AWAITING_GAMEPASS") return "AWAITING";
+  if (status === "PENDING" || status === "IN_PROGRESS") return "BUYOUT";
+  if (status === "ERROR") return "ERROR";
+  if (status === "REJECTED") return "REJECTED";
+  return null;
+}
+
+export type PlaceRequest = { action: string } & Record<string, unknown>;
+
+/**
+ * Запросы к `/api/twa/orders` для переноса — по порядку; `error` — перенос
+ * отсюда невозможен. У выкупленного и ждущего оплату мест нет вовсе.
+ */
+export function placeRequests(
+  order: OrderActionOrder,
+  place: OrderPlace,
+  reason: string,
+): { requests: PlaceRequest[] } | { error: string } {
+  const note = reason.trim();
+  const current = orderPlaceOf(order.status);
+  if (!current) return { error: "У этого заказа места не меняются" };
+  if (current === place) return { error: "Заказ уже здесь" };
+  if (order.heldAt) return { error: "Заказ заморожен — сначала разморозить" };
+  if (!note) return { error: "Нужна причина — она уйдёт в хронологию" };
+  switch (place) {
+    case "ERROR":
+      return ERRORABLE_STATUSES.includes(order.status)
+        ? { requests: [{ action: "set-error" }, { action: "add-note", text: `⚠️ ${note}` }] }
+        : { requests: [{ action: "move-to", target: "ERROR", note }] };
+    case "REJECTED":
+      return REJECTABLE_STATUSES.includes(order.status)
+        ? { requests: [{ action: "reject", reason: note }] }
+        : { requests: [{ action: "move-to", target: "REJECTED", note }] };
+    case "BUYOUT":
+      return order.status === "ERROR"
+        ? { requests: [{ action: "restore-to-buyout" }, { action: "add-note", text: `↩ ${note}` }] }
+        : { requests: [{ action: "move-to", target: "BUYOUT", note }] };
+    case "AWAITING":
+      return { requests: [{ action: "move-to", target: "AWAITING_LINK", note }] };
+  }
+}

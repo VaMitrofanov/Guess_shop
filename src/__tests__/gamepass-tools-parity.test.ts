@@ -132,7 +132,8 @@ describe("предусловия — те же, что на сервере", () 
 describe("все поверхности берут список из общего модуля", () => {
   it.each(SURFACES)("%s рисует общее меню", file => {
     const source = read(file);
-    expect(source).toContain("GamepassToolRows");
+    // «Состав заказа» TWA (25.11.2026) рисует те же инструменты кнопками из того же списка.
+    expect(source).toMatch(/GamepassToolRows|OrderComposition/);
     expect(source).toMatch(/gamepass-tools|GamepassTools/);
   });
 

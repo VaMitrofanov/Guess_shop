@@ -185,7 +185,8 @@ describe("обе админки умеют поднимать заказ", () =>
     const screen = read("src/app/twa/_components/screens/OrdersScreen.tsx");
     expect(screen).toContain('action: "set-priority"');
     expect(screen).toContain("twa-oc-prio");
-    expect(screen).toContain('row("priority", ORDER_ACTIONS.priority.icon');
+    expect(screen).toContain('canOrderAction(order, "priority")');
+    expect(screen).toContain("<b>Вперёд очереди</b>");
   });
 
   it("сайт: кнопка в строке, в карточке, в досье, клавиша P и команда палитры", () => {

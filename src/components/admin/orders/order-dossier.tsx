@@ -28,6 +28,7 @@ import OrderRiskBlock from "@/components/admin/risks/review-plaque";
 import { NowBlock, OrderFeed } from "./order-signals";
 import { replyForOrder } from "@/lib/order-reply";
 import { canOrderAction, ORDER_ACTION_OFF_LABEL, ORDER_ACTIONS } from "@/lib/order-actions";
+import OrderPlaceBox from "./order-place";
 
 const TONE_CLASS: Record<BuyoutTone, string> = {
   green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
@@ -68,7 +69,7 @@ function timesLabel(n: number): string {
 }
 
 export default function OrderDossier({
-  order, live, packDupIn = null, onClose, onPrimary, onHold, onAckFlag, onError, onFavorite, onPriority, onCancel, onRebuy, onSplit, onEdit, onToast, onChanged,
+  order, live, packDupIn = null, onClose, onPrimary, onHold, onAckFlag, onFavorite, onPriority, onRebuy, onSplit, onEdit, onToast, onChanged,
   initialTool = null, instructSignal,
 }: {
   order: AdminOrder;
@@ -396,16 +397,10 @@ export default function OrderDossier({
               {ORDER_ACTIONS.priority.icon} {order.priorityAt ? ORDER_ACTION_OFF_LABEL.priority : ORDER_ACTIONS.priority.label} <kbd>P</kbd>
             </button>
           )}
-          {canOrderAction(order, "error") && (
-            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onError}>{ORDER_ACTIONS.error.icon} {ORDER_ACTIONS.error.label} <kbd>E</kbd></button>
-          )}
           {/* 🔁 У выкупленного заказа главного действия нет — эта кнопка стоит
               в основном ряду, а не в «Ещё»: за ней приходят именно сюда. */}
           {onRebuy && canRebuy(order) && (
             <button type="button" className={styles.btn} onClick={onRebuy}>{ORDER_ACTIONS.rebuy.icon} {ORDER_ACTIONS.rebuy.label}</button>
-          )}
-          {canOrderAction(order, "reject") && (
-            <button type="button" className={`${styles.btn} ${styles.actionMore}`} onClick={onCancel} style={{ color: "#ffc0ba" }}>{ORDER_ACTIONS.reject.icon} {ORDER_ACTIONS.reject.label}</button>
           )}
           <a className={`${styles.btn} ${styles.actionMore}`} href={`/admin/orders/${order.id}`}>Полная карточка ↗</a>
           {/* Ряд из девяти кнопок занимал два ряда на десктопе и два-три экрана на
@@ -539,6 +534,8 @@ export default function OrderDossier({
               </div>
             )}
 
+            <OrderPlaceBox order={order} post={post} onToast={onToast} onChanged={onChanged} />
+
             <div className={styles.kv}>
               <div><div className={styles.kvKey}>Грязные</div><div className={styles.kvValue}>{num(grossOf(order.amount))}<small>R$</small></div></div>
               <div><div className={styles.kvKey}>Чистые</div><div className={styles.kvValue}>{num(order.amount)}<small>R$</small></div></div>
@@ -551,7 +548,7 @@ export default function OrderDossier({
 
             <div className={styles.box}>
               <div className={styles.boxHead}>
-                Геймпасс
+                Состав заказа
                 {live && <em style={{ color: live.isForSale === false ? "var(--o-red)" : live.priceMismatch ? "var(--o-orange)" : "var(--o-green)" }}>
                   {live.isForSale === false ? "снят с продажи" : live.priceMismatch ? "цена не сходится" : "продаётся, цена сходится"}
                 </em>}

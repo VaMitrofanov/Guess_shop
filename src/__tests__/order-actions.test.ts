@@ -35,3 +35,31 @@ describe("order-actions — один реестр на TWA, сайт и серв
     }
   });
 });
+
+import { orderPlaceOf, placeRequests } from "../lib/order-actions";
+
+describe("«Где заказ» — переносы из существующих действий", () => {
+  it("место по статусу", () => {
+    expect(orderPlaceOf("IN_PROGRESS")).toBe("BUYOUT");
+    expect(orderPlaceOf("COMPLETED")).toBeNull();
+    expect(orderPlaceOf("AWAITING_PAYMENT")).toBeNull();
+  });
+  it("ошибка: у выкупаемого — set-error + заметка, у ждущего пасс — перенос", () => {
+    expect(placeRequests({ status: "PENDING" }, "ERROR", "не та цена")).toEqual({
+      requests: [{ action: "set-error" }, { action: "add-note", text: "⚠️ не та цена" }],
+    });
+    expect(placeRequests({ status: "AWAITING_GAMEPASS" }, "ERROR", "x")).toEqual({
+      requests: [{ action: "move-to", target: "ERROR", note: "x" }],
+    });
+  });
+  it("отмена идёт через reject (уведомит покупателя), из отменённых — нельзя повторно", () => {
+    expect(placeRequests({ status: "ERROR" }, "REJECTED", "спор")).toEqual({ requests: [{ action: "reject", reason: "спор" }] });
+    expect(placeRequests({ status: "REJECTED" }, "REJECTED", "спор")).toEqual({ error: "Заказ уже здесь" });
+  });
+  it("к выкупу из ошибки — restore-to-buyout; без причины и у замороженного — отказ", () => {
+    expect(placeRequests({ status: "ERROR" }, "BUYOUT", "цену поправили")).toMatchObject({ requests: [{ action: "restore-to-buyout" }, { action: "add-note" }] });
+    expect(placeRequests({ status: "ERROR" }, "BUYOUT", " ")).toHaveProperty("error");
+    expect(placeRequests({ status: "ERROR", heldAt: new Date() }, "BUYOUT", "x")).toHaveProperty("error");
+    expect(placeRequests({ status: "COMPLETED" }, "BUYOUT", "x")).toHaveProperty("error");
+  });
+});

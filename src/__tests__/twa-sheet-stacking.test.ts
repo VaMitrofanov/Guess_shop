@@ -63,9 +63,12 @@ describe("Ссылку на геймпасс можно вставить рук�
     "utf8",
   );
 
-  it("инструмент есть в меню заказа — строкой из общего списка", () => {
-    expect(screen).toContain("gamepassToolsFor(order).map(tool => row(");
-    expect(screen).toContain('case "link":');
+  it("инструмент есть в «Составе заказа» — кнопкой из общего списка", () => {
+    const blocks = readFileSync(join(process.cwd(), "src/app/twa/_components/OrderSettingsBlocks.tsx"), "utf8");
+    expect(screen).toContain("<OrderComposition");
+    expect(blocks).toContain("gamepassToolsFor(order)");
+    expect(blocks).toContain('toolBtn("link", "+ Пасс")');
+    expect(screen).toContain('tool === "link" && (');
   });
 
   it("форма шлёт attach-gamepass и проверяет цену до привязки", () => {

@@ -16,7 +16,8 @@ import { toast } from "../Toast";
 import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import NickGamepasses from "../NickGamepasses";
-import { AskBuyerForm, AttachGamepassForm, GamepassToolRows, KeyCreateForm } from "../GamepassTools";
+import { AskBuyerForm, AttachGamepassForm, KeyCreateForm } from "../GamepassTools";
+import { OrderComposition, OrderPlaceBlock } from "../OrderSettingsBlocks";
 import { parseGamepassRef, parseGamepassRefs } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
@@ -2226,13 +2227,14 @@ function RejectModal({ order, onReject, onClose }: {
    осознанно: выкуп сейчас ручной, и кнопка, тратящая робуксы, не должна
    стоять рядом с копированием ID.
    ────────────────────────────────────────────────────────────────────────── */
-type MenuAction =
-  | "edit" | "key" | "link" | "nick" | "ask" | "split" | "rebind" | "move"
-  | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
-  | "purchase" | "refund" | "trace" | "rebuy" | "resend";
+type MenuAction = "go-gamepass" | "go-order" | "go-history" | "go-feed" | "reject";
 
+/* «Настройка» (25.11.2026) — вместо меню «···» на 19 действий. Своих действий
+   не держит: ведёт к блокам карточки (Состав, Где заказ, Покупатель) и даёт
+   скопировать то, что нужно для закупки. Отмена — единственное действие:
+   за ней сюда приходят чаще всего. */
 function OrderMenuSheet({
-  open, order, passId, splitIds, grossAmount, canEdit, canRefund, canMove, canPrioritize, busy,
+  open, order, passId, splitIds, grossAmount, busy,
   onClose, onCopy, onPick,
 }: {
   open: boolean;
@@ -2240,10 +2242,6 @@ function OrderMenuSheet({
   passId: string | null;
   splitIds: string[];
   grossAmount: number;
-  canEdit: boolean;
-  canRefund: boolean;
-  canMove: boolean;
-  canPrioritize: boolean;
   busy: boolean;
   onClose: () => void;
   onCopy: (text: string, label: string) => void;
@@ -2267,55 +2265,30 @@ function OrderMenuSheet({
   );
 
   return (
-    <BottomSheet open={open} onClose={onClose} ariaLabel={`Меню заказа ${order.wbCode}`} className="twa-filter-sheet">
+    <BottomSheet open={open} onClose={onClose} ariaLabel={`Настройка заказа ${order.wbCode}`} className="twa-filter-sheet">
       <div className="twa-oc-menu-head">
-        <span>📦</span>
-        <b>{order.wbCode}</b>
-        <em>{[nick, `${grossAmount.toLocaleString("ru-RU")} R$`].filter(Boolean).join(" · ")}</em>
+        <span>⚙️</span>
+        <b>Настройка</b>
+        <em>{order.wbCode}</em>
       </div>
+
+      {row("go-gamepass", "🧩", "Состав заказа")}
+      {row("go-order", "📍", "Где заказ")}
+      {row("go-history", "👤", "Покупатель")}
+      {row("go-feed", "🕓", "Хронология")}
 
       <div className="twa-oc-menu-group">Скопировать</div>
       {gamepassLink && copyRow("⧉", "Ссылку на геймпасс", gamepassLink, `game-pass/${passId}`)}
-      {splitIds.length > 1 && copyRow("⧉", "ID всех частей", splitIds.join("\n"), `${splitIds.length} шт.`)}
-      {nick && copyRow("⧉", "Ник Roblox", nick, nick)}
-      {oneLine && copyRow("⧉", "Всё одной строкой", oneLine, "для закупки")}
+      {splitIds.length > 1 && copyRow("⧉", "ID частей", splitIds.join("\n"), `${splitIds.length} шт.`)}
+      {nick && copyRow("⧉", "Ник", nick, nick)}
+      {oneLine && copyRow("⧉", "Одной строкой", oneLine)}
 
-      <div className="twa-oc-menu-group">Правка</div>
-      {/* 🎮 Настройка геймпассов — ОДИН список на все админки
-          (`@/lib/gamepass-tools`): те же имена, тот же порядок и те же
-          предусловия, что в досье и в правке на сайте. До 19.10.2026 здесь
-          лежали свои строки, и ключ покупателя жил только в этом меню. */}
-      {gamepassToolsFor(order).map(tool => row(
-        tool.id,
-        tool.icon,
-        tool.label,
-        tool.id === "split" && splitIds.length > 0
-          ? `${order.splitGamepasses?.filter(p => p.purchasedAt).length ?? 0}/${splitIds.length}`
-          : tool.hint,
-      ))}
-      {canEdit && row("edit", ORDER_ACTIONS.edit.icon, ORDER_ACTIONS.edit.label)}
-      {canOrderAction(order, "rebind") && row("rebind", ORDER_ACTIONS.rebind.icon, ORDER_ACTIONS.rebind.label)}
-      {canMove && row("move", ORDER_ACTIONS.move.icon, ORDER_ACTIONS.move.label)}
-
-      <div className="twa-oc-menu-group">Статус</div>
-      {canOrderAction(order, "error") && row("error", ORDER_ACTIONS.error.icon, ORDER_ACTIONS.error.label)}
-      {order.heldAt
-        ? row("unhold", ORDER_ACTIONS.unhold.icon, ORDER_ACTIONS.unhold.label, order.heldReason ?? undefined)
-        : canOrderAction(order, "hold") && row("hold", ORDER_ACTIONS.hold.icon, ORDER_ACTIONS.hold.label)}
-      {row("favorite", order.isFavorite ? "★" : "☆", order.isFavorite ? ORDER_ACTION_OFF_LABEL.favorite : ORDER_ACTIONS.favorite.label)}
-      {/* ⚡ Место в очереди — такой же признак поверх статуса, как заморозка:
-          заказ никуда не переезжает, он просто выкупается первым. */}
-      {canPrioritize && row("priority", ORDER_ACTIONS.priority.icon, order.priorityAt ? ORDER_ACTION_OFF_LABEL.priority : ORDER_ACTIONS.priority.label)}
-      {/* 🔁 Выкуплен, но покупатель робуксов не получил — обратно в очередь первым. */}
-      {canRebuy(order as never) && row("rebuy", ORDER_ACTIONS.rebuy.icon, ORDER_ACTIONS.rebuy.label)}
-      {/* Повтор уведомления о выкупе (16.11.2026): карточка выкупленного теперь
-          показывает только «Выкуплен, когда, кто», а действие живёт здесь. */}
-      {canOrderAction(order, "resend") && row("resend", ORDER_ACTIONS.resend.icon, ORDER_ACTIONS.resend.label)}
-      {canOrderAction(order, "reject") && row("reject", ORDER_ACTIONS.reject.icon, ORDER_ACTIONS.reject.label, undefined, "red")}
-
-      <div className="twa-oc-menu-group">Редко</div>
-      {canRefund && row("refund", ORDER_ACTIONS.refund.icon, ORDER_ACTIONS.refund.label, "T-Bank", "dim")}
-      {row("trace", ORDER_ACTIONS.trace.icon, ORDER_ACTIONS.trace.label, undefined, "dim")}
+      {canOrderAction(order, "reject") && (
+        <>
+          <div className="twa-oc-menu-group" />
+          {row("reject", ORDER_ACTIONS.reject.icon, `${ORDER_ACTIONS.reject.label}…`, undefined, "red")}
+        </>
+      )}
     </BottomSheet>
   );
 }
@@ -2324,9 +2297,9 @@ function OrderMenuSheet({
 type SheetSectionId = "journey" | "gamepass" | "order" | "history";
 const SHEET_SECTIONS: { id: SheetSectionId; label: string }[] = [
   { id: "journey", label: "🧭 Путь" },
-  { id: "gamepass", label: "🧩 Пасс" },
-  { id: "order", label: "⚙️ Заказ" },
-  { id: "history", label: "👤 Клиент" },
+  { id: "gamepass", label: "🧩 Состав" },
+  { id: "order", label: "📍 Где заказ" },
+  { id: "history", label: "👤 Покупатель" },
 ];
 
 /* ── Карточка покупателя в шторке ────────────────────────────────────────────
@@ -3084,9 +3057,9 @@ function OrderCard({
           📨
         </button>
       )}
-      <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
+      <button type="button" className="twa-oc-more twa-oc-set twa-press-sm" aria-label="Настройка заказа"
         onClick={() => { haptic.select(); setMenuOpen(true); }}>
-        ···
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
       </button>
     </div>
   );
@@ -3141,9 +3114,9 @@ function OrderCard({
             📨
           </button>
         )}
-        <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
+        <button type="button" className="twa-oc-more twa-oc-set twa-press-sm" aria-label="Настройка заказа"
           onClick={e => { e.stopPropagation(); haptic.select(); setMenuOpen(true); }}>
-          ···
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
         </button>
         {/* Главное действие — справа, крупное и отдельно от ID (16.11.2026):
             «Выкуплено» шлёт уведомление клиенту, промах по нему дорогой. */}
@@ -3186,10 +3159,6 @@ function OrderCard({
       passId={passId}
       splitIds={splitIds}
       grossAmount={dirtyAmount}
-      canEdit={isEditable}
-      canRefund={canRefund}
-      canMove={showMoveBtn}
-      canPrioritize={canPrioritize}
       busy={primaryBusy}
       onClose={() => setMenuOpen(false)}
       onCopy={(text, label) => copyAnd(text, "pass", label)}
@@ -3205,26 +3174,11 @@ function OrderCard({
           if (anchor) setScrollTo(anchor);
         };
         switch (id) {
-          case "edit":     inSheet(() => setEditOpen(true)); break;
-          // Все инструменты геймпасса открываются в одном блоке карточки.
-          case "key":
-          case "link":
-          case "nick":
-          case "ask":      inSheet(() => setTool(id), "gamepass"); break;
-          case "split":    inSheet(() => { setTool(null); setSplitOpen(true); }, "split"); break;
-          case "rebind":   inSheet(() => setRebindOpen(true), "rebind"); break;
-          case "move":     inSheet(() => setMoveOpen(true), "move"); break;
-          case "hold":     inSheet(() => setHoldOpen(true), "hold"); break;
-          case "rebuy":    inSheet(() => setRebuyOpen(true), "rebuy"); break;
-          case "refund":   inSheet(() => setRefundOpen(true), "refund"); break;
-          case "reject":   inSheet(() => setRejectOpen(true), "reject"); break;
-          case "trace":    setExpanded(true); break;
-          case "favorite": onToggleFavorite(); break;
-          case "priority": onTogglePriority?.(); break;
-          case "error":    void onRunAction("set-error"); break;
-          case "unhold":   void onRunAction("unhold"); break;
-          case "purchase": void runPurchase(); break;
-          case "resend":   void resendCompletedNotice(); break;
+          case "go-gamepass": inSheet(() => undefined, "gamepass"); break;
+          case "go-order":    inSheet(() => undefined, "order"); break;
+          case "go-history":  inSheet(() => undefined, "history"); break;
+          case "go-feed":     inSheet(() => setHistoryOpen(true)); break;
+          case "reject":      inSheet(() => setRejectOpen(true), "reject"); break;
         }
       }}
     />
@@ -3453,26 +3407,24 @@ function OrderCard({
 
       {/* ── Разделы полной шторки ─────────────────────────────────────────── */}
       <section data-form="gamepass" className="twa-os-sec">
-        <h3><span aria-hidden="true">🧩</span> Пасс</h3>
+        <h3><span aria-hidden="true">🧩</span> Состав заказа</h3>
       {/* ── 🎮 Геймпасс заказа: одно меню на четыре инструмента ──────────────
           Было четыре отдельных блока со своими кнопками и своими словами —
           «Вставить ссылку», «Ещё пассы ника», «Разбить», а ключ вообще только
           в меню «···». Теперь список один (`@/lib/gamepass-tools`, тот же, что
           на сайте), а раскрывается ровно тот инструмент, который выбрали. */}
-      {tools.length > 0 && (
+      <OrderComposition
+        order={order}
+        token={token}
+        activeTool={tool}
+        onTool={id => {
+          if (id === "split") { setTool(null); setSplitOpen(true); return; }
+          setTool(prev => (prev === id ? null : id));
+        }}
+        onChanged={onMoved}
+      />
+      {tools.length > 0 && tool && tool !== "ask" && (
         <div style={{ padding: "0 14px 10px", display: "grid", gap: 8 }}>
-          <GamepassToolRows
-            order={order}
-            active={tool}
-            handlers={{ key: true, link: true, nick: true, ask: true, split: true }}
-            hints={split.length > 0
-              ? { split: `выкуплено ${split.filter(part => part.purchasedAt).length} из ${split.length}` }
-              : undefined}
-            onPick={id => {
-              if (id === "split") { setTool(null); setSplitOpen(true); return; }
-              setTool(prev => (prev === id ? null : id));
-            }}
-          />
           {tool === "link" && (
             <AttachGamepassForm
               order={order}
@@ -3488,9 +3440,6 @@ function OrderCard({
               onDone={() => { setTool(null); onMoved(); }}
               onClose={() => setTool(null)}
             />
-          )}
-          {tool === "ask" && (
-            <AskBuyerForm key={order.id} order={order} token={token} onClose={() => setTool(null)} />
           )}
           {tool === "nick" && (
             <NickGamepasses
@@ -3569,7 +3518,8 @@ function OrderCard({
       {/* Заказ: признаки поверх статуса (заморозка, избранное, очередь) и всё,
           что делается с самим заказом. */}
       <section data-form="order" className="twa-os-sec">
-        <h3><span aria-hidden="true">⚙️</span> Заказ</h3>
+        <h3><span aria-hidden="true">📍</span> Где заказ</h3>
+        <OrderPlaceBlock order={order} token={token} onChanged={onMoved} />
         <div className="twa-os-group">
           {order.heldAt ? (
             <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); void onRunAction("unhold"); }}>
@@ -3580,19 +3530,19 @@ function OrderCard({
           ) : !["COMPLETED", "REJECTED"].includes(order.status) && (
             <button type="button" className="twa-os-row twa-press-sm" onClick={() => { haptic.impact("light"); setHoldOpen(true); setScrollTo("hold"); }}>
               <span className="twa-os-ic" style={{ background: `${ICE}24` }}>❄️</span>
-              <span className="twa-os-tx"><b>Заморозить</b><small>не выкупать, но и не удалять</small></span>
+              <span className="twa-os-tx"><b>Заморозить</b></span>
               <span className="twa-os-tog" aria-hidden="true" />
             </button>
           )}
           <button type="button" className="twa-os-row twa-press-sm" aria-pressed={!!order.isFavorite} onClick={() => { haptic.impact("light"); onToggleFavorite(); }}>
             <span className="twa-os-ic" style={{ background: `${C.yellow}24`, color: C.yellow }}>★</span>
-            <span className="twa-os-tx"><b>В избранное</b><small>держать под рукой</small></span>
+            <span className="twa-os-tx"><b>В избранное</b></span>
             <span className={`twa-os-tog${order.isFavorite ? " is-on" : ""}`} aria-hidden="true" />
           </button>
           {canPrioritize && (
             <button type="button" className="twa-os-row twa-press-sm" aria-pressed={!!order.priorityAt} onClick={() => { haptic.impact("light"); onTogglePriority?.(); }}>
               <span className="twa-os-ic" style={{ background: `${C.orange}24` }}>⚡</span>
-              <span className="twa-os-tx"><b>Вперёд очереди</b><small>выкупать первым</small></span>
+              <span className="twa-os-tx"><b>Вперёд очереди</b></span>
               <span className={`twa-os-tog${order.priorityAt ? " is-on" : ""}`} aria-hidden="true" />
             </button>
           )}
@@ -3601,21 +3551,19 @@ function OrderCard({
             четырьмя контурными кнопками разного цвета. Опасное — отдельно, ниже. */}
         {(() => {
           const canEditNow = isEditable && !editOpen;
-          const canRebind = canOrderAction(order, "rebind") && !rebindOpen;
           const canMoveNow = showMoveBtn && !moveOpen;
-          if (!canEditNow && !canRebind && !canMoveNow) return null;
-          const actRow = (icon: string, title: string, sub: string, onTap: () => void) => (
+          if (!canEditNow && !canMoveNow) return null;
+          const actRow = (icon: string, title: string, sub: string | null, onTap: () => void) => (
             <button type="button" className="twa-os-row twa-press-sm" onClick={e => { e.stopPropagation(); haptic.select(); onTap(); }}>
               <span className="twa-os-ic">{icon}</span>
-              <span className="twa-os-tx"><b>{title}</b><small>{sub}</small></span>
+              <span className="twa-os-tx"><b>{title}</b>{sub && <small>{sub}</small>}</span>
               <span className="twa-os-chev" aria-hidden="true">›</span>
             </button>
           );
           return (
             <div className="twa-os-group">
-              {canEditNow && actRow(ORDER_ACTIONS.edit.icon, ORDER_ACTIONS.edit.label, "номинал, ник, пасс", () => setEditOpen(true))}
-              {canMoveNow && actRow(ORDER_ACTIONS.move.icon, ORDER_ACTIONS.move.label, "с записью в ленту", () => setMoveOpen(true))}
-              {canRebind && actRow(ORDER_ACTIONS.rebind.icon, ORDER_ACTIONS.rebind.label, "к другому покупателю", () => setRebindOpen(true))}
+              {canEditNow && actRow(ORDER_ACTIONS.edit.icon, ORDER_ACTIONS.edit.label, "все поля и источник", () => setEditOpen(true))}
+              {canMoveNow && actRow(ORDER_ACTIONS.move.icon, ORDER_ACTIONS.move.label, "Готово, Прямой, Избранное", () => setMoveOpen(true))}
             </div>
           );
         })()}
@@ -3739,7 +3687,32 @@ function OrderCard({
 
       {/* История: полноценная карточка покупателя и все его заказы. */}
       <section data-form="history" className="twa-os-sec">
-        <h3><span aria-hidden="true">👤</span> Клиент</h3>
+        <h3><span aria-hidden="true">👤</span> Покупатель</h3>
+        {(canInstruct || canOrderAction(order, "rebind")) && (
+          <div className="twa-os-group">
+            {canInstruct && (
+              <button type="button" className="twa-os-row twa-press-sm" aria-expanded={tool === "ask"}
+                onClick={e => { e.stopPropagation(); haptic.select(); setTool(prev => (prev === "ask" ? null : "ask")); }}>
+                <span className="twa-os-ic">📨</span>
+                <span className="twa-os-tx"><b>Инструкция</b></span>
+                <span className="twa-os-chev" aria-hidden="true">›</span>
+              </button>
+            )}
+            {canOrderAction(order, "rebind") && !rebindOpen && (
+              <button type="button" className="twa-os-row twa-press-sm"
+                onClick={e => { e.stopPropagation(); haptic.select(); setRebindOpen(true); setScrollTo("rebind"); }}>
+                <span className="twa-os-ic">{ORDER_ACTIONS.rebind.icon}</span>
+                <span className="twa-os-tx"><b>{ORDER_ACTIONS.rebind.label}</b></span>
+                <span className="twa-os-chev" aria-hidden="true">›</span>
+              </button>
+            )}
+          </div>
+        )}
+        {tool === "ask" && (
+          <div style={{ padding: "0 14px 10px" }}>
+            <AskBuyerForm key={order.id} order={order} token={token} onClose={() => setTool(null)} />
+          </div>
+        )}
       {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
       {order.vkUnreachable === true && order.user.vkId && (
         <div style={{
