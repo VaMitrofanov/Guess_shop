@@ -1,7 +1,7 @@
 /**
  * ИИ-поддержка @RobloxBank_PA (12.11.2026): страховка поверх модели и контекст.
  */
-import { customerContext, guardDecision, PA_AI_SYSTEM, type PaAiDecision } from "../pa-ai-support";
+import { CHANNEL_NOTES, customerContext, guardDecision, PA_AI_SYSTEM, type PaAiDecision } from "../pa-ai-support";
 
 const reply = (over: Partial<PaAiDecision> = {}): PaAiDecision => ({
   action: "reply", category: "order_status", reply: "Ваш заказ в очереди на выкуп.", summary: "", draft: "", ...over,
@@ -37,6 +37,21 @@ describe("guardDecision", () => {
     expect(PA_AI_SYSTEM).toContain("roblox.com/redeem");
     expect(PA_AI_SYSTEM).toContain("не больше 1500 R$");
     expect(PA_AI_SYSTEM).toContain("Строить догадки о Roblox");
+  });
+
+  it("база знаний: азбука для новичков и кнопки как в ботах", () => {
+    expect(PA_AI_SYSTEM).toContain("АЗБУКА ДЛЯ ТЕХ, КТО ВПЕРВЫЕ");
+    expect(PA_AI_SYSTEM).toContain("«Get Robux»");
+    expect(PA_AI_SYSTEM).toContain("до 5% за друзей");
+    // В TG кнопка «📦 Мой заказ», во ВК — «📊 Мой заказ» (так в коде ботов).
+    expect(PA_AI_SYSTEM).not.toContain("📊 Мой заказ");
+    expect(PA_AI_SYSTEM).toContain("📦 Мой заказ");
+  });
+
+  it("боты TG и ВК — на «вы» (правило владельца 18.11)", () => {
+    expect(CHANNEL_NOTES.tg_bot).not.toContain("«ты»");
+    expect(CHANNEL_NOTES.vk_bot).not.toContain("«ты»");
+    expect(CHANNEL_NOTES.vk_bot).toContain("📊 Мой заказ");
   });
 
   it("смена ника — всегда человеку (случай из живого прогона)", () => {
