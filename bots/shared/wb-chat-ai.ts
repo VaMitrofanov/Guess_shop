@@ -24,7 +24,7 @@ import { isArrivalQuestion } from "./robux-eta";
 import { dbsRef } from "./wb-dbs-thread";
 import { identityLinesFor } from "./buyer-identity";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
-import { aiLogCard } from "./support-ai-log";
+import { aiLogCard, aiLogRecord } from "./support-ai-log";
 import { escapeHtml } from "./notify";
 import { notifyDbsAiEscalation, notifyDbsBuyerMessage } from "./wb-delivery-admin-notify";
 
@@ -129,6 +129,11 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       continue;
     }
     const d = guardDecision(raw, text, "wb_chat");
+    void aiLogRecord(db, {
+      channel: "wb_chat", action: d.action, mode: mode as "on" | "dry", category: d.category,
+      peerKey: `wb:${ref.code}`, orderCode: ref.code,
+      question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+    });
 
     if (mode === "dry") {
       if (d.action !== "ignore") {

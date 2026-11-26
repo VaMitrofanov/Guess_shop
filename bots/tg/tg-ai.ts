@@ -24,7 +24,7 @@ import { CATEGORY_RU, guardDecision, plain } from "../shared/pa-ai-support";
 import { decideSupport, isConversationalText, supportCardTarget, supportChannelMode, TurnMemory } from "../shared/support-ai";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { SUPPORT_METRIC_EVENT, recordSupportMetric } from "../shared/support-metric";
-import { aiLogCard } from "../shared/support-ai-log";
+import { aiLogCard, aiLogRecord } from "../shared/support-ai-log";
 
 const memory = new TurnMemory();
 
@@ -64,6 +64,11 @@ export async function tryTgAi(text: string, deps: TgAiDeps): Promise<boolean> {
   const raw = await decideSupport({ channel: "tg_bot", context, turns: memory.get(key) });
   if (!raw || raw === "out_of_money") return false;
   const d = guardDecision(raw, text, "tg_bot");
+  void aiLogRecord(db, {
+    channel: "tg_bot", action: d.action, mode: mode as "on" | "dry", category: d.category,
+    peerKey: `tg:${key}`, orderCode: customer.orders[0]?.wbCode ?? null,
+    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+  });
 
   const order = customer.orders[0];
   const who = deps.username ? `@${escapeHtml(deps.username)}` : `<a href="tg://user?id=${key}">${escapeHtml(name)}</a>`;

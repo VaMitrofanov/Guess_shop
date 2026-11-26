@@ -32,6 +32,7 @@ import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type Resp
 import { CODE_VIAS } from "../shared/order-contacts";
 import { ocrImageBufferText } from "../shared/pending-ocr";
 import { RATING_CAP, loadAskedMap, ratingDue, recordRatingAsked } from "../shared/pa-rating";
+import { aiWeeklyReport } from "../shared/support-ai-log";
 
 /** Кто отправляет вопрос об оценке — регистрирует обработчик Business (у него подключение). */
 let ratingSender: ((tgId: string) => Promise<boolean>) | null = null;
@@ -149,10 +150,11 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
     profileAudited = true;
     if (mode === "on") await tidyPaProfile().catch((e) => console.warn("[pa-profile] порядок/био:", e instanceof Error ? e.message : e));
     await auditPaProfile().catch((e) => console.warn("[pa-profile]", e instanceof Error ? e.message : e));
-    await exportPaDialogs().catch((e) => console.warn("[pa-export]", e instanceof Error ? e.message : e));
     await registerPaDm().catch((e) => console.warn("[pa-dm]", e instanceof Error ? e.message : e));
   }
   await runPaResponseStats().catch((e) => console.warn("[pa-response]", e instanceof Error ? e.message : e));
+  // Раз в неделю: новые диалоги для разбора ИИ (сама решает, пора ли; проверка — одно чтение строки).
+  await exportPaDialogs().catch((e) => console.warn("[pa-export]", e instanceof Error ? e.message : e));
   return result;
 }
 
@@ -724,34 +726,52 @@ async function dropStaleQuickReplies(tg: TelegramClient, user: Api.UserFull): Pr
   if (!dropped) console.log("[pa-profile] устаревших быстрых ответов не найдено");
 }
 
-/* ── Разовая выгрузка диалогов для базы знаний ИИ (13.11.2026) ──────────── */
+/* ── Выгрузка диалогов для разбора ИИ: раз в неделю (13.11 → 26.11.2026) ── */
 
 /**
- * Только чтение. Один раз на версию (`EXPORT_VERSION`, курсор `pa-export`):
- * все личные чаты аккаунта (и архив) → `/tmp/pa-export/chats.jsonl` в контейнере.
- * Имён, юзернеймов, телефонов нет — только номер чата, сторона (C покупатель,
- * O оператор, B бот аккаунта), время, текст, тип вложения и сводка заказов
- * из базы. Файл забирается по ssh и в репозиторий не попадает.
+ * Только чтение. Раз в 7 дней (курсор `pa-export`, `metadata.until`) — новые
+ * сообщения всех личных чатов аккаунта (и архива) с прошлой выгрузки, плюс
+ * несколько предыдущих для контекста (`ctx: true`) → `/tmp/pa-export/chats-<дата>.jsonl`
+ * в контейнере. Имён, юзернеймов, телефонов нет — только номер чата, сторона
+ * (C покупатель, O оператор, B бот аккаунта), время, текст, тип вложения и
+ * сводка заказов из базы. Файл забирается по ssh и в репозиторий не попадает.
+ * После выгрузки — итог недели ИИ в «📊 Сводки» (`aiWeeklyReport`).
+ * Поменять `EXPORT_VERSION` — внеочередная выгрузка при следующем проходе.
  */
-const EXPORT_VERSION = "2026-11-13";
+const EXPORT_VERSION = "2026-11-26";
 const EXPORT_STREAM = "pa-export";
 const EXPORT_MSGS_PER_CHAT = 300;
+const EXPORT_EVERY_MS = 7 * 86_400_000;
+const EXPORT_CONTEXT_MSGS = 6;
+const EXPORT_FIRST_SINCE = new Date("2026-11-13T00:00:00Z");
 
 export async function exportPaDialogs(): Promise<void> {
   if (paDeskMode() === "off") return;
   const row = await db.wbSyncCursor.findUnique({ where: { stream: EXPORT_STREAM } }).catch(() => null);
-  if (row?.cursor === EXPORT_VERSION) return;
+  const last = row?.lastSuccessAt ? new Date(row.lastSuccessAt).getTime() : 0;
+  if (row?.cursor === EXPORT_VERSION && Date.now() - last < EXPORT_EVERY_MS) return;
+  const meta = (row?.metadata ?? {}) as { until?: string };
+  const since = meta.until ? new Date(meta.until) : row?.lastSuccessAt ? new Date(row.lastSuccessAt) : EXPORT_FIRST_SINCE;
+  const until = new Date();
+  // Сразу двигаем курсор: упадём посреди — следующая попытка через неделю, а не каждые 5 минут.
+  await db.wbSyncCursor.upsert({
+    where: { stream: EXPORT_STREAM },
+    create: { stream: EXPORT_STREAM, cursor: EXPORT_VERSION, lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), running: true } as never },
+    update: { cursor: EXPORT_VERSION, lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), running: true } as never },
+  });
+
   const fs = await import("node:fs/promises");
   const dir = "/tmp/pa-export";
   await fs.mkdir(dir, { recursive: true });
-  const file = `${dir}/chats.jsonl`;
+  const file = `${dir}/chats-${until.toISOString().slice(0, 10)}.jsonl`;
   await fs.writeFile(file, "");
 
+  const sinceSec = Math.floor(since.getTime() / 1000);
   const tg = await getClient();
   const main = await tg.getDialogs({ limit: 3000, folder: 0 });
   const archive = await tg.getDialogs({ limit: 3000, folder: 1 }).catch(() => [] as unknown as typeof main);
   const chats = [...main, ...archive].filter((d: Dialog) =>
-    d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self);
+    d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && (d.date ?? 0) > sinceSec);
 
   const ids = chats.map((d) => String((d.entity as Api.User).id));
   const users = await db.user.findMany({ where: { tgId: { in: ids } }, select: { id: true, tgId: true } });
@@ -766,18 +786,18 @@ export async function exportPaDialogs(): Promise<void> {
     const uid = userByTg.get(String((d.entity as Api.User).id));
     try {
       const msgs = await tg.getMessages(d.entity as Api.User, { limit: EXPORT_MSGS_PER_CHAT });
-      const lines = msgs
-        .filter((m) => m.message || m.media)
-        .sort((a, b) => a.date - b.date)
-        .map((m) => ({
-          t: new Date(m.date * 1000).toISOString().slice(0, 16),
-          s: !m.out ? "C" : (m as unknown as { viaBusinessBotId?: unknown }).viaBusinessBotId ? "B" : "O",
-          x: (m.message ?? "").slice(0, 2000),
-          ...(m.media ? { m: m.media.className.replace(/^MessageMedia/, "") } : {}),
-        }));
-      if (lines.length === 0) continue;
+      const all = msgs.filter((m) => m.message || m.media).sort((a, b) => a.date - b.date);
+      const firstNew = all.findIndex((m) => m.date > sinceSec);
+      if (firstNew < 0) continue;
+      const lines = all.slice(Math.max(0, firstNew - EXPORT_CONTEXT_MSGS)).map((m) => ({
+        t: new Date(m.date * 1000).toISOString().slice(0, 16),
+        s: !m.out ? "C" : (m as unknown as { viaBusinessBotId?: unknown }).viaBusinessBotId ? "B" : "O",
+        x: (m.message ?? "").slice(0, 2000),
+        ...(m.media ? { m: m.media.className.replace(/^MessageMedia/, "") } : {}),
+        ...(m.date <= sinceSec ? { ctx: true } : {}),
+      }));
       n++;
-      msgsTotal += lines.length;
+      msgsTotal += lines.filter((l) => !("ctx" in l)).length;
       const chatOrders = uid ? orders.filter((o) => o.userId === uid).map((o) => ({ st: o.status, amt: o.amount, dir: o.isDirectOrder, held: Boolean(o.heldAt) })) : [];
       await fs.appendFile(file, JSON.stringify({ i: n, archived: d.archived, orders: chatOrders, msgs: lines }) + "\n");
     } catch (error) {
@@ -785,10 +805,11 @@ export async function exportPaDialogs(): Promise<void> {
     }
     await sleep(800);
   }
-  await db.wbSyncCursor.upsert({
+  await db.wbSyncCursor.update({
     where: { stream: EXPORT_STREAM },
-    create: { stream: EXPORT_STREAM, cursor: EXPORT_VERSION, lastSuccessAt: new Date(), metadata: { chats: n, messages: msgsTotal } as never },
-    update: { cursor: EXPORT_VERSION, lastSuccessAt: new Date(), metadata: { chats: n, messages: msgsTotal } as never },
+    data: { metadata: { since: since.toISOString(), until: until.toISOString(), chats: n, messages: msgsTotal, file } as never },
   });
-  console.log(`[pa-export] готово: чатов ${n}, сообщений ${msgsTotal} → ${file}`);
+  console.log(`[pa-export] готово: чатов ${n}, новых сообщений ${msgsTotal} (с ${since.toISOString().slice(0, 10)}) → ${file}`);
+  await aiWeeklyReport(db, { since, chats: n, messages: msgsTotal })
+    .catch((e) => console.warn("[ai-weekly]", e instanceof Error ? e.message : e));
 }

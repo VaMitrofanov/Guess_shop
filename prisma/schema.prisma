@@ -1715,3 +1715,27 @@ model CodeDiscountGrant {
 
   @@index([userId, usedAt])
 }
+
+/// Журнал ИИ-поддержки (26.11.2026): каждое решение модели во всех каналах —
+/// для еженедельного разбора и дополнения базы знаний. Без имён и телефонов:
+/// только канал, ключ собеседника, код заказа, вопрос, ответ.
+model AiSupportLog {
+  id        String   @id @default(cuid())
+  /// tg_pa | tg_bot | vk_bot | wb_chat
+  channel   String
+  /// reply | escalate | ignore — что решила модель
+  action    String
+  /// on | dry
+  mode      String
+  category  String
+  /// tg:<id> / vk:<id> / wb:<код> — склеить реплики одного человека
+  peerKey   String
+  orderCode String?
+  question  String
+  answer    String?
+  summary   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([channel, createdAt])
+}

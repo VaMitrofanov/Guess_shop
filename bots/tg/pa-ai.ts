@@ -19,8 +19,9 @@ import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
 import { heldLabel } from "../shared/notify-format";
+import { aiLogRecord } from "../shared/support-ai-log";
 import {
-  CATEGORY_RU, HANDOFF_TEXT, guardDecision, type PaAiDecision,
+  CATEGORY_RU, HANDOFF_TEXT, guardDecision, plain, type PaAiDecision,
 } from "../shared/pa-ai-support";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { twaOrderRows } from "./twa-order-link";
@@ -168,6 +169,11 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   }
   if (!raw) return false;
   const d = guardDecision(raw, text);
+  void aiLogRecord(db, {
+    channel: "tg_pa", action: d.action, mode: mode as "on" | "dry", category: d.category,
+    peerKey: `tg:${m.chatId}`, orderCode: orders[0]?.wbCode ?? null,
+    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+  });
   const order = orders[0];
   const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason ?? null, 60)}` : ""}` : codeOrders.length ? "🎟 покупка кода Robux на сайте (заказов WB нет)" : "📦 заказов в базе нет";
   const who = `👤 <b>${escapeHtml(m.fromName)}</b>${m.username ? ` @${escapeHtml(m.username)}` : ""}`;
