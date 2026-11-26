@@ -24,6 +24,7 @@ import { CATEGORY_RU, guardDecision, plain } from "../shared/pa-ai-support";
 import { decideSupport, isConversationalText, supportCardTarget, supportChannelMode, TurnMemory } from "../shared/support-ai";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { SUPPORT_METRIC_EVENT, recordSupportMetric } from "../shared/support-metric";
+import { aiLogCard } from "../shared/support-ai-log";
 
 const memory = new TurnMemory();
 
@@ -89,6 +90,8 @@ export async function tryTgAi(text: string, deps: TgAiDeps): Promise<boolean> {
     const answer = plain(d.reply);
     await deps.reply(answer);
     memory.push(key, "assistant", answer);
+    // Журнал: каждый ответ ИИ виден админам, без звука (26.11.2026).
+    void aiLogCard(db, `🤖 <b>Бот TG: ответил сам</b> · ${CATEGORY_RU[d.category]}\n${head}\n\n🤖 ${escapeHtml(answer)}`, { silent: true });
     void recordSupportMetric(db as never, {
       type: SUPPORT_METRIC_EVENT.SELF_SERVED, wbCode: order?.wbCode, via: "tg-bot",
       payload: { kind: "ai", category: d.category },

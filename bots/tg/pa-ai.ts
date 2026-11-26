@@ -183,6 +183,8 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     await api("sendMessage", { business_connection_id: m.connId, chat_id: m.chatId, text: d.reply });
     await api("readBusinessMessage", { business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId }).catch(() => undefined);
     rememberTurn(m.chatId, "assistant", d.reply);
+    // Журнал: каждый ответ ИИ виден админам, без звука (26.11.2026).
+    await card(bot, `🤖 <b>@RobloxBank_PA: ответил сам</b> · ${CATEGORY_RU[d.category]}\n${who}\n${orderLine}\n\n${quote}\n\n🤖 ${escapeHtml(d.reply)}`, undefined, "test", true);
     return true;
   }
 
@@ -230,6 +232,7 @@ export async function card(
   html: string,
   inline?: Array<Array<{ text: string; callback_data: string }>>,
   topic: PaTopic = "support",
+  silent = false,
 ) {
   const s = await loadSettings();
   const targets = s.chatId ? [s.chatId] : ADMIN_IDS.map(Number);
@@ -242,6 +245,7 @@ export async function card(
     link_preview_options: { is_disabled: true },
     ...(thread ? { message_thread_id: thread } : {}),
     ...(keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+    ...(silent ? { disable_notification: true } : {}),
   };
   await Promise.allSettled(targets.map((t) => bot.telegram.sendMessage(t, html.slice(0, 4000), extra)));
 }

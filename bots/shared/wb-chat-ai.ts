@@ -24,6 +24,8 @@ import { isArrivalQuestion } from "./robux-eta";
 import { dbsRef } from "./wb-dbs-thread";
 import { identityLinesFor } from "./buyer-identity";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
+import { aiLogCard } from "./support-ai-log";
+import { escapeHtml } from "./notify";
 import { notifyDbsAiEscalation, notifyDbsBuyerMessage } from "./wb-delivery-admin-notify";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -146,6 +148,16 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       const sent = await notifyBuyerViaWbChat(db, ref.code, plain(d.reply), { skipIfClaimOpen: true });
       if (sent.sent) {
         out.replied++;
+        // Журнал: каждый ответ ИИ виден админам, без звука (26.11.2026).
+        void aiLogCard(db, [
+          `🤖 <b>Чат WB: ответил сам</b> · ${CATEGORY_RU[d.category]}`,
+          `👤 ${escapeHtml(order.buyerName ?? "покупатель")} · чат WB`,
+          `📦 ${ref.code}${orders[0] ? ` · ${orders[0].amount} R$ · ${orders[0].status}` : ""}`,
+          "",
+          `💬 «${escapeHtml(text.slice(0, 600))}»`,
+          "",
+          `🤖 ${escapeHtml(plain(d.reply))}`,
+        ].join("\n"), { silent: true });
         await mark("AI_CHAT_REPLIED", { category: d.category });
         continue;
       }

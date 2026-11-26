@@ -15,6 +15,7 @@
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml, tgSend } from "../shared/notify";
+import { aiLogCard } from "../shared/support-ai-log";
 import { vkDialogLink } from "../shared/vk-links";
 import { CATEGORY_RU, guardDecision, plain } from "../shared/pa-ai-support";
 import { decideSupport, isConversationalText, supportCardTarget, supportChannelMode, TurnMemory } from "../shared/support-ai";
@@ -89,6 +90,8 @@ export async function tryVkAi(vkUserId: number, text: string, deps: VkAiDeps): P
     const answer = plain(d.reply);
     await deps.reply(answer);
     memory.push(key(vkUserId), "assistant", answer);
+    // Журнал: каждый ответ ИИ виден админам, без звука (26.11.2026).
+    void aiLogCard(db, `🤖 <b>ВК: ответил сам</b> · ${CATEGORY_RU[d.category]}\n${head}\n\n🤖 ${escapeHtml(answer)}`, { silent: true });
     void recordSupportMetric(db as never, {
       type: SUPPORT_METRIC_EVENT.SELF_SERVED, wbCode: order?.wbCode, via: "vk-bot",
       payload: { kind: "ai", category: d.category },
