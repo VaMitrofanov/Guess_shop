@@ -26,6 +26,19 @@ describe("guardDecision", () => {
     expect(guardDecision(reply({ reply: "Откройте https://create.roblox.com/dashboard/creations" }), "где пасс").action).toBe("reply");
   });
 
+  it("наш сайт можно (коды, 26.11), подделку под него — нет; в чате WB сайт — человеку", () => {
+    expect(guardDecision(reply({ reply: "На будущее: коды на https://robloxbank.ru/#codes" }), "долго").action).toBe("reply");
+    expect(guardDecision(reply({ reply: "Коды: https://robloxbank.ru" }), "долго").action).toBe("reply");
+    expect(guardDecision(reply({ reply: "Коды: https://robloxbank.ru.example.com/x" }), "долго").action).toBe("escalate");
+    expect(guardDecision(reply({ reply: "Есть коды на robloxbank.ru" }), "долго", "wb_chat").action).toBe("escalate");
+  });
+
+  it("база знаний: коды, потолок пасса 1500, запрет догадок о Roblox", () => {
+    expect(PA_AI_SYSTEM).toContain("roblox.com/redeem");
+    expect(PA_AI_SYSTEM).toContain("не больше 1500 R$");
+    expect(PA_AI_SYSTEM).toContain("Строить догадки о Roblox");
+  });
+
   it("смена ника — всегда человеку (случай из живого прогона)", () => {
     const d = guardDecision(reply({ category: "wrong_account", reply: "Создайте пасс на другом аккаунте" }), "не тот ник");
     expect(d.action).toBe("escalate");

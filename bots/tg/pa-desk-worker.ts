@@ -19,6 +19,7 @@
    `PA_DESK=off` — выключить, `PA_DESK=dry` — только писать в лог, что сделал бы.
    ───────────────────────────────────────────────────────────────────────── */
 
+import { redactWbChatText } from "../shared/wb-delivery-crypto";
 import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import type { Dialog } from "telegram/tl/custom/dialog";
@@ -734,12 +735,16 @@ async function dropStaleQuickReplies(tg: TelegramClient, user: Api.UserFull): Pr
  * несколько предыдущих для контекста (`ctx: true`) → `/tmp/pa-export/chats-<дата>.jsonl`
  * в контейнере. Имён, юзернеймов, телефонов нет — только номер чата, сторона
  * (C покупатель, O оператор, B бот аккаунта), время, текст, тип вложения и
- * сводка заказов из базы. Файл забирается по ssh и в репозиторий не попадает.
+ * сводка заказов из базы. Файл забирается по ssh и в репозиторий не попадает;
+ * сжатая копия последней выгрузки — в базе (`pa-export-file`), длинные ключи вырезаны.
  * После выгрузки — итог недели ИИ в «📊 Сводки» (`aiWeeklyReport`).
  * Поменять `EXPORT_VERSION` — внеочередная выгрузка при следующем проходе.
  */
 const EXPORT_VERSION = "2026-11-26";
 const EXPORT_STREAM = "pa-export";
+/** Сжатая копия последней выгрузки (jsonl.gz в base64): `/tmp` не переживает деплой. */
+const EXPORT_FILE_STREAM = "pa-export-file";
+const EXPORT_RETRY_MS = 3 * 3600_000;
 const EXPORT_MSGS_PER_CHAT = 300;
 const EXPORT_EVERY_MS = 7 * 86_400_000;
 const EXPORT_CONTEXT_MSGS = 6;
@@ -750,14 +755,19 @@ export async function exportPaDialogs(): Promise<void> {
   const row = await db.wbSyncCursor.findUnique({ where: { stream: EXPORT_STREAM } }).catch(() => null);
   const last = row?.lastSuccessAt ? new Date(row.lastSuccessAt).getTime() : 0;
   if (row?.cursor === EXPORT_VERSION && Date.now() - last < EXPORT_EVERY_MS) return;
-  const meta = (row?.metadata ?? {}) as { until?: string };
+  const meta = (row?.metadata ?? {}) as { until?: string; startedAt?: string };
+  // Упавшую посреди выгрузку (деплой пересоздал контейнер — 26.11.2026 так
+  // пропала выгрузка за две недели) повторяем, но не чаще раза в 3 часа.
+  if (meta.startedAt && Date.now() - new Date(meta.startedAt).getTime() < EXPORT_RETRY_MS) return;
   const since = meta.until ? new Date(meta.until) : row?.lastSuccessAt ? new Date(row.lastSuccessAt) : EXPORT_FIRST_SINCE;
   const until = new Date();
-  // Сразу двигаем курсор: упадём посреди — следующая попытка через неделю, а не каждые 5 минут.
+  // Курсор (cursor/lastSuccessAt/until) двигается только после успеха: до
+  // 26.11 он ставился в начале, и прерванная выгрузка считалась сделанной на неделю.
+  const running = { ...meta, startedAt: until.toISOString() };
   await db.wbSyncCursor.upsert({
     where: { stream: EXPORT_STREAM },
-    create: { stream: EXPORT_STREAM, cursor: EXPORT_VERSION, lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), running: true } as never },
-    update: { cursor: EXPORT_VERSION, lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), running: true } as never },
+    create: { stream: EXPORT_STREAM, cursor: "running", metadata: running as never },
+    update: { metadata: running as never },
   });
 
   const fs = await import("node:fs/promises");
@@ -792,7 +802,9 @@ export async function exportPaDialogs(): Promise<void> {
       const lines = all.slice(Math.max(0, firstNew - EXPORT_CONTEXT_MSGS)).map((m) => ({
         t: new Date(m.date * 1000).toISOString().slice(0, 16),
         s: !m.out ? "C" : (m as unknown as { viaBusinessBotId?: unknown }).viaBusinessBotId ? "B" : "O",
-        x: (m.message ?? "").slice(0, 2000),
+        // Ключи API Roblox, которые покупатели присылают в чат, в выгрузку не
+        // идут (она хранится копией в базе) — тем же фильтром, что переписка WB.
+        x: redactWbChatText(m.message ?? ""),
         ...(m.media ? { m: m.media.className.replace(/^MessageMedia/, "") } : {}),
         ...(m.date <= sinceSec ? { ctx: true } : {}),
       }));
@@ -805,9 +817,17 @@ export async function exportPaDialogs(): Promise<void> {
     }
     await sleep(800);
   }
+  // Файл в /tmp контейнера живёт до следующего деплоя — копия сжатой в базе.
+  const { gzipSync } = await import("node:zlib");
+  const gz = gzipSync(await fs.readFile(file)).toString("base64");
+  await db.wbSyncCursor.upsert({
+    where: { stream: EXPORT_FILE_STREAM },
+    create: { stream: EXPORT_FILE_STREAM, cursor: until.toISOString().slice(0, 10), lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), gzBase64: gz } as never },
+    update: { cursor: until.toISOString().slice(0, 10), lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), gzBase64: gz } as never },
+  }).catch((e) => console.warn("[pa-export] копия в базу не записалась:", e instanceof Error ? e.message : e));
   await db.wbSyncCursor.update({
     where: { stream: EXPORT_STREAM },
-    data: { metadata: { since: since.toISOString(), until: until.toISOString(), chats: n, messages: msgsTotal, file } as never },
+    data: { cursor: EXPORT_VERSION, lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), chats: n, messages: msgsTotal, file, copy: EXPORT_FILE_STREAM } as never },
   });
   console.log(`[pa-export] готово: чатов ${n}, новых сообщений ${msgsTotal} (с ${since.toISOString().slice(0, 10)}) → ${file}`);
   await aiWeeklyReport(db, { since, chats: n, messages: msgsTotal })
