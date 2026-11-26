@@ -62,36 +62,8 @@ export function generateDirectCode(): string {
 
 // ── Support alert ─────────────────────────────────────────────────────────────
 
-const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
-  code_not_found: "Код не найден",
-  no_place:       "Новый аккаунт без плейса — нет компьютера для Studio",
-  code_mine:      "Код уже активирован (повторный вход)",
-  code_claimed:   "Код активирован другим пользователем",
-  pass_format:    "Не распознан формат геймпасса",
-  pass_not_found: "Геймпасс не найден на Roblox",
-  pass_private:   "Геймпасс в закрытой игре",
-  pass_inactive:  "Геймпасс не выставлен на продажу",
-  pass_price:     "Неверная цена геймпасса",
-  pass_deleted:   "Геймпасс удалён",
-  roblox_down:    "Серверы Roblox недоступны",
-  order_dupe:     "Дублирующийся заказ",
-  order_lost:     "Заказ не найден",
-  rejected:       "Заказ отклонён",
-  resubmit:       "Исправление ссылки",
-  review_rej:     "Отзыв отклонён",
-  pending_long:   "Заказ долго в обработке",
-  direct_wait:    "Долгое ожидание прямого заказа",
-  general:        "Общий вопрос",
-  ai:             "🤖 ИИ передал человеку",
-  order_hint:     "Дополнение к обращению: код, ник или геймпасс, чтобы найти заказ",
-  robux_overdue:  "Робуксов нет — самопроверка Pending",
-  robux_low_pending: "Робуксов нет: в Pending меньше номинала (самопроверка, скрин Transactions приложен)",
-  robux_low_pending_retry: "Робуксов нет: второй скрин после «это не Transactions» (самопроверка)",
-  // Item 7 Phase E — nick-search dead-ends
-  nick_not_found: "Ник Roblox не найден",
-  place_closed:   "Закрытый плейс / нет публичных геймпассов",
-  wrong_price:    "Геймпасс есть, но цена неверна",
-};
+export { SUPPORT_CONTEXT_LABELS } from "./support-context-labels";
+import { SUPPORT_CONTEXT_LABELS } from "./support-context-labels";
 
 export interface SupportAlertPayload {
   platform:     "TG" | "VK";
