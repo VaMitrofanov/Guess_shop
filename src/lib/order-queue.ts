@@ -76,7 +76,6 @@ export const BUYOUT_QUEUE_SQL = `
   ${PAID_BUYOUT_SQL}
   AND ${NOT_HELD_SQL}
   AND "orderSource" <> 'AVITO'
-  AND "isFavorite" = false
   AND (
     status IN ('PENDING','IN_PROGRESS')
     OR (status = 'ERROR' AND "buyoutErrorCode" IN ('${BUYOUT_ERROR_REGIONAL_PRICE}','${BUYOUT_ERROR_ROBLOX_PLUS_FLOW}'))
@@ -108,20 +107,20 @@ export const BUYOUT_LANE_SQL = `
  * не появилось снова.
  */
 export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
-  WORK: `"isFavorite" = false AND ${NOT_HELD_SQL} AND (
+  WORK: `${NOT_HELD_SQL} AND (
     status = 'ERROR'
     OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" <> 'AVITO')
     OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
   )`,
   BUYOUT: BUYOUT_QUEUE_SQL,
-  DIRECT: `"isDirectOrder" = true AND ${NOT_HELD_SQL} AND "isFavorite" = false
+  DIRECT: `"isDirectOrder" = true AND ${NOT_HELD_SQL}
     AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR')`,
-  NEW: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+  NEW: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL}
     AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`,
-  ERROR: `status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false`,
-  AWAITING_LINK: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+  ERROR: `status = 'ERROR' AND ${NOT_HELD_SQL}`,
+  AWAITING_LINK: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL}
     AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`,
-  STALE_LINK: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false
+  STALE_LINK: `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL}
     AND "remindersSent" >= ${SILENT_REMINDERS}`,
   DONE: `status = 'COMPLETED'`,
   REJECTED: `status = 'REJECTED'`,
@@ -130,7 +129,7 @@ export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
      прямой заказ, ждущий подтверждения оплаты. «Ждут ссылку дольше 5 дней»
      отсюда убраны 20.10: они превращали срез в 90 % всей очереди (150 из 168),
      и он ничего не выделял. Тишину покупателя показывает «Молчат». */
-  ATTENTION: `"isFavorite" = false AND ${NOT_HELD_SQL} AND (
+  ATTENTION: `${NOT_HELD_SQL} AND (
     status = 'ERROR'
     OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" <> 'AVITO'
         AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
@@ -152,7 +151,6 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
   switch (tab) {
     case "WORK":
       return {
-        isFavorite: false,
         ...NOT_HELD,
         OR: [
           { status: "ERROR" },
@@ -167,27 +165,25 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
         ...PAID_BUYOUT_SCOPE,
         ...NOT_HELD,
         orderSource: { not: "AVITO" },
-        isFavorite: false,
         OR: [
           { status: { in: ["PENDING", "IN_PROGRESS"] } },
           { status: "ERROR", buyoutErrorCode: { in: [BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW] } },
         ],
       };
     case "DIRECT":
-      return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false, ...NOT_HELD };
+      return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, ...NOT_HELD };
     case "NEW":
-      return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false, ...NOT_HELD };
+      return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, ...NOT_HELD };
     case "ERROR":
-      return { status: "ERROR", isFavorite: false, ...NOT_HELD };
+      return { status: "ERROR", ...NOT_HELD };
     case "AWAITING_LINK":
-      return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false, ...NOT_HELD };
+      return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, ...NOT_HELD };
     // Подмножество «Ждут ссылку», а не отдельная сущность: те же заказы, по
     // которым бот уже отмолчал все три напоминания.
     case "STALE_LINK":
       return {
         status: "AWAITING_GAMEPASS",
         remindersSent: { gte: SILENT_REMINDERS },
-        isFavorite: false,
         ...NOT_HELD,
       };
     case "DONE":
@@ -206,7 +202,6 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
     case "ATTENTION": {
       const buyoutOverdue = new Date(Date.now() - ATTENTION_BUYOUT_HOURS * 3600_000);
       return {
-        isFavorite: false,
         ...NOT_HELD,
         OR: [
           { status: "ERROR" },

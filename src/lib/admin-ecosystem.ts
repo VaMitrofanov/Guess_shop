@@ -289,8 +289,7 @@ async function queryDashboardOperational() {
         COUNT(*) AS "totalOrders",
         COUNT(*) FILTER (WHERE "status"::text IN ('AWAITING_PAYMENT', 'PAYMENT_PENDING', 'AWAITING_GAMEPASS', 'PENDING', 'IN_PROGRESS')) AS "activeOrders",
         COUNT(*) FILTER (
-          WHERE "isFavorite" = false
-            AND "orderSource"::text <> 'AVITO'
+          WHERE "orderSource"::text <> 'AVITO'
             AND NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
             AND (
               "status"::text IN ('PENDING', 'IN_PROGRESS')

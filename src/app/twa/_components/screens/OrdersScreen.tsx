@@ -3858,7 +3858,6 @@ function orderToTab(order: Order): FilterTab {
   const created = new Date(order.createdAt).getTime();
   // ❄️ Замороженный ушёл из всех рабочих вкладок — счётчики двигаются отсюда.
   if (order.heldAt) return "HELD";
-  if (order.isFavorite) return "FAVORITES";
   if (order.status === "COMPLETED") return "DONE";
   if (order.status === "REJECTED") return "REJECTED";
   if (order.status === "ERROR") return "ERROR";
@@ -3871,7 +3870,6 @@ function orderToTab(order: Order): FilterTab {
 }
 
 function isWorkOrder(order: Order): boolean {
-  if (order.isFavorite) return false;
   const cutoff = Date.now() - 40 * 3600_000;
   if (order.status === "ERROR") return true;
   if (["PENDING", "IN_PROGRESS"].includes(order.status) && !isUnpaidDirect(order) && order.orderSource !== "AVITO") return true;
@@ -4569,24 +4567,16 @@ export default function OrdersScreen({
     haptic.impact("medium");
     const wasFav = order.isFavorite;
     setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, isFavorite: !wasFav } : o));
+    // ★ С 26.11.2026 «Избранное» — только звёздочка: заказ остаётся во всех
+    // своих очередях, меняется лишь счётчик вкладки «Избранное».
     setData(prev => {
       if (!prev?.counts) return prev;
       const next = { ...prev.counts };
-      if (wasFav) {
-        next["FAVORITES"] = Math.max(0, (next["FAVORITES"] ?? 0) - 1);
-        if (isWorkOrder({ ...order, isFavorite: false })) next.WORK = (next.WORK ?? 0) + 1;
-      } else {
-        next["FAVORITES"] = (next["FAVORITES"] ?? 0) + 1;
-        if (isWorkOrder(order)) next.WORK = Math.max(0, (next.WORK ?? 0) - 1);
-        const fromTab = orderToTab(order);
-        if (fromTab !== "ALL") next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
-        // Избранное исключается из «Требуют внимания» по определению выборки.
-        if (isAttentionView) next["ATTENTION"] = Math.max(0, (next["ATTENTION"] ?? 0) - 1);
-      }
+      next["FAVORITES"] = wasFav ? Math.max(0, (next["FAVORITES"] ?? 0) - 1) : (next["FAVORITES"] ?? 0) + 1;
       return { ...prev, counts: next };
     });
 
-    if ((filter !== "ALL" || isAttentionView) && !wasFav) {
+    if (filter === "FAVORITES" && wasFav) {
       setExiting(prev => new Set(prev).add(order.id));
       window.setTimeout(() => {
         setAllOrders(prev => prev.filter(o => o.id !== order.id));
@@ -4605,7 +4595,7 @@ export default function OrdersScreen({
     } catch {
       setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, isFavorite: wasFav } : o));
     }
-  }, [token, filter, isAttentionView, onActionDone]);
+  }, [token, filter, onActionDone]);
 
   /* ⚡ «Вперёд очереди». Признак поверх статуса, как заморозка: заказ никуда не
      переезжает, меняется только его место в сортировке. Поэтому счётчики вкладок

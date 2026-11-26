@@ -117,10 +117,9 @@ export function orderBadge(order: PresentableOrder): { label: string; tone: Tone
   // ❄️ Заморозка бьёт все остальные бейджи: это единственное, что определяет,
   // можно ли с заказом вообще что-то делать.
   if (order.heldAt) return { label: "❄️ Заморожен", tone: "ice" };
-  // 🔁 Перевыкуп сильнее «Избранного» и источника: этот заказ уже раз закрыли,
+  // 🔁 Перевыкуп сильнее источника (★ «Избранное» с 26.11 — не бейдж, а звёздочка): этот заказ уже раз закрыли,
   // и покупатель ждёт его дольше всех в очереди.
   if (order.rebuyAt && isRebuyQueued(order)) return { label: "🔁 Перевыкуп", tone: "pink" };
-  if (order.isFavorite) return { label: "Избранное", tone: "yellow" };
   if (order.status === "COMPLETED") return { label: "Готово", tone: "green" };
   if (order.status === "REJECTED") return { label: "Отменено", tone: "red" };
   if (order.status === "ERROR") return { label: "Ошибка", tone: "red" };

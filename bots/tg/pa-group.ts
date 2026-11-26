@@ -227,6 +227,9 @@ async function orderInfo(code: string) {
     select: {
       wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true, heldReason: true,
       robloxUsername: true, gamepassUrl: true, isDirectOrder: true, flags: true, rejectionReason: true,
+      id: true, userId: true, gamepassId: true, adminNote: true, pendingAt: true, purchaserUsername: true,
+      rebuyAt: true, rebuyReason: true, rebuyBy: true, priorityAt: true, priorityBy: true, isFavorite: true,
+      manualReleaseAt: true, manualReleaseBy: true, orderSource: true,
       user: { select: { name: true, username: true, tgId: true, vkId: true } },
     },
   });
@@ -239,10 +242,40 @@ async function orderInfo(code: string) {
     where: { wbCode, ...NOT_FOREIGN_REVIEW }, orderBy: { occurredAt: "desc" }, take: 5,
     select: { kind: true, stars: true, text: true, occurredAt: true, resolvedAt: true },
   });
+  const [events, related] = o ? await Promise.all([
+    db.orderEvent.findMany({
+      where: { orderId: o.id }, orderBy: { createdAt: "asc" }, take: 40,
+      select: { type: true, createdAt: true, payload: true },
+    }),
+    db.wbOrder.findMany({
+      where: {
+        id: { not: o.id },
+        OR: [
+          ...(o.gamepassId ? [{ gamepassId: o.gamepassId }] : []),
+          ...(o.robloxUsername ? [{ robloxUsername: { equals: o.robloxUsername, mode: "insensitive" as const } }] : []),
+          { userId: o.userId },
+        ],
+      },
+      orderBy: { createdAt: "desc" }, take: 6,
+      select: { wbCode: true, amount: true, status: true, createdAt: true, robloxUsername: true, gamepassId: true },
+    }),
+  ]) : [[], []];
   return {
     found: true,
+    // История заказа — главное для ответа «что с ним было»: правки пасса и ника,
+    // перевыкуп, заморозки/разморозки, ручные пометки админов (adminNote) и журнал.
+    history: o && {
+      notes: (o.adminNote ?? "").split("\n").map((l) => l.trim()).filter(Boolean).slice(-20).map((l) => l.slice(0, 300)),
+      events: events.map((e) => ({ at: e.createdAt, type: e.type, data: JSON.stringify(e.payload).slice(0, 220) })),
+      rebuy: o.rebuyAt ? { at: o.rebuyAt, by: o.rebuyBy, reason: o.rebuyReason } : null,
+      priority: o.priorityAt ? { at: o.priorityAt, by: o.priorityBy } : null,
+      favorite: o.isFavorite,
+      manualRelease: o.manualReleaseAt ? { at: o.manualReleaseAt, by: o.manualReleaseBy } : null,
+      boughtByAccount: o.purchaserUsername,
+    },
+    related: related.map((r) => ({ code: r.wbCode, robux: r.amount, status: STATUS_RU[r.status] ?? r.status, created: r.createdAt, nick: r.robloxUsername, samePass: Boolean(o?.gamepassId && r.gamepassId === o.gamepassId) })),
     order: o && {
-      code: o.wbCode, robux: o.amount, status: STATUS_RU[o.status] ?? o.status, created: o.createdAt, bought: o.completedAt,
+      code: o.wbCode, robux: o.amount, status: STATUS_RU[o.status] ?? o.status, source: o.orderSource, created: o.createdAt, waitingSince: o.pendingAt, bought: o.completedAt,
       frozen: o.heldAt ? o.heldReason ?? "да" : null, nick: o.robloxUsername, pass: o.gamepassUrl, direct: o.isDirectOrder,
       flags: flagsOf(o).filter((f) => !f.ackAt).map((f) => `${f.kind}${f.detail ? `: ${f.detail}` : ""}`),
       rejection: o.rejectionReason,
@@ -342,7 +375,7 @@ async function openRisks() {
 
 const TOOLS: Anthropic.Tool[] = [
   { name: "who_is", description: "КТО ЭТО: единый профиль покупателя по чему угодно — код заказа, номер заказа WB, ник Roblox, @username Telegram, имя на WB или в боте. Возвращает его Telegram/ВК, все заказы (WB и прямые), имена на WB, ники Roblox, отзывы/заявки/жалобы на WB. Связь WB↔наш клиент помечена: точно / вероятно / тёзки.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false }, strict: true },
-  { name: "order_info", description: "Всё о заказе по коду (7 символов, например ZT8BW8D, или DIR-...): статус, ник, пасс, заморозка, пометки, данные Wildberries, события рисков.", input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"], additionalProperties: false }, strict: true },
+  { name: "order_info", description: "Вся карточка заказа С ИСТОРИЕЙ (правки, перевыкуп, заморозки, пометки админов, журнал, связанные заказы). Всё о заказе по коду (7 символов, например ZT8BW8D, или DIR-...): статус, ник, пасс, заморозка, пометки, данные Wildberries, события рисков.", input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"], additionalProperties: false }, strict: true },
   { name: "find_orders", description: "Поиск заказов по нику Roblox, имени покупателя, @username Telegram, части кода или номеру заказа WB. До 10 свежих.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false }, strict: true },
   { name: "queue_overview", description: "Что сейчас в работе: заказы по статусам, сколько заморожено, кто ждёт пасс 2–30 дней (самые свежие коды) и сколько висит дольше 30 дней, самый старый в очереди на выкуп.", input_schema: { type: "object", properties: {}, required: [], additionalProperties: false }, strict: true },
   { name: "stats", description: "Цифры за период: заказы, робуксы заказано/выкуплено, отмены, заказы DBS с WB. days=1 — сегодня по Москве.", input_schema: { type: "object", properties: { days: { type: "integer", enum: [1, 7, 30] } }, required: ["days"], additionalProperties: false }, strict: true },
@@ -361,7 +394,7 @@ async function runTool(name: string, input: Record<string, unknown>) {
   }
 }
 
-const ASSISTANT_SYSTEM = `Ты — ассистент команды магазина RobloxBank (робуксы через геймпассы, продажи на Wildberries и в Telegram/VK-ботах). Тебе пишут админы в рабочей беседе. Отвечай по-русски, коротко и по делу, как коллега: цифры, коды заказов, что делать. Суммы заказов (robux) — в робуксах, пиши «R$», не рубли. Данные бери ТОЛЬКО из инструментов (они читают нашу базу); если данных нет — так и скажи, не выдумывай. Ты ничего не меняешь в заказах — только смотришь и подсказываешь; если просят действие (выкупить, разморозить, вернуть деньги), объясни, где это сделать в админке (TWA/сайт), и дай нужные данные. Время в данных — UTC, админам называй по Москве (UTC+3). Это переписка: «этот заказ», «он», «а пасс?» — про то, о чём шла речь выше или в сообщении, на которое ответили; переспрашивай, только если по разговору правда не понять. Без markdown-разметки (звёздочки, решётки) — обычный текст и эмодзи по делу.`;
+const ASSISTANT_SYSTEM = `Ты — ассистент команды магазина RobloxBank (робуксы через геймпассы, продажи на Wildberries и в Telegram/VK-ботах). Тебе пишут админы в рабочей беседе. Отвечай по-русски, коротко и по делу, как коллега: цифры, коды заказов, что делать. Суммы заказов (robux) — в робуксах, пиши «R$», не рубли. Данные бери ТОЛЬКО из инструментов (они читают нашу базу); если данных нет — так и скажи, не выдумывай. Ты ничего не меняешь в заказах — только смотришь и подсказываешь; если просят действие (выкупить, разморозить, вернуть деньги), объясни, где это сделать в админке (TWA/сайт), и дай нужные данные. Время в данных — UTC, админам называй по Москве (UTC+3). Про заказ отвечай как человек, который в курсе: сначала то, чем он НЕ обычный (перевыкуп, смена пасса или ника, заморозки и кто снял, приоритет, обращения покупателя, связанные заказы на тот же пасс/ник) — коротко историей по датам, 2–5 строк, из history и related; потом текущий статус и что делать дальше. Обычный заказ без истории — одной строкой. Пометки в квадратных скобках ([EDIT], [ПЕРЕВЫКУП], [ЗАМОРОЗКА]…) — это журнал админов, пересказывай их своими словами, а не цитатой. Это переписка: «этот заказ», «он», «а пасс?» — про то, о чём шла речь выше или в сообщении, на которое ответили; переспрашивай, только если по разговору правда не понять. Без markdown-разметки (звёздочки, решётки) — обычный текст и эмодзи по делу.`;
 
 export async function askAssistant(question: string, history: AssistantTurn[] = []): Promise<string> {
   const messages: Anthropic.MessageParam[] = [

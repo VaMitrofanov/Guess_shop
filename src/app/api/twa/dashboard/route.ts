@@ -123,7 +123,7 @@ async function loadCore() {
         MIN("createdAt") AS "oldestAt",
         MIN("createdAt") FILTER (WHERE "remindersSent" >= ${SILENT_REMINDERS}) AS "staleOldestAt"
       FROM "WbOrder"
-      WHERE "isTest" = false AND "isFavorite" = false AND ${NOT_HELD_SQL}
+      WHERE "isTest" = false AND ${NOT_HELD_SQL}
         AND status = 'AWAITING_GAMEPASS'
         AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'
     `),
@@ -131,11 +131,11 @@ async function loadCore() {
     prisma.$queryRawUnsafe<ErrorRow[]>(`
       SELECT COUNT(*)::int AS "count", MIN("createdAt") AS "oldestAt"
       FROM "WbOrder"
-      WHERE "isTest" = false AND "isFavorite" = false AND ${NOT_HELD_SQL} AND status = 'ERROR'
+      WHERE "isTest" = false AND ${NOT_HELD_SQL} AND status = 'ERROR'
     `),
 
     prisma.wbOrder.findFirst({
-      where: { isTest: false, isFavorite: false, status: "ERROR", heldAt: null },
+      where: { isTest: false, status: "ERROR", heldAt: null },
       orderBy: { createdAt: "asc" },
       select: { buyoutErrorCode: true, adminNote: true },
     }),

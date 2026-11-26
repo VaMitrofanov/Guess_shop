@@ -150,8 +150,8 @@ function ageBasisIsPending(tab: FilterTab): boolean {
 
 /* ── Предикаты срезов для сырого SQL ─────────────────────────────────────── */
 
-const ERROR_SLICE_SQL = `status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false`;
-const LINK_SLICE_SQL = `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "isFavorite" = false AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`;
+const ERROR_SLICE_SQL = `status = 'ERROR' AND ${NOT_HELD_SQL}`;
+const LINK_SLICE_SQL = `status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours'`;
 
 const SLICE_SQL: Record<Exclude<SliceKey, "DONE">, string> = {
   BUYOUT: BUYOUT_QUEUE_SQL,
