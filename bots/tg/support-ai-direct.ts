@@ -8,7 +8,24 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { CHANNEL_NOTES, PA_AI_CATEGORIES, PA_AI_MODEL, PA_AI_SYSTEM, type SupportChannel } from "../shared/pa-ai-support";
-import type { SupportAiRequest, SupportAiResult } from "../shared/support-ai";
+import { SUPPORT_SETTINGS_STREAM, type SupportAiRequest, type SupportAiResult } from "../shared/support-ai";
+import { db } from "../shared/db";
+
+/** Правила владельца (`/ai_rule`) из строки настроек; кэш минута. */
+let rulesCache = { at: 0, text: "" };
+async function ownerRules(): Promise<string> {
+  if (Date.now() - rulesCache.at < 60_000) return rulesCache.text;
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: SUPPORT_SETTINGS_STREAM } }).catch(() => null);
+  const rules = ((row?.metadata ?? {}) as { rules?: unknown }).rules;
+  const list = Array.isArray(rules) ? rules.filter((r): r is string => typeof r === "string" && r.trim().length > 0) : [];
+  rulesCache = {
+    at: Date.now(),
+    text: list.length
+      ? `ПРАВИЛА ВЛАДЕЛЬЦА МАГАЗИНА (важнее базы знаний выше; соблюдай всегда):\n${list.map((r, i) => `${i + 1}. ${r}`).join("\n")}`
+      : "",
+  };
+  return rulesCache.text;
+}
 
 const PaAiDecisionSchema = z.object({
   action: z.enum(["reply", "escalate", "ignore"]),
@@ -60,6 +77,7 @@ export async function decideSupportDirect(req: SupportAiRequest): Promise<Suppor
   calls.set(req.channel, counter);
   const messages = buildSupportMessages(req);
   if (!messages) return null;
+  const rules = await ownerRules();
   try {
     const res = await anthropic().messages.parse({
       model: PA_AI_MODEL,
@@ -68,6 +86,7 @@ export async function decideSupportDirect(req: SupportAiRequest): Promise<Suppor
       system: [
         { type: "text", text: PA_AI_SYSTEM, cache_control: { type: "ephemeral" } },
         { type: "text", text: CHANNEL_NOTES[req.channel] },
+        ...(rules ? [{ type: "text" as const, text: rules }] : []),
       ],
       messages,
       output_config: { effort: "low", format: zodOutputFormat(PaAiDecisionSchema) },

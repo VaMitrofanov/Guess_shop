@@ -16,7 +16,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
 import { isOrderStatusQuestion, paBotRedirectReply, paOrderReply } from "../shared/pa-business-reply";
-import { handleWithAi, operatorReplied, registerPaAiAdmin, rememberTurn } from "./pa-ai";
+import { handleWithAi, operatorReplied, paAiMode, registerPaAiAdmin, rememberTurn } from "./pa-ai";
 import { registerPaGroup } from "./pa-group";
 import { registerReleaseNotes } from "./release-notes";
 import { registerWatchList } from "./watch-list";
@@ -243,7 +243,9 @@ export function registerPaBusiness(bot: Telegraf): void {
       // 🤖 «Где заказ / где Robux» — сразу короткий ответ по этапу + ссылка на
       // карточку в боте, до ИИ и до человека (15.11.2026). Повтор за 10 минут,
       // заморозка, ошибка, несколько живых заказов — дальше штатно (ИИ/человек).
-      if (text && isOrderStatusQuestion(text)) {
+      // С включённым ИИ (on) шаблон не перехватывает: «в Pending ничего нет» —
+      // жалоба, а не вопрос статуса, и ИИ видит заказ (26.11.2026).
+      if (text && isOrderStatusQuestion(text) && (await paAiMode()) !== "on") {
         const buyer = await db.user.findUnique({ where: { tgId: String(fromId) }, select: { id: true } });
         const list = buyer
           ? await db.wbOrder.findMany({

@@ -43,8 +43,8 @@ const drafts = new Map<string, { connId: string; chatId: number; text: string; a
 /** Темы беседы админов (форум): куда что слать. */
 export type PaTopic = "support" | "test" | "digest" | "assistant" | "ideas" | "updates";
 type Channels = Partial<Record<SupportChannelKey, SupportAiMode>>;
-export type PaSettings = { chatId: number | null; mode: PaAiMode; topics: Partial<Record<PaTopic, number>>; digestDay?: string; channels: Channels; loadedAt: number };
-let settings: PaSettings = { chatId: null, mode: "dry", topics: {}, channels: {}, loadedAt: 0 };
+export type PaSettings = { chatId: number | null; mode: PaAiMode; topics: Partial<Record<PaTopic, number>>; digestDay?: string; channels: Channels; rules: string[]; loadedAt: number };
+let settings: PaSettings = { chatId: null, mode: "dry", topics: {}, channels: {}, rules: [], loadedAt: 0 };
 let outOfMoneyNotified = 0;
 
 export function rememberTurn(chatId: number, role: Turn["role"], text: string) {
@@ -64,19 +64,20 @@ export function operatorReplied(chatId: number) {
 export async function loadSettings(force = false): Promise<PaSettings> {
   if (!force && Date.now() - settings.loadedAt < 60_000) return settings;
   const row = await db.wbSyncCursor.findUnique({ where: { stream: STREAM } }).catch(() => null);
-  const meta = (row?.metadata ?? {}) as { mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string; channels?: Channels };
+  const meta = (row?.metadata ?? {}) as { mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string; channels?: Channels; rules?: string[] };
   settings = {
     chatId: row?.cursor ? Number(row.cursor) : null,
     mode: meta.mode === "on" || meta.mode === "off" ? meta.mode : "dry",
     topics: meta.topics ?? {},
     digestDay: meta.digestDay,
     channels: meta.channels ?? {},
+    rules: Array.isArray(meta.rules) ? meta.rules.filter((r) => typeof r === "string") : [],
     loadedAt: Date.now(),
   };
   return settings;
 }
 
-export async function saveSettings(patch: { chatId?: number; mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string; channels?: Channels }) {
+export async function saveSettings(patch: { chatId?: number; mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string; channels?: Channels; rules?: string[] }) {
   const cur = await loadSettings(true);
   const chatId = patch.chatId ?? cur.chatId;
   const next = {
@@ -85,6 +86,8 @@ export async function saveSettings(patch: { chatId?: number; mode?: PaAiMode; to
     digestDay: patch.digestDay ?? cur.digestDay,
     // Режимы ВК и WB живут в этой же строке — терять их при любой другой правке нельзя.
     channels: { ...cur.channels, ...patch.channels },
+    // Правила владельца для ИИ (`/ai_rule`) — тоже здесь; терять при другой правке нельзя.
+    rules: patch.rules ?? cur.rules,
   };
   resetSupportModeCache();
   await db.wbSyncCursor.upsert({
@@ -295,6 +298,42 @@ export function registerPaAiAdmin(bot: Telegraf): void {
       `• чаты WB — ${s.channels.wb_chat ?? "off"} · ${supportAiCallsToday("wb_chat")}\n\n` +
       `Сменить: /support_mode on|dry|off · /support_mode bot|vk|wb on|dry|off`,
     );
+  });
+
+  // Правила владельца для ИИ (26.11.2026): действуют сразу, без деплоя, во всех
+  // каналах — блоком «ПРАВИЛА ВЛАДЕЛЬЦА» после базы знаний (`support-ai-direct`).
+  bot.command("ai_rule", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const rule = (ctx.message?.text ?? "").replace(/^\/ai_rule(@\w+)?\s*/i, "").trim();
+    if (rule.length < 10) {
+      await ctx.reply("Напишите правило после команды, например:\n/ai_rule Если в Pending пусто — попросить скриншот профиля с ником и Transactions за месяц");
+      return;
+    }
+    const s = await loadSettings(true);
+    const rules = [...s.rules, rule.slice(0, 600)].slice(-40);
+    await saveSettings({ rules });
+    await ctx.reply(`✅ Правило №${rules.length} добавлено — ИИ учтёт его в течение минуты.\nВсе правила: /ai_rules`);
+  });
+
+  bot.command("ai_rules", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const s = await loadSettings(true);
+    await ctx.reply(s.rules.length
+      ? `Правила ИИ (${s.rules.length}):\n\n${s.rules.map((r, i) => `${i + 1}. ${r}`).join("\n\n")}\n\nУдалить: /ai_rule_del N`
+      : "Своих правил пока нет. Добавить: /ai_rule текст");
+  });
+
+  bot.command("ai_rule_del", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const n = Number((ctx.message?.text ?? "").split(/\s+/)[1]);
+    const s = await loadSettings(true);
+    if (!Number.isInteger(n) || n < 1 || n > s.rules.length) {
+      await ctx.reply(`Укажите номер от 1 до ${s.rules.length}: /ai_rule_del N`);
+      return;
+    }
+    const rules = s.rules.filter((_, i) => i !== n - 1);
+    await saveSettings({ rules });
+    await ctx.reply(`🗑 Правило №${n} удалено. Осталось: ${rules.length}.`);
   });
 
   bot.action(/^paai:(send|own):(\w+)$/, async (ctx) => {

@@ -153,6 +153,8 @@ const ADMIN_GROUP_COMMANDS = [
   { command: "who", description: "Досье: код, номер WB, ник Roblox, @username или имя" },
   { command: "reviews", description: "Последние плохие отзывы WB с покупателями" },
   { command: "support_mode", description: "Режим ИИ-поддержки: on, dry или off" },
+  { command: "ai_rule", description: "Добавить правило для ИИ (действует сразу)" },
+  { command: "ai_rules", description: "Правила ИИ: список и удаление" },
   { command: "digest", description: "Сводка сейчас (работает после переезда)" },
 ];
 
