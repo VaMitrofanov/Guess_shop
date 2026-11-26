@@ -13,7 +13,7 @@
 
 import { ADMIN_IDS } from "./admin";
 import { tgSend } from "./notify";
-import { supportCardTarget } from "./support-ai";
+import { supportCardTarget, supportChannelMode } from "./support-ai";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -64,29 +64,130 @@ const CHANNEL_RU: Record<string, string> = {
   tg_pa: "@RobloxBank_PA", tg_bot: "бот TG", vk_bot: "ВК", wb_chat: "чаты WB",
 };
 
+/* ── Статистика по площадкам (26.11.2026) ─────────────────────────────────
+   Владелец: «стату по ответам отдельно для ВК, ВБ и ТГ — сколько чатов и где
+   воркер взял на себя». Считаем ЧАТЫ (`peerKey`), а не реплики: чат «закрыт
+   сам», если за период ИИ ни разу не передал его человеку. Режим dry —
+   отдельной строкой «тест»: покупателю тогда ничего не уходило. */
+
+export type AiChannel = AiLogEntry["channel"];
+export type AiMode = "on" | "dry" | "off";
+
+export interface AiChannelStat {
+  /** Чатов, где ИИ работал в боевом режиме. */
+  chats: number;
+  /** Из них ни разу не передал человеку. */
+  selfChats: number;
+  /** Из них передал человеку хотя бы раз. */
+  handedChats: number;
+  replies: number;
+  handoffs: number;
+  ignores: number;
+  /** Чатов в режиме dry (покупателю не уходило). */
+  dryChats: number;
+}
+
+type LogRow = { channel: string; action: string; mode: string; peerKey: string };
+
+/** Чистый подсчёт по строкам журнала — с тестами. */
+export function aggregateAiLog(rows: LogRow[]): Record<AiChannel, AiChannelStat> {
+  const empty = (): AiChannelStat => ({ chats: 0, selfChats: 0, handedChats: 0, replies: 0, handoffs: 0, ignores: 0, dryChats: 0 });
+  const out: Record<AiChannel, AiChannelStat> = { tg_pa: empty(), tg_bot: empty(), vk_bot: empty(), wb_chat: empty() };
+  const live = new Map<string, boolean>(); // channel|peer → передавал ли
+  const dry = new Set<string>();
+  for (const r of rows) {
+    const st = out[r.channel as AiChannel];
+    if (!st) continue;
+    const key = `${r.channel}|${r.peerKey}`;
+    if (r.mode === "dry") { dry.add(key); continue; }
+    if (r.action === "reply") st.replies++;
+    else if (r.action === "escalate") st.handoffs++;
+    else if (r.action === "ignore") st.ignores++;
+    live.set(key, (live.get(key) ?? false) || r.action === "escalate");
+  }
+  for (const [key, handed] of live) {
+    const st = out[key.split("|")[0] as AiChannel];
+    st.chats++;
+    if (handed) st.handedChats++; else st.selfChats++;
+  }
+  for (const key of dry) out[key.split("|")[0] as AiChannel].dryChats++;
+  return out;
+}
+
+const MODE_RU: Record<AiMode, string> = { on: "отвечает", dry: "тест", off: "выключен" };
+
+function channelLine(label: string, st: AiChannelStat, mode: AiMode, total?: number | null): string {
+  const head = `${label} (${MODE_RU[mode]})`;
+  if (!st.chats && !st.dryChats) return `• ${head}: ИИ не работал${total ? ` · чатов с покупателями ${total}` : ""}`;
+  const parts: string[] = [];
+  if (st.chats) {
+    const pct = Math.round((st.selfChats / st.chats) * 100);
+    parts.push(`${st.chats} ${plural(st.chats, "чат", "чата", "чатов")}${total ? ` из ${total}` : ""} — сам ${st.selfChats} (${pct}%), вам ${st.handedChats}`);
+    parts.push(`ответов ${st.replies}, передач ${st.handoffs}${st.ignores ? `, промолчал ${st.ignores}` : ""}`);
+  }
+  if (st.dryChats) parts.push(`тест: ${st.dryChats} ${plural(st.dryChats, "чат", "чата", "чатов")}`);
+  return `• ${head}: ${parts.join(" · ")}`;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+  return many;
+}
+
+/** Блок «ИИ-поддержка» по площадкам: Telegram (аккаунт + бот), ВК, WB. HTML. */
+export function formatAiStats(
+  stats: Record<AiChannel, AiChannelStat>,
+  modes: Record<AiChannel, AiMode>,
+  opts: { title: string; wbTotalChats?: number | null },
+): string {
+  const tgChats = stats.tg_pa.chats + stats.tg_bot.chats;
+  const tgSelf = stats.tg_pa.selfChats + stats.tg_bot.selfChats;
+  return [
+    `🧠 <b>${opts.title}</b>`,
+    "",
+    `📱 <b>Telegram</b>${tgChats ? ` — ${tgChats} ${plural(tgChats, "чат", "чата", "чатов")}, сам ${tgSelf}` : ""}`,
+    channelLine("@RobloxBank_PA", stats.tg_pa, modes.tg_pa),
+    channelLine("бот @RobloxBankBot", stats.tg_bot, modes.tg_bot),
+    "",
+    "💬 <b>ВКонтакте</b>",
+    channelLine("сообщество", stats.vk_bot, modes.vk_bot),
+    "",
+    "🛒 <b>Wildberries</b>",
+    channelLine("чаты заказов", stats.wb_chat, modes.wb_chat, opts.wbTotalChats),
+    "",
+    "«Сам» — чат, который ИИ ни разу не передал человеку.",
+  ].join("\n");
+}
+
+/** Статистика за [since, until): журнал ИИ + сколько всего чатов WB, где писали покупатели. */
+export async function loadAiStats(db: Db, since: Date, until: Date = new Date()): Promise<{ stats: Record<AiChannel, AiChannelStat>; wbTotalChats: number | null }> {
+  const rows: LogRow[] = await db.aiSupportLog.findMany({
+    where: { createdAt: { gte: since, lt: until } },
+    select: { channel: true, action: true, mode: true, peerKey: true },
+  }).catch(() => []);
+  const wb: Array<{ chatId: string }> | null = await db.wbBuyerChatEvent.findMany({
+    where: { sentAt: { gte: since, lt: until }, sender: "client" },
+    distinct: ["chatId"],
+    select: { chatId: true },
+  }).catch(() => null);
+  return { stats: aggregateAiLog(rows), wbTotalChats: wb ? wb.length : null };
+}
+
 /**
  * Итог недели ИИ — в «📊 Сводки» после еженедельной выгрузки диалогов PA:
- * сколько ответил сам / передал / промолчал по каналам и напоминание, что
- * выгрузка готова к разбору (разбирает Claude по просьбе владельца).
+ * та же раскладка по площадкам, что в утренней сводке и /ai_stats, плюс
+ * напоминание, что выгрузка готова к разбору (разбирает Claude по просьбе владельца).
  */
-export async function aiWeeklyReport(db: Db, exp: { since: Date; chats: number; messages: number }): Promise<void> {
-  const rows: Array<{ channel: string; action: string; _count: { _all: number } }> = await db.aiSupportLog.groupBy({
-    by: ["channel", "action"],
-    where: { createdAt: { gte: exp.since }, mode: "on" },
-    _count: { _all: true },
-  }).catch(() => []);
-  const by = new Map<string, { reply: number; escalate: number; ignore: number }>();
-  for (const r of rows) {
-    const c = by.get(r.channel) ?? { reply: 0, escalate: 0, ignore: 0 };
-    if (r.action === "reply" || r.action === "escalate" || r.action === "ignore") c[r.action] += r._count._all;
-    by.set(r.channel, c);
-  }
-  const lines = [...by.entries()].map(([ch, c]) =>
-    `• ${CHANNEL_RU[ch] ?? ch}: ответил сам ${c.reply}, передал вам ${c.escalate}${c.ignore ? `, промолчал ${c.ignore}` : ""}`);
+export async function aiWeeklyReport(
+  db: Db,
+  exp: { since: Date; chats: number; messages: number },
+  modes?: Record<AiChannel, AiMode>,
+): Promise<void> {
+  const { stats, wbTotalChats } = await loadAiStats(db, exp.since);
   const html = [
-    `🧠 <b>ИИ-поддержка: итог с ${exp.since.toISOString().slice(0, 10)}</b>`,
-    "",
-    ...(lines.length ? lines : ["• ИИ в режиме on не отвечал"]),
+    formatAiStats(stats, modes ?? await loadAiModes(db), { title: `ИИ-поддержка: итог с ${exp.since.toISOString().slice(0, 10)}`, wbTotalChats }),
     "",
     `📥 Выгрузка диалогов @RobloxBank_PA готова: чатов ${exp.chats}, новых сообщений ${exp.messages}.`,
     "Чтобы ИИ отвечал лучше — попросите Claude «разбор ИИ за неделю»: он прочитает журнал и диалоги и допишет базу знаний.",
@@ -98,4 +199,13 @@ export async function aiWeeklyReport(db: Db, exp: { since: Date; chats: number; 
     parse_mode: "HTML",
     ...(thread ? { message_thread_id: thread } : {}),
   })));
+}
+
+/** Режимы каналов: @RobloxBank_PA — из настроек беседы поддержки, боты и WB — `/support_mode`. */
+export async function loadAiModes(db: Db): Promise<Record<AiChannel, AiMode>> {
+  const pa = await db.wbSyncCursor.findUnique({ where: { stream: "pa-support" } }).catch(() => null);
+  const paMode = ((pa?.metadata ?? {}) as { mode?: string }).mode;
+  const asMode = (m: unknown): AiMode => (m === "on" || m === "dry" ? m : "off");
+  const [tgBot, vk, wb] = await Promise.all((["tg_bot", "vk_bot", "wb_chat"] as const).map((k) => supportChannelMode(db, k).catch(() => "off" as const)));
+  return { tg_pa: asMode(paMode), tg_bot: asMode(tgBot), vk_bot: asMode(vk), wb_chat: asMode(wb) };
 }

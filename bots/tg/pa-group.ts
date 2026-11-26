@@ -157,6 +157,7 @@ const ADMIN_GROUP_COMMANDS = [
   { command: "support_mode", description: "Режим ИИ-поддержки: on, dry или off" },
   { command: "ai_rule", description: "Добавить правило для ИИ (действует сразу)" },
   { command: "ai_rules", description: "Правила ИИ: список и удаление" },
+  { command: "ai_stats", description: "ИИ по площадкам TG/ВК/WB: /ai_stats 1, 7 или 30" },
   { command: "digest", description: "Сводка сейчас (работает после переезда)" },
 ];
 
@@ -198,6 +199,7 @@ function keepInThread(ctx: any, thread: number | undefined): void {
 import { twaOrderRows } from "./twa-order-link";
 import { expectedGamepassPrice } from "../shared/gamepass-plan";
 import { actorText, describeEvent, mskText, notesByTime } from "../shared/order-history-text";
+import { formatAiStats, loadAiModes, loadAiStats } from "../shared/support-ai-log";
 import { memoryKey, recallTurns, rememberExchange, replyContext, withReplyContext, type AssistantTurn } from "../shared/assistant-memory";
 import { PROFILE_STREAM, loadPaResponseStats } from "./pa-desk-worker";
 import { formatResponseStats } from "./pa-response-stats";
@@ -502,13 +504,21 @@ export function startPaDigest(bot: Telegraf) {
     const yKey = new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(0, 10);
     const resp = await loadPaResponseStats().catch(() => null);
     const respBlock = resp?.day === yKey ? `\n\n${escape(formatResponseStats(resp, "@RobloxBank_PA"))}` : "";
-    await card(bot, `☀️ <b>Сводка за ${new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(5, 10).split("-").reverse().join(".")}</b>\n\n${escape(text)}${respBlock}`, undefined, "digest");
+    // ИИ-поддержка по площадкам за вчера — готовым блоком, не через модель (26.11.2026).
+    const aiBlock = await aiStatsBlock(mskDayStart(-1), mskDayStart(0), "ИИ-поддержка вчера").catch(() => "");
+    await card(bot, `☀️ <b>Сводка за ${new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(5, 10).split("-").reverse().join(".")}</b>\n\n${escape(text)}${respBlock}${aiBlock ? `\n\n${aiBlock}` : ""}`, undefined, "digest");
   };
   setTimeout(() => void tick().catch((e) => console.error("[pa-group] сводка:", e)), 180_000);
   setInterval(() => void tick().catch((e) => console.error("[pa-group] сводка:", e)), 10 * 60_000);
 }
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Блок «ИИ-поддержка» по площадкам (TG / ВК / WB) за [since, until). */
+async function aiStatsBlock(since: Date, until: Date, title: string): Promise<string> {
+  const [{ stats, wbTotalChats }, modes] = await Promise.all([loadAiStats(db, since, until), loadAiModes(db)]);
+  return formatAiStats(stats, modes, { title, wbTotalChats });
+}
 
 const SILENT_STREAM = "silent-weekly";
 
@@ -648,6 +658,16 @@ export function registerPaGroup(bot: Telegraf): void {
   bot.command("silent", async (ctx) => {
     if (!isAdmin(ctx.from?.id)) return;
     await ctx.reply(formatSilentSummary(await loadSilentSummary(db)), { parse_mode: "HTML" });
+  });
+
+  // ИИ-поддержка по площадкам: /ai_stats [1|7|30] — сегодня по МСК / неделя / месяц.
+  bot.command("ai_stats", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const arg = Number((ctx.message?.text ?? "").split(/\s+/)[1]);
+    const days = [1, 7, 30].includes(arg) ? arg : 7;
+    const since = days === 1 ? mskDayStart(0) : new Date(Date.now() - days * 86_400_000);
+    const title = days === 1 ? "ИИ-поддержка сегодня" : `ИИ-поддержка за ${days} дн.`;
+    await ctx.reply(await aiStatsBlock(since, new Date(), title), { parse_mode: "HTML" });
   });
 
   bot.command("digest", async (ctx) => {
