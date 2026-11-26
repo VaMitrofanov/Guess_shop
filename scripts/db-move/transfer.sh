@@ -26,7 +26,8 @@ DUMP="$WORK/neon-$STAMP.dump"
 PG_IMAGE=postgres:17   # клиент той же major-версии, что Neon (17.x)
 
 src_psql() { docker run --rm --network host -e PGCONNECT_TIMEOUT=20 "$PG_IMAGE" psql "$SOURCE_URL" -XAtq -v ON_ERROR_STOP=1 -c "$1"; }
-dst_psql() { docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -XAtq -v ON_ERROR_STOP=1 -c "$1"; }
+# Без -i: иначе psql съедает stdin цикла verify() — сверялась одна таблица из 55 (26.11.2026).
+dst_psql() { docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -XAtq -v ON_ERROR_STOP=1 -c "$1"; }
 
 tables() { src_psql "select tablename from pg_tables where schemaname='public' order by 1"; }
 

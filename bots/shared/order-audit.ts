@@ -112,6 +112,8 @@ export async function auditNickEntered(
     robloxKnows?: boolean;
     /** Сколько пассов на продажу нашлось у этого ника в тот момент. */
     passesFound?: number;
+    /** Видны ли поиску игры аккаунта: ok / hidden (скрыты приватностью) / none (игр нет). */
+    gamesVisibility?: string | null;
   },
 ): Promise<void> {
   const nick = opts.nick.trim().replace(/^@/, "");
@@ -124,6 +126,7 @@ export async function auditNickEntered(
       via: opts.via,
       ...(opts.robloxKnows === undefined ? {} : { robloxKnows: opts.robloxKnows }),
       ...(opts.passesFound === undefined ? {} : { passesFound: opts.passesFound }),
+      ...(opts.gamesVisibility ? { gamesVisibility: opts.gamesVisibility } : {}),
     });
   } catch (err) {
     console.warn("[order-audit] auditNickEntered:", err instanceof Error ? err.message : err);

@@ -65,6 +65,17 @@ describe("граф модулей ботов", () => {
     expect(hits(graph, "wb-delivery-sync")).toEqual([]);
   });
 
+  it("VK-бот не тянет SDK Anthropic и zod через ИИ-поддержку (13.11.2026)", () => {
+    const graph = runtimeGraph("bots/vk/bot.ts");
+    expect(hits(graph, "support-ai-direct")).toEqual([]);
+    expect(hits(graph, "bots/tg/")).toEqual([]);
+    expect(hits(graph, "support-ai.ts")).toEqual(["bots/shared/support-ai.ts"]);
+    for (const file of graph) {
+      const bare = runtimeSpecifiers(readFileSync(file, "utf8")).filter((s) => !s.startsWith("."));
+      expect({ file, bad: bare.filter((s) => s === "zod" || s.startsWith("@anthropic-ai/")) }).toEqual({ file, bad: [] });
+    }
+  });
+
   it("живая карточка DBS доступна обоим ботам — она вынесена из воркера", () => {
     for (const entry of ["bots/vk/bot.ts", "bots/tg/bot.ts"]) {
       expect(hits(runtimeGraph(entry), "wb-dbs-thread")).toEqual(["bots/shared/wb-dbs-thread.ts"]);

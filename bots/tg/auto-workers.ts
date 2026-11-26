@@ -30,7 +30,8 @@ import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-que
 import { adminTargets, type AdminTopic } from "../shared/admin-route";
 import { paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
 import { applyPaQuickPlan, dumpPaQuickReplies, syncPaQuickReplies } from "./pa-quick-replies";
-import { startPaDigest } from "./pa-group";
+import { runWbChatAiSweep } from "../shared/wb-chat-ai";
+import { startPaDigest, startSilentWeekly } from "./pa-group";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -243,8 +244,26 @@ export function startAutoWorkers(bot: Telegraf): void {
   setTimeout(questions, 300_000);
   setInterval(questions, 10 * 60 * 1000);
 
+  // ИИ в чатах заказов WB (13.11.2026). Режим — `/support_mode wb on|dry|off`,
+  // по умолчанию off: проход сразу выходит.
+  let chatAiRunning = false;
+  const chatAi = () => {
+    if (chatAiRunning) return;
+    chatAiRunning = true;
+    runWbChatAiSweep(db)
+      .then((r) => {
+        if (r.seen) console.log(`[wb-chat-ai] чатов ${r.seen}: ответил ${r.replied}, передал ${r.escalated}, тест ${r.dry}`);
+      })
+      .catch((e) => console.error("[wb-chat-ai] tick:", e instanceof Error ? e.message : e))
+      .finally(() => { chatAiRunning = false; });
+  };
+  setTimeout(chatAi, 150_000);
+  setInterval(chatAi, 60 * 1000);
+
   // Утренняя сводка в беседу админов (09:00 МСК), Claude Haiku 5.5.
   startPaDigest(bot);
+  // «Молчат» — раз в неделю, без ИИ (13.11.2026).
+  startSilentWeekly(bot);
 
   // Разметка чатов поддержки @RobloxBank_PA (12.11.2026): метки в именах контактов
   // и папки по заказам. Никому не пишет. Env: PA_API_ID/PA_API_HASH/PA_SESSION, PA_DESK=off|dry.
@@ -261,9 +280,10 @@ export function startAutoWorkers(bot: Telegraf): void {
       try {
         const r = await runPaDeskSweep(mode);
         if (r && (r.renamed || r.foldersUpdated || r.archived)) {
-          console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
+          console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, без ответа ${r.waiting}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
         }
-        // Быстрые ответы — при старте и раз в 6 ч: только недостающие ярлыки.
+        // 13.11.2026: быстрые ответы — при старте и раз в 6 ч (профиль и время
+        // ответа воркер ведёт сам внутри runPaDeskSweep).
         if (n % 72 === 0) {
           const q = await syncPaQuickReplies(await paDeskClient(), mode === "dry");
           if (q.created || q.updated) console.log(`[pa-quick] создано ${q.created}, обновлено ${q.updated}, без изменений ${q.same}`);

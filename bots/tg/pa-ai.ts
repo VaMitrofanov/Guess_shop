@@ -14,23 +14,21 @@
    скажет «устарело» — открыть чат и ответить руками.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { NOT_FOREIGN_REVIEW } from "../shared/buyout-gate";
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
 import { heldLabel } from "../shared/notify-format";
-import { CODE_VIAS, codeOrderContextLine } from "../shared/order-contacts";
 import {
-  CATEGORY_RU, HANDOFF_TEXT, PA_AI_MODEL, PA_AI_SYSTEM, PaAiDecisionSchema,
-  customerContext, guardDecision, type PaAiDecision,
+  CATEGORY_RU, HANDOFF_TEXT, guardDecision, type PaAiDecision,
 } from "../shared/pa-ai-support";
+import { loadSupportCustomer } from "../shared/support-ai-context";
+import { twaOrderRows } from "./twa-order-link";
+import { resetSupportModeCache, type SupportAiMode, type SupportChannelKey } from "../shared/support-ai";
+import { decideSupportDirect, supportAiCallsToday } from "./support-ai-direct";
 
 export type PaAiMode = "on" | "dry" | "off";
 const STREAM = "pa-support";
-/** Потолок вызовов модели в сутки — страховка счёта. */
 const DAILY_CAP = 300;
 /** Сколько последних сообщений чата помним и отдаём модели. */
 const HISTORY = 12;
@@ -41,11 +39,11 @@ type Turn = { role: "user" | "assistant"; text: string; at: number };
 const history = new Map<number, Turn[]>();
 const handedOffAt = new Map<number, number>();
 const drafts = new Map<string, { connId: string; chatId: number; text: string; at: number }>();
-let calls = { day: "", n: 0 };
 /** Темы беседы админов (форум): куда что слать. */
 export type PaTopic = "support" | "test" | "digest" | "assistant" | "ideas" | "updates";
-export type PaSettings = { chatId: number | null; mode: PaAiMode; topics: Partial<Record<PaTopic, number>>; digestDay?: string; loadedAt: number };
-let settings: PaSettings = { chatId: null, mode: "dry", topics: {}, loadedAt: 0 };
+type Channels = Partial<Record<SupportChannelKey, SupportAiMode>>;
+export type PaSettings = { chatId: number | null; mode: PaAiMode; topics: Partial<Record<PaTopic, number>>; digestDay?: string; channels: Channels; loadedAt: number };
+let settings: PaSettings = { chatId: null, mode: "dry", topics: {}, channels: {}, loadedAt: 0 };
 let outOfMoneyNotified = 0;
 
 export function rememberTurn(chatId: number, role: Turn["role"], text: string) {
@@ -65,25 +63,29 @@ export function operatorReplied(chatId: number) {
 export async function loadSettings(force = false): Promise<PaSettings> {
   if (!force && Date.now() - settings.loadedAt < 60_000) return settings;
   const row = await db.wbSyncCursor.findUnique({ where: { stream: STREAM } }).catch(() => null);
-  const meta = (row?.metadata ?? {}) as { mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string };
+  const meta = (row?.metadata ?? {}) as { mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string; channels?: Channels };
   settings = {
     chatId: row?.cursor ? Number(row.cursor) : null,
     mode: meta.mode === "on" || meta.mode === "off" ? meta.mode : "dry",
     topics: meta.topics ?? {},
     digestDay: meta.digestDay,
+    channels: meta.channels ?? {},
     loadedAt: Date.now(),
   };
   return settings;
 }
 
-export async function saveSettings(patch: { chatId?: number; mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string }) {
+export async function saveSettings(patch: { chatId?: number; mode?: PaAiMode; topics?: PaSettings["topics"]; digestDay?: string; channels?: Channels }) {
   const cur = await loadSettings(true);
   const chatId = patch.chatId ?? cur.chatId;
   const next = {
     mode: patch.mode ?? cur.mode,
     topics: patch.topics ?? (patch.chatId && patch.chatId !== cur.chatId ? {} : cur.topics),
     digestDay: patch.digestDay ?? cur.digestDay,
+    // Режимы ВК и WB живут в этой же строке — терять их при любой другой правке нельзя.
+    channels: { ...cur.channels, ...patch.channels },
   };
+  resetSupportModeCache();
   await db.wbSyncCursor.upsert({
     where: { stream: STREAM },
     create: { stream: STREAM, cursor: chatId ? String(chatId) : null, metadata: next },
@@ -97,53 +99,11 @@ export async function paAiMode(): Promise<PaAiMode> {
   return (await loadSettings()).mode;
 }
 
-let client: Anthropic | null = null;
-const anthropic = () => (client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), maxRetries: 1, timeout: 45_000 }));
-
 async function decide(chatId: number, context: string, image?: { data: string; mediaType: "image/jpeg" | "image/png" | "image/webp" }): Promise<PaAiDecision | "out_of_money" | null> {
-  const day = new Date().toISOString().slice(0, 10);
-  if (calls.day !== day) calls = { day, n: 0 };
-  if (calls.n >= DAILY_CAP) return null;
-  calls.n++;
-  const turns = history.get(chatId) ?? [];
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: context },
-    ...turns.map((t) => ({
-      role: t.role,
-      content: t.role === "assistant" ? `[поддержка] ${t.text}` : t.text,
-    }) as Anthropic.MessageParam),
-  ];
-  if (messages[messages.length - 1].role !== "user") return null;
+  const turns = (history.get(chatId) ?? []).map(({ role, text }) => ({ role, text }));
   // Скриншот покупателя — к последнему сообщению: Haiku читает картинки
   // (Pending 0 или 500, «Managed pricing» включён, цена не та…).
-  if (image) {
-    const last = messages[messages.length - 1];
-    last.content = [
-      { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
-      { type: "text", text: typeof last.content === "string" ? last.content : "[скриншот]" },
-    ];
-  }
-  try {
-    const res = await anthropic().messages.parse({
-      model: PA_AI_MODEL,
-      max_tokens: 2000,
-      // Кэшируем только базу знаний: данные покупателя у каждого свои.
-      system: [{ type: "text", text: PA_AI_SYSTEM, cache_control: { type: "ephemeral" } }],
-      messages,
-      output_config: { effort: "low", format: zodOutputFormat(PaAiDecisionSchema) },
-    });
-    const u = res.usage;
-    console.log(`[pa-ai] токены: вход ${u.input_tokens} (+кэш ${u.cache_read_input_tokens ?? 0}/${u.cache_creation_input_tokens ?? 0}), выход ${u.output_tokens}`);
-    if (res.stop_reason === "refusal") {
-      return { action: "escalate", category: "other", reply: "", summary: "Модель отказалась отвечать — посмотрите сами.", draft: "" };
-    }
-    return res.parsed_output ?? null;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.warn(`[pa-ai] вызов не прошёл: ${msg.slice(0, 200)}`);
-    if (/credit balance|billing|insufficient/i.test(msg)) return "out_of_money";
-    return null;
-  }
+  return decideSupportDirect({ channel: "tg_pa", context, turns, image });
 }
 
 export interface PaIncoming {
@@ -196,43 +156,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   }
 
   const user = await db.user.findUnique({ where: { tgId: String(m.fromId) }, select: { id: true, name: true } });
-  const orders = user
-    ? await db.wbOrder.findMany({
-        // + заказы, к которым аккаунт подключён с другого по коду (OrderContact,
-        // 17.11.2026). Подключённые по нику или пассу в контекст не идут: модель
-        // назвала бы код заказа, а ник публичный.
-        where: { OR: [{ userId: user.id }, { contacts: { some: { userId: user.id, removedAt: null, via: { in: CODE_VIAS } } } }] },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        select: {
-          wbCode: true, amount: true, status: true, createdAt: true, completedAt: true, heldAt: true, heldReason: true,
-          robloxUsername: true, gamepassUrl: true, isDirectOrder: true,
-        },
-      })
-    : [];
-  const wbNotes = orders.length
-    ? (await db.riskEvent.findMany({
-        where: { wbCode: { in: orders.map((o) => o.wbCode) }, ...NOT_FOREIGN_REVIEW, kind: { in: ["BAD_REVIEW", "REVIEW_FIXED", "REVIEW_DELETED", "CLAIM_OPENED", "REFUND_OPEN", "REFUND_AFTER_DELIVERY"] } },
-        orderBy: { occurredAt: "desc" }, take: 5,
-        select: { kind: true, wbCode: true, stars: true, starsBefore: true, text: true, occurredAt: true },
-      }).catch(() => [])).map((r) => {
-        const what = r.kind === "BAD_REVIEW" ? `отзыв ★${r.stars}` : r.kind === "REVIEW_FIXED" ? `отзыв исправлен ★${r.starsBefore}→★${r.stars}`
-          : r.kind === "REVIEW_DELETED" ? `плохой отзыв ★${r.stars} удалён` : r.kind === "CLAIM_OPENED" ? "заявка на возврат" : "WB вернул деньги";
-        return `${what} по заказу ${r.wbCode} (${r.occurredAt.toISOString().slice(0, 10)})${r.text ? `: «${r.text.slice(0, 120)}»` : ""}`;
-      })
-    : [];
-  // 🎟 Покупки кодов Robux (18.11.2026): раньше ИИ их не видел и отвечал «заказов нет».
-  const codeOrders = user
-    ? (await db.codeOrder.findMany({
-        where: {
-          status: { in: ["PAID", "ISSUED"] }, refundedAt: null,
-          OR: [{ creatorUserId: user.id }, { contacts: { some: { userId: user.id, removedAt: null } } }],
-        },
-        orderBy: { createdAt: "desc" }, take: 3,
-        select: { denomination: true, status: true, createdAt: true, issuedAt: true },
-      }).catch(() => [])).map((o) => codeOrderContextLine({ amount: o.denomination, status: o.status, createdAt: o.createdAt, issuedAt: o.issuedAt }))
-    : [];
-  const context = customerContext({ name: user?.name ?? m.fromName, known: Boolean(user), orders, wbNotes, codeOrders });
+  const { context, orders, codeOrders } = await loadSupportCustomer(db, { userId: user?.id, name: user?.name ?? m.fromName });
   const image = m.photoFileId ? await loadPhoto(bot, m.photoFileId) : undefined;
   const raw = await decide(m.chatId, context, image);
   if (raw === "out_of_money") {
@@ -245,7 +169,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   if (!raw) return false;
   const d = guardDecision(raw, text);
   const order = orders[0];
-  const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason, 60)}` : ""}` : codeOrders.length ? "🎟 покупка кода Robux на сайте (заказов WB нет)" : "📦 заказов в базе нет";
+  const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason ?? null, 60)}` : ""}` : codeOrders.length ? "🎟 покупка кода Robux на сайте (заказов WB нет)" : "📦 заказов в базе нет";
   const who = `👤 <b>${escapeHtml(m.fromName)}</b>${m.username ? ` @${escapeHtml(m.username)}` : ""}`;
   const quote = `💬 «${escapeHtml(text.slice(0, 600))}»`;
 
@@ -310,11 +234,14 @@ export async function card(
   const s = await loadSettings();
   const targets = s.chatId ? [s.chatId] : ADMIN_IDS.map(Number);
   const thread = s.chatId ? s.topics[topic] : undefined;
+  // Заказ в карточке — сразу кнопка «открыть в TWA» (сводкам не нужна: там списки).
+  const twa = topic === "digest" || topic === "updates" ? [] : await twaOrderRows(bot.botInfo?.username, html);
+  const keyboard = [...(inline ?? []), ...twa];
   const extra = {
     parse_mode: "HTML" as const,
     link_preview_options: { is_disabled: true },
     ...(thread ? { message_thread_id: thread } : {}),
-    ...(inline ? { reply_markup: { inline_keyboard: inline } } : {}),
+    ...(keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}),
   };
   await Promise.allSettled(targets.map((t) => bot.telegram.sendMessage(t, html.slice(0, 4000), extra)));
 }
@@ -334,14 +261,30 @@ export function registerPaAiAdmin(bot: Telegraf): void {
 
   bot.command("support_mode", async (ctx) => {
     if (!isAdmin(ctx.from?.id)) return;
-    const arg = (ctx.message?.text ?? "").split(/\s+/)[1]?.toLowerCase();
-    if (arg !== "on" && arg !== "dry" && arg !== "off") {
-      const s = await loadSettings(true);
-      await ctx.reply(`Режим ИИ-поддержки: ${s.mode}. Сегодня вызовов: ${calls.n}/${DAILY_CAP}.\nСменить: /support_mode on | dry | off`);
+    const args = (ctx.message?.text ?? "").split(/\s+/).slice(1).map((a) => a.toLowerCase());
+    const isMode = (a: string | undefined): a is SupportAiMode => a === "on" || a === "dry" || a === "off";
+    const channel: SupportChannelKey | null =
+      args[0] === "vk" ? "vk_bot" : args[0] === "wb" ? "wb_chat" : args[0] === "bot" ? "tg_bot" : null;
+    const channelRu: Record<SupportChannelKey, string> = { tg_bot: "боте @RobloxBankBot", vk_bot: "ВКонтакте", wb_chat: "чатах WB" };
+    if (channel && isMode(args[1])) {
+      await saveSettings({ channels: { [channel]: args[1] } });
+      await ctx.reply(`✅ ИИ в ${channelRu[channel]}: ${args[1]}`);
       return;
     }
-    await saveSettings({ mode: arg });
-    await ctx.reply(`✅ Режим ИИ-поддержки: ${arg}`);
+    if (!channel && isMode(args[0])) {
+      await saveSettings({ mode: args[0] });
+      await ctx.reply(`✅ Режим ИИ-поддержки @RobloxBank_PA: ${args[0]}`);
+      return;
+    }
+    const s = await loadSettings(true);
+    await ctx.reply(
+      `ИИ-поддержка, сегодня вызовов (лимит ${DAILY_CAP} на канал):\n` +
+      `• @RobloxBank_PA — ${s.mode} · ${supportAiCallsToday("tg_pa")}\n` +
+      `• бот @RobloxBankBot — ${s.channels.tg_bot ?? "off"} · ${supportAiCallsToday("tg_bot")}\n` +
+      `• ВКонтакте — ${s.channels.vk_bot ?? "off"} · ${supportAiCallsToday("vk_bot")}\n` +
+      `• чаты WB — ${s.channels.wb_chat ?? "off"} · ${supportAiCallsToday("wb_chat")}\n\n` +
+      `Сменить: /support_mode on|dry|off · /support_mode bot|vk|wb on|dry|off`,
+    );
   });
 
   bot.action(/^paai:(send|own):(\w+)$/, async (ctx) => {

@@ -102,6 +102,8 @@ import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReply
 import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, personalFaqAnswer, priceLabelSuffix, type FaqStage } from "../shared/smart-faq";
 import { robuxWaitText } from "../shared/robux-wait";
+import { rememberVkOutbox, tryVkAi, vkStateAllowsAi } from "./vk-ai";
+import { PASS_ID_IMAGE, PASS_ID_IMAGE_CAPTION, passIdHelpText } from "../shared/passid-help";
 import { robuxGotCardText } from "../shared/robux-got-card";
 
 /** Фото, ждущее ответа «что на нём» (26.10.2026): vkUserId → URL + момент. */
@@ -839,7 +841,7 @@ async function isVkSubscribed(_ctx: MessageContext, vkUserId: number): Promise<b
 
 const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто ждите 👌" },
-  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на вашем аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("vy") + "\n\nПроверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на вашем аккаунте — в статусе Pending. Так Roblox делает с каждой покупкой геймпасса.\n\nЕсли робуксы в Pending — с нашей стороны всё сделано. Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("vy") + "\n\nПроверить: roblox.com/transactions → строка Pending Robux (Ожидание робуксов), там должна быть сумма заказа.\n⚠️ Страница открывается только в браузере — в приложении Roblox её нет." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
   { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставьте отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришлите скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформите следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.` },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто ждите. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — откройте 📖 Инструкцию и пройди все шаги." },
@@ -1059,6 +1061,7 @@ async function isHumanOutbox(ctx: MessageContext, peer: number): Promise<boolean
 export async function handleOutboxMessage(ctx: MessageContext): Promise<void> {
   const peer = typeof (ctx as any).peerId === "number" ? (ctx as any).peerId : undefined;
   if (peer === undefined || peer <= 0) return;
+  rememberVkOutbox(peer, ctx.text ?? "");
   const t = (ctx.text ?? "").trim().toLowerCase();
   if (RESUME_KEYWORDS.includes(t)) {
     // Менеджер вернул бота командой «+бот» из чата сообщества.
@@ -1534,6 +1537,24 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       }));
       return;
     }
+  }
+
+  // ── 🤖 ИИ-поддержка (13.11.2026): вопрос своими словами. Стоит ДО «позовите
+  // человека»: «помогите, не могу создать пасс» чаще решается ответом, чем
+  // менеджером. Режим off/dry/on — `/support_mode vk …` в беседе админов.
+  if (
+    !msgPayload?.command &&
+    !messageHasPhoto(ctx) &&
+    extractPassId(text) === null &&
+    vkStateAllowsAi(getState(vkUserId)?.type) &&
+    !(await isSupportPaused(vkUserId)) &&
+    await tryVkAi(vkUserId, text, {
+      reply: (message) => ctx.reply(message),
+      escalate: (problemText) => triggerSupport(ctx, vkUserId, "ai", { problemText }),
+      firstName: () => vkGetName(vkUserId),
+    }).catch((err) => { console.error("[VK] ИИ-поддержка:", err); return false; })
+  ) {
+    return;
   }
 
   // ── Natural-language support request — user can reach a manager by simply
@@ -3384,14 +3405,6 @@ function vkFaqNextRows(kb: any, order: any, stage: FaqStage): void {
 }
 
 /** Текст-подсказка, откуда взять ссылку. Общий для всех точек входа. */
-const GP_LINK_PROMPT =
-  "🔗 Пришлите ссылку на свой геймпасс — одним сообщением.\n\n" +
-  "Где её взять:\n" +
-  "1. Creator Hub → Creations → ваша игра → Passes\n" +
-  "2. Нажмите на геймпасс — он откроется в браузере\n" +
-  "3. Скопируйте адрес из адресной строки и пришлите сюда\n\n" +
-  "Подойдёт любой вид: roblox.com/game-pass/1234567, ссылка из Creator Hub или просто номер геймпасса.\n\n" +
-  "Так заказ оформится, даже если плейс скрыт и поиск по нику пасс не видит.";
 
 /** «🔗 Прислать ссылку» — переводим в AWAITING_LINK и объясняем, где её взять. */
 async function handleSendGpLink(ctx: MessageContext, vkUserId: number): Promise<void> {
@@ -3420,8 +3433,16 @@ async function handleSendGpLink(ctx: MessageContext, vkUserId: number): Promise<
     viaManualLink: true,
   });
   const passPrice = Math.ceil(order.amount / 0.7);
+  // VK не берёт фото по ссылке — качаем свой кадр и загружаем; не вышло — только текст.
+  try {
+    const img = await fetch(PASS_ID_IMAGE, { signal: AbortSignal.timeout(10_000) });
+    if (!img.ok) throw new Error(`HTTP ${img.status}`);
+    await vkSendPhoto(vkUserId, Buffer.from(await img.arrayBuffer()), PASS_ID_IMAGE_CAPTION);
+  } catch (err: unknown) {
+    console.warn("[VK] скрин Pass ID не ушёл:", errText(err));
+  }
   await ctx.reply({
-    message: GP_LINK_PROMPT + `\n\n📌 Цена геймпасса должна быть ровно ${passPrice} R$.`,
+    message: passIdHelpText("plain", passPrice, order.robloxUsername),
     keyboard: Keyboard.builder()
       .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` })
       .row()
@@ -3757,7 +3778,11 @@ async function handleRobloxNickInput(
   // real Roblox account — note it on the order (заметка, не основное поле:
   // юзер мог опечататься), even if the gamepass never materialises (VFNCQMT).
   if (outcome.status !== "user_not_found") {
-    void noteProbableNick({ nick, source: "nick-search", wbCode });
+    void noteProbableNick({
+      nick, source: "nick-search", wbCode,
+      passesFound: outcome.status === "ok" ? outcome.all.length : 0,
+      gamesVisibility: outcome.games?.visibility,
+    });
   }
 
   // ── Аккаунта нет на Roblox — почти всегда опечатка ───────────────────────
@@ -5828,7 +5853,7 @@ async function handleIdleMessage(
         ? "\n\n🔧 Менеджер уже работает над вашим заказом. Скоро всё будет готово!"
         : order.status === "COMPLETED"
         ? "\n\n💎 Робуксы уже у вас в Roblox — в статусе Pending. С нашей стороны всё сделано, дальше решает Roblox: когда перевести их на баланс, он определяет сам." +
-          "\n💡 Проверить: roblox.com/transactions → строка Pending Robux, там должна быть сумма заказа." +
+          "\n💡 Проверить: roblox.com/transactions → строка Pending Robux (Ожидание робуксов), там должна быть сумма заказа. Только в браузере — в приложении Roblox этой страницы нет." +
           (reviewClaimed
             ? "\n\n🚀 Хотите заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пишите: https://t.me/RobloxBank_PA"
             : "\n\n🎁 Оставьте отзыв на Wildberries с текстом и фото — получите +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся.\nПришлите скриншот отзыва сюда фотографией.")

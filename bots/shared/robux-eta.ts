@@ -25,6 +25,9 @@ const DAY_MS = 86_400_000;
 export const ROBLOX_TRANSACTIONS_URL = "https://www.roblox.com/transactions";
 /** Наша страница «что такое геймпасс и Pending» — со схемой и скриншотами. */
 export const PENDING_INFO_URL = "https://robloxbank.ru/pending";
+/** В русской локализации Roblox строка называется иначе — называем обе (13.11.2026). */
+export const PENDING_ROW = "Pending Robux (Ожидание робуксов)";
+const BROWSER_ONLY_SENTENCE = "Страница открывается только в браузере (Safari, Chrome) — в приложении Roblox её нет.";
 
 export function fmtDateRu(d: Date): string {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
@@ -108,7 +111,7 @@ function checkLine(fmt: RobuxEtaFormat, amount: number | null): string {
     ? `<a href="${ROBLOX_TRANSACTIONS_URL}">roblox.com/transactions</a>`
     : ROBLOX_TRANSACTIONS_URL;
   const need = amount ? `не меньше ${amount}` : "не меньше суммы заказа";
-  return `🔍 Проверить: ${link} → строка ${b(fmt, "Pending Robux")}, там должно быть число ${need}. Есть — всё в порядке, робуксы придут сами.`;
+  return `🔍 Проверить: ${link} → строка ${b(fmt, PENDING_ROW)}, там должно быть число ${need}. Есть — всё в порядке, робуксы придут сами.\n⚠️ ${BROWSER_ONLY_SENTENCE}`;
 }
 
 /**
@@ -208,7 +211,7 @@ export function robuxSelfCheckText(fmt: RobuxEtaFormat, c: SelfCheckContext = {}
   return (
     `🔍 ${b(fmt, "Давай проверим за минуту")}\n\n` +
     `1. Зайдите в Roblox в ${account}.\n` +
-    `2. Откройте ${link} и найдите строку ${b(fmt, "Pending Robux")}.\n\n` +
+    `2. Откройте ${link} и найдите строку ${b(fmt, PENDING_ROW)}. ${BROWSER_ONLY_SENTENCE}\n\n` +
     `⚠️ Строка Pending Robux есть у всех — важно ${b(fmt, "число")} в ней. ` +
     `Там должно быть ${b(fmt, c.amount ? `не меньше ${c.amount}` : "не меньше суммы заказа")}, а не 0.\n\n` +
     `Какое число видите?`
@@ -243,7 +246,7 @@ export function robuxPendingWhereText(fmt: RobuxEtaFormat, c: SelfCheckContext =
     `📍 ${b(fmt, "Где искать")}\n\n` +
     `• Откройте ${link} в браузере (в приложении Roblox этой страницы нет).\n` +
     `• Войдите в аккаунт ${c.robloxUsername ? b(fmt, c.robloxUsername) : "заказа"}.\n` +
-    `• Вкладка ${b(fmt, "Summary")} → в таблице строка ${b(fmt, "Pending Robux")}, справа число.\n\n` +
+    `• Вкладка ${b(fmt, "Summary")} → в таблице строка ${b(fmt, PENDING_ROW)}, справа число.\n\n` +
     `Скриншот с подсказкой — на странице: ${PENDING_INFO_URL}\n\n` +
     `Нашёл? Какое там число?`
   );
@@ -270,7 +273,7 @@ export function robuxScreenshotRequestText(fmt: RobuxEtaFormat, c: SelfCheckCont
   return (
     `📸 ${b(fmt, "Пришлите скриншот страницы Transactions")} — одним фото, сюда в чат.\n\n` +
     `На скрине должны быть видны:\n` +
-    `• строка ${b(fmt, "Pending Robux")} с числом;\n` +
+    `• строка ${b(fmt, PENDING_ROW)} с числом;\n` +
     `• ник аккаунта${c.robloxUsername ? ` (${c.robloxUsername})` : ""} в правом верхнем углу.\n\n` +
     `По скрину менеджер сразу проверит выкуп и ответит по делу. Без скриншота обращение не передаётся — ` +
     `проверить «на слово» мы не можем.\n\n` +
@@ -319,6 +322,7 @@ export function buildRobuxEtaWbChat(ordersIn: RobuxEtaOrder[], now: Date = new D
   const core =
     `Робуксы за заказ на ${amount} R$ уже на вашем аккаунте Roblox — в статусе Pending. Выкупили: ${fmtDateRu(completedAt)}.\n\n` +
     `С нашей стороны всё сделано. Похоже, ваш аккаунт попал под дополнительную проверку Roblox — тогда он держит покупку дольше обычного. Ускорить это мы не можем. ${robuxWaitText("vy")}\n\n` +
+    // Без добавок: в чате WB лимит 1000 символов, и промо кодов влезает впритык.
     `Проверить: Roblox → Transactions → строка Pending Robux, там должно быть не меньше ${amount}. ` +
     `Если меньше и на балансе тоже нет — пришлите сюда скриншот Transactions, менеджер проверит.`;
   const full = `${core}\n\n${WB_CODES_UPSELL}`;
@@ -410,7 +414,7 @@ export function robuxSurveyText(fmt: RobuxEtaFormat, amount: number): string {
     `Roblox сейчас держит робуксы за геймпассы в статусе Pending дольше обычного — так у всех продавцов, не только у нас.\n\n` +
     `❗️ ${b(fmt, "Важно: робуксы должны быть в одном из двух мест — в Pending или уже на балансе.")} ` +
     `Если они в Pending — всё в порядке: с нашей стороны всё сделано, на баланс их переведёт сам Roblox.\n\n` +
-    `🔍 Проверьте: ${link} → строка ${b(fmt, "Pending Robux")} (там должно быть ${amount} или больше) и баланс робуксов.\n\n` +
+    `🔍 Проверьте: ${link} → строка ${b(fmt, PENDING_ROW)} (там должно быть ${amount} или больше) и баланс робуксов. ${BROWSER_ONLY_SENTENCE}\n\n` +
     `Нажмите, что видите 👇`
   );
 }
@@ -442,7 +446,7 @@ export function photoKindQuestionText(fmt: RobuxEtaFormat): string {
 /** Ответ на «это скрин Pending / Transactions». */
 export function pendingPhotoReplyText(fmt: RobuxEtaFormat): string {
   return (
-    `👍 Спасибо! Посмотрите на строку ${b(fmt, "Pending Robux")}:\n\n` +
+    `👍 Спасибо! Посмотрите на строку ${b(fmt, PENDING_ROW)}:\n\n` +
     `✅ там сумма заказа или больше (или робуксы уже на балансе) — ${b(fmt, "всё в порядке")}. ` +
     `С нашей стороны всё сделано, на баланс робуксы переведёт сам Roblox.\n\n` +
     `❌ там 0 или меньше суммы, и на балансе пусто — нажмите «${NO_ROBUX_BUTTON}», проверим вместе.\n\n` +

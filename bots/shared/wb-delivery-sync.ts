@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { wbChatAiTakesOver } from "./wb-chat-ai";
 import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
 import {
@@ -1819,7 +1820,9 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
       : false;
     if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !courierSelfServed
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.cancelledAt
-      && (!order.completedAt || !(await buyoutFinished(db, order.wbCodeId)))) {
+      && (!order.completedAt || !(await buyoutFinished(db, order.wbCodeId)))
+      // ИИ в режиме on ответит сам или позовёт человека с черновиком (`wb-chat-ai`).
+      && !(await wbChatAiTakesOver(db, order, rawText).catch(() => false))) {
       notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText, await identityLinesFor(db, order.id, { short: true }));
     }
 

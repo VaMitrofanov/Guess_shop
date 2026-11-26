@@ -525,7 +525,17 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       "Номинал и пасс у разбитого заказа меняются только через «Разбить»: раньше правка молча ломала части.",
     ],
   },
-];
+  {
+    id: "2026-11-26-ai-support-channels",
+    date: "2026-11-26",
+    title: "ИИ-поддержка в боте, ВК и чатах WB + сервер в Амстердаме",
+    admin: [
+      "База и TG-бот переехали в Амстердам: админка отвечает в ~5 раз быстрее, ИИ снова доступен.",
+      "ИИ отвечает на вопросы своими словами в боте TG, во ВК и в чатах заказов WB; что не знает — передаёт вам с черновиком.",
+      "Включается в беседе админов: /support_mode bot|vk|wb dry → смотрим «🧪 Тест ИИ» → on. По умолчанию выключено.",
+      "Кнопка «Прислать ссылку на геймпасс» теперь учит брать номер (Pass ID) со скрином; «Молчат» — сводка по понедельникам.",
+    ],
+  },];
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -557,7 +567,8 @@ const ALLOWED_TAGS = new Set(["b", "i", "u", "s", "code", "a", "tg-spoiler", "bl
 /** Разметка, которую Telegram примет: только разрешённые теги, все закрыты. */
 export function tgHtmlProblems(html: string): string[] {
   const problems: string[] = [];
-  const stack: string[] = [];
+  const stack: string[] = [
+];
   for (const match of html.matchAll(/<\/?([a-z-]+)([^>]*)>/gi)) {
     const tag = match[1].toLowerCase();
     if (!ALLOWED_TAGS.has(tag)) problems.push(`тег <${tag}> Telegram не понимает`);

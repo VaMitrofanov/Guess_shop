@@ -33,6 +33,7 @@ import {
   searchGamepassesByNickDirect,
 } from "./roblox";
 import { telegramRequestInit } from "./telegram-photo";
+import { hasDirectSupportAi, parseSupportAiRequest } from "./support-ai";
 
 /** What the bridge hands back to the caller after a Telegram call.
  *
@@ -118,8 +119,9 @@ export function startBridgeServer(): http.Server {
     const isVerifyKey        = req.method === "POST" && url.pathname === "/verify-gamepass-key";
     const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
     const isRobloxUser       = req.method === "GET"  && url.pathname === "/roblox-user";
+    const isSupportAi        = req.method === "POST" && url.pathname === "/support-ai";
 
-    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isCreateGamepass && !isVerifyKey && !isGamepassById && !isRobloxUser) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isCreateGamepass && !isVerifyKey && !isGamepassById && !isRobloxUser && !isSupportAi) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -135,6 +137,46 @@ export function startBridgeServer(): http.Server {
         respond(401, { ok: false, error: "unauthorized" });
         return;
       }
+    }
+
+    // ── POST /support-ai ────────────────────────────────────────────────────
+    // Решение ИИ-поддержки для процесса без доступа к Anthropic (ВК-бот в РФ).
+    // Ключ Anthropic остаётся здесь. Маршрут тратит деньги — без ключа моста
+    // не работает никогда, даже если остальные маршруты открыты.
+    if (isSupportAi) {
+      if (!expectedKey) {
+        respond(401, { ok: false, error: "unauthorized" });
+        return;
+      }
+      // Мост без ключа Anthropic (ВК-бот в РФ) — модели здесь нет, и SDK в его
+      // образе тоже нет: отказ ДО импорта.
+      if (!hasDirectSupportAi()) {
+        respond(503, { ok: false, error: "no_model_here" });
+        return;
+      }
+      let parsed: ReturnType<typeof parseSupportAiRequest> = null;
+      try {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", (chunk) => {
+            data += chunk;
+            if (data.length > 7_000_000) reject(new Error("too_large"));
+          });
+          req.on("end", () => resolve(data));
+          req.on("error", reject);
+        });
+        parsed = parseSupportAiRequest(JSON.parse(raw));
+      } catch {
+        parsed = null;
+      }
+      if (!parsed) {
+        respond(400, { ok: false, error: "bad_request" });
+        return;
+      }
+      const { decideSupportDirect } = await import("../tg/support-ai-direct");
+      const result = await decideSupportDirect(parsed);
+      respond(200, { ok: true, result });
+      return;
     }
 
     // ── POST /tg-proxy ──────────────────────────────────────────────────────

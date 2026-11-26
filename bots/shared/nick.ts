@@ -26,6 +26,9 @@ export async function noteProbableNick(opts: {
   source: string;
   /** Corridor order to annotate (skipped for DIR-/AV- synthetic codes). */
   wbCode?: string;
+  /** Итог поиска по нику — для разбора «почему поиск пустой» (13.11.2026: не писался ни разу). */
+  passesFound?: number;
+  gamesVisibility?: string | null;
 }): Promise<void> {
   const nick = opts.nick.trim().replace(/^@/, "");
   if (!NICK_RE.test(nick)) return;
@@ -42,6 +45,8 @@ export async function noteProbableNick(opts: {
     via: opts.source,
     wbCode: code,
     robloxKnows: true,
+    passesFound: opts.passesFound,
+    gamesVisibility: opts.gamesVisibility,
   });
 
   try {

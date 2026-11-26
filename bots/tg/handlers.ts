@@ -97,6 +97,8 @@ import { readFile } from "node:fs/promises";
 import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReplyText, type PendingCheck } from "../shared/pending-ocr";
 import { PENDING_MENU_BUTTON, PENDING_PAGE_BUTTON, PENDING_PAGE_URL, pendingInfoText } from "../shared/pending-info";
 import { robuxWaitText } from "../shared/robux-wait";
+import { PASS_ID_IMAGE, PASS_ID_IMAGE_CAPTION, passIdHelpText } from "../shared/passid-help";
+import { tryTgAi } from "./tg-ai";
 import { robuxGotCardText } from "../shared/robux-got-card";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, gpPassPrice, personalFaqAnswer, priceLabelSuffix, stageNextLine, type FaqStage } from "../shared/smart-faq";
 import {
@@ -383,7 +385,7 @@ async function getDirectKbParams(tgId: string): Promise<{ bonus: number; rubleDi
 
 const FAQ_ITEMS: { key: string; label: string; answer: string; buttons?: { label: string; cb: string }[][] }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Сейчас у Roblox задержки, поэтому выкуп может занять до нескольких суток — часто получается быстрее. Заказ стоит в очереди и никуда не пропадёт.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто ждите 👌" },
-  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на вашем аккаунте — в статусе <b>Pending</b>. Так Roblox делает с каждой покупкой геймпасса.\n\n<b>Если робуксы в Pending — с нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("vy") + "\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending Robux</b>, там должна быть сумма заказа." },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа робуксы сразу на вашем аккаунте — в статусе <b>Pending</b>. Так Roblox делает с каждой покупкой геймпасса.\n\n<b>Если робуксы в Pending — с нашей стороны всё сделано.</b> Дальше всё зависит от Roblox: когда перевести их на баланс, он решает сам, и ускорить это нельзя. " + robuxWaitText("vy") + "\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending Robux (Ожидание робуксов)</b>, там должна быть сумма заказа.\n⚠️ Страница открывается только в браузере — в приложении Roblox её нет." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
   { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим <b>+${REVIEW_BONUS_AMOUNT} R$</b> к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставьте отзыв <b>с текстом и фото</b> (только оценка не подойдёт).\n2. Пришлите скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформите следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.`,
     buttons: [[{ label: "📸 Прислать отзыв", cb: "review_hint" }, { label: "💎 Купить напрямую", cb: "start_direct" }]] },
@@ -2389,7 +2391,7 @@ async function buildStatusMessage(tgId: string, focusCode?: string): Promise<Sta
   } else if (order.status === "COMPLETED") {
     note =
       `\n\n💎 Робуксы уже у вас в Roblox — в статусе Pending. <b>С нашей стороны всё сделано</b>, дальше решает Roblox: когда перевести их на баланс, он определяет сам.\n` +
-      `💡 <i>Проверить: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка Pending Robux, там должна быть сумма заказа.</i>\n\n` +
+      `💡 <i>Проверить: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка Pending Robux (Ожидание робуксов), там должна быть сумма заказа. Только в браузере — в приложении Roblox этой страницы нет.</i>\n\n` +
       `🚀 <i>Хотите заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>`;
   }
 
@@ -2592,6 +2594,22 @@ export function registerText(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     const isAdmin = ADMIN_IDS.includes(tgId);
     const text = ctx.message.text.trim();
+
+    // ИИ-поддержка (13.11.2026, `./tg-ai.ts`): только там, где автомат ниже
+    // сам ответить не может, — вместо напоминания/формат-ошибки/«нет заявок».
+    const aiTakes = (step: string): Promise<boolean> => isAdmin
+      ? Promise.resolve(false)
+      : tryTgAi(text, {
+          tgId: ctx.from.id,
+          name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || "Покупатель",
+          username: ctx.from.username ?? null,
+          step,
+          reply: (answer) => ctx.reply(answer, { link_preview_options: { is_disabled: true } }),
+          escalate: async (problemText) => {
+            await openIntake(intakeDb, { tgId }, { platform: "TG", contextKey: "ai", nudged: true });
+            await deliverSupportIntakeTg(bot, ctx, problemText);
+          },
+        }).catch((err) => { console.error("[TG] ИИ-поддержка:", err); return false; });
 
     // 0. PERSISTENT REPLY KEYBOARD buttons — always handled, even mid-flow.
     //    clearUserSession ensures the user escapes ANY pending input state.
@@ -3031,6 +3049,8 @@ export function registerText(bot: Telegraf): void {
               const recoverGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
               // One-tap: gamepass already picked on the website → offer confirm.
               if (await offerPreselectedGamepass(ctx, state.wbCode, passPrice, recoverGuideUrl)) return;
+              // Пасс уже выбран на сайте — важнее любого ответа ИИ (выше); дальше вопрос посреди инструкции.
+              if (await aiTakes(`код ${state.wbCode} активирован, заказ ждёт геймпасс за ${passPrice} R$ — человек проходит инструкцию (создать пасс, прислать ник или ссылку)`)) return;
               const recoverNick = tgUser.robloxUsername;
               const recoverNickLine = recoverNick ? `\n🎮 Ник: <b>${escapeHtml(recoverNick)}</b>` : "";
               const recoverSearchBtns = recoverNick
@@ -3112,6 +3132,7 @@ export function registerText(bot: Telegraf): void {
             );
             return;
           }
+          if (await aiTakes("активного заказа нет: ждём код с карты WB или прямой заказ")) return;
           await ctx.reply(
             "У вас сейчас нет активных заявок.\n\n" +
             "🔑 Есть код с WB-карты? Напишите его прямо сюда.",
@@ -3139,6 +3160,7 @@ export function registerText(bot: Telegraf): void {
         await handleRobloxNickInput(bot, ctx, text);
         return;
       }
+      if (await aiTakes(`заказ ${state.wbCode} на ${state.denomination} R$: бот ждёт ник Roblox или ссылку/номер геймпасса за ${Math.ceil(state.denomination / 0.7)} R$`)) return;
       const fc = getFailCounts(ctx.from.id);
       fc.formatError++;
       void recordBuyerDeadEnd(stepDb, { wbCode: state.wbCode, via: "tg-bot", reason: "link_format", sentLength: text.length });
@@ -3180,17 +3202,6 @@ export function registerText(bot: Telegraf): void {
 function gpLinkBtn() {
   return Markup.button.callback("🔗 Прислать ссылку на геймпасс", CB.sendGpLink);
 }
-
-/** Текст-подсказка, откуда взять ссылку. Общий для всех точек входа. */
-const GP_LINK_PROMPT =
-  "🔗 Пришли <b>ссылку на свой геймпасс</b> — одним сообщением.\n\n" +
-  "Где её взять:\n" +
-  "1. Creator Hub → <b>Creations</b> → ваша игра → <b>Passes</b>\n" +
-  "2. Нажмите на геймпасс — он откроется в браузере\n" +
-  "3. Скопируйте адрес из адресной строки и пришлите сюда\n\n" +
-  "Подойдёт любой вид: <code>roblox.com/game-pass/1234567</code>, ссылка из Creator Hub " +
-  "или просто <b>номер</b> геймпасса.\n\n" +
-  "Так заказ оформится, даже если плейс скрыт и поиск по нику пасс не видит.";
 
 /** Allowed Roblox username regex. */
 
@@ -3520,7 +3531,11 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   // real Roblox account — note it on the order (заметка, не основное поле:
   // юзер мог опечататься), even if the gamepass never materialises (VFNCQMT).
   if (outcome.status !== "user_not_found") {
-    void noteProbableNick({ nick, source: "nick-search", wbCode: state.wbCode });
+    void noteProbableNick({
+      nick, source: "nick-search", wbCode: state.wbCode,
+      passesFound: outcome.status === "ok" ? outcome.all.length : 0,
+      gamesVisibility: outcome.games?.visibility,
+    });
   }
 
   // ── Аккаунта нет на Roblox — почти всегда опечатка ───────────────────────
@@ -6033,8 +6048,11 @@ export function registerCallbacks(bot: Telegraf): void {
         ? linkTargets[0].price
         : Math.ceil(working.order.amount / 0.7);
       await ctx.answerCbQuery().catch(() => {});
+      // 13.11.2026: номер (Pass ID) вместо адреса — с телефона так проще; скрин таблицы Passes.
+      await ctx.replyWithPhoto(PASS_ID_IMAGE, { caption: PASS_ID_IMAGE_CAPTION })
+        .catch((err) => console.warn("[TG] скрин Pass ID не ушёл:", err?.message ?? err));
       await ctx.reply(
-        GP_LINK_PROMPT + `\n\n📌 Цена геймпасса должна быть ровно <b>${linkPassPrice} R$</b>.`,
+        passIdHelpText("html", linkPassPrice, working.order.robloxUsername),
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },

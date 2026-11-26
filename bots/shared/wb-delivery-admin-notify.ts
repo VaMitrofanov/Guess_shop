@@ -138,6 +138,23 @@ export function noteDbsAdminReply(wbOrderId: string, actor: string, what: string
   return noteAdminReply(`dbs:${wbOrderId}`, actor, what).catch(() => false);
 }
 
+/** ИИ в чате WB передал вопрос человеку — с сутью и готовым черновиком. */
+export function notifyDbsAiEscalation(ref: DbsRef, input: { text: string; summary: string; draft: string; category: string }, who: string[] = []) {
+  broadcast({
+    marker: "action",
+    zone: "DBS",
+    title: `🤖 ИИ передал вам · ${input.category}`,
+    lines: [
+      refLine(ref),
+      ...who.map((line) => escapeHtml(line)),
+      `<i>${escapeHtml(input.text.slice(0, 600))}</i>`,
+      input.summary ? `🧾 ${escapeHtml(input.summary)}` : null,
+      input.draft ? `✍️ Черновик: ${escapeHtml(input.draft.slice(0, 1200))}` : null,
+    ],
+    next: "ответить из консоли DBS или из кабинета WB",
+  }, ref);
+}
+
 /** Новые находки сверки денег WB с выдачей — одним сообщением на проход. */
 export function notifyWbReconcile(lines: string[], total: number) {
   if (lines.length === 0) return;

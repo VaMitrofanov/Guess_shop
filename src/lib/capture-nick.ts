@@ -17,7 +17,12 @@ import { auditNickEntered, type OrderAuditClient } from "@/lib/order-audit";
  */
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
-export async function noteProbableNickByCode(wbCode: string, rawNick: string, source: string): Promise<void> {
+export async function noteProbableNickByCode(
+  wbCode: string,
+  rawNick: string,
+  source: string,
+  search?: { passesFound: number; gamesVisibility?: string | null },
+): Promise<void> {
   const nick = rawNick.trim().replace(/^@/, "");
   const code = wbCode.trim().toUpperCase();
   if (!NICK_RE.test(nick) || !/^[A-Z0-9]{7}$/.test(code)) return;
@@ -29,6 +34,8 @@ export async function noteProbableNickByCode(wbCode: string, rawNick: string, so
     via: source,
     wbCode: code,
     robloxKnows: true,
+    passesFound: search?.passesFound,
+    gamesVisibility: search?.gamesVisibility,
   });
 
   try {

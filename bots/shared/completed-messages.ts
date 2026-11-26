@@ -121,13 +121,14 @@ function buildCompletedMessagesBase(inp: CompletedMessagesInput): CompletedMessa
   const nickPlain = inp.nick ? ` на ник ${inp.nick}` : "";
   const tgMsg1 =
     `✅ <b>${amountStr} выкуплены</b>${nickHtml}\n\n` +
-    `<b>С нашей стороны всё сделано:</b> робуксы уже в Roblox, в статусе <b>Pending</b>. В истории транзакций — строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}.\n` +
+    `<b>С нашей стороны всё сделано:</b> робуксы уже в Roblox, в статусе <b>Pending</b>. В истории транзакций — строка Pending Robux (Ожидание робуксов), там будет число не меньше ${inp.amount ?? "суммы заказа"}.\n` +
     `<blockquote expandable>⏳ ${robuxWaitText("vy")}</blockquote>\n` +
     confirmHintLine("html");
   const vkMsg1 =
     `✅ ${amountStr} выкуплены${nickPlain}\n\n` +
     `С нашей стороны всё сделано: робуксы уже в Roblox, в статусе Pending. ${robuxWaitText("vy")}\n\n` +
-    `📊 Проверить: ${ROBLOX_TRANSACTIONS} → строка Pending Robux, там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `📊 Проверить: ${ROBLOX_TRANSACTIONS} → строка Pending Robux (Ожидание робуксов), там будет число не меньше ${inp.amount ?? "суммы заказа"}\n` +
+    `⚠️ Страница открывается только в браузере — в приложении Roblox её нет\n` +
     `📖 Почему так: ${PENDING_INFO_URL}\n\n` +
     confirmHintLine("plain");
 

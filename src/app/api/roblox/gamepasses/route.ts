@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
         account: null,
       });
     }
-    if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
+    if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search", { passesFound: gamepasses.length, gamesVisibility: games?.visibility });
     // Аккаунт может не приехать (мост без `/roblox-user`), а пассы — приехать.
     // Ветка «пользователя нет» тут была бы ложью: страница просто рисуется без
     // карточки аккаунта, а имя берётся из того, что нашлось.

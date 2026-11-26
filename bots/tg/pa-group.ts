@@ -191,6 +191,10 @@ function keepInThread(ctx: any, thread: number | undefined): void {
     if (orig) ctx[m] = (a: unknown, extra: Record<string, unknown> = {}) => orig(a, { message_thread_id: thread, ...extra });
   }
 }
+import { twaOrderRows } from "./twa-order-link";
+import { PROFILE_STREAM, loadPaResponseStats } from "./pa-desk-worker";
+import { formatResponseStats } from "./pa-response-stats";
+import { formatSilentSummary, loadSilentSummary, mskWeekKey, silentWeeklyDue } from "../shared/silent-orders";
 
 const isAdmin = (id: number | undefined) => id !== undefined && ADMIN_IDS.map(String).includes(String(id));
 const MSK = 3 * 3600_000;
@@ -392,7 +396,7 @@ export async function askAssistant(question: string): Promise<string> {
 async function digestData() {
   const y0 = mskDayStart(-1);
   const y1 = mskDayStart(0);
-  const [created, bought, rejected, dbsNew, risksNew, risksOpen, queue] = await Promise.all([
+  const [created, bought, rejected, dbsNew, risksNew, risksOpen, queue, silent] = await Promise.all([
     db.wbOrder.aggregate({ where: { createdAt: { gte: y0, lt: y1 }, isTest: false }, _count: true, _sum: { amount: true } }),
     db.wbOrder.aggregate({ where: { completedAt: { gte: y0, lt: y1 }, status: "COMPLETED", isTest: false }, _count: true, _sum: { amount: true } }),
     db.wbOrder.count({ where: { updatedAt: { gte: y0, lt: y1 }, status: "REJECTED", isTest: false } }),
@@ -400,6 +404,7 @@ async function digestData() {
     db.riskEvent.groupBy({ by: ["kind"], where: { createdAt: { gte: y0, lt: y1 } }, _count: true }),
     db.riskEvent.count({ where: { resolvedAt: null } }),
     queueOverview(),
+    loadSilentSummary(db),
   ]);
   return {
     yesterday: {
@@ -408,11 +413,11 @@ async function digestData() {
       rejected, wbDbsOrders: dbsNew,
       newRisks: Object.fromEntries(risksNew.map((r) => [r.kind, r._count])),
     },
-    now: { ...queue, openRisks: risksOpen },
+    now: { ...queue, openRisks: risksOpen, silent: { count: silent.count, robux: silent.robux, overMonth: silent.buckets.over30 } },
   };
 }
 
-const DIGEST_SYSTEM = `Ты пишешь утреннюю сводку для команды магазина RobloxBank в Telegram. По данным (JSON) напиши 6–12 коротких строк по-русски: сначала итоги вчера (заказы, сколько робуксов выкуплено, заказы с WB), потом «что горит сейчас» — очередь, кто ждёт пасс больше 2 дней (коды), заморозки, открытые риски с расшифровкой (BAD_REVIEW — плохие отзывы, REFUND_OPEN — WB вернул деньги, не выкупать, SALE_NO_CODE — оплачен, код не выдан, SALE_UNMATCHED — продажа без заказа, REFUND_AFTER_DELIVERY — возврат после выкупа, REVIEW_FIXED — отзыв исправлен, REVIEW_DELETED — плохой отзыв удалён, CLAIM_OPENED — заявка на возврат, BUYER_QUESTION — вопрос на WB, BUYER_HELP и BUYER_CANCEL — обращения покупателей в чатах). Ждущих пасс больше 30 дней называй одним числом — это старые брошенные заказы. В конце одна строка «на что посмотреть первым». Только факты из данных, без воды, эмодзи по делу, без markdown-звёздочек.`;
+const DIGEST_SYSTEM = `Ты пишешь утреннюю сводку для команды магазина RobloxBank в Telegram. По данным (JSON) напиши 6–12 коротких строк по-русски: сначала итоги вчера (заказы, сколько робуксов выкуплено, заказы с WB), потом «что горит сейчас» — очередь, кто ждёт пасс больше 2 дней (коды), заморозки, открытые риски с расшифровкой (BAD_REVIEW — плохие отзывы, REFUND_OPEN — WB вернул деньги, не выкупать, SALE_NO_CODE — оплачен, код не выдан, SALE_UNMATCHED — продажа без заказа, REFUND_AFTER_DELIVERY — возврат после выкупа, REVIEW_FIXED — отзыв исправлен, REVIEW_DELETED — плохой отзыв удалён, CLAIM_OPENED — заявка на возврат, BUYER_QUESTION — вопрос на WB, BUYER_HELP и BUYER_CANCEL — обращения покупателей в чатах). Ждущих пасс больше 30 дней называй одним числом — это старые брошенные заказы. silent — «Молчат»: бот отправил все 3 напоминания, ответа нет; одной строкой (сколько, R$, сколько дольше месяца), без тревоги — это нормально. В конце одна строка «на что посмотреть первым». Только факты из данных, без воды, эмодзи по делу, без markdown-звёздочек.`;
 
 export async function buildDigest(): Promise<string> {
   const data = await digestData();
@@ -444,13 +449,36 @@ export function startPaDigest(bot: Telegraf) {
     if (msk.getUTCHours() < 9 || s.digestDay === today) return;
     await saveSettings({ digestDay: today });
     const text = await buildDigest();
-    await card(bot, `☀️ <b>Сводка за ${new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(5, 10).split("-").reverse().join(".")}</b>\n\n${escape(text)}`, undefined, "digest");
+    // Время ответа поддержки — готовой строкой, не через модель (13.11.2026).
+    const yKey = new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(0, 10);
+    const resp = await loadPaResponseStats().catch(() => null);
+    const respBlock = resp?.day === yKey ? `\n\n${escape(formatResponseStats(resp, "@RobloxBank_PA"))}` : "";
+    await card(bot, `☀️ <b>Сводка за ${new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(5, 10).split("-").reverse().join(".")}</b>\n\n${escape(text)}${respBlock}`, undefined, "digest");
   };
   setTimeout(() => void tick().catch((e) => console.error("[pa-group] сводка:", e)), 180_000);
   setInterval(() => void tick().catch((e) => console.error("[pa-group] сводка:", e)), 10 * 60_000);
 }
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const SILENT_STREAM = "silent-weekly";
+
+/** «Молчат» раз в неделю (пн после 10:00 МСК). Без ИИ — работает и без ключа Anthropic. */
+export function startSilentWeekly(bot: Telegraf) {
+  const tick = async () => {
+    const row = await db.wbSyncCursor.findUnique({ where: { stream: SILENT_STREAM } }).catch(() => null);
+    if (!silentWeeklyDue(row?.cursor)) return;
+    const week = mskWeekKey();
+    await db.wbSyncCursor.upsert({
+      where: { stream: SILENT_STREAM },
+      create: { stream: SILENT_STREAM, cursor: week },
+      update: { cursor: week },
+    });
+    await card(bot, formatSilentSummary(await loadSilentSummary(db)), undefined, "digest");
+  };
+  setTimeout(() => void tick().catch((e) => console.error("[silent] сводка:", e)), 200_000);
+  setInterval(() => void tick().catch((e) => console.error("[silent] сводка:", e)), 15 * 60_000);
+}
 
 // ── Регистрация ──────────────────────────────────────────────────────────────
 
@@ -545,7 +573,32 @@ export function registerPaGroup(bot: Telegraf): void {
     const res = await whoIs(db, query);
     if (res.found.length === 0 && res.notes.length === 0) return void ctx.reply(`По «${query}» никого не нашёл.`);
     const text = [...res.notes, ...res.found.map(profileText), res.more ? `…и ещё ${res.more}` : null].filter(Boolean).join("\n\n");
-    await ctx.reply(text.slice(0, 4000), { link_preview_options: { is_disabled: true } });
+    const twa = await twaOrderRows(ctx.botInfo?.username, text);
+    await ctx.reply(text.slice(0, 4000), {
+      link_preview_options: { is_disabled: true },
+      ...(twa.length ? { reply_markup: { inline_keyboard: twa } } : {}),
+    });
+  });
+
+  // Время ответа поддержки за вчера и что настроено в профиле @RobloxBank_PA (13.11.2026).
+  bot.command("support_stats", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const st = await loadPaResponseStats();
+    await ctx.reply(st ? formatResponseStats(st, `за ${st.day.slice(8, 10)}.${st.day.slice(5, 7)}`) : "Ещё не посчитано: считается раз в сутки, после полуночи МСК.");
+  });
+
+  bot.command("support_profile", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    const row = await db.wbSyncCursor.findUnique({ where: { stream: PROFILE_STREAM } }).catch(() => null);
+    const lines = (row?.metadata as { lines?: string[] } | null)?.lines;
+    await ctx.reply(lines?.length
+      ? `Профиль @RobloxBank_PA (проверен ${row!.lastSuccessAt?.toISOString().slice(0, 16).replace("T", " ")} UTC):\n• ${lines.join("\n• ")}`
+      : "Профиль ещё не проверялся: проверка идёт при старте бота.");
+  });
+
+  bot.command("silent", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return;
+    await ctx.reply(formatSilentSummary(await loadSilentSummary(db)), { parse_mode: "HTML" });
   });
 
   bot.command("digest", async (ctx) => {
@@ -614,7 +667,11 @@ export function registerPaGroup(bot: Telegraf): void {
     await ctx.sendChatAction("typing", { message_thread_id: msg.message_thread_id }).catch(() => undefined);
     try {
       const answer = await askAssistant(question);
-      await ctx.reply(answer.slice(0, 4000), { reply_parameters: { message_id: msg.message_id } });
+      const twa = await twaOrderRows(ctx.botInfo?.username, answer);
+      await ctx.reply(answer.slice(0, 4000), {
+        reply_parameters: { message_id: msg.message_id },
+        ...(twa.length ? { reply_markup: { inline_keyboard: twa } } : {}),
+      });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       const blocked = /403|forbidden|not allowed/i.test(text);
