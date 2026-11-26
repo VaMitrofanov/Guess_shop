@@ -8,6 +8,8 @@
    2. Ассистент. Обращение к боту (@RobloxBankBot …, ответ на его сообщение или
       любое сообщение в теме «🤖 Ассистент») → Claude Haiku 5.5 с инструментами
       ТОЛЬКО на чтение базы: заказ по коду, поиск, очередь, цифры, риски.
+      Помнит разговор (30 мин, на админа в теме) и видит сообщение, на которое
+      ответили, — bots/shared/assistant-memory.ts (26.11.2026).
    3. Порядок. `/support_setup` в беседе с включёнными темами создаёт темы
       «🆘 Поддержка», «🧪 Тест ИИ», «📊 Сводки», «🤖 Ассистент», закрепляет
       памятку и разводит карточки по темам.
@@ -194,6 +196,7 @@ function keepInThread(ctx: any, thread: number | undefined): void {
   }
 }
 import { twaOrderRows } from "./twa-order-link";
+import { memoryKey, recallTurns, rememberExchange, replyContext, withReplyContext, type AssistantTurn } from "../shared/assistant-memory";
 import { PROFILE_STREAM, loadPaResponseStats } from "./pa-desk-worker";
 import { formatResponseStats } from "./pa-response-stats";
 import { formatSilentSummary, loadSilentSummary, mskWeekKey, silentWeeklyDue } from "../shared/silent-orders";
@@ -358,10 +361,13 @@ async function runTool(name: string, input: Record<string, unknown>) {
   }
 }
 
-const ASSISTANT_SYSTEM = `Ты — ассистент команды магазина RobloxBank (робуксы через геймпассы, продажи на Wildberries и в Telegram/VK-ботах). Тебе пишут админы в рабочей беседе. Отвечай по-русски, коротко и по делу, как коллега: цифры, коды заказов, что делать. Суммы заказов (robux) — в робуксах, пиши «R$», не рубли. Данные бери ТОЛЬКО из инструментов (они читают нашу базу); если данных нет — так и скажи, не выдумывай. Ты ничего не меняешь в заказах — только смотришь и подсказываешь; если просят действие (выкупить, разморозить, вернуть деньги), объясни, где это сделать в админке (TWA/сайт), и дай нужные данные. Время в данных — UTC, админам называй по Москве (UTC+3). Без markdown-разметки (звёздочки, решётки) — обычный текст и эмодзи по делу.`;
+const ASSISTANT_SYSTEM = `Ты — ассистент команды магазина RobloxBank (робуксы через геймпассы, продажи на Wildberries и в Telegram/VK-ботах). Тебе пишут админы в рабочей беседе. Отвечай по-русски, коротко и по делу, как коллега: цифры, коды заказов, что делать. Суммы заказов (robux) — в робуксах, пиши «R$», не рубли. Данные бери ТОЛЬКО из инструментов (они читают нашу базу); если данных нет — так и скажи, не выдумывай. Ты ничего не меняешь в заказах — только смотришь и подсказываешь; если просят действие (выкупить, разморозить, вернуть деньги), объясни, где это сделать в админке (TWA/сайт), и дай нужные данные. Время в данных — UTC, админам называй по Москве (UTC+3). Это переписка: «этот заказ», «он», «а пасс?» — про то, о чём шла речь выше или в сообщении, на которое ответили; переспрашивай, только если по разговору правда не понять. Без markdown-разметки (звёздочки, решётки) — обычный текст и эмодзи по делу.`;
 
-export async function askAssistant(question: string): Promise<string> {
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
+export async function askAssistant(question: string, history: AssistantTurn[] = []): Promise<string> {
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((t) => ({ role: t.role, content: t.text })),
+    { role: "user", content: question },
+  ];
   for (let step = 0; step < 6; step++) {
     const res = await anthropic().messages.create({
       model: PA_AI_MODEL,
@@ -664,11 +670,17 @@ export function registerPaGroup(bot: Telegraf): void {
     const inAssistant = Boolean(s.topics.assistant) && msg.message_thread_id === s.topics.assistant;
     if (!mentioned && !replyToBot && !inAssistant) return;
     if (msg.text.startsWith("/")) return;
-    const question = msg.text.replace(new RegExp(`@${me}`, "g"), "").trim();
-    if (!question) return;
+    const asked = msg.text.replace(new RegExp(`@${me}`, "g"), "").trim();
+    if (!asked) return;
+    // Память разговора (на админа в теме) + сообщение, на которое он ответил.
+    const key = memoryKey(ctx.chat!.id, msg.message_thread_id, ctx.from!.id);
+    const history = recallTurns(key);
+    const replied = replyContext(msg.reply_to_message, (msg as { quote?: { text?: string } }).quote, history.filter((t) => t.role === "assistant").map((t) => t.text));
+    const question = withReplyContext(asked, replied);
     await ctx.sendChatAction("typing", { message_thread_id: msg.message_thread_id }).catch(() => undefined);
     try {
-      const answer = await askAssistant(question);
+      const answer = await askAssistant(question, history);
+      rememberExchange(key, question, answer);
       const twa = await twaOrderRows(ctx.botInfo?.username, answer);
       await ctx.reply(answer.slice(0, 4000), {
         reply_parameters: { message_id: msg.message_id },
