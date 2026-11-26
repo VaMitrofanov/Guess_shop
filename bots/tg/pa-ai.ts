@@ -12,6 +12,13 @@
    Карточка проблемы: суть, заказ, черновик и кнопки «📤 Отправить черновик» /
    «✋ Сам отвечу». Черновики живут в памяти процесса: после рестарта кнопка
    скажет «устарело» — открыть чат и ответить руками.
+
+   Передача человеку (26.11.2026, разбор чата Татьяны К.): пока чат передан,
+   бот покупателю не пишет, но каждое новое сообщение покупателя приходит
+   карточкой «➕ дописал» со СВЕЖИМ черновиком — модель видит всю переписку.
+   Кнопка старой карточки после этого не шлёт (черновик мог спрашивать то, что
+   покупатель уже прислал). «📤 Отправить черновик» снимает передачу — бот
+   снова отвечает в чате сам; «✋ Сам отвечу» — молчит, пока не ответит оператор.
    ───────────────────────────────────────────────────────────────────────── */
 
 import type { Telegraf } from "telegraf";
@@ -27,6 +34,7 @@ import { loadSupportCustomer } from "../shared/support-ai-context";
 import { twaOrderRows } from "./twa-order-link";
 import { resetSupportModeCache, type SupportAiMode, type SupportChannelKey } from "../shared/support-ai";
 import { decideSupportDirect, supportAiCallsToday } from "./support-ai-direct";
+import { reactPaMessage } from "./pa-desk-worker";
 
 export type PaAiMode = "on" | "dry" | "off";
 const STREAM = "pa-support";
@@ -38,8 +46,11 @@ const HANDOFF_QUIET_MS = 6 * 3600_000;
 
 type Turn = { role: "user" | "assistant"; text: string; at: number };
 const history = new Map<number, Turn[]>();
-const handedOffAt = new Map<number, number>();
+/** Чат передан человеку: когда и какой черновик сейчас актуален. */
+const handedOff = new Map<number, { at: number; draftId: string | null }>();
 const drafts = new Map<string, { connId: string; chatId: number; text: string; at: number }>();
+/** Черновики, которые перебил «➕ дописал» со свежим черновиком. */
+const staleDrafts = new Set<string>();
 /** Темы беседы админов (форум): куда что слать. */
 export type PaTopic = "support" | "test" | "digest" | "assistant" | "ideas" | "updates";
 type Channels = Partial<Record<SupportChannelKey, SupportAiMode>>;
@@ -58,7 +69,35 @@ export function rememberTurn(chatId: number, role: Turn["role"], text: string) {
 
 /** Оператор написал в чат — передача закрыта, бот снова может отвечать позже. */
 export function operatorReplied(chatId: number) {
-  handedOffAt.delete(chatId);
+  handedOff.delete(chatId);
+}
+
+/**
+ * Сообщение покупателя в переданном чате разобрал не ИИ, а другой обработчик
+ * (бот сам предложил привязать заказ по коду, принял пасс) — старый черновик
+ * мог просить ровно это. Снимаем его и коротко сообщаем админам.
+ */
+export async function handledDuringHandoff(bot: Telegraf, chatId: number, who: string, text: string, what: string): Promise<void> {
+  const h = handedOff.get(chatId);
+  if (!h || Date.now() - h.at >= HANDOFF_QUIET_MS) return;
+  if (h.draftId) staleDrafts.add(h.draftId);
+  h.draftId = null;
+  await card(bot, `➕ <b>${escapeHtml(who)}</b> дописал:\n💬 «${escapeHtml(text.slice(0, 600))}»\n\n🤖 ${escapeHtml(what)}. Черновик в карточке выше устарел — не отправляется.`).catch(() => undefined);
+}
+
+const newDraftId = () => Math.random().toString(36).slice(2, 10);
+
+function putDraft(id: string, d: { connId: string; chatId: number; text: string }) {
+  drafts.set(id, { ...d, at: Date.now() });
+  if (drafts.size > 500) drafts.delete(drafts.keys().next().value as string);
+  if (staleDrafts.size > 1000) staleDrafts.delete(staleDrafts.values().next().value as string);
+}
+
+function draftButtons(id: string, hasDraft: boolean) {
+  return [[
+    ...(hasDraft ? [{ text: "📤 Отправить черновик", callback_data: `paai:send:${id}` }] : []),
+    { text: "✋ Сам отвечу", callback_data: `paai:own:${id}` },
+  ]];
 }
 
 export async function loadSettings(force = false): Promise<PaSettings> {
@@ -152,17 +191,20 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   if (!text) return true;
   rememberTurn(m.chatId, "user", text);
 
-  // Уже передали человеку — бот молчит, админам — короткая приписка.
-  const handed = handedOffAt.get(m.chatId);
-  if (handed && Date.now() - handed < HANDOFF_QUIET_MS) {
-    await card(bot, `➕ <b>${escapeHtml(m.fromName)}</b> дописал${m.username ? ` (@${escapeHtml(m.username)})` : ""}:\n💬 «${escapeHtml(text.slice(0, 600))}»`);
-    return true;
-  }
+  // Уже передали человеку — покупателю бот не пишет, а админам — «➕ дописал»
+  // со свежим черновиком: модель видит всю переписку, включая новое сообщение.
+  const handedRaw = handedOff.get(m.chatId);
+  const handed = handedRaw && Date.now() - handedRaw.at < HANDOFF_QUIET_MS ? handedRaw : null;
+  const addedHead = `➕ <b>${escapeHtml(m.fromName)}</b> дописал${m.username ? ` (@${escapeHtml(m.username)})` : ""}:\n💬 «${escapeHtml(text.slice(0, 600))}»`;
 
   const user = await db.user.findUnique({ where: { tgId: String(m.fromId) }, select: { id: true, name: true } });
   const { context, orders, codeOrders } = await loadSupportCustomer(db, { userId: user?.id, name: user?.name ?? m.fromName });
   const image = m.photoFileId ? await loadPhoto(bot, m.photoFileId) : undefined;
   const raw = await decide(m.chatId, context, image);
+  if (handed && (raw === "out_of_money" || !raw)) {
+    await card(bot, addedHead);
+    return true;
+  }
   if (raw === "out_of_money") {
     if (Date.now() - outOfMoneyNotified > 6 * 3600_000) {
       outOfMoneyNotified = Date.now();
@@ -173,7 +215,8 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   if (!raw) return false;
   const d = guardDecision(raw, text);
   void aiLogRecord(db, {
-    channel: "tg_pa", action: d.action, mode: mode as "on" | "dry", category: d.category,
+    // Пока чат у человека, ответ модели — лишь черновик: в статистике это передача, не «сам».
+    channel: "tg_pa", action: handed && d.action === "reply" ? "escalate" : d.action, mode: mode as "on" | "dry", category: d.category,
     peerKey: `tg:${m.chatId}`, orderCode: orders[0]?.wbCode ?? null,
     question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
   });
@@ -181,6 +224,27 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason ?? null, 60)}` : ""}` : codeOrders.length ? "🎟 покупка кода Robux на сайте (заказов WB нет)" : "📦 заказов в базе нет";
   const who = `👤 <b>${escapeHtml(m.fromName)}</b>${m.username ? ` @${escapeHtml(m.username)}` : ""}`;
   const quote = `💬 «${escapeHtml(text.slice(0, 600))}»`;
+
+  if (handed) {
+    // Ответ, который модель дала бы сама, здесь — тоже лишь черновик: чат у человека.
+    const draft = (d.action === "reply" ? d.reply : d.action === "escalate" ? d.draft : "").trim();
+    if (!draft) {
+      await card(bot, `${addedHead}\n\n🧾 ${escapeHtml(d.summary || "—")}`);
+      return true;
+    }
+    const id = newDraftId();
+    putDraft(id, { connId: m.connId, chatId: m.chatId, text: draft });
+    if (handed.draftId) staleDrafts.add(handed.draftId);
+    handed.draftId = id;
+    await card(bot, [
+      addedHead,
+      orderLine,
+      "",
+      `🧾 ${escapeHtml(d.summary || "—")}`,
+      `\n✍️ <b>Свежий черновик</b> (с учётом нового сообщения):\n${escapeHtml(draft)}`,
+    ].join("\n"), draftButtons(id, true));
+    return true;
+  }
 
   if (d.action === "ignore") return true;
 
@@ -198,9 +262,8 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   }
 
   // escalate
-  const id = Math.random().toString(36).slice(2, 10);
-  if (d.draft.trim()) drafts.set(id, { connId: m.connId, chatId: m.chatId, text: d.draft.trim(), at: Date.now() });
-  if (drafts.size > 500) drafts.delete(drafts.keys().next().value as string);
+  const id = newDraftId();
+  if (d.draft.trim()) putDraft(id, { connId: m.connId, chatId: m.chatId, text: d.draft.trim() });
   const head = mode === "dry" ? "🧪 <b>Тест: бот передал бы вам</b>" : "🆘 <b>Нужен человек</b>";
   const body = [
     `${head} · ${CATEGORY_RU[d.category]}`,
@@ -212,20 +275,14 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     `🧾 ${escapeHtml(d.summary || "—")}`,
     d.draft.trim() ? `\n✍️ <b>Черновик:</b>\n${escapeHtml(d.draft.trim())}` : "",
   ].join("\n");
-  const buttons = mode === "on"
-    ? [[
-        ...(d.draft.trim() ? [{ text: "📤 Отправить черновик", callback_data: `paai:send:${id}` }] : []),
-        { text: "✋ Сам отвечу", callback_data: `paai:own:${id}` },
-      ]]
-    : undefined;
+  const buttons = mode === "on" ? draftButtons(id, Boolean(d.draft.trim())) : undefined;
   await card(bot, body, buttons, mode === "dry" ? "test" : "support");
   if (mode === "on") {
-    handedOffAt.set(m.chatId, Date.now());
-    // ✨ З7: 👀 на сообщение клиента — «взяли в работу». Не встала — не беда.
-    await api("setMessageReaction", {
-      business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId,
-      reaction: [{ type: "emoji", emoji: "👀" }],
-    }).catch((e: unknown) => console.warn("[pa-ai] 👀 не встала:", e instanceof Error ? e.message : e));
+    handedOff.set(m.chatId, { at: Date.now(), draftId: d.draft.trim() ? id : null });
+    // ✨ З7: 👀 на сообщение клиента — «взяли в работу». Ставит сам аккаунт:
+    // Bot API через бизнес-подключение отвечал «message to react not found».
+    await reactPaMessage(String(m.chatId), m.messageId, "👀")
+      .catch((e: unknown) => console.warn("[pa-ai] 👀 не встала:", e instanceof Error ? e.message : e));
     await api("sendMessage", { business_connection_id: m.connId, chat_id: m.chatId, text: HANDOFF_TEXT });
     rememberTurn(m.chatId, "assistant", HANDOFF_TEXT);
   }
@@ -343,6 +400,10 @@ export function registerPaAiAdmin(bot: Telegraf): void {
     const draft = drafts.get(id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const original = ((ctx.callbackQuery?.message as any)?.text ?? "") as string;
+    if (act === "send" && staleDrafts.has(id)) {
+      await ctx.answerCbQuery("Покупатель дописал после этой карточки — ниже карточка «➕ дописал» со свежим черновиком", { show_alert: true }).catch(() => undefined);
+      return;
+    }
     if (act === "own") {
       await ctx.answerCbQuery("Ок, бот в этом чате молчит").catch(() => undefined);
       await ctx.editMessageText(`${escapeHtml(original).slice(0, 3500)}\n\n✋ Отвечает ${escapeHtml(who)}`, { parse_mode: "HTML" }).catch(() => undefined);
@@ -356,8 +417,11 @@ export function registerPaAiAdmin(bot: Telegraf): void {
       await api("sendMessage", { business_connection_id: draft.connId, chat_id: draft.chatId, text: draft.text });
       rememberTurn(draft.chatId, "assistant", draft.text);
       drafts.delete(id);
+      // Черновик ушёл — передача закрыта, на следующее сообщение бот отвечает
+      // сам (раньше молчал ещё до 6 часов, и покупатель с кодом ждал впустую).
+      handedOff.delete(draft.chatId);
       await ctx.answerCbQuery("Отправлено").catch(() => undefined);
-      await ctx.editMessageText(`${escapeHtml(original).slice(0, 3500)}\n\n📤 Черновик отправил ${escapeHtml(who)}`, { parse_mode: "HTML" }).catch(() => undefined);
+      await ctx.editMessageText(`${escapeHtml(original).slice(0, 3500)}\n\n📤 Черновик отправил ${escapeHtml(who)} · дальше бот отвечает в чате сам`, { parse_mode: "HTML" }).catch(() => undefined);
     } catch (error) {
       await ctx.answerCbQuery(`Не ушло: ${error instanceof Error ? error.message.slice(0, 120) : "ошибка"}`, { show_alert: true }).catch(() => undefined);
     }

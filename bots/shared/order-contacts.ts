@@ -419,9 +419,23 @@ const PLATFORM_WORD = { TG: "Telegram", VK: "ВКонтакте" } as const;
 export function maskName(name: string | null | undefined): string | null {
   const parts = String(name ?? "").replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean);
   if (!parts.length) return null;
-  const first = parts[0];
-  const head = `${first.slice(0, 1).toUpperCase()}***`;
-  return parts[1] ? `${head} ${parts[1].slice(0, 1).toUpperCase()}.` : head;
+  // Первая БУКВА, а не первый UTF-16-юнит: у «𝕬𝖓𝖉𝖗𝖊𝖎» `slice(0, 1)` — половинка
+  // суррогатной пары, и Telegram отклоняет всё сообщение «text must be encoded
+  // in UTF-8» (26.11.2026: вопрос «это ваш заказ?» не ушёл, покупатель застрял).
+  const initial = (s: string) => (Array.from(s)[0] ?? "").toUpperCase();
+  const head = `${initial(parts[0])}***`;
+  return parts[1] ? `${head} ${initial(parts[1])}.` : head;
+}
+
+/** Заменить одиночные половинки суррогатных пар на «�» (как `String#toWellFormed`). */
+export function wellFormed(s: string): string {
+  return s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+}
+
+/** Обрезать по символам, а не по UTF-16-юнитам (эмодзи и «фигурные» буквы не рвутся). */
+export function cutChars(s: string, max: number): string {
+  const chars = Array.from(s);
+  return chars.length > max ? chars.slice(0, max).join("") : s;
 }
 
 function ownerWhere(o: FoundOrder): string {
@@ -474,7 +488,7 @@ export function offerText(orders: FoundOrder[], platform: "TG" | "VK", html = tr
 export function offerButtonLabel(o: FoundOrder, many: boolean): string {
   if (!many) return "✅ Да, добавить этот аккаунт";
   const nick = o.robloxUsername ?? o.probableNick;
-  return `✅ ${o.amount} R$${nick ? ` · ${nick}` : ` · ${fmtDay(o.createdAt)}`}`.slice(0, 40);
+  return cutChars(`✅ ${o.amount} R$${nick ? ` · ${nick}` : ` · ${fmtDay(o.createdAt)}`}`, 40);
 }
 
 export const DECLINE_LABEL = "Это не мой заказ";
@@ -834,7 +848,7 @@ export function codeOfferText(orders: FoundCodeOrder[], platform: "TG" | "VK", h
 }
 
 export function codeOfferButtonLabel(o: FoundCodeOrder, many: boolean): string {
-  return many ? `✅ ${o.amount} R$ · ${fmtDay(o.createdAt)}`.slice(0, 40) : "✅ Да, это мой заказ";
+  return many ? cutChars(`✅ ${o.amount} R$ · ${fmtDay(o.createdAt)}`, 40) : "✅ Да, это мой заказ";
 }
 
 export function codeAddedText(o: FoundCodeOrder, html = true): string {

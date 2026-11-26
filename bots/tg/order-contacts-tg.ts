@@ -24,6 +24,7 @@ import {
   recordContactDeclined, rememberOffer, removeOrderContact, supportVia, takeOffer, dropOffer,
   addCodeOrderContact, codeAddedText, codeOfferButtonLabel, codeOfferText, codeOwnerNoticeText, findCodeOrders, planCodeContact,
   recordCodeContactDeclined,
+  wellFormed,
   type FoundCodeOrder, type FoundOrder,
 } from "../shared/order-contacts";
 import { tgSend, vkSend } from "../shared/notify";
@@ -97,8 +98,10 @@ export async function offerFromSupport(bot: Telegraf, api: Api, m: {
     console.log(`[order-contacts] скрин: ${text ? `${text.length} симв., кандидатов кода ${clues.codes.length}` : "не прочитался"}`);
   }
 
+  // `wellFormed` — страховка: любая половинка суррогатной пары (обрезанный
+  // эмодзи в имени, нике) роняет весь ответ Telegram'а «must be encoded in UTF-8».
   const send = (text: string, keyboard?: unknown[][]) => api("sendMessage", {
-    business_connection_id: m.connId, chat_id: m.chatId, text, parse_mode: "HTML",
+    business_connection_id: m.connId, chat_id: m.chatId, text: wellFormed(text), parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
   });

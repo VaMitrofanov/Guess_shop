@@ -16,7 +16,7 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
 import { isOrderStatusQuestion, paBotRedirectReply, paOrderReply } from "../shared/pa-business-reply";
-import { handleWithAi, operatorReplied, paAiMode, registerPaAiAdmin, rememberTurn } from "./pa-ai";
+import { handleWithAi, handledDuringHandoff, operatorReplied, paAiMode, registerPaAiAdmin, rememberTurn } from "./pa-ai";
 import { registerPaGroup } from "./pa-group";
 import { registerReleaseNotes } from "./release-notes";
 import { registerWatchList } from "./watch-list";
@@ -216,6 +216,7 @@ export function registerPaBusiness(bot: Telegraf): void {
         });
         if (attached) {
           rememberTurn(msg.chat.id, "user", text);
+          await handledDuringHandoff(bot, msg.chat.id, [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "Покупатель", text, "Бот сам принял геймпасс в заказ");
           return;
         }
       }
@@ -230,6 +231,7 @@ export function registerPaBusiness(bot: Telegraf): void {
         });
         if (offered) {
           rememberTurn(msg.chat.id, "user", text || "[скриншот с кодом заказа]");
+          await handledDuringHandoff(bot, msg.chat.id, [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "Покупатель", text || "[скриншот]", "Бот сам ответил по присланному коду/нику (привязка заказа)");
           return;
         }
       }

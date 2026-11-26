@@ -1,6 +1,6 @@
 import {
   addedText, blockedText, declinedText, STALE_OFFER_TEXT, cluesFromOcr, contactEventText, extractOrderClues, ocrLooksUseful, maskName, offerText, parseContactCallback,
-  planContactOffer, rememberOffer, takeOffer, offerKey, type FoundOrder,
+  planContactOffer, rememberOffer, takeOffer, offerKey, offerButtonLabel, cutChars, wellFormed, type FoundOrder,
 } from "../order-contacts";
 
 const base = (over: Partial<FoundOrder> = {}): FoundOrder => ({
@@ -103,6 +103,24 @@ describe("слова", () => {
     expect(maskName(null)).toBeNull();
     expect(offerText([base()], "TG")).toContain("во ВКонтакте (А*** К.)");
     expect(offerText([base()], "TG")).not.toContain("Анна");
+  });
+  // 26.11.2026: «𝕬𝖓𝖉𝖗𝖊𝖎†» → `slice(0, 1)` давал половинку суррогатной пары, и
+  // Telegram отклонял вопрос «это ваш заказ?» целиком («must be encoded in UTF-8»).
+  it("«фигурные» буквы в имени не рвут текст пополам", () => {
+    expect(maskName("𝕬𝖓𝖉𝖗𝖊𝖎†")).toBe("𝕬***");
+    expect(maskName("𝓻𝓲𝓷𝓪 🚬")).toBe("𝓻***");
+    expect(maskName("𝙎𝙝𝙖𝙙𝙤𝙬 𝙩𝙝𝙚")).toBe("𝙎*** 𝙩.");
+    const owner = { ...base().user!, name: "𝕬𝖓𝖉𝖗𝖊𝖎†" };
+    const text = offerText([{ ...base(), user: owner }], "TG");
+    expect(wellFormed(text)).toBe(text);
+    const label = offerButtonLabel({ ...base(), robloxUsername: "x".repeat(30) + "🎀🎀🎀🎀🎀" }, true);
+    expect(wellFormed(label)).toBe(label);
+    expect(Array.from(label).length).toBeLessThanOrEqual(40);
+  });
+  it("cutChars и wellFormed", () => {
+    expect(cutChars("ab🎀cd", 3)).toBe("ab🎀");
+    expect(wellFormed("a\uD835b")).toBe("a\uFFFDb");
+    expect(wellFormed("ok 🎀")).toBe("ok 🎀");
   });
   it("строки ленты", () => {
     expect(contactEventText("CONTACT_ADDED", { via: "support_code", platform: "TG", who: "Вика" })).toBe("Добавлен контакт: Telegram «Вика» — из поддержки по коду");

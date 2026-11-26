@@ -341,6 +341,26 @@ async function autoHearts(tg: TelegramClient, dialogs: Dialog[], mode: Mode): Pr
   return done;
 }
 
+/**
+ * Реакция на сообщение клиента ОТ ИМЕНИ аккаунта (26.11.2026): Bot API через
+ * бизнес-подключение реакцию не ставит («message to react not found» на каждой
+ * передаче человеку), а аккаунт может — id сообщения в бизнес-чате тот же.
+ */
+export async function reactPaMessage(tgId: string, messageId: number, emoji: string): Promise<boolean> {
+  if (paDeskMode() !== "on") return false;
+  const tg = await getClient();
+  let peer = await tg.getInputEntity(Number(tgId)).catch(() => null);
+  if (!peer) {
+    // Сущности ещё нет в кэше сессии (новый клиент) — она есть в свежих диалогах.
+    const d = (await tg.getDialogs({ limit: 50 })).find((x: Dialog) =>
+      x.isUser && x.entity instanceof Api.User && String(x.entity.id) === tgId);
+    peer = d?.inputEntity ?? null;
+  }
+  if (!peer) return false;
+  await tg.invoke(new Api.messages.SendReaction({ peer, msgId: messageId, reaction: [new Api.ReactionEmoji({ emoticon: emoji })] }));
+  return true;
+}
+
 /* ── 📌 Закреп заказа в диалоге (15.11.2026) ─────────────────────────────── */
 
 /**
