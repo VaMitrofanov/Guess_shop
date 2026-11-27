@@ -22,6 +22,7 @@ import { registerReleaseNotes } from "./release-notes";
 import { registerWatchList } from "./watch-list";
 import { registerWbReply } from "./wb-reply";
 import { registerWbReviewCards } from "./wb-review-cards";
+import { registerAiJudge } from "./ai-judge";
 import { registerCodesIssueReply } from "./codes-issue-reply";
 import { registerWbMorningDigest } from "./wb-morning-digest";
 import { registerNoticeStatsReport } from "./notice-stats-report";
@@ -89,6 +90,7 @@ export function paBusinessReplyEnabled(env: NodeJS.ProcessEnv = process.env): bo
 export function registerPaBusiness(bot: Telegraf): void {
   // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
   registerPaAiAdmin(bot);
+  registerAiJudge(bot);
   // 🔗 Контакты заказа (17.11.2026): «да / не мой / убрать» — и из чата
   // поддержки, и из бота, и у владельца. До защиты беседы админов.
   registerOrderContactActions(bot);
@@ -191,7 +193,7 @@ export function registerPaBusiness(bot: Telegraf): void {
         const isOrderPin = /^📌 Ваш(и)? заказ/.test(msg.text ?? "");
         if (!msg.sender_business_bot && !isOrderPin) {
           operatorAt.set(msg.chat.id, Date.now());
-          operatorReplied(msg.chat.id);
+          operatorReplied(msg.chat.id, (msg.text ?? msg.caption ?? "").trim());
           rememberTurn(msg.chat.id, "assistant", (msg.text ?? msg.caption ?? "").trim());
         }
         return;

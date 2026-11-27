@@ -2,7 +2,8 @@ import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
-import { noteDbsAdminReply } from "../shared/wb-delivery-admin-notify";
+import { recordOperatorExample } from "../shared/support-ai-learn";
+import { noteDbsAdminReply, WB_AI_SEND_CB } from "../shared/wb-delivery-admin-notify";
 import { parseWbReplyCallback, sendWbChatReply, wbOrderForMessage, wbReplyFailText, wbReplyTemplate } from "../shared/wb-chat-reply";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -16,9 +17,48 @@ const isAdmin = (id: number | undefined) => id !== undefined && ADMIN_IDS.includ
 const actorOf = (from: { id: number; username?: string; first_name?: string }) =>
   from.username ? `@${from.username}` : from.first_name || String(from.id);
 
+async function lastBuyerWbText(wbOrderId: string): Promise<string | null> {
+  const mp = await db.wbMarketplaceOrder.findFirst({ where: { wbOrderId }, select: { id: true } }).catch(() => null);
+  if (!mp) return null;
+  const ev = await db.wbBuyerChatEvent.findFirst({
+    where: { marketplaceOrderId: mp.id, sender: "client", textRedacted: { not: null } },
+    orderBy: { sentAt: "desc" }, select: { textRedacted: true },
+  }).catch(() => null);
+  return ev?.textRedacted?.trim() || null;
+}
+
 const KIND_LABEL = { g: "📖 инструкция", c: "🔑 просьба прислать код", r: "🚚 «курьера нет»" } as const;
 
 export function registerWbReply(bot: Telegraf): void {
+  /* 📤 Ответ воркера ИИ в чат WB одной кнопкой (27.11.2026). Текст лежит в
+     событии `ai-chat:<wbEventId>`; повторное нажатие ничего не шлёт. */
+  bot.action(new RegExp(`^${WB_AI_SEND_CB}(.+)$`), async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return ctx.answerCbQuery("Только для админов").catch(() => undefined);
+    const eventId = (ctx.match as RegExpMatchArray)[1];
+    const ev = await db.wbMarketplaceEvent.findUnique({
+      where: { idempotencyKey: `ai-chat:${eventId}` },
+      select: { id: true, payload: true, marketplaceOrderId: true },
+    }).catch(() => null);
+    const payload = (ev?.payload ?? {}) as { draft?: string | null; sentBy?: string };
+    if (!ev || !payload.draft) return ctx.answerCbQuery("Ответа нет — напишите сами", { show_alert: true }).catch(() => undefined);
+    if (payload.sentBy) return ctx.answerCbQuery(`Уже отправил ${payload.sentBy}`).catch(() => undefined);
+    const mp = await db.wbMarketplaceOrder.findUnique({ where: { id: ev.marketplaceOrderId! }, select: { wbOrderId: true } }).catch(() => null);
+    if (!mp) return ctx.answerCbQuery("Заказ не найден").catch(() => undefined);
+    const actor = actorOf(ctx.from);
+    const result = await sendWbChatReply(db as never, mp.wbOrderId, payload.draft, actor);
+    if (!result.sent) {
+      await ctx.answerCbQuery(`Не ушло: ${wbReplyFailText(result.reason)}`, { show_alert: true }).catch(() => undefined);
+      return;
+    }
+    await db.wbMarketplaceEvent.update({ where: { id: ev.id }, data: { payload: { ...payload, sentBy: actor, sentAt: new Date().toISOString() } } }).catch(() => undefined);
+    await ctx.answerCbQuery("Отправлено").catch(() => undefined);
+    await ctx.editMessageReplyMarkup(undefined).catch(() => undefined);
+    await ctx.reply(`📤 ${escapeHtml(actor)} отправил ответ воркера в чат WB.`, {
+      parse_mode: "HTML", disable_notification: true,
+      reply_parameters: { message_id: (ctx.callbackQuery as { message?: { message_id: number } }).message?.message_id ?? 0, allow_sending_without_reply: true },
+    }).catch(() => undefined);
+  });
+
   bot.action(/^wbr:/, async (ctx) => {
     const data = (ctx.callbackQuery as { data?: string }).data ?? "";
     const parsed = parseWbReplyCallback(data);
@@ -60,6 +100,8 @@ export function registerWbReply(bot: Telegraf): void {
     if (!wbOrderId) return next();
     const actor = actorOf(ctx.from);
     const result = await sendWbChatReply(db as never, wbOrderId, msg.text, actor);
+    // 🧠 Ответ админа в чат WB — пример для ИИ (27.11.2026): вопрос — последнее слово покупателя.
+    if (result.sent) void lastBuyerWbText(wbOrderId).then(async (q) => { if (q) await recordOperatorExample(db, { channel: "wb_chat", question: q, answer: msg.text!, by: actor }); });
     if (result.sent && await noteDbsAdminReply(wbOrderId, actor, msg.text)) {
       await ctx.react("👍").catch(() => undefined);
       return;

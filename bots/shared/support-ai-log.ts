@@ -44,6 +44,32 @@ export interface AiLogEntry {
   summary?: string | null;
 }
 
+/**
+ * 🧠 Память разговора после деплоя (27.11.2026). Память ботов TG/ВК/PA живёт в
+ * процессе и умирала на каждом рестарте (три деплоя за ночь — три «новых»
+ * разговора). Журнал решений уже хранит вопрос и ответ: из него и поднимаем.
+ * Ответ берём только реально отправленный (`reply` в режиме on).
+ */
+export async function recallTurns(db: Db, channel: AiLogEntry["channel"], peerKey: string, maxAgeMs = 6 * 3600_000, limit = 6): Promise<Array<{ role: "user" | "assistant"; text: string; at: number }>> {
+  try {
+    const rows: Array<{ question: string; answer: string | null; action: string; mode: string; createdAt: Date }> = await db.aiSupportLog.findMany({
+      where: { channel, peerKey, createdAt: { gte: new Date(Date.now() - maxAgeMs) } },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: { question: true, answer: true, action: true, mode: true, createdAt: true },
+    });
+    const out: Array<{ role: "user" | "assistant"; text: string; at: number }> = [];
+    for (const r of rows.reverse()) {
+      const at = new Date(r.createdAt).getTime();
+      out.push({ role: "user", text: r.question.slice(0, 1500), at });
+      if (r.action === "reply" && r.mode === "on" && r.answer) out.push({ role: "assistant", text: r.answer.slice(0, 1500), at });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** Запись решения ИИ в базу — для еженедельного разбора. Сбой — не беда. */
 export async function aiLogRecord(db: Db, e: AiLogEntry): Promise<void> {
   try {

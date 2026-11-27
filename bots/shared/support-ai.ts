@@ -126,6 +126,33 @@ export function isConversationalText(text: string): boolean {
   return words.length >= 3 || (/\?\s*$/.test(t) && /\p{L}{3}/u.test(t));
 }
 
+/**
+ * ⏳ Склейка подряд идущих сообщений (27.11.2026): покупатель пишет
+ * «здравствуйте» / «у меня проблема» / «робуксы не пришли» тремя сообщениями —
+ * отвечаем один раз, на всё сразу. Запускается последний вызов за `ms`.
+ * Не ждёт внутри обработчика бота: иначе стоял бы весь поток апдейтов.
+ */
+export const AI_DEBOUNCE_MS = 15_000;
+export class Debouncer {
+  private seq = new Map<string, number>();
+  schedule(key: string, ms: number, fn: () => Promise<void>): void {
+    const v = (this.seq.get(key) ?? 0) + 1;
+    this.seq.set(key, v);
+    setTimeout(() => {
+      if (this.seq.get(key) !== v) return;
+      this.seq.delete(key);
+      void fn().catch((e) => console.warn("[support-ai] отложенный ответ упал:", e instanceof Error ? e.message : e));
+    }, ms);
+  }
+}
+
+/** Все сообщения покупателя после последнего ответа поддержки — одним текстом. */
+export function trailingUserText(turns: SupportTurn[]): string {
+  const out: string[] = [];
+  for (let i = turns.length - 1; i >= 0 && turns[i].role === "user"; i--) out.unshift(turns[i].text);
+  return out.join("\n");
+}
+
 /** Реплики чата в памяти процесса (ВК): последние 12 на собеседника. */
 export class TurnMemory {
   private map = new Map<string, Array<SupportTurn & { at: number }>>();
@@ -139,8 +166,34 @@ export class TurnMemory {
     this.map.set(key, list);
     if (this.map.size > 3000) this.map.delete(this.map.keys().next().value as string);
   }
+  /** Пусто после рестарта — поднять из журнала (`recallTurns`). */
+  seed(key: string, turns: Array<SupportTurn & { at: number }>): void {
+    if (this.map.has(key) || turns.length === 0) return;
+    this.map.set(key, turns.slice(-this.size));
+  }
+  has(key: string): boolean {
+    return this.map.has(key);
+  }
   get(key: string): SupportTurn[] {
     const now = Date.now();
     return (this.map.get(key) ?? []).filter((t) => now - t.at < this.ttlMs).map(({ role, text }) => ({ role, text }));
   }
 }
+
+/** 📷 Картинка по ссылке → для модели (ВК/TG-файл). Больше 3,5 МБ или не картинка — `undefined`. */
+export async function fetchSupportImage(url: string): Promise<SupportImage | undefined> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return undefined;
+    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const mediaType = (["image/jpeg", "image/png", "image/webp"].includes(type) ? type : /\.png(\?|$)/i.test(url) ? "image/png" : "image/jpeg") as SupportImage["mediaType"];
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > 3_500_000) return undefined;
+    return { data: buf.toString("base64"), mediaType };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Подпись к фото, у которой свой путь (бонус за отзыв, оплата) — ИИ не трогает. */
+export const SCREENSHOT_OWN_FLOW_RE = /отзыв|оплат|оплачен|чек|перевод|квитанц/i;

@@ -26,7 +26,9 @@ import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
 import { heldLabel } from "../shared/notify-format";
-import { aiLogRecord } from "../shared/support-ai-log";
+import { aiLogRecord, recallTurns } from "../shared/support-ai-log";
+import { screenshotFact } from "../shared/support-ai-facts";
+import { recordOperatorExample } from "../shared/support-ai-learn";
 import {
   CATEGORY_RU, HANDOFF_TEXT, guardDecision, plain, refundGoesToWb, type PaAiDecision,
 } from "../shared/pa-ai-support";
@@ -68,7 +70,14 @@ export function rememberTurn(chatId: number, role: Turn["role"], text: string) {
 }
 
 /** Оператор написал в чат — передача закрыта, бот снова может отвечать позже. */
-export function operatorReplied(chatId: number) {
+export function operatorReplied(chatId: number, text?: string) {
+  /* 🧠 ИИ передал разговор, оператор ответил сам — учимся на этой паре (27.11.2026). */
+  if (handedOff.has(chatId) && text?.trim()) {
+    const turns = history.get(chatId) ?? [];
+    const q: string[] = [];
+    for (let i = turns.length - 1; i >= 0 && turns[i].role === "user"; i--) q.unshift(turns[i].text);
+    if (q.length) void recordOperatorExample(db, { channel: "tg_pa", question: q.join("\n"), answer: text, by: "оператор PA" });
+  }
   handedOff.delete(chatId);
 }
 
@@ -82,7 +91,7 @@ export async function handledDuringHandoff(bot: Telegraf, chatId: number, who: s
   if (!h || Date.now() - h.at >= HANDOFF_QUIET_MS) return;
   if (h.draftId) staleDrafts.add(h.draftId);
   h.draftId = null;
-  await card(bot, `➕ <b>${escapeHtml(who)}</b> дописал:\n💬 «${escapeHtml(text.slice(0, 600))}»\n\n🤖 ${escapeHtml(what)}. Черновик в карточке выше устарел — не отправляется.`).catch(() => undefined);
+  await card(bot, `➕ <b>${escapeHtml(who)}</b> дописал:\n💬 «${escapeHtml(text.slice(0, 600))}»\n\n🤖 ${escapeHtml(what)}. Ответ в карточке выше устарел — не отправляется.`).catch(() => undefined);
 }
 
 const newDraftId = () => Math.random().toString(36).slice(2, 10);
@@ -95,7 +104,7 @@ function putDraft(id: string, d: { connId: string; chatId: number; text: string 
 
 function draftButtons(id: string, hasDraft: boolean) {
   return [[
-    ...(hasDraft ? [{ text: "📤 Отправить черновик", callback_data: `paai:send:${id}` }] : []),
+    ...(hasDraft ? [{ text: "📤 Отправить", callback_data: `paai:send:${id}` }] : []),
     { text: "✋ Сам отвечу", callback_data: `paai:own:${id}` },
   ]];
 }
@@ -189,6 +198,11 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     (bot.telegram as any).callApi(method, payload);
   const text = m.text || (m.photoFileId ? "[прислал скриншот]" : m.hasMedia ? "[прислал файл без текста]" : "");
   if (!text) return true;
+  // 🧠 После рестарта память пуста — поднять разговор из журнала (27.11.2026).
+  if (!history.has(m.chatId)) {
+    const past = await recallTurns(db, "tg_pa", `tg:${m.chatId}`);
+    if (past.length) history.set(m.chatId, past.slice(-HISTORY));
+  }
   rememberTurn(m.chatId, "user", text);
 
   // Уже передали человеку — покупателю бот не пишет, а админам — «➕ дописал»
@@ -200,7 +214,9 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   const user = await db.user.findUnique({ where: { tgId: String(m.fromId) }, select: { id: true, name: true } });
   const { context, orders, codeOrders } = await loadSupportCustomer(db, { userId: user?.id, name: user?.name ?? m.fromName });
   const image = m.photoFileId ? await loadPhoto(bot, m.photoFileId) : undefined;
-  const raw = await decide(m.chatId, context, image);
+  // 📷 Распознавание Pending на скрине (27.11.2026) — фактом в данные покупателя.
+  const ocrLine = image ? await screenshotFact(image.data, orders[0]?.amount, orders[0]?.robloxUsername) : null;
+  const raw = await decide(m.chatId, ocrLine ? `${context}\n${ocrLine}` : context, image);
   if (handed && (raw === "out_of_money" || !raw)) {
     await card(bot, addedHead);
     return true;
@@ -216,6 +232,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
   const d = guardDecision(raw, text, "tg_pa", {
     greeted: (history.get(m.chatId) ?? []).some((t) => t.role === "assistant"),
     refundViaWb: refundGoesToWb(orders, codeOrders),
+    known: `${context}\n${(history.get(m.chatId) ?? []).map((t) => t.text).join("\n")}`,
   });
   void aiLogRecord(db, {
     // Пока чат у человека, ответ модели — лишь черновик: в статистике это передача, не «сам».
@@ -244,7 +261,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
       orderLine,
       "",
       `🧾 ${escapeHtml(d.summary || "—")}`,
-      `\n✍️ <b>Свежий черновик</b> (с учётом нового сообщения):\n${escapeHtml(draft)}`,
+      `\n🤖 <b>Ответ</b> (с учётом нового сообщения):\n${escapeHtml(draft)}`,
     ].join("\n"), draftButtons(id, true));
     return true;
   }
@@ -276,7 +293,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     quote,
     "",
     `🧾 ${escapeHtml(d.summary || "—")}`,
-    d.draft.trim() ? `\n✍️ <b>Черновик:</b>\n${escapeHtml(d.draft.trim())}` : "",
+    d.draft.trim() ? `\n🤖 <b>Ответ:</b>\n${escapeHtml(d.draft.trim())}` : "",
   ].join("\n");
   const buttons = mode === "on" ? draftButtons(id, Boolean(d.draft.trim())) : undefined;
   await card(bot, body, buttons, mode === "dry" ? "test" : "support");
@@ -404,7 +421,7 @@ export function registerPaAiAdmin(bot: Telegraf): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const original = ((ctx.callbackQuery?.message as any)?.text ?? "") as string;
     if (act === "send" && staleDrafts.has(id)) {
-      await ctx.answerCbQuery("Покупатель дописал после этой карточки — ниже карточка «➕ дописал» со свежим черновиком", { show_alert: true }).catch(() => undefined);
+      await ctx.answerCbQuery("Покупатель дописал после этой карточки — ниже карточка «➕ дописал» со свежим ответом", { show_alert: true }).catch(() => undefined);
       return;
     }
     if (act === "own") {
@@ -413,7 +430,7 @@ export function registerPaAiAdmin(bot: Telegraf): void {
       return;
     }
     if (!draft) {
-      await ctx.answerCbQuery("Черновик устарел (бот перезапускался) — ответьте в чате вручную", { show_alert: true }).catch(() => undefined);
+      await ctx.answerCbQuery("Ответ устарел (бот перезапускался) — ответьте в чате вручную", { show_alert: true }).catch(() => undefined);
       return;
     }
     try {
@@ -424,7 +441,7 @@ export function registerPaAiAdmin(bot: Telegraf): void {
       // сам (раньше молчал ещё до 6 часов, и покупатель с кодом ждал впустую).
       handedOff.delete(draft.chatId);
       await ctx.answerCbQuery("Отправлено").catch(() => undefined);
-      await ctx.editMessageText(`${escapeHtml(original).slice(0, 3500)}\n\n📤 Черновик отправил ${escapeHtml(who)} · дальше бот отвечает в чате сам`, { parse_mode: "HTML" }).catch(() => undefined);
+      await ctx.editMessageText(`${escapeHtml(original).slice(0, 3500)}\n\n📤 Ответ отправил ${escapeHtml(who)} · дальше бот отвечает в чате сам`, { parse_mode: "HTML" }).catch(() => undefined);
     } catch (error) {
       await ctx.answerCbQuery(`Не ушло: ${error instanceof Error ? error.message.slice(0, 120) : "ошибка"}`, { show_alert: true }).catch(() => undefined);
     }

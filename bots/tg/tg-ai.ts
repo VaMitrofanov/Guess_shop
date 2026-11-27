@@ -21,12 +21,14 @@ import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml, tgSend } from "../shared/notify";
 import { CATEGORY_RU, guardDecision, plain, refundGoesToWb } from "../shared/pa-ai-support";
-import { decideSupport, isConversationalText, supportCardTarget, supportChannelMode, TurnMemory } from "../shared/support-ai";
+import { AI_DEBOUNCE_MS, Debouncer, type SupportImage, decideSupport, isConversationalText, supportCardTarget, supportChannelMode, trailingUserText, TurnMemory } from "../shared/support-ai";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { SUPPORT_METRIC_EVENT, recordSupportMetric } from "../shared/support-metric";
-import { aiLogCard, aiLogRecord } from "../shared/support-ai-log";
+import { aiLogCard, aiLogRecord, recallTurns } from "../shared/support-ai-log";
+import { screenshotFact } from "../shared/support-ai-facts";
 
 const memory = new TurnMemory();
+const debouncer = new Debouncer();
 
 async function card(html: string): Promise<void> {
   const target = await supportCardTarget(db);
@@ -50,23 +52,41 @@ export interface TgAiDeps {
 }
 
 /** `true` — сообщение обработано ИИ; `false` — пусть работает старая логика. */
-export async function tryTgAi(text: string, deps: TgAiDeps): Promise<boolean> {
+export async function tryTgAi(text: string, deps: TgAiDeps, image?: SupportImage): Promise<boolean> {
   if (!isConversationalText(text)) return false;
   const mode = await supportChannelMode(db, "tg_bot");
   if (mode === "off") return false;
 
   const key = String(deps.tgId);
+  if (!memory.has(key)) memory.seed(key, await recallTurns(db, "tg_bot", `tg:${key}`));
   memory.push(key, "user", text);
+  if (mode === "on") {
+    // ⏳ Склейка сообщений (27.11.2026): ответ — через AI_DEBOUNCE_MS после последнего.
+    debouncer.schedule(key, AI_DEBOUNCE_MS, async () => {
+      const joined = trailingUserText(memory.get(key)) || text;
+      const r = await answerTgAi(joined, deps, mode, image);
+      if (r === "failed") await deps.escalate(joined);
+    });
+    return true;
+  }
+  return (await answerTgAi(text, deps, mode, image)) === "handled";
+}
+
+async function answerTgAi(text: string, deps: TgAiDeps, mode: "on" | "dry", image?: SupportImage): Promise<"handled" | "ignored" | "failed"> {
+  const key = String(deps.tgId);
   const user = await db.user.findUnique({ where: { tgId: key }, select: { id: true, name: true } }).catch(() => null);
   const name = user?.name ?? deps.name;
   const customer = await loadSupportCustomer(db, { userId: user?.id, name });
-  const context = `${customer.context}\n\nГДЕ ЧЕЛОВЕК В БОТЕ: ${deps.step}`;
+  // 📷 Скриншот с вопросом (27.11.2026): картинку видит модель, Pending — распознаём.
+  const ocrLine = image ? await screenshotFact(image.data, customer.orders[0]?.amount, customer.orders[0]?.robloxUsername) : null;
+  const context = `${customer.context}${ocrLine ? `\n${ocrLine}` : ""}\n\nГДЕ ЧЕЛОВЕК В БОТЕ: ${deps.step}`;
   const turns = memory.get(key);
-  const raw = await decideSupport({ channel: "tg_bot", context, turns });
-  if (!raw || raw === "out_of_money") return false;
+  const raw = await decideSupport({ channel: "tg_bot", context, turns, ...(image ? { image } : {}) });
+  if (!raw || raw === "out_of_money") return "failed";
   const d = guardDecision(raw, text, "tg_bot", {
     greeted: turns.some((t) => t.role === "assistant"),
     refundViaWb: refundGoesToWb(customer.orders, customer.codeOrders),
+    known: `${context}\n${turns.map((t) => t.text).join("\n")}`,
   });
   void aiLogRecord(db, {
     channel: "tg_bot", action: d.action, mode: mode as "on" | "dry", category: d.category,
@@ -85,16 +105,16 @@ export async function tryTgAi(text: string, deps: TgAiDeps): Promise<boolean> {
   ].join("\n");
 
   if (mode === "dry") {
-    if (d.action === "ignore") return false;
+    if (d.action === "ignore") return "ignored";
     const body = d.action === "reply"
       ? `🧪 <b>Бот TG: ответил бы сам</b> · ${CATEGORY_RU[d.category]}\n${head}\n\n🤖 ${escapeHtml(plain(d.reply))}`
       : `🧪 <b>Бот TG: передал бы вам</b> · ${CATEGORY_RU[d.category]}\n${head}\n\n🧾 ${escapeHtml(d.summary || "—")}` +
-        (d.draft.trim() ? `\n\n✍️ <b>Черновик:</b>\n${escapeHtml(d.draft.trim())}` : "");
+        (d.draft.trim() ? `\n\n🤖 <b>Ответ:</b>\n${escapeHtml(d.draft.trim())}` : "");
     await card(body);
-    return false;
+    return "ignored";
   }
 
-  if (d.action === "ignore") return false;
+  if (d.action === "ignore") return "ignored";
   if (d.action === "reply") {
     const answer = plain(d.reply);
     await deps.reply(answer);
@@ -105,14 +125,14 @@ export async function tryTgAi(text: string, deps: TgAiDeps): Promise<boolean> {
       type: SUPPORT_METRIC_EVENT.SELF_SERVED, wbCode: order?.wbCode, via: "tg-bot",
       payload: { kind: "ai", category: d.category },
     });
-    return true;
+    return "handled";
   }
   const problem = [
     text,
     "",
     `🤖 ${d.summary || CATEGORY_RU[d.category]}`,
-    d.draft.trim() ? `✍️ Черновик ответа: ${d.draft.trim()}` : "",
+    d.draft.trim() ? `🤖 Ответ воркера: ${d.draft.trim()}` : "",
   ].filter(Boolean).join("\n");
   await deps.escalate(problem);
-  return true;
+  return "handled";
 }

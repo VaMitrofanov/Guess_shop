@@ -99,6 +99,7 @@ import { PENDING_MENU_BUTTON, PENDING_PAGE_BUTTON, PENDING_PAGE_URL, pendingInfo
 import { robuxWaitText } from "../shared/robux-wait";
 import { PASS_ID_IMAGE, PASS_ID_IMAGE_CAPTION, passIdHelpText } from "../shared/passid-help";
 import { tryTgAi } from "./tg-ai";
+import { fetchSupportImage, isConversationalText, SCREENSHOT_OWN_FLOW_RE } from "../shared/support-ai";
 import { robuxGotCardText } from "../shared/robux-got-card";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, gpPassPrice, personalFaqAnswer, priceLabelSuffix, stageNextLine, type FaqStage } from "../shared/smart-faq";
 import {
@@ -5308,6 +5309,28 @@ export function registerPhoto(bot: Telegraf): void {
         const fileId = ctx.message.photo.at(-1)!.file_id;
         await deliverSupportIntakeTg(bot, ctx, ctx.message.caption ?? "", fileId);
         return;
+      }
+    }
+
+    // 0d. 📷 Скриншот с вопросом в подписи → ИИ (27.11.2026): модель видит картинку,
+    //     Pending распознаётся. Фото без подписи и подписи про отзыв/оплату — прежним путём.
+    {
+      const caption = (ctx.message.caption ?? "").trim();
+      if (!reviewExplicit && !ADMIN_IDS.includes(tgId) && caption && !SCREENSHOT_OWN_FLOW_RE.test(caption) && isConversationalText(caption)) {
+        const link = await ctx.telegram.getFileLink(ctx.message.photo.at(-1)!.file_id).catch(() => null);
+        const image = link ? await fetchSupportImage(String(link)) : undefined;
+        const took = await tryTgAi(caption, {
+          tgId: ctx.from.id,
+          name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || "Покупатель",
+          username: ctx.from.username ?? null,
+          step: "прислал скриншот с вопросом",
+          reply: (answer) => ctx.reply(answer, { link_preview_options: { is_disabled: true } }),
+          escalate: async (problemText) => {
+            await openIntake(intakeDb, { tgId }, { platform: "TG", contextKey: "ai", nudged: true });
+            await deliverSupportIntakeTg(bot, ctx, problemText, ctx.message.photo.at(-1)!.file_id);
+          },
+        }, image).catch((err) => { console.error("[TG] ИИ по скриншоту:", err); return false; });
+        if (took) return;
       }
     }
 

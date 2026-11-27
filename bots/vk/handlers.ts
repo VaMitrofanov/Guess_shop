@@ -103,6 +103,7 @@ import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, personalFaqAnswer, priceLabelSuffix, type FaqStage } from "../shared/smart-faq";
 import { robuxWaitText } from "../shared/robux-wait";
 import { rememberVkOutbox, tryVkAi, vkStateAllowsAi } from "./vk-ai";
+import { fetchSupportImage, isConversationalText, SCREENSHOT_OWN_FLOW_RE } from "../shared/support-ai";
 import { PASS_ID_IMAGE, PASS_ID_IMAGE_CAPTION, passIdHelpText } from "../shared/passid-help";
 import { robuxGotCardText } from "../shared/robux-got-card";
 
@@ -1544,7 +1545,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // менеджером. Режим off/dry/on — `/support_mode vk …` в беседе админов.
   if (
     !msgPayload?.command &&
-    !messageHasPhoto(ctx) &&
+    // 📷 С 27.11.2026 фото с вопросом в подписи тоже к ИИ (не про отзыв/оплату).
+    (!messageHasPhoto(ctx) || (isConversationalText(text) && !SCREENSHOT_OWN_FLOW_RE.test(text))) &&
     extractPassId(text) === null &&
     vkStateAllowsAi(getState(vkUserId)?.type) &&
     !(await isSupportPaused(vkUserId)) &&
@@ -1552,7 +1554,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       reply: (message) => ctx.reply(message),
       escalate: (problemText) => triggerSupport(ctx, vkUserId, "ai", { problemText }),
       firstName: () => vkGetName(vkUserId),
-    }).catch((err) => { console.error("[VK] ИИ-поддержка:", err); return false; })
+    }, messageHasPhoto(ctx) ? await extractPhotoUrl(ctx).then((u) => (u ? fetchSupportImage(u) : undefined)).catch(() => undefined) : undefined)
+      .catch((err) => { console.error("[VK] ИИ-поддержка:", err); return false; })
   ) {
     return;
   }

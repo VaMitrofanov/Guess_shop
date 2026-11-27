@@ -19,6 +19,8 @@ import { passPriceFor } from "./wb-question-templates";
 import { buyoutDelayText } from "./robux-wait";
 
 export const PA_AI_MODEL = "claude-haiku-5-5";
+/** Публичные ответы на отзывы и ночной разбор — сильнее и реже (27.11.2026). */
+export const PA_AI_STRONG_MODEL = "claude-sonnet-5-5";
 
 export const PA_AI_CATEGORIES = [
   "order_status", "how_to", "gamepass_problem", "robux_missing", "wrong_account",
@@ -156,13 +158,18 @@ ROBLOX: ГДЕ ЧТО НАХОДИТСЯ И КУДА НАЖИМАТЬ
 • Главный путь в боте — «🔑 Сделайте за меня»: покупатель один раз присылает ключ из Roblox (пароль не нужен), мы сами находим его игру (даже скрытую) и создаём пасс нужной цены. Ключ — это код-пропуск: с ним можно только увидеть список игр и создать геймпасс, войти в аккаунт или потратить робуксы нельзя. В ключе два права: game-passes (game-pass:read и game-pass:write) и user.inventory-item (user.inventory-item:read) — второе нужно, чтобы найти скрытую игру. Если бот ответил «Ключ от другого аккаунта» — ключ сделан не на том аккаунте, что в заказе. Предлагай этот путь первым, если у человека не получается создать пасс.
 • Транзакции и Pending: давай ссылку https://www.roblox.com/transactions → строка «Pending Robux» (в русском Roblox — «Ожидание робуксов»). Всегда добавляй, что страница открывается только в браузере (Safari, Chrome), в приложении Roblox её нет.
 
+ЖИВЫЕ ПРОВЕРКИ В ДАННЫХ (с 27.11.2026)
+• «ПРОВЕРКА ПАССА …» — что с пассом покупателя прямо сейчас. Есть проблема (цена не та, не в продаже, Managed pricing, Regional pricing, игра закрыта или 18+) — ответь сам: назови ровно эту проблему и куда нажать, чтобы её исправить (по разделу «Roblox: где что находится»), а не «на каком шаге вы застряли». «Всё в порядке» — пасс верный, выкуп за нами (смысл из «Выкуп идёт медленно»).
+• «причина: …» у заказа — почему он стоит, словами для покупателя. Если причину исправляет сам покупатель (региональные цены, цена пасса, пасс не того аккаунта, прислать пасс заново) — подскажи, что сделать, сам. «Проверка у менеджера» или «нужен менеджер» — escalate, причину не выдумывай.
+• «РАСПОЗНАВАНИЕ СКРИНШОТА: в Pending N R$» — число прочитано с картинки программой. Не меньше суммы заказа — робуксы на месте, всё в порядке (текст про Pending). Меньше или ник не тот — escalate. Картинку смотри и сама: распознавание иногда ошибается.
+
 ЧТО ТЫ ДЕЛАЕШЬ
 Ниже в каждом запросе будут данные покупателя из нашей базы (заказы, этапы, ник, пасс) и последние сообщения чата. Реши одно из трёх:
 1) action="reply" — если вопрос типовой и ответ полностью есть выше или в данных заказа. Отвечай по фактам из данных: этап заказа, сумма, ник. Не выдумывай ничего, чего нет в данных.
 2) action="escalate" — во всех остальных случаях, и ВСЕГДА если:
    • деньги по прямому заказу, заказу с сайта или коду Robux: возврат, оплата, двойное списание (возврат за заказ с WB — НЕ escalate, ответ выше);
    • робуксы не пришли, а заказ выкуплен больше 30 дней назад или покупатель прислал скриншот/говорит, что в Pending 0;
-   • не тот ник/аккаунт — просит поменять ник или аккаунт в заказе (category="wrong_account"), в любой момент; ошибка выкупа; заказ заморожен;
+   • не тот ник/аккаунт — просит поменять ник или аккаунт в заказе (category="wrong_account"), в любой момент; ошибка выкупа или заморозка, если «причина» не подсказывает, что исправить покупателю;
    • покупатель хочет купить напрямую / узнать цену прямой покупки (category="direct_purchase");
    • угрозы (суд, полиция, Роспотребнадзор), отзыв-шантаж; злость и мат из-за долгого ожидания — НЕ escalate, ответ из «Выкуп идёт медленно»;
    • покупателя нет в базе и вопрос про конкретный заказ;
@@ -191,6 +198,8 @@ export interface PaAiOrder {
   isDirectOrder: boolean;
   /** Заявка на возврат на WB (27.11.2026): открыта — выкуп остановлен; одобрена — выкупа не будет. */
   wbClaim?: "open" | "refunded" | null;
+  /** Почему стоит — словами для покупателя (`orderProblemRu`, 27.11.2026). */
+  problem?: string | null;
 }
 
 const STATUS_RU: Record<string, string> = {
@@ -207,7 +216,7 @@ const STATUS_RU: Record<string, string> = {
 function orderStateRu(o: PaAiOrder): string {
   if (o.status !== "COMPLETED" && o.wbClaim === "open") return `${STATUS_RU[o.status] ?? o.status}; на WB открыта заявка на возврат`;
   if (o.status !== "COMPLETED" && o.wbClaim === "refunded") return "возврат на WB одобрен — выкупа не будет";
-  if (o.heldAt) return "заморожен (нужен человек)";
+  if (o.heldAt) return o.problem ? "заморожен" : "заморожен (нужен человек)";
   return STATUS_RU[o.status] ?? o.status;
 }
 
@@ -222,6 +231,8 @@ export function customerContext(input: {
   wbNotes?: string[];
   /** Покупки кодов Robux на сайте — готовые строки (`codeOrderContextLine`), свои и подключённые. */
   codeOrders?: string[];
+  /** Живые проверки (пасс сейчас) — отдельными строками. */
+  facts?: string[];
   now?: Date;
 }): string {
   const now = input.now ?? new Date();
@@ -232,6 +243,7 @@ export function customerContext(input: {
     const days = o.completedAt ? Math.floor((now.getTime() - o.completedAt.getTime()) / 86_400_000) : null;
     lines.push([
       `• Заказ ${o.wbCode}: ${o.amount} R$, ${orderStateRu(o)}`,
+      o.problem ? `причина: ${o.problem}` : null,
       `создан ${fmt(o.createdAt)}`,
       o.completedAt ? `выкуплен ${fmt(o.completedAt)} (${days} дн. назад)` : null,
       o.robloxUsername ? `ник Roblox: ${o.robloxUsername}` : "ник не указан",
@@ -240,6 +252,7 @@ export function customerContext(input: {
     ].filter(Boolean).join("; "));
   }
   for (const c of (input.codeOrders ?? []).slice(0, 3)) lines.push(c);
+  for (const f of (input.facts ?? []).slice(0, 2)) lines.push(f);
   if (input.wbNotes?.length) {
     lines.push("На Wildberries (по его заказам; не пересказывай дословно, учитывай тон — если был плохой отзыв или заявка на возврат, будь особенно внимателен и при любой проблеме — escalate):");
     for (const n of input.wbNotes.slice(0, 5)) lines.push(`• ${n}`);
@@ -327,7 +340,27 @@ export function humanizeReply(text: string, opts: { greeted?: boolean } = {}): s
   return t;
 }
 
+/**
+ * 🧾 Сверка фактов (27.11.2026): код заказа и сумма в R$ из ответа должны быть
+ * в данных покупателя, в его сообщении или в базе знаний. Иначе модель что-то
+ * придумала — ответ уходит человеку. Возвращает выдуманное (пусто — всё чисто).
+ */
+export function unknownFacts(reply: string, known: string): string[] {
+  const out: string[] = [];
+  const hay = `${known}\n${PA_AI_SYSTEM}`;
+  for (const m of reply.matchAll(/(?<![A-Z0-9])(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{7}(?![A-Z0-9])/g)) {
+    if (!hay.includes(m[0])) out.push(m[0]);
+  }
+  for (const m of reply.matchAll(/(\d[\d\s ]{0,6}\d|\d)\s?(?:R\$|робукс)/giu)) {
+    const n = m[1].replace(/\D/g, "");
+    if (!new RegExp(`(?<!\\d)${n}(?!\\d)`).test(hay.replace(/(\d)[\s ](?=\d{3}(?!\d))/g, "$1"))) out.push(`${n} R$`);
+  }
+  return out;
+}
+
 export interface GuardOptions {
+  /** Данные покупателя + его сообщения — для сверки фактов (`unknownFacts`). */
+  known?: string;
   /** В разговоре уже был наш ответ — второй раз не здороваемся. */
   greeted?: boolean;
   /** Все заказы покупателя — с WB: просьбу о возврате отправляем в WB сами. */
@@ -372,6 +405,13 @@ export function guardDecision(
       summary: decision.summary || "Бот хотел ответить сам, но ответ задел деньги/обещания — проверьте.",
       draft: decision.reply,
     };
+  }
+  if (decision.action === "reply" && opts.known !== undefined) {
+    const bad = unknownFacts(decision.reply, `${opts.known}\n${customerText}`);
+    if (bad.length) {
+      return { ...decision, action: "escalate", reply: "", draft: decision.reply,
+        summary: `Ответ ИИ назвал то, чего нет в данных (${bad.join(", ")}) — проверьте перед отправкой.` };
+    }
   }
   if (decision.action === "reply" && decision.reply.length > 1200) {
     return { ...decision, reply: decision.reply.slice(0, 1200) };

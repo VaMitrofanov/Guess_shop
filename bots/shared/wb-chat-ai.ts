@@ -24,6 +24,7 @@
 
 import { CATEGORY_RU, guardDecision, plain } from "./pa-ai-support";
 import { downloadBuyerChatImage } from "./wb-delivery-api";
+import { screenshotFact } from "./support-ai-facts";
 import { decideSupport, supportChannelMode, type SupportTurn } from "./support-ai";
 import { loadSupportCustomer } from "./support-ai-context";
 import { findGamepassRefInChatText } from "./wb-chat-gamepass";
@@ -68,6 +69,23 @@ export async function wbChatAiTakesOver(
   // Заявка открыта — синк молчит про «где робуксы» сам, ответит ИИ (27.11.2026).
   if ((!order.claimOpenedAt && isArrivalQuestion(text)) || !wbChatTextForAi(text, order.nmId)) return false;
   return (await supportChannelMode(db, "wb_chat")) === "on";
+}
+
+/** Ночь по МСК (23:00–09:00): люди спят, обещать «скоро» нельзя. */
+export function isNightMsk(now = new Date()): boolean {
+  const h = (now.getUTCHours() + 3) % 24;
+  return h >= 23 || h < 9;
+}
+
+/** Заглушка покупателю, когда вопрос ушёл человеку (владелец 27.11.2026: «да»). */
+export function holdingText(now = new Date()): string {
+  return isNightMsk(now)
+    ? "Передали ваш вопрос коллеге — ответим утром здесь же, в этом чате."
+    : "Передали ваш вопрос коллеге — ответим здесь же, в этом чате.";
+}
+
+export function isHoldingText(text: string): boolean {
+  return /^Передали ваш вопрос коллеге/.test(text.trim());
 }
 
 interface ChatEvent { id: string; wbEventId: string; chatId: string; sender: string; textRedacted: string | null; containsDeliveryCode: boolean; sentAt: Date; marketplaceOrderId: string | null; attachmentsMeta?: unknown }
@@ -162,7 +180,8 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     const imageId = latestBuyerImageId(events, last.chatId);
     const image = imageId ? await downloadBuyerChatImage(imageId) : null;
     if (imageId && !image) console.warn(`[wb-chat-ai] картинка ${ref.code} не скачалась — отвечаем по тексту`);
-    const raw = await decideSupport({ channel: "wb_chat", context, turns: history, ...(image ? { image } : {}) });
+    const ocrLine = image ? await screenshotFact(image.data, orders[0]?.amount, orders[0]?.robloxUsername) : null;
+    const raw = await decideSupport({ channel: "wb_chat", context: ocrLine ? `${context}\n${ocrLine}` : context, turns: history, ...(image ? { image } : {}) });
     const mark = (type: string, payload: Record<string, string | number | boolean | null>) =>
       db.wbMarketplaceEvent.upsert({
         where: { idempotencyKey: key },
@@ -180,6 +199,7 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     const d = guardDecision(raw, text, "wb_chat", {
       // Наш автотекст в чате («код получен», инструкция) — тоже «уже поздоровались».
       greeted: history.some((t) => t.role === "assistant"),
+      known: `${context}\n${history.map((t) => t.text).join("\n")}`,
     });
     void aiLogRecord(db, {
       channel: "wb_chat", action: d.action, mode: mode as "on" | "dry", category: d.category,
@@ -224,10 +244,18 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       continue;
     }
     if (d.action === "escalate") {
-      notifyDbsAiEscalation(ref, { text, summary: d.summary, draft: d.draft, category: CATEGORY_RU[d.category] }, who);
+      const draft = plain(d.draft || "").trim();
+      notifyDbsAiEscalation(ref, { text, summary: d.summary, draft, category: CATEGORY_RU[d.category], sendKey: last.wbEventId }, who);
       out.escalated++;
+      // 🕐 Покупатель на WB при передаче не получал НИЧЕГО (27.11.2026: 22 из 30
+      // обращений, ответ человека — часами). Одна заглушка на разговор.
+      if (!history.some((t) => t.role === "assistant" && isHoldingText(t.text))) {
+        await notifyBuyerViaWbChat(db, ref.code, holdingText(), { skipIfClaimOpen: false }).catch(() => undefined);
+      }
+      await mark("AI_CHAT_ESCALATED", { category: d.category, draft: draft || null, code: ref.code });
+      continue;
     }
-    await mark(d.action === "escalate" ? "AI_CHAT_ESCALATED" : "AI_CHAT_IGNORED", { category: d.category });
+    await mark("AI_CHAT_IGNORED", { category: d.category });
   }
   return out;
 }

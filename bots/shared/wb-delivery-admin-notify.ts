@@ -57,14 +57,19 @@ function refLine(ref: DbsRef, extra?: Array<string | null | undefined | false>):
   return orderRef(ref, extra);
 }
 
-function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
+type InlineButton = { text: string; callback_data: string };
+
+function broadcast(notice: AdminNotice, ref?: DbsRef | null, extraRow?: InlineButton[]) {
   const text = formatAdminNotice(notice);
   // Провал доставки обязан быть слышен: раньше ответ Telegram не читался, и
   // потерянное уведомление не оставляло следа (разбор 27.09).
   void adminTargetsForNotice(notice).then((targets) => Promise.allSettled(targets.map(async (t) => {
     // 📱 У каждого уведа о заказе — «Открыть в TWA» (16.11.2026).
     const twaUrl = twaStartappUrl(ref?.code);
-    const markup = twaUrl ? { reply_markup: { inline_keyboard: [[{ text: "📱 Открыть в TWA", url: twaUrl }]] } } : {};
+    const rows: Array<Array<InlineButton | { text: string; url: string }>> = [];
+    if (extraRow?.length) rows.push(extraRow);
+    if (twaUrl) rows.push([{ text: "📱 Открыть в TWA", url: twaUrl }]);
+    const markup = rows.length ? { reply_markup: { inline_keyboard: rows } } : {};
     const reply = await tgSend(t.chatId, text, { parse_mode: "HTML", ...markup, ...replyToRootFor(ref?.cardMessages, t), ...t.extra });
     if (reply?.ok !== true) {
       console.warn(`[dbs-notify] «${notice.title}» не доставлено chat_id=${t.chatId}: ${JSON.stringify(reply).slice(0, 200)}`);
@@ -139,7 +144,10 @@ export function noteDbsAdminReply(wbOrderId: string, actor: string, what: string
 }
 
 /** ИИ в чате WB передал вопрос человеку — с сутью и готовым черновиком. */
-export function notifyDbsAiEscalation(ref: DbsRef, input: { text: string; summary: string; draft: string; category: string }, who: string[] = []) {
+/** Префикс кнопки «📤 Отправить» ответа ИИ в чат WB (27.11.2026); дальше — `wbEventId`. */
+export const WB_AI_SEND_CB = "wbais:";
+
+export function notifyDbsAiEscalation(ref: DbsRef, input: { text: string; summary: string; draft: string; category: string; sendKey?: string }, who: string[] = []) {
   broadcast({
     marker: "action",
     zone: "DBS",
@@ -149,10 +157,11 @@ export function notifyDbsAiEscalation(ref: DbsRef, input: { text: string; summar
       ...who.map((line) => escapeHtml(line)),
       `<i>${escapeHtml(input.text.slice(0, 600))}</i>`,
       input.summary ? `🧾 ${escapeHtml(input.summary)}` : null,
-      input.draft ? `✍️ Черновик: ${escapeHtml(input.draft.slice(0, 1200))}` : null,
+      // Владелец 27.11.2026: не «черновик», а ответ воркера — подошёл, жмёте «Отправить».
+      input.draft ? `🤖 Ответ: ${escapeHtml(input.draft.slice(0, 1200))}` : null,
     ],
-    next: "ответить из консоли DBS или из кабинета WB",
-  }, ref);
+    next: input.draft && input.sendKey ? "подошёл ответ — «📤 Отправить», нет — ответьте сами" : "ответить из консоли DBS или из кабинета WB",
+  }, ref, input.draft && input.sendKey ? [{ text: "📤 Отправить", callback_data: `${WB_AI_SEND_CB}${input.sendKey}`.slice(0, 64) }] : undefined);
 }
 
 /** Новые находки сверки денег WB с выдачей — одним сообщением на проход. */
