@@ -35,7 +35,7 @@
  */
 
 import { getGamepassDetails } from "./roblox";
-import { DONOR_NET_CAPACITY, splitRequiredMessage } from "./gamepass-plan";
+import { DONOR_NET_CAPACITY, MAX_AUTO_PARTS, expectedGamepassPrice, isAllowedPartAmount, splitIntoDonorChunks, splitRequiredMessage } from "./gamepass-plan";
 import { auditGamepassSubmitted, type OrderAuditClient } from "./order-audit";
 import { countPreviousOrders } from "./order-loyalty";
 import { sendAdminOrderCard } from "./admin";
@@ -478,7 +478,9 @@ async function sendBuyoutCard(
 
 export type SupportPassOutcome =
   | { kind: "skipped"; why: "no_orders" | "not_a_pass" | "roblox_down" | "ambiguous" | "race" }
-  | { kind: "attached"; order: ChatOrderRow; gamepassId: string; price: number; nick: string }
+  | { kind: "attached"; order: ChatOrderRow; gamepassId: string; price: number; nick: string; parts?: SplitPart[] }
+  /** Часть набора принята, заказ ещё не собран (27.11.2026). */
+  | { kind: "partial"; order: ChatOrderRow; gamepassId: string; price: number; nick: string; parts: SplitPart[]; remaining: number; need: number[] }
   /** `toBuyer` — причину можно сказать покупателю (цена, не в продаже); иначе только оператору. */
   | {
       kind: "rejected"; order: ChatOrderRow; gamepassId: string; reason: string; expectedPrice: number; toBuyer: boolean;
@@ -512,9 +514,11 @@ export async function attachGamepassFromSupport(
   if (details.validationSkipped) return { kind: "skipped", why: "roblox_down" };
 
   // Какой заказ: тот, чьей цене пасс соответствует. Один заказ — он и есть.
+  // Иначе — единственный заказ под набор, к которому пасс годится частью.
   const fits = open.filter((o) => Math.abs(details.price - Math.ceil(o.amount / 0.7)) <= PRICE_TOLERANCE);
   if (fits.length > 1) return { kind: "skipped", why: "ambiguous" };
-  const order = fits[0] ?? (open.length === 1 ? open[0] : null);
+  const splitFits = open.filter((o) => o.amount > DONOR_NET_CAPACITY && partAmountForPrice(details.price, o.amount) !== null);
+  const order = fits[0] ?? (open.length === 1 ? open[0] : splitFits.length === 1 ? splitFits[0] : null);
   if (!order) {
     const prices = open.map((o) => Math.ceil(o.amount / 0.7));
     return {
@@ -528,10 +532,7 @@ export async function attachGamepassFromSupport(
   // Заказ больше донора: одиночный пасс не годится при любой цене. Покупателю —
   // какой набор прислать, оператору — что пасс не подставлен.
   if (order.amount > DONOR_NET_CAPACITY) {
-    return {
-      kind: "rejected", order, gamepassId: input.gamepassId, expectedPrice, toBuyer: true,
-      reason: NEEDS_SPLIT_REASON(order.amount), buyerText: splitRequiredMessage(order.amount),
-    };
+    return collectSplitPart(db, order, input.gamepassId, details);
   }
   const verdict = checkChatPass(details, expectedPrice, order.amount);
   if (!verdict.ok) {
@@ -568,4 +569,107 @@ export async function attachGamepassFromSupport(
     console.warn("[pa-gamepass] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
   });
   return { kind: "attached", order: { ...order, robloxUsername: creator, gamepassUrl }, gamepassId: input.gamepassId, price: details.price, nick: creator };
+}
+
+
+/* ── Набор из нескольких пассов, присланных по одному (27.11.2026) ──────────
+   Владелец: «надо обучить воркера принимать несколько, считать их сумму,
+   ориентироваться в них». Заказ больше потолка донора (1500) закрывается
+   набором. Покупатель шлёт пассы по одному — каждый проверяем, номинал части
+   выводим из цены, копим в `WbSyncCursor(split-collect:<orderId>)`; сумма
+   сошлась — заказ уходит в выкуп со строками `WbOrderGamepass`.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type SplitPart = { gamepassId: string; amount: number; price: number; creator: string };
+
+/** Номинал части по цене пасса (±2 R$) или null, если такая часть заказу не годится. */
+export function partAmountForPrice(price: number, orderAmount: number): number | null {
+  for (let a = Math.min(orderAmount, DONOR_NET_CAPACITY); a > 0; a--) {
+    if (Math.abs(expectedGamepassPrice(a) - price) <= PRICE_TOLERANCE && isAllowedPartAmount(a, orderAmount)) return a;
+  }
+  return null;
+}
+
+/** Чего не хватает: остаток и пассы (в робуксах на руки), которыми его закрыть. */
+export function splitRemaining(orderAmount: number, parts: SplitPart[]): { remaining: number; need: number[] } {
+  const remaining = orderAmount - parts.reduce((s, p) => s + p.amount, 0);
+  return { remaining, need: remaining > 0 ? splitIntoDonorChunks(remaining) : [] };
+}
+
+/** Текст покупателю: что принято, сколько осталось, какой пасс прислать. */
+export function splitProgressText(orderAmount: number, parts: SplitPart[]): string {
+  const { remaining, need } = splitRemaining(orderAmount, parts);
+  const got = parts.map((p) => `${p.amount}`).join(" + ");
+  const head = `Геймпасс принят ✅ Собрано ${got} = ${orderAmount - remaining} из ${orderAmount} R$.`;
+  if (remaining <= 0) return head;
+  const prices = need.map((n) => `${expectedGamepassPrice(n)} R$`).join(" + ");
+  return `${head}\nОсталось ${remaining} R$ — пришлите ${need.length > 1 ? "геймпассы" : "геймпасс"} за ${prices} (ссылку или ID).`;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function collectSplitPart(db: any, order: ChatOrderRow, gamepassId: string, details: PassDetails): Promise<SupportPassOutcome> {
+  const stream = `split-collect:${order.id}`;
+  const row = await db.wbSyncCursor.findUnique({ where: { stream } }).catch(() => null);
+  const parts: SplitPart[] = (row?.metadata as { parts?: SplitPart[] } | null)?.parts ?? [];
+  const { remaining, need } = splitRemaining(order.amount, parts);
+  const needPrices = need.map(expectedGamepassPrice);
+  const reject = (reason: string, toBuyer = true, buyerText?: string): SupportPassOutcome =>
+    ({ kind: "rejected", order, gamepassId, reason, expectedPrice: needPrices[0] ?? 0, toBuyer, ...(buyerText ? { buyerText } : {}) });
+
+  if (parts.some((p) => p.gamepassId === gamepassId)) {
+    return reject("этот пасс уже принят в набор", true, splitProgressText(order.amount, parts).replace("Геймпасс принят ✅", "Этот геймпасс уже приняли."));
+  }
+  if (parts.length >= MAX_AUTO_PARTS) return reject(`в наборе уже ${parts.length} пасса — дальше вручную`, false);
+  if (!details.isActive) return reject(details.isGamePrivate ? "игра закрыта (private) — выкупить нельзя" : "пасс не выставлен на продажу");
+  const creator = details.creatorName?.trim();
+  if (!creator) return reject("Roblox не отдал владельца пасса", false);
+  const amount = partAmountForPrice(details.price, order.amount);
+  if (amount === null || amount > remaining || (remaining - amount > 0 && remaining - amount < 500 && remaining - amount !== 0)) {
+    return reject(`цена ${details.price} R$ не подходит к набору (осталось ${remaining} R$)`, true,
+      parts.length
+        ? `Проверили геймпасс: цена ${details.price} R$ не подходит. ${splitProgressText(order.amount, parts).replace(/^Геймпасс принят ✅ /, "")}`
+        : `Проверили геймпасс: цена ${details.price} R$ не подходит. ${splitRequiredMessage(order.amount)}\n\nПришлите ссылки или ID этих геймпассов — можно по одному, сумму посчитаем сами.`);
+  }
+  const owner = order.robloxUsername ?? parts[0]?.creator ?? null;
+  if (owner && owner.toLowerCase() !== creator.toLowerCase()) {
+    return reject(`пасс принадлежит ${creator}, а в заказе ник ${owner}`, false);
+  }
+  const busy = await db.wbOrder.count({ where: { gamepassId, status: { in: LIVE_ORDER_STATUSES }, id: { not: order.id } } }).catch(() => 0);
+  if (busy > 0) return reject("этот пасс уже стоит в другом живом заказе", false);
+
+  const next = [...parts, { gamepassId, amount, price: details.price, creator }];
+  const left = splitRemaining(order.amount, next);
+  if (left.remaining > 0) {
+    await db.wbSyncCursor.upsert({ where: { stream }, create: { stream, metadata: { parts: next } }, update: { metadata: { parts: next } } });
+    return { kind: "partial", order, gamepassId, price: details.price, nick: creator, parts: next, ...left };
+  }
+
+  // Набор собран: заказ в выкуп, части — строками WbOrderGamepass (как ручной набор в консоли).
+  const first = next[0];
+  const gamepassUrl = `https://www.roblox.com/game-pass/${first.gamepassId}`;
+  const done = await db.$transaction(async (tx: any) => {
+    const u = await tx.wbOrder.updateMany({
+      where: { id: order.id, status: "AWAITING_GAMEPASS" },
+      data: { gamepassUrl, gamepassId: first.gamepassId, robloxUsername: creator, status: "PENDING", pendingAt: new Date(), rejectionReason: null },
+    });
+    if (u.count !== 1) return false;
+    await tx.wbOrderGamepass.deleteMany({ where: { orderId: order.id } });
+    await tx.wbOrderGamepass.createMany({
+      data: next.map((p, position) => ({ orderId: order.id, gamepassId: p.gamepassId, gamepassUrl: `https://www.roblox.com/game-pass/${p.gamepassId}`, amount: p.amount, position })),
+    });
+    await tx.wbSyncCursor.deleteMany({ where: { stream } });
+    return true;
+  }).catch((e: unknown) => { console.warn("[split-collect]", e instanceof Error ? e.message : e); return false; });
+  if (!done) return { kind: "skipped", why: "race" };
+  await db.wbCode.updateMany({
+    where: { code: { equals: order.wbCode, mode: "insensitive" }, isUsed: false },
+    data: { isUsed: true, usedAt: new Date(), status: "CLAIMED" },
+  }).catch(() => {});
+  for (const p of next) {
+    void auditGamepassSubmitted(db as OrderAuditClient, { gamepassId: p.gamepassId, via: "pa-support", orderId: order.id, wbCode: order.wbCode, creatorName: creator, price: p.price });
+  }
+  await sendBuyoutCard(db, order, gamepassUrl, creator, "support").catch((err: unknown) => {
+    console.warn("[pa-gamepass] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
+  });
+  return { kind: "attached", order: { ...order, robloxUsername: creator, gamepassUrl }, gamepassId, price: details.price, nick: creator, parts: next };
 }

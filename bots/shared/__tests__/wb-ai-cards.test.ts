@@ -31,3 +31,18 @@ describe("кто ведёт чат", () => {
     expect(lastHumanReply([{ ...m[0], sentAt: at(150) }], bot, [], now)).toBeNull();
   });
 });
+
+import { partAmountForPrice, splitProgressText, splitRemaining } from "../wb-chat-gamepass";
+describe("набор пассов по одному (27.11.2026, D5R4NN7)", () => {
+  it("цена → номинал части", () => {
+    expect(partAmountForPrice(2143, 2000)).toBe(1500);
+    expect(partAmountForPrice(715, 2000)).toBe(500);
+    expect(partAmountForPrice(1429, 2600)).toBe(1000);
+    expect(partAmountForPrice(300, 2000)).toBeNull();
+  });
+  it("остаток и подсказка", () => {
+    const parts = [{ gamepassId: "1", amount: 1500, price: 2143, creator: "a" }];
+    expect(splitRemaining(2000, parts)).toEqual({ remaining: 500, need: [500] });
+    expect(splitProgressText(2000, parts)).toMatch(/Осталось 500 R\$ — пришлите геймпасс за 715 R\$/);
+  });
+});

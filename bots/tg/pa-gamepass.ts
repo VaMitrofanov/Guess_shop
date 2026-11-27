@@ -15,7 +15,7 @@
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { escapeHtml } from "../shared/notify";
-import { attachGamepassFromSupport, findGamepassRefInChatText } from "../shared/wb-chat-gamepass";
+import { attachGamepassFromSupport, findGamepassRefInChatText, splitProgressText } from "../shared/wb-chat-gamepass";
 import { pinPaOrdersNow } from "./pa-desk-worker";
 import { card } from "./pa-ai";
 
@@ -44,6 +44,24 @@ export async function attachPassFromSupport(bot: Telegraf, api: Api, m: {
   const read = () => api("readBusinessMessage", { business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId }).catch(() => undefined);
   const who = escapeHtml(m.fromName);
 
+  if (res.kind === "partial") {
+    await send(escapeHtml(splitProgressText(res.order.amount, res.parts)));
+    await read();
+    await card(bot, `🎟 <b>${who}</b> прислал пасс ${res.gamepassId} (${res.price} R$ → ${res.parts[res.parts.length - 1].amount} R$) для заказа <b>${res.order.wbCode}</b> — набор: ${res.parts.map((p) => p.amount).join(" + ")}, осталось ${res.remaining} R$.`).catch(() => undefined);
+    console.log(`[pa-gamepass] часть ${res.gamepassId} → ${res.order.wbCode}, осталось ${res.remaining}`);
+    return true;
+  }
+  if (res.kind === "attached" && res.parts) {
+    await send(
+      `Все геймпассы приняты ✅ ${res.parts.map((p) => p.amount).join(" + ")} = ${res.order.amount} R$.\n\n` +
+      `Заказ поставлен в очередь на выкуп на аккаунт <b>${escapeHtml(res.nick)}</b>. Как только выкупим — напишем.`,
+    );
+    await read();
+    await card(bot, `🎟 <b>${who}</b> собрал набор в поддержке — заказ <b>${res.order.wbCode}</b> (${res.order.amount} R$) в выкуп: ${res.parts.map((p) => `${p.gamepassId} (${p.price}→${p.amount})`).join(", ")}, ник ${escapeHtml(res.nick)}.`).catch(() => undefined);
+    void pinPaOrdersNow(String(m.fromId)).catch(() => undefined);
+    console.log(`[pa-gamepass] набор → ${res.order.wbCode}`);
+    return true;
+  }
   if (res.kind === "attached") {
     await send(
       `Геймпасс принят ✅\n\n${res.order.amount} R$ поставлены в очередь на выкуп на аккаунт <b>${escapeHtml(res.nick)}</b>. ` +
@@ -57,7 +75,7 @@ export async function attachPassFromSupport(bot: Telegraf, api: Api, m: {
   }
   if (res.kind === "rejected") {
     if (res.toBuyer && res.buyerText) {
-      await send(`${escapeHtml(res.buyerText)}\n\nПришлите ссылки на эти геймпассы — проверим сразу.`);
+      await send(escapeHtml(res.buyerText));
       await read();
     } else if (res.toBuyer) {
       await send(

@@ -359,10 +359,20 @@ describe("заказ больше донора — одиночный пасс �
 
   test("поддержка: не подставляем, покупателю — какой набор прислать", async () => {
     mockDetails.mockResolvedValue(pass2858);
-    const db = makeDb({ wbOrder: { findMany: jest.fn().mockResolvedValue([big]), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } });
+    const db = { ...makeDb({ wbOrder: { findMany: jest.fn().mockResolvedValue([big]), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } }), wbSyncCursor: { findUnique: jest.fn().mockResolvedValue(null), upsert: jest.fn() } };
     const out = await attachGamepassFromSupport(db as never, { orderIds: ["ord_1"], gamepassId: "1595350420" });
     expect(out).toMatchObject({ kind: "rejected", toBuyer: true });
     expect((out as { buyerText?: string }).buyerText).toMatch(/одним геймпассом не закрыть/);
+    expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("часть набора (27.11.2026): 2143 к заказу на 2000 → принята, осталось 500", async () => {
+    mockDetails.mockResolvedValue({ ...pass2858, price: 2143 });
+    const upsert = jest.fn();
+    const db = { ...makeDb({ wbOrder: { findMany: jest.fn().mockResolvedValue([big]), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } }), wbSyncCursor: { findUnique: jest.fn().mockResolvedValue(null), upsert } };
+    const out = await attachGamepassFromSupport(db as never, { orderIds: ["ord_1"], gamepassId: "1595350420" });
+    expect(out).toMatchObject({ kind: "partial", remaining: 500, need: [500] });
+    expect(upsert).toHaveBeenCalled();
     expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
   });
 

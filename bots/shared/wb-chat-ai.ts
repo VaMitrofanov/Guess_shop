@@ -298,8 +298,8 @@ export function nickFactLine(o: GamepassSearchOutcome): string {
     const p = o.matches[0];
     return `Проверка ника: ${name}, есть пасс нужной цены ${o.expectedPrice} R$ (id ${p.gamepassId}). В черновике: ник поменяли, пасс видим, выкупим.`;
   }
-  const hidden = o.games?.visibility === "hidden" || o.games?.count === 0;
-  return `Проверка ника: ${name}, но пасса за ${o.expectedPrice} R$ нет${hidden ? " (публичных плейсов не видно)" : ""}. В черновике: попроси создать пасс ценой ${o.expectedPrice} R$ в публичном плейсе и прислать ссылку на него.`;
+  // Пасс в закрытом плейсе мы тоже выкупаем — по ссылке или ID (поиск по нику его почти не видит).
+  return `Проверка ника: ${name}, но пасса за ${o.expectedPrice} R$ поиском не видно. В черновике: попроси создать пасс ценой ${o.expectedPrice} R$ (если уже создан — просто прислать ссылку на него или его ID). НЕ пиши, что плейс должен быть публичным: по ссылке/ID выкупаем и из закрытого.`;
 }
 
 export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen: number; replied: number; escalated: number; dry: number }> {
