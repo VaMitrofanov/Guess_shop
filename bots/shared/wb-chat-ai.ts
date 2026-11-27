@@ -9,7 +9,12 @@
    • заказ с выданным кодом гейта (до выдачи разговор про доставку — человеку);
    • без кода доставки, без пасса в тексте (их разбирает синк);
    • «где робуксы?» по выкупленному заказу — на него есть точный ответ синка;
-   • без открытой заявки на возврат и отмены.
+   • без отмены. Открытая заявка на возврат (27.11.2026) — берём: ИИ отвечает,
+     что выкуп остановлен и деньги вернёт WB по заявке.
+   • Картинки (27.11.2026): до этого дня ни одна из 61 картинки покупателей за
+     две недели не доходила до модели — событие без текста пропускалось, а
+     следом ИИ отвечал «снимок не прикрепился». Теперь свежая картинка из
+     последних сообщений покупателя качается из WB и идёт модели.
 
    Режимы (`/support_mode wb on|dry|off`): dry — только карточка «бот ответил
    бы», on — отвечает в чат WB сам, проблемы — в нить заказа с черновиком.
@@ -17,6 +22,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { CATEGORY_RU, guardDecision, plain } from "./pa-ai-support";
+import { downloadBuyerChatImage } from "./wb-delivery-api";
 import { decideSupport, supportChannelMode, type SupportTurn } from "./support-ai";
 import { loadSupportCustomer } from "./support-ai-context";
 import { findGamepassRefInChatText } from "./wb-chat-gamepass";
@@ -57,12 +63,51 @@ export async function wbChatAiTakesOver(
   order: { wbCodeId?: string | null; cancelledAt: Date | null; claimOpenedAt?: Date | null; nmId?: number | null },
   text: string,
 ): Promise<boolean> {
-  if (!order.wbCodeId || order.cancelledAt || order.claimOpenedAt) return false;
-  if (isArrivalQuestion(text) || !wbChatTextForAi(text, order.nmId)) return false;
+  if (!order.wbCodeId || order.cancelledAt) return false;
+  // Заявка открыта — синк молчит про «где робуксы» сам, ответит ИИ (27.11.2026).
+  if ((!order.claimOpenedAt && isArrivalQuestion(text)) || !wbChatTextForAi(text, order.nmId)) return false;
   return (await supportChannelMode(db, "wb_chat")) === "on";
 }
 
-interface ChatEvent { id: string; wbEventId: string; chatId: string; sender: string; textRedacted: string | null; containsDeliveryCode: boolean; sentAt: Date; marketplaceOrderId: string | null }
+interface ChatEvent { id: string; wbEventId: string; chatId: string; sender: string; textRedacted: string | null; containsDeliveryCode: boolean; sentAt: Date; marketplaceOrderId: string | null; attachmentsMeta?: unknown }
+
+/** `downloadID` картинок события WB — не больше трёх, только похожие на id. */
+export function wbChatImageIds(images: unknown[] | undefined): string[] {
+  return (images ?? [])
+    .map((i) => (i && typeof i === "object" ? (i as { downloadID?: unknown }).downloadID : null))
+    .filter((id): id is string => typeof id === "string" && /^[\w-]{8,80}$/.test(id))
+    .slice(0, 3);
+}
+
+/** Сколько картинок в событии и их `downloadID` (`imageIds` пишет синк с 27.11.2026). */
+export function eventImages(e: Pick<ChatEvent, "attachmentsMeta">): { count: number; ids: string[] } {
+  const m = (e.attachmentsMeta ?? {}) as { images?: unknown; imageIds?: unknown };
+  const ids = Array.isArray(m.imageIds) ? m.imageIds.filter((x): x is string => typeof x === "string") : [];
+  const count = typeof m.images === "number" ? m.images : ids.length;
+  return { count, ids };
+}
+
+/** Текст события для модели: картинка без подписи — пометкой. */
+export function eventTextForAi(e: Pick<ChatEvent, "textRedacted" | "attachmentsMeta">): string {
+  const text = e.textRedacted?.trim() ?? "";
+  if (eventImages(e).count === 0) return text;
+  return text ? `[прислал скриншот] ${text}` : "[прислал скриншот]";
+}
+
+/**
+ * Последние сообщения покупателя после нашего ответа — самая свежая картинка
+ * среди них. Покупатель шлёт скрин, а следом «вот» или «увидели?».
+ */
+export function latestBuyerImageId(events: ChatEvent[], chatId: string): string | null {
+  const chat = events.filter((e) => e.chatId === chatId)
+    .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+  for (const e of chat) {
+    if (!isBuyerSender(e.sender)) return null;
+    const ids = eventImages(e).ids;
+    if (ids.length) return ids[ids.length - 1];
+  }
+  return null;
+}
 
 /** Последнее событие каждого чата за сутки: ждёт ответа, если оно от покупателя. */
 export function chatsAwaitingReply(events: ChatEvent[], now: number): ChatEvent[] {
@@ -74,7 +119,7 @@ export function chatsAwaitingReply(events: ChatEvent[], now: number): ChatEvent[
   return [...latest.values()].filter((e) => {
     const age = now - new Date(e.sentAt).getTime();
     return isBuyerSender(e.sender) && age >= MIN_AGE_MS && age <= MAX_AGE_MS
-      && !!e.marketplaceOrderId && !!e.textRedacted?.trim() && !e.containsDeliveryCode;
+      && !!e.marketplaceOrderId && !!eventTextForAi(e) && !e.containsDeliveryCode;
   });
 }
 
@@ -87,7 +132,7 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     where: { sentAt: { gte: new Date(now - MAX_AGE_MS) }, NOT: { wbEventId: { startsWith: "local:" } } },
     orderBy: { sentAt: "desc" },
     take: 800,
-    select: { id: true, wbEventId: true, chatId: true, sender: true, textRedacted: true, containsDeliveryCode: true, sentAt: true, marketplaceOrderId: true },
+    select: { id: true, wbEventId: true, chatId: true, sender: true, textRedacted: true, containsDeliveryCode: true, sentAt: true, marketplaceOrderId: true, attachmentsMeta: true },
   });
 
   for (const last of chatsAwaitingReply(events, now).slice(0, PER_PASS)) {
@@ -98,22 +143,25 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       where: { id: last.marketplaceOrderId! },
       select: { id: true, wbOrderId: true, nmId: true, wbCodeId: true, cancelledAt: true, claimOpenedAt: true, buyerName: true, isTest: true },
     });
-    const text = last.textRedacted!.trim();
-    if (!order || order.isTest || !order.wbCodeId || order.cancelledAt || order.claimOpenedAt) continue;
+    const text = eventTextForAi(last);
+    if (!order || order.isTest || !order.wbCodeId || order.cancelledAt) continue;
     if (!wbChatTextForAi(text, order.nmId)) continue;
     const ref = await dbsRef(db, order.id, order.wbOrderId);
     if (!ref.code) continue;
     const { context, orders } = await loadSupportCustomer(db, { wbCodes: [ref.code], name: order.buyerName });
-    if (isArrivalQuestion(text) && orders[0]?.status === "COMPLETED") continue;
+    if (!order.claimOpenedAt && isArrivalQuestion(text) && orders[0]?.status === "COMPLETED") continue;
     out.seen++;
 
     const history: SupportTurn[] = events
-      .filter((e) => e.chatId === last.chatId && e.textRedacted?.trim())
+      .filter((e) => e.chatId === last.chatId && eventTextForAi(e))
       .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
       .slice(-12)
-      .map((e) => ({ role: isBuyerSender(e.sender) ? "user" as const : "assistant" as const, text: e.textRedacted!.trim() }));
+      .map((e) => ({ role: isBuyerSender(e.sender) ? "user" as const : "assistant" as const, text: eventTextForAi(e) }));
 
-    const raw = await decideSupport({ channel: "wb_chat", context, turns: history });
+    const imageId = latestBuyerImageId(events, last.chatId);
+    const image = imageId ? await downloadBuyerChatImage(imageId) : null;
+    if (imageId && !image) console.warn(`[wb-chat-ai] картинка ${ref.code} не скачалась — отвечаем по тексту`);
+    const raw = await decideSupport({ channel: "wb_chat", context, turns: history, ...(image ? { image } : {}) });
     const mark = (type: string, payload: Record<string, string | number | boolean | null>) =>
       db.wbMarketplaceEvent.upsert({
         where: { idempotencyKey: key },
@@ -128,7 +176,10 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       await mark("AI_CHAT_FAILED", { reason: raw ?? "no_answer" });
       continue;
     }
-    const d = guardDecision(raw, text, "wb_chat");
+    const d = guardDecision(raw, text, "wb_chat", {
+      // Наш автотекст в чате («код получен», инструкция) — тоже «уже поздоровались».
+      greeted: history.some((t) => t.role === "assistant"),
+    });
     void aiLogRecord(db, {
       channel: "wb_chat", action: d.action, mode: mode as "on" | "dry", category: d.category,
       peerKey: `wb:${ref.code}`, orderCode: ref.code,
@@ -150,7 +201,8 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     }
 
     if (d.action === "reply") {
-      const sent = await notifyBuyerViaWbChat(db, ref.code, plain(d.reply), { skipIfClaimOpen: true });
+      // Заявка открыта — ИИ как раз и объясняет, что выкуп остановлен (27.11.2026).
+      const sent = await notifyBuyerViaWbChat(db, ref.code, plain(d.reply), { skipIfClaimOpen: false });
       if (sent.sent) {
         out.replied++;
         // Журнал: каждый ответ ИИ виден админам, без звука (26.11.2026).

@@ -58,7 +58,8 @@ describe("чат WB: другие площадки — только через �
   ])("%s → escalate", (t) => {
     const d = guardDecision(reply(t), "как быть?", "wb_chat");
     expect(d.action).toBe("escalate");
-    expect(d.draft).toBe(t);
+    // Черновик проходит ту же «живость» (заглавная буква в начале).
+    expect(d.draft.toLowerCase()).toBe(t.toLowerCase());
   });
   it("Roblox-ссылка в чате WB допустима", () => {
     expect(guardDecision(reply("Откройте https://create.roblox.com/dashboard/creations"), "где?", "wb_chat").action).toBe("reply");

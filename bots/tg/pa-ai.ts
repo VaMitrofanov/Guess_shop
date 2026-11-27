@@ -28,7 +28,7 @@ import { escapeHtml } from "../shared/notify";
 import { heldLabel } from "../shared/notify-format";
 import { aiLogRecord } from "../shared/support-ai-log";
 import {
-  CATEGORY_RU, HANDOFF_TEXT, guardDecision, plain, type PaAiDecision,
+  CATEGORY_RU, HANDOFF_TEXT, guardDecision, plain, refundGoesToWb, type PaAiDecision,
 } from "../shared/pa-ai-support";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { twaOrderRows } from "./twa-order-link";
@@ -213,7 +213,10 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     return false;
   }
   if (!raw) return false;
-  const d = guardDecision(raw, text);
+  const d = guardDecision(raw, text, "tg_pa", {
+    greeted: (history.get(m.chatId) ?? []).some((t) => t.role === "assistant"),
+    refundViaWb: refundGoesToWb(orders, codeOrders),
+  });
   void aiLogRecord(db, {
     // Пока чат у человека, ответ модели — лишь черновик: в статистике это передача, не «сам».
     channel: "tg_pa", action: handed && d.action === "reply" ? "escalate" : d.action, mode: mode as "on" | "dry", category: d.category,

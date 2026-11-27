@@ -242,8 +242,8 @@ describe("holdForProblem", () => {
     expect(calls.holds[0].wbCode).toBe("JR7HTSW");
   });
 
-  it("заявка, частичный возврат, просьба об отмене — пометка вместо заморозки", async () => {
-    for (const kind of ["WB_CLAIM", "PAYMENT_PARTIAL_REFUND", "BUYER_REFUND_REQUEST"] as const) {
+  it("частичный возврат, просьба об отмене — пометка вместо заморозки", async () => {
+    for (const kind of ["PAYMENT_PARTIAL_REFUND", "BUYER_REFUND_REQUEST"] as const) {
       const { db, calls, state } = fakeDb({ order: baseOrder() });
       const res = await holdForProblem(db, { wbCode: "JR7HTSW", kind, detail: "не приходят рб" });
       expect(res.flagged).toBe(true);
@@ -251,6 +251,15 @@ describe("holdForProblem", () => {
       expect(state.order!.heldAt).toBeNull();
       expect(state.order!.flaggedAt).toBeInstanceOf(Date);
     }
+  });
+
+  it("заявка на возврат WB (27.11.2026) — заморозка и пометка «Возврат открыт»", async () => {
+    const { db, calls, state } = fakeDb({ order: baseOrder() });
+    const res = await holdForProblem(db, { wbCode: "JR7HTSW", kind: "WB_CLAIM", detail: "передумал" });
+    expect(res.ok).toBe(true);
+    expect(res.flagged).toBeUndefined();
+    expect(calls.holds).toHaveLength(1);
+    expect(state.order!.flaggedAt).toBeInstanceOf(Date);
   });
 
   it("выкупленный заказ не морозит — тратить уже нечего", async () => {

@@ -17,7 +17,7 @@ import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml, tgSend } from "../shared/notify";
 import { aiLogCard, aiLogRecord } from "../shared/support-ai-log";
 import { vkDialogLink } from "../shared/vk-links";
-import { CATEGORY_RU, guardDecision, plain } from "../shared/pa-ai-support";
+import { CATEGORY_RU, guardDecision, plain, refundGoesToWb } from "../shared/pa-ai-support";
 import { decideSupport, isConversationalText, supportCardTarget, supportChannelMode, TurnMemory } from "../shared/support-ai";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { SUPPORT_METRIC_EVENT, recordSupportMetric } from "../shared/support-metric";
@@ -62,10 +62,14 @@ export async function tryVkAi(vkUserId: number, text: string, deps: VkAiDeps): P
   memory.push(key(vkUserId), "user", text);
   const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, name: true } }).catch(() => null);
   const name = user?.name ?? await deps.firstName().catch(() => null);
-  const { context, orders } = await loadSupportCustomer(db, { userId: user?.id, name });
-  const raw = await decideSupport({ channel: "vk_bot", context, turns: memory.get(key(vkUserId)) });
+  const { context, orders, codeOrders } = await loadSupportCustomer(db, { userId: user?.id, name });
+  const turns = memory.get(key(vkUserId));
+  const raw = await decideSupport({ channel: "vk_bot", context, turns });
   if (!raw || raw === "out_of_money") return false;
-  const d = guardDecision(raw, text, "vk_bot");
+  const d = guardDecision(raw, text, "vk_bot", {
+    greeted: turns.some((t) => t.role === "assistant"),
+    refundViaWb: refundGoesToWb(orders, codeOrders),
+  });
   void aiLogRecord(db, {
     channel: "vk_bot", action: d.action, mode: mode as "on" | "dry", category: d.category,
     peerKey: `vk:${vkUserId}`, orderCode: orders[0]?.wbCode ?? null,

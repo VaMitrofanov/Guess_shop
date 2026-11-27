@@ -303,6 +303,33 @@ export async function fetchBuyerChats() {
   return response;
 }
 
+/** Картинки дороже 4 МБ модели не отдаём (лимит Anthropic — 5 МБ на картинку, base64 раздувает на треть). */
+const CHAT_IMAGE_MAX_BYTES = 3_500_000;
+const CHAT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/**
+ * 🖼 Картинка из чата покупателя (27.11.2026). В событии WB у картинки пустой
+ * `url` и только `downloadID` — сам файл отдаёт `GET /api/v1/seller/download/{id}`
+ * с тем же токеном чата. Любой сбой — `null`: ИИ ответит по тексту.
+ */
+export async function downloadBuyerChatImage(downloadId: string): Promise<{ data: string; mediaType: "image/jpeg" | "image/png" | "image/webp" } | null> {
+  if (!/^[\w-]{8,80}$/.test(downloadId)) return null;
+  try {
+    const response = await fetch(`${CHAT_BASE}/api/v1/seller/download/${downloadId}`, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { Authorization: tokenFor("chat") },
+    });
+    if (!response.ok) return null;
+    const type = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!CHAT_IMAGE_TYPES.has(type)) return null;
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (buf.length === 0 || buf.length > CHAT_IMAGE_MAX_BYTES) return null;
+    return { data: buf.toString("base64"), mediaType: type as "image/jpeg" | "image/png" | "image/webp" };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBuyerChatEvents(next?: string | null) {
   const suffix = next ? `?next=${encodeURIComponent(next)}` : "";
   const response = await requestJson("chat", `${CHAT_BASE}/api/v1/seller/events${suffix}`, WbChatEventsResponseSchema);

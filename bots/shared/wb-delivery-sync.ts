@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { wbChatAiTakesOver } from "./wb-chat-ai";
+import { wbChatAiTakesOver, wbChatImageIds } from "./wb-chat-ai";
 import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
 import {
@@ -95,7 +95,7 @@ import {
   notifyBuyoutGateReviewDeleted,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
-import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
+import { activeHoldCodes, holdByCode, holdForProblem, holdOpenClaims, releaseByCode, type ProblemHoldResult } from "./order-hold";
 import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
 import { GATE_ACTOR, MISATTRIBUTED_ACTOR, attributeFeedbacks, foreignReviewOfHold, isGateReviewHold, matchBadReview, matchFixedReview, reviewOrderTime, runBuyoutGate, REVIEW_ORDER_WINDOW_MS, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
 import {
@@ -1773,6 +1773,8 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
           goodCard: Boolean(event.message.attachments?.goodCard),
           files: event.message.attachments?.files.length ?? 0,
           images: event.message.attachments?.images.length ?? 0,
+          // 🖼 Номера картинок для ИИ (27.11.2026): сам файл качается по `downloadID`.
+          imageIds: wbChatImageIds(event.message.attachments?.images),
         },
       };
     const isNewEvent = !providerEvent && !outboundMirror;
@@ -3065,15 +3067,22 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
       await touchCursor(db, REMINDERS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }
     /* Заявки на возврат — отдельный контур WB, и статусы заказа про них не
-       знают. Раз в 15 минут: заявка живёт днями, а зря разбуженный цикл стоит
-       дороже, чем четверть часа задержки. Никогда не валит цикл. */
-    if (await streamDue(db, CLAIMS_STREAM, 15 * 60_000, force)) {
+       знают. Раз в 5 минут (27.11.2026, было 15): заявка морозит выкуп, и
+       четверть часа — это время, за которое заказ успевали выкупить. Два
+       запроса к returns-api на проход. Никогда не валит цикл. */
+    if (await streamDue(db, CLAIMS_STREAM, 5 * 60_000, force)) {
       await syncBuyerClaims(db, out).catch((error) => {
         console.error(`[WbDbsSync] claims skipped: ${safeErrorCode(error)}`);
       });
       // 🏷 Заявка могла прийти раньше заказа — пометка догоняет его здесь.
       await syncClaimFlags(db).catch((error) => {
         console.error(`[WbDbsSync] claim flags skipped: ${safeErrorCode(error)}`);
+      });
+      // ❄️ Открытая заявка морозит и тот заказ, что родился позже заявки (27.11.2026).
+      await holdOpenClaims(db).then((n) => {
+        if (n > 0) console.log(`[WbDbsSync] заморожено по открытым заявкам WB: ${n}`);
+      }).catch((error) => {
+        console.error(`[WbDbsSync] claim holds skipped: ${safeErrorCode(error)}`);
       });
       await touchCursor(db, CLAIMS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }

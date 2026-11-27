@@ -48,10 +48,28 @@ export async function loadSupportCustomer(
         },
       }).catch(() => [])
     : [];
+  // ↩ Заявка на возврат на WB (27.11.2026): про неё покупатель знает сам, и ИИ
+  // отвечает на «что с заказом» правдой — выкуп остановлен, деньги вернёт WB.
+  const claims = new Map<string, "open" | "refunded">();
+  if (rows.length) {
+    const mps: Array<{ claimOpenedAt: Date | null; claimResolvedAt: Date | null; cancelledAt: Date | null; wbCode: { code: string } | null }> =
+      await db.wbMarketplaceOrder.findMany({
+        where: { wbCode: { code: { in: rows.map((o) => o.wbCode) } }, claimOpenedAt: { not: null } },
+        select: { claimOpenedAt: true, claimResolvedAt: true, cancelledAt: true, wbCode: { select: { code: true } } },
+      }).catch(() => []);
+    for (const m of mps) {
+      if (!m.wbCode?.code) continue;
+      if (m.cancelledAt) claims.set(m.wbCode.code, "refunded");
+      else if (!m.claimResolvedAt) claims.set(m.wbCode.code, "open");
+    }
+  }
   // Подключённому по нику или пассу код заказа не называем: ник публичный.
   const orders: SupportCustomer["orders"] = rows.map(({ userId, contacts, ...o }) => {
     const watchedVia = who.userId && userId !== who.userId ? contacts?.[0]?.via : undefined;
-    return watchedVia && !CODE_VIAS.includes(watchedVia) ? { ...o, wbCode: "скрыт — подключён по нику, код не называть" } : o;
+    const claim = claims.get(o.wbCode)
+      ?? (/^Возврат на WB одобрен/.test(o.heldReason ?? "") ? "refunded" as const : null);
+    const withClaim = { ...o, wbClaim: claim };
+    return watchedVia && !CODE_VIAS.includes(watchedVia) ? { ...withClaim, wbCode: "скрыт — подключён по нику, код не называть" } : withClaim;
   });
   const wbNotes = orders.length
     ? (await db.riskEvent.findMany({

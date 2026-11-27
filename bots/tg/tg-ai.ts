@@ -20,7 +20,7 @@
 import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml, tgSend } from "../shared/notify";
-import { CATEGORY_RU, guardDecision, plain } from "../shared/pa-ai-support";
+import { CATEGORY_RU, guardDecision, plain, refundGoesToWb } from "../shared/pa-ai-support";
 import { decideSupport, isConversationalText, supportCardTarget, supportChannelMode, TurnMemory } from "../shared/support-ai";
 import { loadSupportCustomer } from "../shared/support-ai-context";
 import { SUPPORT_METRIC_EVENT, recordSupportMetric } from "../shared/support-metric";
@@ -61,9 +61,13 @@ export async function tryTgAi(text: string, deps: TgAiDeps): Promise<boolean> {
   const name = user?.name ?? deps.name;
   const customer = await loadSupportCustomer(db, { userId: user?.id, name });
   const context = `${customer.context}\n\nГДЕ ЧЕЛОВЕК В БОТЕ: ${deps.step}`;
-  const raw = await decideSupport({ channel: "tg_bot", context, turns: memory.get(key) });
+  const turns = memory.get(key);
+  const raw = await decideSupport({ channel: "tg_bot", context, turns });
   if (!raw || raw === "out_of_money") return false;
-  const d = guardDecision(raw, text, "tg_bot");
+  const d = guardDecision(raw, text, "tg_bot", {
+    greeted: turns.some((t) => t.role === "assistant"),
+    refundViaWb: refundGoesToWb(customer.orders, customer.codeOrders),
+  });
   void aiLogRecord(db, {
     channel: "tg_bot", action: d.action, mode: mode as "on" | "dry", category: d.category,
     peerKey: `tg:${key}`, orderCode: customer.orders[0]?.wbCode ?? null,
