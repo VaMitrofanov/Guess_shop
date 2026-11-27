@@ -18,7 +18,8 @@ describe("чей отзыв: заказ по времени заказа WB (27.
     const info = await reviewOrderInfo(db, { id: "f1", userName: "Ольга", productDetails: { nmId: 967446616 }, lastOrderCreatedAt: at, lastOrderShkId: 123456789 });
     expect(info.code).toBe("ABC1234");
     expect(info.lines[0]).toContain("<code>ABC1234</code>");
-    expect(info.lines[0]).toContain("6320000001");
+    expect(info.lines[0]).toMatch(/выкуплен 21\.11/);
+    expect(info.lines.join("\n")).toContain("6320000001");
     expect(info.lines.join("\n")).toContain("kid_2015");
     expect(info.lines.join("\n")).toContain("123456789");
     expect(info.lines).toContain("👤 Ольга · TG · 2-й заказ");

@@ -66,9 +66,11 @@ export async function reviewOrderInfo(db: Db, fb: WbFeedback & { lastOrderShkId?
   }).catch(() => null);
   const status = order ? orderStatusWord(order.status) : "код ещё не вводил";
   const who = await identityLinesFor(db, mp.id, { short: true });
+  // Владелец 27.11.2026: главное — копируемый код, статус и дата; остальное — по мере места.
+  const head = order?.completedAt ? `выкуплен ${msk(order.completedAt)}` : `${status}${ordered ? ` · ${ordered}` : ""}`;
   const lines = [
-    `📦 <code>${escapeHtml(code)}</code> · WB #<code>${escapeHtml(mp.wbOrderId)}</code> · ${order ? `${order.amount} R$ · ` : ""}${escapeHtml(status)}${order?.heldAt ? " · ❄️" : ""}`,
-    [ordered, shk, order?.robloxUsername ? `ник <code>${escapeHtml(order.robloxUsername)}</code>` : null, mp.claimOpenedAt ? "↩ открыт возврат" : null, mp.cancelledAt ? "отменён на WB" : null]
+    `📦 <code>${escapeHtml(code)}</code> · <b>${escapeHtml(head)}</b>${order?.heldAt ? " ❄️" : ""}${mp.claimOpenedAt ? " · ↩ возврат" : ""}${mp.cancelledAt ? " · отменён" : ""}`,
+    [order ? `${order.amount} R$` : null, `WB #<code>${escapeHtml(mp.wbOrderId)}</code>`, order?.robloxUsername ? `ник <code>${escapeHtml(order.robloxUsername)}</code>` : null, shk]
       .filter(Boolean).join(" · "),
     ...who,
   ].filter(Boolean);
