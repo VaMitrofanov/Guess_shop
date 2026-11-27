@@ -72,7 +72,7 @@ export default function WbClaimPanel({ code, token, flags, onChanged }: {
 
   if (!flag) return null;
 
-  async function send(decision: "reject" | "refund") {
+  async function send(decision: "reject" | "refund" | "keep") {
     if (busy) return;
     if (decision === "reject" && claim?.rejectNeedsComment && comment.trim().length < 10) {
       toast("Комментарий для WB — не короче 10 символов", "error");
@@ -91,7 +91,9 @@ export default function WbClaimPanel({ code, token, flags, onChanged }: {
         haptic.notify("error"); toast(text, "error"); setNote({ ok: false, text });
         return;
       }
-      const text = decision === "reject" ? "Возврат отклонён — заказ в очереди" : "Деньги вернутся покупателю — заказ заморожен";
+      const text = decision === "reject" ? "Возврат отклонён — заказ в очереди"
+        : decision === "keep" ? "Пометка снята — заказ в очереди, заявку решите в WB"
+        : "Деньги вернутся покупателю — заказ заморожен";
       haptic.notify("success"); toast(text, "success"); setNote({ ok: true, text });
       setMode("idle");
       onChanged();
@@ -126,16 +128,22 @@ export default function WbClaimPanel({ code, token, flags, onChanged }: {
         </div>
       )}
 
-      {canAct && mode === "idle" && (
+      {claim !== undefined && mode === "idle" && (
         <>
-          {claim!.canReject && (
+          {canAct && claim!.canReject && (
             <button type="button" className="twa-press" disabled={busy}
               onClick={() => { haptic.impact("light"); setMode("reject"); }}
               style={{ minHeight: 52, border: 0, borderRadius: 14, background: C.green, color: "#08210f", fontSize: 17, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
               <Check size={18} aria-hidden="true" /> Отклонить и выкупить
             </button>
           )}
-          {claim!.canRefund && (
+          {/* Просто выкупить (владелец 27.11.2026): в WB ничего не уходит, заявку админ решает сам. */}
+          <button type="button" className="twa-press-sm" disabled={busy}
+            onClick={() => { haptic.select(); void send("keep"); }}
+            style={{ minHeight: 46, borderRadius: 14, background: "rgba(48,209,88,0.12)", border: `1px solid ${C.green}66`, color: C.green, fontSize: 15, fontWeight: 600 }}>
+            Просто выкупить · заявку решу сам
+          </button>
+          {canAct && claim!.canRefund && (
             <button type="button" className="twa-press-sm" disabled={busy}
               onClick={() => { haptic.select(); setMode("refund"); }}
               style={{ minHeight: 46, borderRadius: 14, background: "transparent", border: "1px solid rgba(255,105,97,0.45)", color: red, fontSize: 15, fontWeight: 600 }}>
@@ -143,7 +151,7 @@ export default function WbClaimPanel({ code, token, flags, onChanged }: {
             </button>
           )}
           <span style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.4 }}>
-            Отказ уходит в WB с вашим комментарием, заказ остаётся в очереди. Возврат подтверждает заявку — заказ замораживается.
+            Отказ уходит в WB с вашим комментарием. «Просто выкупить» в WB ничего не шлёт. В обоих случаях заказ в очереди. Возврат подтверждает заявку — заказ замораживается.
           </span>
         </>
       )}
@@ -193,7 +201,7 @@ export default function WbClaimPanel({ code, token, flags, onChanged }: {
         <span role="status" style={{ fontSize: 15, fontWeight: 600, color: note.ok ? C.green : red }}>{note.ok ? "✓ " : ""}{note.text}</span>
       )}
 
-      {claim !== undefined && !canAct && (
+      {claim !== undefined && !canAct && mode === "idle" && (
         <span style={{ fontSize: 14, color: C.textSecondary }}>
           {claim?.decided ? "Решение по заявке уже принято — пометку можно снять «✓ Договорились»." : "WB не даёт ответить на эту заявку отсюда — решите её в кабинете WB."}
         </span>

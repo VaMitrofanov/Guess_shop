@@ -11,7 +11,9 @@ import { ackFlags } from "../../../../../bots/shared/order-flags";
    (27.11.2026, мокап https://claude.ai/artifact/MUiwNghNKnnW6wCo6NE3zC).
 
    GET  ?code=XXXXXXX — заявка WB по заказу и что по ней можно сделать.
-   POST { code, decision: "reject" | "refund", comment? }.
+   POST { code, decision: "reject" | "refund" | "keep", comment? }.
+   «keep» (владелец 27.11.2026): просто выкупить, в WB ничего не отправлять —
+   пометка гасится, заявку админ решает сам, как считает лучше.
 
    Кнопки строятся из `actions`, которые WB отдаёт по ЭТОЙ заявке: сами мы
    действие не выдумываем. Отказ гасит пометку «Возврат открыт» — заказ
@@ -64,8 +66,20 @@ export async function POST(req: NextRequest) {
   const code = String(body?.code ?? "").trim().toUpperCase();
   const decision = body?.decision;
   const comment = String(body?.comment ?? "").replace(/\s+/g, " ").trim().slice(0, 1000);
-  if (!/^[A-Z0-9]{5,12}$/.test(code) || (decision !== "reject" && decision !== "refund")) {
+  if (!/^[A-Z0-9]{5,12}$/.test(code) || (decision !== "reject" && decision !== "refund" && decision !== "keep")) {
     return NextResponse.json({ error: "code и decision обязательны" }, { status: 400 });
+  }
+  if (decision === "keep") {
+    const order = await prisma.wbOrder.findUnique({ where: { wbCode: code }, select: { id: true } });
+    if (!order) return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
+    await ackFlags(prisma, { orderId: order.id, actor: actor.displayName, kind: "CLAIM" });
+    const mp = await prisma.wbMarketplaceOrder.findFirst({ where: { wbCode: { code } }, orderBy: { claimOpenedAt: "desc" }, select: { id: true } });
+    if (mp) {
+      await prisma.wbMarketplaceEvent.create({
+        data: { marketplaceOrderId: mp.id, type: "CLAIM_KEPT_BY_ADMIN", idempotencyKey: `claim-keep:${mp.id}:${Date.now()}`, actor: actor.displayName, payload: {} },
+      }).catch(() => undefined);
+    }
+    return NextResponse.json({ ok: true, decision });
   }
   const found = await loadClaim(code);
   if (!found?.claim) return NextResponse.json({ error: "Заявка на WB не найдена — решите её в кабинете" }, { status: 404 });
