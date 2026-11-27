@@ -234,6 +234,10 @@ export function notifyWbBuyerClaim(input: {
   buyerName: string | null;
   reason: string | null;
   hold?: ClaimHoldOutcome;
+  /** Чем найти заявку в кабинете WB: номер заявки, артикул, даты, цена (`claimSearchLines`). */
+  search?: string[];
+  /** Кто это: TG/ВК, ник Roblox, прошлые заказы (`identityLinesFor`). */
+  who?: string[];
 }): Promise<void> {
   const ref: DbsRef = {
     wbOrderId: input.wbOrderId,
@@ -248,6 +252,8 @@ export function notifyWbBuyerClaim(input: {
     lines: [
       refLine(ref),
       input.reason ? `💬 <i>${escapeHtml(input.reason)}</i>` : null,
+      ...(input.who ?? []),
+      ...(input.search?.length ? ["", "🔎 <b>Найти в кабинете WB</b> (Возвраты → Заявки покупателей):", ...input.search] : []),
       claimHoldLine(input.hold),
     ],
     next: "ответить в чате WB и решить заявку в кабинете",

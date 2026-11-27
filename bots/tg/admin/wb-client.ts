@@ -286,16 +286,70 @@ export async function getUnansweredReviews(): Promise<WbReview[]> {
   return result;
 }
 
+/** Отзыв WB с полями для привязки к заказу и жалобы (27.11.2026). */
+export interface WbFeedbackRaw {
+  id: string;
+  text?: string;
+  pros?: string;
+  cons?: string;
+  productValuation?: number;
+  createdDate?: string;
+  userName?: string;
+  productDetails?: { nmId?: number; supplierArticle?: string; productName?: string };
+  lastOrderCreatedAt?: string | null;
+  lastOrderShkId?: number | string | null;
+  parentFeedbackId?: string | null;
+  childFeedbackId?: string | null;
+  /** WB разрешает продавцу пожаловаться на этот отзыв. */
+  isAbleSupplierFeedbackValuation?: boolean;
+  answer?: { text?: string } | null;
+}
+
+/** Неотвеченные отзывы целиком (без кэша) — для карточек плохих отзывов. */
+export async function getUnansweredFeedbacksRaw(take = 30): Promise<WbFeedbackRaw[]> {
+  if (!wbCodeEnv) return [];
+  const res = await fetchWb(
+    `https://feedbacks-api.wildberries.ru/api/v1/feedbacks?isAnswered=false&take=${take}&skip=0&order=dateDesc`,
+    z.object({ data: z.object({ feedbacks: z.array(z.object({ id: z.string() }).passthrough()).optional().default([]) }).optional() }),
+  );
+  return (res?.data?.feedbacks ?? []) as unknown as WbFeedbackRaw[];
+}
+
+/** Один отзыв: `null` — WB его не отдаёт (удалён), `undefined` — сеть/ошибка. */
+export async function getFeedbackById(id: string): Promise<WbFeedbackRaw | null | undefined> {
+  if (!wbCodeEnv) return undefined;
+  try {
+    const res = await fetch(`https://feedbacks-api.wildberries.ru/api/v1/feedback?id=${encodeURIComponent(id)}`, {
+      headers: { Authorization: wbCodeEnv },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) return undefined;
+    const j = (await res.json()) as { data?: WbFeedbackRaw | null };
+    return j.data ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Ответ на отзыв или вопрос WB.
+ *
+ * 27.11.2026: `PATCH /api/v1/feedbacks` WB больше не принимает (405 «method not
+ * allowed») — ответ на отзыв из бота молча не уходил. Отзыв — `POST
+ * /api/v1/feedbacks/answer`, вопрос — `PATCH /api/v1/questions` с `answer.text`
+ * (как в `wb-questions-sweep`, он работает).
+ */
 export async function answerReview(id: string, text: string, isQuestion: boolean): Promise<boolean> {
   if (!wbCodeEnv) return false;
   const url = isQuestion
     ? "https://feedbacks-api.wildberries.ru/api/v1/questions"
-    : "https://feedbacks-api.wildberries.ru/api/v1/feedbacks";
+    : "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/answer";
   try {
     const res = await fetch(url, {
-      method: "PATCH",
+      method: isQuestion ? "PATCH" : "POST",
       headers: { Authorization: wbCodeEnv, "Content-Type": "application/json" },
-      body: JSON.stringify(isQuestion ? { id, text, state: "wbGoodsQA" } : { id, text }),
+      body: JSON.stringify(isQuestion ? { id, answer: { text }, state: "wbRu" } : { id, text }),
     });
     if (!res.ok) {
       console.error(`WB Answer ${isQuestion ? "question" : "review"} error: ${res.status} ${await res.text()}`);

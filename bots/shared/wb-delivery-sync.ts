@@ -95,7 +95,7 @@ import {
   notifyBuyoutGateReviewDeleted,
 } from "./wb-delivery-admin-notify";
 import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
-import { activeHoldCodes, holdByCode, holdForProblem, holdOpenClaims, releaseByCode, type ProblemHoldResult } from "./order-hold";
+import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
 import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
 import { GATE_ACTOR, MISATTRIBUTED_ACTOR, attributeFeedbacks, foreignReviewOfHold, isGateReviewHold, matchBadReview, matchFixedReview, reviewOrderTime, runBuyoutGate, REVIEW_ORDER_WINDOW_MS, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
 import {
@@ -117,6 +117,7 @@ import { dbsRef, refreshDbsCard } from "./wb-dbs-thread";
 import { notifyBuyerViaWbChat } from "./wb-chat-notify";
 import { resolveWbOrderChat } from "./wb-order-chat";
 import { identityLinesFor } from "./buyer-identity";
+import { escapeHtml } from "./notify";
 import { buildRobuxEtaWbChat, isArrivalQuestion } from "./robux-eta";
 import { COURIER_REPLY_WINDOW_MS, courierReplyText, isCourierQuestion } from "./wb-courier-reply";
 import {
@@ -2758,7 +2759,10 @@ function claimHoldOutcome(hold: ProblemHoldResult | null): ClaimHoldOutcome {
 }
 
 async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
-  type SeenClaim = { dt: string | undefined; reason: string | undefined; status: number | undefined; statusEx: number | undefined };
+  type SeenClaim = {
+    dt: string | undefined; reason: string | undefined; status: number | undefined; statusEx: number | undefined;
+    id: string; nmId: number | undefined; orderDt: string | undefined; title: string | undefined; price: number | undefined;
+  };
   const seen = new Map<string, SeenClaim>();
   for (const isArchive of [false, true]) {
     const page = await fetchBuyerClaims(isArchive);
@@ -2773,6 +2777,11 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
           reason: claim.user_comment,
           status: claim.status,
           statusEx: claim.status_ex,
+          id: claim.id,
+          nmId: claim.nm_id,
+          orderDt: claim.order_dt,
+          title: claim.imt_name,
+          price: claim.price,
         });
       }
     }
@@ -2821,6 +2830,8 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
         buyerName: order.buyerName,
         reason: claim.reason ?? null,
         hold: claimHoldOutcome(hold),
+        search: claimSearchLines({ ...claim, wbOrderId: order.wbOrderId, buyerName: order.buyerName }),
+        who: await identityLinesFor(db, order.id).catch(() => [] as string[]),
       }).catch(() => undefined);
       continue;
     }
@@ -2852,6 +2863,24 @@ async function syncBuyerClaims(db: Db, out: WbDeliverySyncResult) {
       refunded,
     });
   }
+}
+
+/**
+ * 🔎 Чем найти заявку в кабинете WB (27.11.2026, владелец: «данные для лёгкого
+ * поиска, кто это на WB»). Время заявки WB отдаёт московским без зоны — как есть.
+ */
+export function claimSearchLines(c: {
+  id: string; nmId?: number; orderDt?: string; dt?: string; title?: string; price?: number;
+  wbOrderId: string; buyerName: string | null;
+}): string[] {
+  const msk = (s?: string) => (s ? s.slice(0, 16).replace("T", " ").replace(/^(\d{4})-(\d\d)-(\d\d)/, "$3.$2.$1") + " МСК" : null);
+  return [
+    `• покупатель: <b>${escapeHtml(c.buyerName ?? "имя не пришло")}</b>`,
+    `• заказ WB: <code>${escapeHtml(c.wbOrderId)}</code>${msk(c.orderDt) ? ` · оформлен ${msk(c.orderDt)}` : ""}`,
+    c.nmId ? `• артикул: <code>${c.nmId}</code>${c.title ? ` · ${escapeHtml(c.title.slice(0, 60))}` : ""}` : null,
+    msk(c.dt) ? `• заявка: ${msk(c.dt)}${typeof c.price === "number" ? ` · ${c.price} ₽` : ""}` : null,
+    `• номер заявки: <code>${escapeHtml(c.id)}</code>`,
+  ].filter((l): l is string => Boolean(l));
 }
 
 /** Э7: a gate link nobody opened is a paid order we never delivered.
@@ -3067,9 +3096,8 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
       await touchCursor(db, REMINDERS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }
     /* Заявки на возврат — отдельный контур WB, и статусы заказа про них не
-       знают. Раз в 5 минут (27.11.2026, было 15): заявка морозит выкуп, и
-       четверть часа — это время, за которое заказ успевали выкупить. Два
-       запроса к returns-api на проход. Никогда не валит цикл. */
+       знают. Раз в 5 минут (27.11.2026, было 15): админу важно увидеть заявку,
+       пока покупатель ещё на связи. Два запроса к returns-api на проход. Никогда не валит цикл. */
     if (await streamDue(db, CLAIMS_STREAM, 5 * 60_000, force)) {
       await syncBuyerClaims(db, out).catch((error) => {
         console.error(`[WbDbsSync] claims skipped: ${safeErrorCode(error)}`);
@@ -3077,12 +3105,6 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
       // 🏷 Заявка могла прийти раньше заказа — пометка догоняет его здесь.
       await syncClaimFlags(db).catch((error) => {
         console.error(`[WbDbsSync] claim flags skipped: ${safeErrorCode(error)}`);
-      });
-      // ❄️ Открытая заявка морозит и тот заказ, что родился позже заявки (27.11.2026).
-      await holdOpenClaims(db).then((n) => {
-        if (n > 0) console.log(`[WbDbsSync] заморожено по открытым заявкам WB: ${n}`);
-      }).catch((error) => {
-        console.error(`[WbDbsSync] claim holds skipped: ${safeErrorCode(error)}`);
       });
       await touchCursor(db, CLAIMS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }

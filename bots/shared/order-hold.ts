@@ -450,10 +450,9 @@ export function problemHoldReason(kind: ProblemKind, detail?: string | null): st
   return normalizeHoldReason(tail ? `${head}: «${tail}»` : head) ?? head;
 }
 
-/** Проблемы, которые с 11.11.2026 ставят пометку вместо заморозки.
- *  27.11.2026 (владелец: «главное — сразу морозить заказ, как только на WB открыт
- *  возврат»): заявка WB снова морозит, пометка «Возврат открыт» ставится рядом. */
+/** Проблемы, которые с 11.11.2026 ставят пометку вместо заморозки. */
 const PROBLEM_FLAG: Partial<Record<ProblemKind, OrderFlagKind>> = {
+  WB_CLAIM: "CLAIM",
   PAYMENT_PARTIAL_REFUND: "PARTIAL_REFUND",
   BUYER_REFUND_REQUEST: "CANCEL_ASK",
 };
@@ -497,9 +496,6 @@ export async function holdForProblem(
     const res = await setFlag(db, { wbCode, kind: flagKind, detail: input.detail, at: input.eventAt ? new Date(input.eventAt) : null });
     return { ok: res.ok, flagged: true, awaitingOrder: res.awaitingOrder, internalStatus: order?.status ?? null };
   }
-  if (input.kind === "WB_CLAIM") {
-    await setFlag(db, { wbCode, kind: "CLAIM", detail: input.detail, at: input.eventAt ? new Date(input.eventAt) : null }).catch(() => null);
-  }
   const res = await holdByCode(db, {
     wbCode,
     reason: problemHoldReason(input.kind, input.detail),
@@ -507,41 +503,6 @@ export async function holdForProblem(
     auto: { kind: input.kind, eventAt: input.eventAt },
   });
   return { ...res, internalStatus: order?.status ?? null };
-}
-
-/**
- * ❄️ Догоняющая заморозка по открытым заявкам WB (27.11.2026).
- *
- * С 11.11 по 27.11 заявка ставила только пометку — заказы с открытым возвратом
- * стояли в очереди выкупа (GVD9W9H, ATP4ML6). Плюс заявка часто приходит раньше,
- * чем бот создаёт заказ по коду. Свип морозит каждый живой заказ с открытой
- * заявкой; ручная разморозка админа сильнее (`holdByCode` её помнит).
- */
-export async function holdOpenClaims(db: any, now = new Date()): Promise<number> {
-  const claims = await db.wbMarketplaceOrder.findMany({
-    where: {
-      claimOpenedAt: { not: null, gte: new Date(now.getTime() - 90 * 86_400_000) },
-      claimResolvedAt: null,
-      cancelledAt: null,
-      wbCodeId: { not: null },
-    },
-    select: { claimOpenedAt: true, claimReason: true, wbCode: { select: { code: true } } },
-    take: 500,
-  });
-  const byCode = new Map<string, { at: Date; reason: string | null }>();
-  for (const c of claims) if (c.wbCode?.code) byCode.set(c.wbCode.code, { at: c.claimOpenedAt, reason: c.claimReason });
-  if (byCode.size === 0) return 0;
-  const orders = await db.wbOrder.findMany({
-    where: { wbCode: { in: [...byCode.keys()] }, heldAt: null, status: { notIn: ["COMPLETED", "REJECTED"] } },
-    select: { wbCode: true },
-  });
-  let held = 0;
-  for (const o of orders) {
-    const c = byCode.get(o.wbCode)!;
-    const res = await holdForProblem(db, { wbCode: o.wbCode, kind: "WB_CLAIM", detail: c.reason, eventAt: c.at }).catch(() => null);
-    if (res?.ok && !res.skippedByManualRelease && !res.flagged) held++;
-  }
-  return held;
 }
 
 /** Статусы, в которых выкуп невозможен ни при каких условиях. */

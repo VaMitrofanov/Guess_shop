@@ -85,7 +85,7 @@ export function parseSupportAiRequest(raw: unknown): SupportAiRequest | null {
 // ── Режимы каналов ──────────────────────────────────────────────────────────
 
 export const SUPPORT_SETTINGS_STREAM = "pa-support";
-export type SupportChannelKey = Exclude<SupportChannel, "tg_pa">;
+export type SupportChannelKey = Exclude<SupportChannel, "tg_pa" | "wb_review">;
 let cache: { at: number; channels: Partial<Record<SupportChannelKey, SupportAiMode>> } = { at: 0, channels: {} };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

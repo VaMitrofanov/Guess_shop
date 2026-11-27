@@ -25,6 +25,7 @@ import {
   flushFbsDigest,
   getFbsOrders,
 } from "./wb-client";
+import { runWbReviewCards } from "../wb-review-cards";
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -101,13 +102,16 @@ export function startWbMonitor(bot: Telegraf, intervalMs = 15 * 60 * 1000): void
       // so a "open the Отзывы section" pointer leads nowhere. Instead we render
       // the new review(s) — rating + full text + which product — right in the
       // notification, so the admin sees what was written and the score at a glance.
-      // NB: WB feedback API exposes no order/code, so a review can't be tied to a
-      // specific order — only to the product (article/nmId = a denomination).
+      // 27.11.2026: отзыв привязывается к заказу по `lastOrderCreatedAt` — это
+      // делают карточки плохих отзывов (`wb-review-cards`), здесь — 4–5★ и вопросы.
       const newReviews = reviewCount - prev.reviewCount;
       if (newReviews > 0) {
-        const reviewWord = newReviews === 1 ? "отзыв/вопрос" : newReviews < 5 ? "отзыва/вопроса" : "отзывов/вопросов";
         // reviews is sorted newest-first → the freshest unanswered are the new ones.
-        const shown = reviews.slice(0, Math.min(newReviews, 3));
+        // ⭐ 1–3★ уходят отдельной карточкой с заказом и ответом (`wb-review-cards`, 27.11.2026).
+        const cards = process.env.WB_REVIEW_CARDS !== "off";
+        const shown = reviews.slice(0, Math.min(newReviews, 3))
+          .filter(r => !(cards && r.kind === "review" && (r.stars ?? 5) <= 3));
+        const reviewWord = shown.length === 1 ? "отзыв/вопрос" : shown.length < 5 ? "отзыва/вопроса" : "отзывов/вопросов";
         const body = shown.map(r => {
           const icon   = r.kind === "review" ? "⭐" : "❓";
           const rating = r.kind === "review" && r.stars
@@ -120,11 +124,11 @@ export function startWbMonitor(bot: Telegraf, intervalMs = 15 * 60 * 1000): void
             : `\n<i>(без текста — только оценка)</i>`;
           return `${icon} <b>${escapeHtmlWb(r.author)}</b>${rating}${prod}${quote}`;
         }).join("\n\n");
-        const more = newReviews > shown.length ? `\n\n<i>…ещё ${newReviews - shown.length} — ответь на WB</i>` : "";
+        const more = !cards && newReviews > shown.length ? `\n\n<i>…ещё ${newReviews - shown.length} — ответь на WB</i>` : "";
         const msg =
-          `⭐ <b>${newReviews} новых ${reviewWord} на Wildberries</b>\n` +
+          `⭐ <b>${shown.length} ${shown.length === 1 ? "новый" : "новых"} ${reviewWord} на Wildberries</b>\n` +
           `━━━━━━━━━━━━━━━━\n\n${body}${more}`;
-        for (const t of await adminTargets("reviews", { loud: true })) {
+        for (const t of shown.length ? await adminTargets("reviews", { loud: true }) : []) {
           await bot.telegram.sendMessage(t.chatId, msg, {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
@@ -132,6 +136,7 @@ export function startWbMonitor(bot: Telegraf, intervalMs = 15 * 60 * 1000): void
           }).catch(() => {});
         }
       }
+      await runWbReviewCards(bot).catch((e: unknown) => console.error("[wb-review-cards]", e instanceof Error ? e.message : e));
     } catch (err) {
       console.error("WB monitor error:", err);
     }

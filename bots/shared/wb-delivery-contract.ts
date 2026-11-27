@@ -265,6 +265,9 @@ const WbClaimSchema = z.object({
   user_comment: OptionalString,
   dt: OptionalString,
   order_dt: OptionalString,
+  /** Название товара и цена, ₽ — для поиска заявки в кабинете (27.11.2026). */
+  imt_name: OptionalString,
+  price: OptionalNumber,
 });
 
 export const WbClaimsResponseSchema = z.object({
