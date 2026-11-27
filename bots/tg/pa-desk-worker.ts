@@ -26,7 +26,7 @@ import type { Dialog } from "telegram/tl/custom/dialog";
 import { db } from "../shared/db";
 import { setAdminDm } from "../shared/admin-route";
 import { openFlags } from "../shared/order-flags";
-import { DESK_FOLDERS, answeredByReaction, badReviewMark, deskDecision, heartTarget, isThanksLike, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
+import { DESK_FOLDERS, DIRECT_FOLDER, isBuyIntent, answeredByReaction, badReviewMark, deskDecision, heartTarget, isThanksLike, nextContactName, type DeskFolder, type DeskOrder } from "../shared/pa-desk";
 import { BAD_REVIEW_STARS_SQL } from "../shared/vk-dialog-labels";
 import { CODE_PIN_STATUS, pinText, pinWorthCreating, type PinOrder } from "../shared/pa-pin";
 import { chatTurns, formatResponseStats, summarizeTurns, type ChatMsg, type ResponseStats } from "./pa-response-stats";
@@ -167,7 +167,7 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
     d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self && d.date && now - d.date < WINDOW_DAYS * 86_400);
   // Порядок: личные чаты без сообщений больше 30 дней — в Архив. Новое сообщение
   // вернёт чат из архива само (если он не заглушён). Закреп и непрочитанное не трогаем.
-  const stale = all.filter((d: Dialog) =>
+  let stale = all.filter((d: Dialog) =>
     d.isUser && !d.archived && !d.pinned && !d.unreadCount && d.entity instanceof Api.User && !d.entity.self
     && d.date && now - d.date >= WINDOW_DAYS * 86_400).slice(0, ARCHIVE_CAP);
 
@@ -270,6 +270,12 @@ async function sweepOnce(mode: Mode): Promise<PaDeskResult> {
   }).slice(0, FOLDER_CAP);
   result.waiting = waiting.length;
   if (await syncFolder(tg, list, WAIT_FOLDER, waiting, mode)) result.foldersUpdated++;
+
+  await syncDirectBuyers(tg, list, dialogs, mode).catch((e) => console.warn("[pa-direct]", e instanceof Error ? e.message : e));
+  // «Прямые» в архив не уходят никогда — даже после 30 дней тишины.
+  const directF = list.find((f) => f instanceof Api.DialogFilter && f.id === DIRECT_FOLDER.id) as Api.DialogFilter | undefined;
+  const directIds = new Set([...(directF?.includePeers ?? []), ...(directF?.pinnedPeers ?? [])].map((p) => ("userId" in p ? String(p.userId) : "")));
+  stale = stale.filter((d) => !directIds.has(String((d.entity as Api.User).id)));
 
   if (stale.length > 0) {
     result.archived = stale.length;
@@ -580,6 +586,68 @@ async function syncFolder(
   return true;
 }
 
+/* ── 💸 Прямые и возврат из архива (27.11.2026) ──────────────────────────
+   Клиент из архива написал «хочу купить» — чат так и лежал в архиве
+   (Telegram держит заглушённые архивные чаты в архиве и при новом сообщении).
+   • Архивный чат, где за 7 дней последнее слово — клиента, достаём из архива.
+   • Запрос на покупку за 7 дней (последние 10 сообщений клиента) — в папку
+     «💸 Прямые». Папка только пополняется: кого оператор добавил руками, бот
+     не трогает; убирает оператор. */
+const DIRECT_WINDOW_S = 7 * 86_400;
+const DIRECT_SCAN_CAP = 80;
+
+async function syncDirectBuyers(tg: TelegramClient, list: Api.TypeDialogFilter[], dialogs: Dialog[], mode: Mode): Promise<void> {
+  const now = Date.now() / 1000;
+  const archived = await tg.getDialogs({ limit: 300, folder: 1 }).catch(() => [] as unknown as Dialog[]);
+  const isClient = (d: Dialog) => d.isUser && d.entity instanceof Api.User && !d.entity.bot && !d.entity.self;
+  const fresh = (d: Dialog) => !!d.date && now - d.date < DIRECT_WINDOW_S;
+
+  // 1) Из архива — живые чаты, где ждут нас.
+  const back = archived.filter((d) => isClient(d) && fresh(d) && d.message && !d.message.out);
+  if (back.length) {
+    if (mode === "dry") console.log(`[pa-direct] (dry) из архива: ${back.length}`);
+    else {
+      try {
+        const peers = await Promise.all(back.map((d) => tg.getInputEntity(d.entity as Api.User)));
+        await tg.invoke(new Api.folders.EditPeerFolders({ folderPeers: peers.map((peer) => new Api.InputFolderPeer({ peer, folderId: 0 })) }));
+        console.log(`[pa-direct] из архива достали ${back.length}`);
+      } catch (e) {
+        console.warn(`[pa-direct] из архива не достали: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+  }
+
+  // 2) Кто хочет купить.
+  const have = list.find((f) => f instanceof Api.DialogFilter && f.id === DIRECT_FOLDER.id) as Api.DialogFilter | undefined;
+  const haveIds = new Set([...(have?.includePeers ?? []), ...(have?.pinnedPeers ?? [])].map((p) => ("userId" in p ? String(p.userId) : "")));
+  const candidates = [...dialogs, ...back].filter((d) => isClient(d) && fresh(d) && !haveIds.has(String((d.entity as Api.User).id))).slice(0, DIRECT_SCAN_CAP);
+  const buyers: Dialog[] = [];
+  for (const d of candidates) {
+    const msgs = await tg.getMessages(d.entity as Api.User, { limit: 10 }).catch(() => []);
+    if (msgs.some((m) => !m.out && m.date && now - m.date < DIRECT_WINDOW_S && isBuyIntent(m.message))) buyers.push(d);
+    await sleep(300);
+  }
+  if (!buyers.length) return;
+  if (mode === "dry") { console.log(`[pa-direct] (dry) в «Прямые»: ${buyers.length}`); return; }
+  try {
+    const added = await Promise.all(buyers.map((d) => tg.getInputEntity(d.entity as Api.User)));
+    await tg.invoke(new Api.messages.UpdateDialogFilter({
+      id: DIRECT_FOLDER.id,
+      filter: new Api.DialogFilter({
+        id: DIRECT_FOLDER.id,
+        title: new Api.TextWithEntities({ text: DIRECT_FOLDER.title, entities: [] }),
+        color: have?.color ?? DIRECT_FOLDER.color,
+        pinnedPeers: have?.pinnedPeers ?? [],
+        includePeers: [...(have?.includePeers ?? []), ...added].slice(0, 100),
+        excludePeers: [],
+      }),
+    }));
+    console.log(`[pa-direct] в «Прямые» +${buyers.length}`);
+  } catch (e) {
+    console.warn(`[pa-direct] папка «Прямые» не обновилась: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 /* ── Время ответа за вчера (раз в сутки) ─────────────────────────────────── */
 
 export const RESPONSE_STREAM = "pa-response";
@@ -694,7 +762,7 @@ async function registerPaDm(): Promise<void> {
 /* ── Порядок папок и био (при старте, 13.11.2026) ───────────────────────── */
 
 /** Сначала «кому ответить» и «проблемы», «Готово» — в конце; чужие папки — после наших. */
-const FOLDER_ORDER = [WAIT_FOLDER.id, DESK_FOLDERS.PROBLEM.id, DESK_FOLDERS.NEW.id, DESK_FOLDERS.QUEUE.id, DESK_FOLDERS.REVIEW.id, DESK_FOLDERS.DONE.id];
+const FOLDER_ORDER = [WAIT_FOLDER.id, DIRECT_FOLDER.id, DESK_FOLDERS.PROBLEM.id, DESK_FOLDERS.NEW.id, DESK_FOLDERS.QUEUE.id, DESK_FOLDERS.REVIEW.id, DESK_FOLDERS.DONE.id];
 /** Био — только если пустое: своё оператора не перетираем. Не длиннее 70 символов. */
 const PA_BIO = "Поддержка RobloxBank 💙 Заказ, статус и инструкция — в @RobloxBankBot";
 

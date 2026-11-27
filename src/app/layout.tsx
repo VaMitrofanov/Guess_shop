@@ -42,7 +42,7 @@ export const metadata: Metadata = {
   // come up blank.
   metadataBase: new URL("https://robloxbank.ru"),
   title: "Roblox Bank — купить Robux за рубли",
-  description: "Коды Robux от 10 R$ — сразу на баланс, без пароля от Roblox. Оплата картой или СБП, подарок открыткой, геймпасс — дешевле.",
+  description: "Коды Robux — сразу на баланс, без пароля от Roblox. Оплата картой или СБП, подарок открыткой, геймпасс — дешевле.",
   keywords: ["купить робуксы", "robux за рубли", "roblox bank", "робуксы дешево", "код роблокс", "подарочная карта roblox"],
   // Яндекс.Вебмастер (15.11.2026): подтверждение и файлом public/yandex_bf0d3da6d4e6e62e.html, и мета-тегом.
   verification: { yandex: "bf0d3da6d4e6e62e" },

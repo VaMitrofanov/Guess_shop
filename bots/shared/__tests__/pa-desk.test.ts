@@ -139,3 +139,9 @@ describe("авто-❤️ на финальное «спасибо» (17.11.2026
     expect(heartTarget([c("спасибо"), { out: true, text: "📌 Ваш заказ · 500 R$", ourReaction: false }, c("где робуксы")])).toBeNull();
   });
 });
+
+describe("isBuyIntent — 💸 Прямые", () => {
+  const { isBuyIntent } = jest.requireActual("../pa-desk") as typeof import("../pa-desk");
+  it.each(["Хочу купить робуксы", "сколько стоит 1000?", "Можно ли заказать ещё", "хочу ещё 500", "а цена какая", "есть коды?"])("да: %s", (t) => expect(isBuyIntent(t)).toBe(true));
+  it.each(["где мои робуксы?", "спасибо, пришли", "не могу создать геймпасс"])("нет: %s", (t) => expect(isBuyIntent(t)).toBe(false));
+});
