@@ -94,7 +94,7 @@ import {
   notifyBuyoutGateBadReview,
   notifyBuyoutGateReviewDeleted,
 } from "./wb-delivery-admin-notify";
-import { findGamepassRefInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
+import { findGamepassRefsInChatText, tryAttachGamepassFromChat, type ChatGamepassDb } from "./wb-chat-gamepass";
 import { activeHoldCodes, holdByCode, holdForProblem, releaseByCode, type ProblemHoldResult } from "./order-hold";
 import { flagsOf, setFlag, syncClaimFlags } from "./order-flags";
 import { GATE_ACTOR, MISATTRIBUTED_ACTOR, attributeFeedbacks, foreignReviewOfHold, isGateReviewHold, matchBadReview, matchFixedReview, reviewOrderTime, runBuyoutGate, REVIEW_ORDER_WINDOW_MS, type DeletedReview, type GateOrder, type WbFeedback } from "./buyout-gate";
@@ -1850,7 +1850,7 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     // код, а пасс приходит ПОСЛЕ — с этим условием подстановка из чата не
     // сработала ни разу с 07.09 по 31.10.2026 (0 событий `via: wb-chat`).
     if (isNewEvent && order && isBuyerSender(event.sender) && rawText
-      && findGamepassRefInChatText(rawText, order.nmId) && !order.cancelledAt) {
+      && findGamepassRefsInChatText(rawText, order.nmId).length && !order.cancelledAt) {
       const ref = await dbsRef(db, order.id, order.wbOrderId);
       if (ref.code) {
         const outcome = await tryAttachGamepassFromChat(db as unknown as ChatGamepassDb, { ref, wbCode: ref.code, text: rawText, nmId: order.nmId })

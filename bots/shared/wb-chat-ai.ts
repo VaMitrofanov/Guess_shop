@@ -27,7 +27,7 @@ import { downloadBuyerChatImage } from "./wb-delivery-api";
 import { screenshotFact } from "./support-ai-facts";
 import { decideSupport, supportChannelMode, type SupportTurn } from "./support-ai";
 import { loadSupportCustomer } from "./support-ai-context";
-import { findGamepassRefInChatText } from "./wb-chat-gamepass";
+import { findGamepassRefsInChatText } from "./wb-chat-gamepass";
 import { isArrivalQuestion } from "./robux-eta";
 import { dbsRef } from "./wb-dbs-thread";
 import { identityLinesFor } from "./buyer-identity";
@@ -56,7 +56,7 @@ export function wbChatTextForAi(text: string | null | undefined, nmId?: number |
   const t = (text ?? "").trim();
   if (t.length < 2) return false;
   if (/\d{3}\s?\d{3}/.test(t) && t.replace(/\D/g, "").length >= 5 && t.length < 20) return false;
-  if (findGamepassRefInChatText(t, nmId)) return false;
+  if (findGamepassRefsInChatText(t, nmId).length) return false;
   return true;
 }
 

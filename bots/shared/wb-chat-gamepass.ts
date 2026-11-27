@@ -87,6 +87,23 @@ const PRICE_TOLERANCE = 2;
  * ОДНО: две длинные цифры в одном сообщении — это уже догадка, а догадка здесь
  * стоит чужого пасса в заказе.
  */
+/**
+ * Все пассы из сообщения (28.11.2026: «и в одном сообщении несколько гп принимал»).
+ * Ссылки — где угодно; голые числа — из текста без ссылок (иначе id плейса из
+ * адреса игры сойдёт за пасс). Каждый id потом проверяется у Roblox, чужой или
+ * не-пасс отсеется там, поэтому несколько голых чисел больше не догадка.
+ */
+export function findGamepassRefsInChatText(text: string, nmId?: number | null): string[] {
+  if (WB_SYSTEM_LINE_RE.test(text)) return [];
+  const ids: string[] = [];
+  for (const pattern of URL_PATTERNS) {
+    for (const m of text.matchAll(new RegExp(pattern.source, pattern.flags + "g"))) if (m[1]) ids.push(m[1]);
+  }
+  const bare = text.replace(/https?:\/\/\S+|\S*roblox\.com\S*/gi, " ");
+  for (const m of bare.matchAll(BARE_RE)) if (!nmId || m[1] !== String(nmId)) ids.push(m[1]);
+  return [...new Set(ids)].slice(0, MAX_AUTO_PARTS);
+}
+
 export function findGamepassRefInChatText(text: string, nmId?: number | null): string | null {
   if (WB_SYSTEM_LINE_RE.test(text)) return null;
   for (const pattern of URL_PATTERNS) {
@@ -175,8 +192,9 @@ interface AttachInput {
  * Возвращает исход для счётчиков воркера; уведомления шлёт сама.
  */
 export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: AttachInput): Promise<ChatGamepassOutcome> {
-  const gamepassId = findGamepassRefInChatText(input.text, input.nmId);
-  if (!gamepassId) return { kind: "skipped" };
+  const ids = findGamepassRefsInChatText(input.text, input.nmId);
+  if (!ids.length) return { kind: "skipped" };
+  const gamepassId = ids[0];
 
   const order = await db.wbOrder
     .findFirst({
@@ -203,6 +221,18 @@ export async function tryAttachGamepassFromChat(db: ChatGamepassDb, input: Attac
     .catch(() => null);
   if (active && !active.releasedAt) return { kind: "skipped" };
 
+  // Заказ больше потолка донора (1500) — только набором, пасс за 2000+ не берём никогда.
+  if (order.amount > DONOR_NET_CAPACITY) return collectFromChat(db, input, order, ids);
+  // Несколько пассов к обычному заказу — берём первый годный.
+  let last: ChatGamepassOutcome = { kind: "skipped" };
+  for (const id of ids) {
+    last = await attachOneFromChat(db, input, order, id);
+    if (last.kind === "attached") return last;
+  }
+  return last;
+}
+
+async function attachOneFromChat(db: ChatGamepassDb, input: AttachInput, order: ChatOrderRow, gamepassId: string): Promise<ChatGamepassOutcome> {
   const details = await getGamepassDetails(gamepassId).catch(() => null);
   // Число оказалось не пассом (телефон, номер заказа WB) — ни действия, ни шума.
   if (!details) return { kind: "skipped" };
@@ -607,7 +637,7 @@ export function splitProgressText(orderAmount: number, parts: SplitPart[]): stri
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function collectSplitPart(db: any, order: ChatOrderRow, gamepassId: string, details: PassDetails): Promise<SupportPassOutcome> {
+async function collectSplitPart(db: any, order: ChatOrderRow, gamepassId: string, details: PassDetails, via: true | "support" = "support"): Promise<SupportPassOutcome> {
   const stream = `split-collect:${order.id}`;
   const row = await db.wbSyncCursor.findUnique({ where: { stream } }).catch(() => null);
   const parts: SplitPart[] = (row?.metadata as { parts?: SplitPart[] } | null)?.parts ?? [];
@@ -666,10 +696,61 @@ async function collectSplitPart(db: any, order: ChatOrderRow, gamepassId: string
     data: { isUsed: true, usedAt: new Date(), status: "CLAIMED" },
   }).catch(() => {});
   for (const p of next) {
-    void auditGamepassSubmitted(db as OrderAuditClient, { gamepassId: p.gamepassId, via: "pa-support", orderId: order.id, wbCode: order.wbCode, creatorName: creator, price: p.price });
+    void auditGamepassSubmitted(db as OrderAuditClient, { gamepassId: p.gamepassId, via: via === true ? "wb-chat" : "pa-support", orderId: order.id, wbCode: order.wbCode, creatorName: creator, price: p.price });
   }
-  await sendBuyoutCard(db, order, gamepassUrl, creator, "support").catch((err: unknown) => {
-    console.warn("[pa-gamepass] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
+  await sendBuyoutCard(db, order, gamepassUrl, creator, via).catch((err: unknown) => {
+    console.warn("[split-collect] карточка выкупа не ушла:", err instanceof Error ? err.message : err);
   });
   return { kind: "attached", order: { ...order, robloxUsername: creator, gamepassUrl }, gamepassId, price: details.price, nick: creator, parts: next };
+}
+
+/** Уже принятые части набора по заказу. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function loadSplitParts(db: any, orderId: string): Promise<SplitPart[]> {
+  const row = await db.wbSyncCursor?.findUnique({ where: { stream: `split-collect:${orderId}` } }).catch(() => null);
+  return (row?.metadata as { parts?: SplitPart[] } | null)?.parts ?? [];
+}
+
+/**
+ * Итог разбора нескольких пассов для покупателя: отказы по каждому, затем
+ * состояние набора. `null` — сказать нечего (ни один id не оказался пассом).
+ */
+export function splitBatchText(orderAmount: number, parts: SplitPart[], outcomes: SupportPassOutcome[]): string | null {
+  const done = outcomes.find((o) => o.kind === "attached" && o.parts);
+  if (done && done.kind === "attached" && done.parts) {
+    return `Все геймпассы приняты ✅ ${done.parts.map((p) => p.amount).join(" + ")} = ${orderAmount} R$. `
+      + `Поставили в очередь на зачисление на аккаунт ${done.nick}. Как только робуксы будут отправлены, напишем сюда же.`;
+  }
+  const rejects = outcomes.filter((o): o is Extract<SupportPassOutcome, { kind: "rejected" }> => o.kind === "rejected" && o.toBuyer);
+  const accepted = outcomes.some((o) => o.kind === "partial");
+  if (!rejects.length && !accepted) return null;
+  const lines = rejects.map((r) => `Геймпасс ${r.gamepassId}: ${r.reason}.`);
+  const progress = parts.length
+    ? splitProgressText(orderAmount, parts).replace(/^Геймпасс принят ✅ /, accepted ? "Принято ✅ " : "")
+    : `${splitRequiredMessage(orderAmount)}\nПришлите ссылки или ID этих геймпассов — можно все в одном сообщении или по одному.`;
+  return [...lines, progress].join("\n");
+}
+
+/** Чат WB: пассы к заказу больше 1500 R$ — копим набор, покупателю один ответ. */
+async function collectFromChat(db: ChatGamepassDb, input: AttachInput, order: ChatOrderRow, ids: string[]): Promise<ChatGamepassOutcome> {
+  const outcomes: SupportPassOutcome[] = [];
+  for (const id of ids) {
+    const details = await getGamepassDetails(id).catch(() => null);
+    if (!details || details.validationSkipped) continue;
+    const r = await collectSplitPart(db, order, id, details, true);
+    outcomes.push(r);
+    if (r.kind === "rejected") notifyDbsChatGamepassRejected(input.ref, { gamepassId: id, reason: r.reason, expectedPrice: r.expectedPrice });
+    if (r.kind === "attached") break;
+  }
+  if (!outcomes.length) return { kind: "skipped" };
+  const parts = await loadSplitParts(db, order.id);
+  const text = splitBatchText(order.amount, parts, outcomes);
+  if (text) await notifyBuyerViaWbChat(db as never, order.wbCode, wbChatSafeText(text), { skipIfClaimOpen: true }).catch(() => undefined);
+  const done = outcomes.find((o) => o.kind === "attached");
+  if (done && done.kind === "attached") {
+    notifyDbsChatGamepassAttached(input.ref, { wbCode: order.wbCode, gamepassId: (done.parts ?? []).map((p) => p.gamepassId).join(" + "), nick: done.nick, price: done.price, amount: order.amount });
+    return { kind: "attached", gamepassId: done.gamepassId, price: done.price, nick: done.nick, wbCode: order.wbCode };
+  }
+  const last = outcomes[outcomes.length - 1];
+  return last.kind === "rejected" ? { kind: "rejected", gamepassId: last.gamepassId, reason: last.reason } : { kind: "skipped" };
 }

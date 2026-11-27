@@ -15,7 +15,7 @@
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { escapeHtml } from "../shared/notify";
-import { attachGamepassFromSupport, findGamepassRefInChatText, splitProgressText } from "../shared/wb-chat-gamepass";
+import { attachGamepassFromSupport, findGamepassRefsInChatText, loadSplitParts, splitBatchText, splitProgressText, type SupportPassOutcome } from "../shared/wb-chat-gamepass";
 import { pinPaOrdersNow } from "./pa-desk-worker";
 import { card } from "./pa-ai";
 
@@ -26,8 +26,9 @@ type Api = (method: string, payload: Record<string, unknown>) => Promise<any>;
 export async function attachPassFromSupport(bot: Telegraf, api: Api, m: {
   connId: string; chatId: number; messageId: number; fromId: number; fromName: string; text: string;
 }): Promise<boolean> {
-  const gamepassId = findGamepassRefInChatText(m.text);
-  if (!gamepassId) return false;
+  const ids = findGamepassRefsInChatText(m.text);
+  if (!ids.length) return false;
+  const gamepassId = ids[0];
   const user = await db.user.findUnique({ where: { tgId: String(m.fromId) }, select: { id: true } });
   if (!user) return false;
   const [own, linked] = await Promise.all([
@@ -37,6 +38,7 @@ export async function attachPassFromSupport(bot: Telegraf, api: Api, m: {
   const orderIds = [...own.map((o) => o.id), ...linked.map((l) => l.orderId)];
   if (!orderIds.length) return false;
 
+  if (ids.length > 1) return attachManyFromSupport(bot, api, m, orderIds, ids);
   const res = await attachGamepassFromSupport(db as never, { orderIds, gamepassId });
   const send = (text: string) => api("sendMessage", {
     business_connection_id: m.connId, chat_id: m.chatId, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
@@ -93,4 +95,37 @@ export async function attachPassFromSupport(bot: Telegraf, api: Api, m: {
     await card(bot, `🎟 <b>${who}</b> прислал пасс ${gamepassId} в поддержку, но у него несколько заказов на этот номинал — какой выбрать, решите вручную.`).catch(() => undefined);
   }
   return false;
+}
+
+/**
+ * Несколько пассов одним сообщением (28.11.2026): каждый проверяем, к набору —
+ * копим, к обычному заказу — первый годный. Покупателю один ответ.
+ */
+async function attachManyFromSupport(bot: Telegraf, api: Api, m: {
+  connId: string; chatId: number; messageId: number; fromId: number; fromName: string; text: string;
+}, orderIds: string[], ids: string[]): Promise<boolean> {
+  const outcomes: SupportPassOutcome[] = [];
+  for (const gamepassId of ids) {
+    const r = await attachGamepassFromSupport(db as never, { orderIds, gamepassId });
+    outcomes.push(r);
+    if (r.kind === "attached") break;
+  }
+  const meaningful = outcomes.filter((o) => o.kind !== "skipped");
+  if (!meaningful.length) return false;
+  const order = (meaningful[0] as Exclude<SupportPassOutcome, { kind: "skipped" }>).order;
+  const who = escapeHtml(m.fromName);
+  const single = meaningful.find((o) => o.kind === "attached" && !o.parts);
+  const text = single && single.kind === "attached"
+    ? `Геймпасс принят ✅\n\n${order.amount} R$ поставлены в очередь на выкуп на аккаунт ${single.nick}. Как только выкупим — напишем.`
+    : splitBatchText(order.amount, await loadSplitParts(db, order.id), meaningful);
+  if (text) {
+    await api("sendMessage", { business_connection_id: m.connId, chat_id: m.chatId, text: escapeHtml(text), parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+    await api("readBusinessMessage", { business_connection_id: m.connId, chat_id: m.chatId, message_id: m.messageId }).catch(() => undefined);
+  }
+  const lines = meaningful.map((o) => o.kind === "rejected" ? `${o.gamepassId} ✗ ${escapeHtml(o.reason)}${o.toBuyer ? "" : " (покупателю НЕ сказали)"}`
+    : o.kind === "partial" ? `${o.gamepassId} ✓ ${o.parts[o.parts.length - 1].amount} R$` : `${o.gamepassId} ✓`);
+  const done = meaningful.some((o) => o.kind === "attached");
+  await card(bot, `🎟 <b>${who}</b> прислал ${ids.length} пасса одним сообщением для заказа <b>${order.wbCode}</b> (${order.amount} R$):\n${lines.join("\n")}${done ? "\n✅ Заказ ушёл в выкуп." : ""}`).catch(() => undefined);
+  if (done) void pinPaOrdersNow(String(m.fromId)).catch(() => undefined);
+  return Boolean(text);
 }

@@ -325,18 +325,18 @@ describe("воркер зовёт разбор", () => {
   test("пасс разбирается и после закрытия доставки (31.10.2026)", () => {
     // `completedAt` у DBS — «доставка закрыта»: с ним в условии подстановка
     // не сработала ни разу, потому что пасс всегда приходит после кода.
-    const line = sync.slice(sync.indexOf("findGamepassRefInChatText(rawText, order.nmId) &&") - 120,
-      sync.indexOf("findGamepassRefInChatText(rawText, order.nmId) &&") + 80);
+    const line = sync.slice(sync.indexOf("findGamepassRefsInChatText(rawText, order.nmId).length &&") - 120,
+      sync.indexOf("findGamepassRefsInChatText(rawText, order.nmId).length &&") + 80);
     expect(line).not.toContain("completedAt");
   });
 
   const source = fs.readFileSync(path.join(process.cwd(), "bots/shared/wb-delivery-sync.ts"), "utf8");
 
   test("только на сообщениях покупателя и только когда в тексте что-то есть", () => {
-    expect(source).toContain("findGamepassRefInChatText(rawText, order.nmId)");
+    expect(source).toContain("findGamepassRefsInChatText(rawText, order.nmId).length");
     expect(source).toContain("tryAttachGamepassFromChat");
     // Дешёвый разбор стоит ДО похода в базу за карточкой заказа.
-    expect(source.indexOf("findGamepassRefInChatText(rawText, order.nmId)"))
+    expect(source.indexOf("findGamepassRefsInChatText(rawText, order.nmId).length"))
       .toBeLessThan(source.indexOf("tryAttachGamepassFromChat(db"));
   });
 });
@@ -350,10 +350,11 @@ describe("заказ больше донора — одиночный пасс �
 
   test("чат WB: пасс по цене, но заказ 2000 — не подставляем, оператору причина", async () => {
     mockDetails.mockResolvedValue(pass2858);
-    const db = makeDb({ wbOrder: { findFirst: jest.fn().mockResolvedValue(big), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } });
-    const out = await tryAttachGamepassFromChat(asDb(db), { ref, wbCode: "A7NT83T", text: "1595350420" });
+    const db = { ...makeDb({ wbOrder: { findFirst: jest.fn().mockResolvedValue(big), updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) } }), wbSyncCursor: { findUnique: jest.fn().mockResolvedValue(null), upsert: jest.fn() } };
+    const out = await tryAttachGamepassFromChat(asDb(db as never), { ref, wbCode: "A7NT83T", text: "1595350420" });
+    // 28.11.2026: заказ больше 1500 — набор; пасс за 2858 частью быть не может (потолок 1500).
     expect(out).toMatchObject({ kind: "rejected" });
-    expect((out as { reason: string }).reason).toMatch(/разбивк/);
+    expect((out as { reason: string }).reason).toMatch(/не подходит к набору/);
     expect(db.wbOrder.updateMany).not.toHaveBeenCalled();
   });
 

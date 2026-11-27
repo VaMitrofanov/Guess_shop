@@ -46,3 +46,25 @@ describe("набор пассов по одному (27.11.2026, D5R4NN7)", () =
     expect(splitProgressText(2000, parts)).toMatch(/Осталось 500 R\$ — пришлите геймпасс за 715 R\$/);
   });
 });
+
+import { findGamepassRefsInChatText, splitBatchText } from "../wb-chat-gamepass";
+describe("несколько пассов в одном сообщении (28.11.2026)", () => {
+  it("голые id и ссылки — все", () => {
+    expect(findGamepassRefsInChatText("2099689546 и https://www.roblox.com/game-pass/2102262561/pass")).toEqual(["2102262561", "2099689546"]);
+    expect(findGamepassRefsInChatText("2099689546\n2102262561")).toEqual(["2099689546", "2102262561"]);
+  });
+  it("id плейса из ссылки на игру — не пасс", () => {
+    expect(findGamepassRefsInChatText("https://www.roblox.com/games/1234567890/x")).toEqual([]);
+  });
+  it("номер товара WB отсекается", () => {
+    expect(findGamepassRefsInChatText("123456789 2099689546", 123456789)).toEqual(["2099689546"]);
+  });
+  it("итог: собрано и что осталось", () => {
+    const parts = [{ gamepassId: "1", amount: 1500, price: 2143, creator: "a" }];
+    const out = [{ kind: "partial", parts, remaining: 500, need: [500] } as never, { kind: "rejected", gamepassId: "2", reason: "пасс не выставлен на продажу", toBuyer: true } as never];
+    const t = splitBatchText(2000, parts, out)!;
+    expect(t).toMatch(/Геймпасс 2: пасс не выставлен/);
+    expect(t).toMatch(/Принято ✅ Собрано 1500 = 1500 из 2000 R\$/);
+    expect(t).toMatch(/715 R\$/);
+  });
+});
