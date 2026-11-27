@@ -3,6 +3,7 @@ import { db } from "../shared/db";
 import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
 import { recordOperatorExample } from "../shared/support-ai-learn";
+import { isAutoSellerText } from "../shared/wb-chat-ai";
 import { noteDbsAdminReply, WB_AI_SEND_CB } from "../shared/wb-delivery-admin-notify";
 import { parseWbReplyCallback, sendWbChatReply, wbOrderForMessage, wbReplyFailText, wbReplyTemplate } from "../shared/wb-chat-reply";
 
@@ -37,13 +38,30 @@ export function registerWbReply(bot: Telegraf): void {
     const eventId = (ctx.match as RegExpMatchArray)[1];
     const ev = await db.wbMarketplaceEvent.findUnique({
       where: { idempotencyKey: `ai-chat:${eventId}` },
-      select: { id: true, payload: true, marketplaceOrderId: true },
+      select: { id: true, payload: true, marketplaceOrderId: true, createdAt: true },
     }).catch(() => null);
     const payload = (ev?.payload ?? {}) as { draft?: string | null; sentBy?: string };
     if (!ev || !payload.draft) return ctx.answerCbQuery("Ответа нет — напишите сами", { show_alert: true }).catch(() => undefined);
     if (payload.sentBy) return ctx.answerCbQuery(`Уже отправил ${payload.sentBy}`).catch(() => undefined);
     const mp = await db.wbMarketplaceOrder.findUnique({ where: { id: ev.marketplaceOrderId! }, select: { wbOrderId: true } }).catch(() => null);
     if (!mp) return ctx.answerCbQuery("Заказ не найден").catch(() => undefined);
+    /* Карточка устарела (27.11.2026, VWU5YU8): черновик 08:31 ушёл в 08:44, хотя
+       в 08:41 владелец уже ответил руками. После карточки в чате ответили или
+       есть карточка новее — не шлём. */
+    const [answeredAfter, newer] = await Promise.all([
+      db.wbBuyerChatEvent.findMany({
+        where: { marketplaceOrderId: ev.marketplaceOrderId!, sender: { not: "client" }, sentAt: { gt: ev.createdAt } },
+        select: { textRedacted: true }, take: 20,
+      }).catch(() => [] as { textRedacted: string | null }[]),
+      db.wbMarketplaceEvent.findFirst({
+        where: { marketplaceOrderId: ev.marketplaceOrderId!, type: { in: ["AI_CHAT_ESCALATED", "AI_CHAT_REPLIED"] }, createdAt: { gt: ev.createdAt } },
+        select: { id: true },
+      }).catch(() => null),
+    ]);
+    if (newer || answeredAfter.some((m: { textRedacted: string | null }) => m.textRedacted && !isAutoSellerText(m.textRedacted))) {
+      await ctx.editMessageReplyMarkup(undefined).catch(() => undefined);
+      return ctx.answerCbQuery("Устарело: после этой карточки в чате уже ответили или пришла новая. Черновик не отправлен.", { show_alert: true }).catch(() => undefined);
+    }
     const actor = actorOf(ctx.from);
     const result = await sendWbChatReply(db as never, mp.wbOrderId, payload.draft, actor);
     if (!result.sent) {

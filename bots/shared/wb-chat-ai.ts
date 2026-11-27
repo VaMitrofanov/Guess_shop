@@ -140,6 +140,37 @@ export function buyerTailText(history: SupportTurn[]): string {
   return tail.join("\n");
 }
 
+/* 🥷 Человек ведёт разговор (27.11.2026, VWU5YU8). Владелец ответил руками в
+   кабинете WB, а через 3 минуты в чат ушёл старый черновик воркера. Правило:
+   если в чате недавно писал человек — воркер сам не пишет, только предлагает. */
+export const HUMAN_TAKEOVER_MS = 12 * 3600_000;
+
+const norm = (t: string) => t.replace(/\s+/g, " ").trim().slice(0, 60).toLowerCase();
+
+/** Автотексты, которые шлёт не человек: синк, заглушка, уведомления о выкупе. */
+export function isAutoSellerText(text: string): boolean {
+  return isHoldingText(text)
+    || /^(Здравствуйте! Для успешного получения|Спасибо, код доставки получен|Ваш заказ выполнен|Код вашего заказа)/.test(text.trim());
+}
+
+/**
+ * Писал ли в чат человек за последние 12 ч: ответ из TG (`TG_REPLY_SENT`, в том
+ * числе отправленный кнопкой черновик) или текст продавца из кабинета WB,
+ * которого нет среди ответов воркера и автотекстов.
+ */
+export function humanRepliedRecently(
+  sellerTexts: { text: string; sentAt: Date; local: boolean }[],
+  botTexts: string[],
+  tgReplyTimes: Date[],
+  now: number,
+): boolean {
+  const since = now - HUMAN_TAKEOVER_MS;
+  if (tgReplyTimes.some((d) => new Date(d).getTime() >= since)) return true;
+  const bot = new Set(botTexts.map(norm));
+  return sellerTexts.some((m) => !m.local && new Date(m.sentAt).getTime() >= since
+    && !isAutoSellerText(m.text) && !bot.has(norm(m.text)));
+}
+
 /** Последнее событие каждого чата за сутки: ждёт ответа, если оно от покупателя. */
 export function chatsAwaitingReply(events: ChatEvent[], now: number): ChatEvent[] {
   const latest = new Map<string, ChatEvent>();
@@ -210,11 +241,29 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       await mark("AI_CHAT_FAILED", { reason: raw ?? "no_answer" });
       continue;
     }
-    const d = guardDecision(raw, text, "wb_chat", {
+    const tgReplies = await db.wbMarketplaceEvent.findMany({
+      where: { marketplaceOrderId: order.id, type: "TG_REPLY_SENT", createdAt: { gte: new Date(now - HUMAN_TAKEOVER_MS) } },
+      select: { createdAt: true },
+    }).catch(() => [] as { createdAt: Date }[]);
+    const botLog = await db.aiSupportLog.findMany({
+      where: { orderCode: ref.code, channel: "wb_chat", answer: { not: null } }, select: { answer: true }, take: 50,
+    }).catch(() => [] as { answer: string | null }[]);
+    const humanLed = humanRepliedRecently(
+      events.filter((e) => e.chatId === last.chatId && !isBuyerSender(e.sender) && e.textRedacted)
+        .map((e) => ({ text: e.textRedacted!, sentAt: e.sentAt, local: e.wbEventId.startsWith("local:") })),
+      botLog.map((r: { answer: string | null }) => r.answer ?? ""),
+      tgReplies.map((r: { createdAt: Date }) => r.createdAt),
+      now,
+    );
+    const decided = guardDecision(raw, text, "wb_chat", {
       // Наш автотекст в чате («код получен», инструкция) — тоже «уже поздоровались».
       greeted: history.some((t) => t.role === "assistant"),
       known: `${context}\n${history.map((t) => t.text).join("\n")}`,
     });
+    // Человек ведёт чат — ответ воркера становится черновиком с кнопкой.
+    const d = humanLed && decided.action === "reply"
+      ? { ...decided, action: "escalate" as const, draft: decided.reply, summary: decided.summary || "Чат ведёт человек — воркер только предлагает" }
+      : decided;
     void aiLogRecord(db, {
       channel: "wb_chat", action: d.action, mode: mode as "on" | "dry", category: d.category,
       peerKey: `wb:${ref.code}`, orderCode: ref.code,
@@ -263,7 +312,7 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       out.escalated++;
       // 🕐 Покупатель на WB при передаче не получал НИЧЕГО (27.11.2026: 22 из 30
       // обращений, ответ человека — часами). Одна заглушка на разговор.
-      if (!history.some((t) => t.role === "assistant" && isHoldingText(t.text))) {
+      if (!humanLed && !history.some((t) => t.role === "assistant" && isHoldingText(t.text))) {
         await notifyBuyerViaWbChat(db, ref.code, holdingText(), { skipIfClaimOpen: false }).catch(() => undefined);
       }
       await mark("AI_CHAT_ESCALATED", { category: d.category, draft: draft || null, code: ref.code });

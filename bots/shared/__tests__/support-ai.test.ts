@@ -2,7 +2,7 @@ jest.mock("../db", () => ({ db: {} }));
 
 import { asPaAiDecision, guardDecision, plain, type PaAiDecision } from "../pa-ai-support";
 import { isConversationalText, parseSupportAiRequest, TurnMemory } from "../support-ai";
-import { buyerTailText, chatsAwaitingReply, wbChatTextForAi } from "../wb-chat-ai";
+import { buyerTailText, chatsAwaitingReply, humanRepliedRecently, isAutoSellerText, wbChatTextForAi } from "../wb-chat-ai";
 
 const reply = (text: string): PaAiDecision => ({ action: "reply", category: "how_to", reply: text, summary: "", draft: "" });
 
@@ -124,4 +124,25 @@ describe("plain — markdown-ссылки не доходят до покупа�
   it("обычные скобки не трогает", () => {
     expect(plain("код (5–7 цифр) [важно]")).toBe("код (5–7 цифр) [важно]");
   });
+});
+
+describe("humanRepliedRecently — человек ведёт чат, воркер только предлагает", () => {
+  const now = Date.parse("2026-11-27T09:00:00Z");
+  const at = (m: number) => new Date(now - m * 60_000);
+  const bot = ["Понимаю. С телефона плейс не создать, поэтому есть два варианта"];
+  it("ответ руками в кабинете WB (VWU5YU8 08:41)", () => {
+    expect(humanRepliedRecently([{ text: "без пароля не получится зайти. Потом нужно будет создать геймпасс", sentAt: at(19), local: false }], bot, [], now)).toBe(true);
+  });
+  it("ответ из TG", () => { expect(humanRepliedRecently([], bot, [at(30)], now)).toBe(true); });
+  it("свои тексты воркера, заглушка и синк — не человек", () => {
+    expect(humanRepliedRecently([
+      { text: "Понимаю. С телефона плейс не создать, поэтому есть два варианта: менеджер…", sentAt: at(5), local: false },
+      { text: "Передали ваш вопрос коллеге — ответим здесь же, в этом чате.", sentAt: at(5), local: false },
+      { text: "Спасибо, код доставки получен! Заказ подтверждён", sentAt: at(5), local: false },
+    ], bot, [], now)).toBe(false);
+  });
+  it("старше 12 ч — воркер снова отвечает сам", () => {
+    expect(humanRepliedRecently([{ text: "ручной ответ", sentAt: at(13 * 60), local: false }], bot, [at(13 * 60)], now)).toBe(false);
+  });
+  it("isAutoSellerText", () => { expect(isAutoSellerText("Ваш заказ выполнен: 500 R$")).toBe(true); expect(isAutoSellerText("без пароля не зайти")).toBe(false); });
 });
