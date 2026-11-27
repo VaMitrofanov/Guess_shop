@@ -1,8 +1,8 @@
 jest.mock("../db", () => ({ db: {} }));
 
-import { asPaAiDecision, guardDecision, type PaAiDecision } from "../pa-ai-support";
+import { asPaAiDecision, guardDecision, plain, type PaAiDecision } from "../pa-ai-support";
 import { isConversationalText, parseSupportAiRequest, TurnMemory } from "../support-ai";
-import { chatsAwaitingReply, wbChatTextForAi } from "../wb-chat-ai";
+import { buyerTailText, chatsAwaitingReply, wbChatTextForAi } from "../wb-chat-ai";
 
 const reply = (text: string): PaAiDecision => ({ action: "reply", category: "how_to", reply: text, summary: "", draft: "" });
 
@@ -95,5 +95,33 @@ describe("память реплик", () => {
     const m = new TurnMemory(3);
     for (let i = 0; i < 5; i++) m.push("u", "user", `t${i}`);
     expect(m.get("u").map((t) => t.text)).toEqual(["t2", "t3", "t4"]);
+  });
+});
+
+describe("buyerTailText — карточка показывает всю очередь покупателя", () => {
+  it("склеивает реплики после нашего ответа (VWU5YU8)", () => {
+    expect(buyerTailText([
+      { role: "user", text: "Помогите" },
+      { role: "assistant", text: "На каком шаге?" },
+      { role: "user", text: "Что за создание геймпасса?" },
+      { role: "user", text: "Я делаю дочке, она тоже не знает" },
+      { role: "user", text: "Сейчас сделаем скрин" },
+    ])).toBe("Что за создание геймпасса?\nЯ делаю дочке, она тоже не знает\nСейчас сделаем скрин");
+  });
+  it("пусто, если последнее слово наше", () => {
+    expect(buyerTailText([{ role: "user", text: "a" }, { role: "assistant", text: "b" }])).toBe("");
+  });
+});
+
+describe("plain — markdown-ссылки не доходят до покупателя", () => {
+  it("снимает обрывок «](/)» в конце (GVD9W9H)", () => {
+    expect(plain("доведём заказ до конца.](/)")).toBe("доведём заказ до конца.");
+  });
+  it("ссылка → текст и адрес", () => {
+    expect(plain("Откройте [инструкцию](https://robloxbank.ru/guide)")).toBe("Откройте инструкцию https://robloxbank.ru/guide");
+    expect(plain("см. [тут](/)")).toBe("см. тут");
+  });
+  it("обычные скобки не трогает", () => {
+    expect(plain("код (5–7 цифр) [важно]")).toBe("код (5–7 цифр) [важно]");
   });
 });

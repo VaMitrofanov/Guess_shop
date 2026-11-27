@@ -128,6 +128,18 @@ export function latestBuyerImageId(events: ChatEvent[], chatId: string): string 
   return null;
 }
 
+/**
+ * Все реплики покупателя после нашего последнего ответа — для карточки и журнала.
+ * Покупатель пишет очередью («Что за геймпасс?» / «Я делаю дочке» / «Сейчас скрин»),
+ * ИИ отвечает на всю очередь, а в карточке было только последнее — ответ
+ * выглядел выдуманным (VWU5YU8, 27.11.2026).
+ */
+export function buyerTailText(history: SupportTurn[]): string {
+  const tail: string[] = [];
+  for (let i = history.length - 1; i >= 0 && history[i].role === "user"; i--) tail.unshift(history[i].text);
+  return tail.join("\n");
+}
+
 /** Последнее событие каждого чата за сутки: ждёт ответа, если оно от покупателя. */
 export function chatsAwaitingReply(events: ChatEvent[], now: number): ChatEvent[] {
   const latest = new Map<string, ChatEvent>();
@@ -177,6 +189,8 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
       .slice(-12)
       .map((e) => ({ role: isBuyerSender(e.sender) ? "user" as const : "assistant" as const, text: eventTextForAi(e) }));
 
+    const asked = buyerTailText(history) || text;
+
     const imageId = latestBuyerImageId(events, last.chatId);
     const image = imageId ? await downloadBuyerChatImage(imageId) : null;
     if (imageId && !image) console.warn(`[wb-chat-ai] картинка ${ref.code} не скачалась — отвечаем по тексту`);
@@ -204,13 +218,13 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     void aiLogRecord(db, {
       channel: "wb_chat", action: d.action, mode: mode as "on" | "dry", category: d.category,
       peerKey: `wb:${ref.code}`, orderCode: ref.code,
-      question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+      question: asked, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
     });
 
     if (mode === "dry") {
       if (d.action !== "ignore") {
         notifyDbsAiEscalation(ref, {
-          text,
+          text: asked,
           summary: d.action === "reply" ? `🧪 тест — бот ответил бы сам: ${plain(d.reply)}` : `🧪 тест — бот передал бы вам: ${d.summary}`,
           draft: d.action === "escalate" ? d.draft : "",
           category: CATEGORY_RU[d.category],
@@ -232,20 +246,20 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
           `👤 ${escapeHtml(order.buyerName ?? "покупатель")} · чат WB`,
           `📦 ${ref.code}${orders[0] ? ` · ${orders[0].amount} R$ · ${orders[0].status}` : ""}`,
           "",
-          `💬 «${escapeHtml(text.slice(0, 600))}»`,
+          `💬 «${escapeHtml(asked.slice(0, 600))}»`,
           "",
           `🤖 ${escapeHtml(plain(d.reply))}`,
         ].join("\n"), { silent: true });
         await mark("AI_CHAT_REPLIED", { category: d.category });
         continue;
       }
-      notifyDbsAiEscalation(ref, { text, summary: `Ответ не ушёл в чат WB (${sent.reason ?? "ошибка"}) — отправьте сами`, draft: plain(d.reply), category: CATEGORY_RU[d.category] }, who);
+      notifyDbsAiEscalation(ref, { text: asked, summary: `Ответ не ушёл в чат WB (${sent.reason ?? "ошибка"}) — отправьте сами`, draft: plain(d.reply), category: CATEGORY_RU[d.category] }, who);
       await mark("AI_CHAT_SEND_FAILED", { reason: sent.reason ?? null });
       continue;
     }
     if (d.action === "escalate") {
       const draft = plain(d.draft || "").trim();
-      notifyDbsAiEscalation(ref, { text, summary: d.summary, draft, category: CATEGORY_RU[d.category], sendKey: last.wbEventId }, who);
+      notifyDbsAiEscalation(ref, { text: asked, summary: d.summary, draft, category: CATEGORY_RU[d.category], sendKey: last.wbEventId }, who);
       out.escalated++;
       // 🕐 Покупатель на WB при передаче не получал НИЧЕГО (27.11.2026: 22 из 30
       // обращений, ответ человека — часами). Одна заглушка на разговор.
