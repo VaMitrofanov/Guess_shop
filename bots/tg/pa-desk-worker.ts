@@ -921,3 +921,40 @@ export async function exportPaDialogs(): Promise<void> {
   await aiWeeklyReport(db, { since, chats: n, messages: msgsTotal })
     .catch((e) => console.warn("[ai-weekly]", e instanceof Error ? e.message : e));
 }
+
+/* ── 📤 Исходящие от разработки (27.11.2026) ────────────────────────────────
+ * Сообщение клиенту от имени @RobloxBank_PA, заданное вне бота (scripts/pa-send.mjs).
+ * Сессию аккаунта нельзя открывать снаружи, поэтому скрипт кладёт текст в
+ * `WbSyncCursor(pa-outbox)`, а воркер отправляет его своим подключением и
+ * отмечает `sent`/`failed`. Каждый элемент уходит не больше одного раза. */
+const OUTBOX_STREAM = "pa-outbox";
+type OutboxItem = { id: string; tgId: string; text: string; status: "new" | "sent" | "failed"; at: string; sentAt?: string; error?: string };
+
+export async function flushPaOutbox(): Promise<void> {
+  if (paDeskMode() !== "on") return;
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: OUTBOX_STREAM } }).catch(() => null);
+  const items = ((row?.metadata as { items?: OutboxItem[] } | null)?.items ?? []);
+  if (!items.some((i) => i.status === "new")) return;
+  const tg = await getClient();
+  for (const i of items.filter((x) => x.status === "new")) {
+    // Сначала помечаем — при падении посередине повтора не будет.
+    i.status = "failed";
+    try {
+      let peer = await tg.getInputEntity(Number(i.tgId)).catch(() => null);
+      if (!peer) {
+        const d = (await tg.getDialogs({ limit: 200 })).find((x: Dialog) =>
+          x.isUser && x.entity instanceof Api.User && String(x.entity.id) === i.tgId);
+        peer = d?.inputEntity ?? null;
+      }
+      if (!peer) throw new Error("нет диалога");
+      await tg.sendMessage(peer, { message: i.text });
+      i.status = "sent";
+      i.sentAt = new Date().toISOString();
+      console.log(`[pa-outbox] отправлено ${i.id} → ${i.tgId}`);
+    } catch (e) {
+      i.error = e instanceof Error ? e.message : String(e);
+      console.warn(`[pa-outbox] ${i.id}:`, i.error);
+    }
+  }
+  await db.wbSyncCursor.update({ where: { stream: OUTBOX_STREAM }, data: { metadata: { items: items.slice(-50) } as never } });
+}

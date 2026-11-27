@@ -30,7 +30,7 @@ import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-rec
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
 import { adminTargets, type AdminTopic } from "../shared/admin-route";
-import { paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
+import { flushPaOutbox, paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
 import { applyPaQuickPlan, dumpPaQuickReplies, syncPaQuickReplies } from "./pa-quick-replies";
 import { runWbChatAiSweep } from "../shared/wb-chat-ai";
 import { startPaDigest, startSilentWeekly } from "./pa-group";
@@ -302,6 +302,7 @@ export function startAutoWorkers(bot: Telegraf): void {
       running = true;
       const n = tick++;
       try {
+        await flushPaOutbox().catch((e) => console.warn("[pa-outbox]", e instanceof Error ? e.message : e));
         const r = await runPaDeskSweep(mode);
         if (r && (r.renamed || r.foldersUpdated || r.archived)) {
           console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, без ответа ${r.waiting}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
