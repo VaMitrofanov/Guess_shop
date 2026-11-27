@@ -256,6 +256,29 @@ async function closeAnsweredCards(db: Db, events: ChatEvent[], now: number): Pro
   }
 }
 
+/**
+ * Ответ на нашу просьбу (27.11.2026, TM6MZJ3): мы попросили ник, покупатель прислал
+ * «ACMVPO» — модель решила, что это код заказа. Если последняя наша реплика
+ * просила ник/пасс, а покупатель ответил одним словом — подсказка, чем оно является.
+ */
+export function replyHint(history: { role: "user" | "assistant"; text: string }[], orderCode?: string | null): string | null {
+  let i = history.length - 1;
+  const tail: string[] = [];
+  while (i >= 0 && history[i].role === "user") tail.unshift(history[i--].text.trim());
+  const ours = i >= 0 ? history[i].text.toLowerCase() : "";
+  const word = tail.join(" ").trim();
+  if (!ours || !/^\S{3,20}$/.test(word)) return null;
+  if (orderCode && word.toUpperCase() === orderCode.toUpperCase()) return null;
+  const asks = /(пришлите|напишите|укажите|отправьте|скиньте)/.test(ours);
+  if (asks && /ник/.test(ours) && !/^\d+$/.test(word)) {
+    return `Покупатель ответил на нашу просьбу прислать ник: «${word}» — это НИК Roblox, а не код. Не переспрашивай и не называй его кодом. Смену ника делает менеджер: escalate, черновик — «Спасибо, ник ${word} получили, меняем его в заказе и напишем здесь же».`;
+  }
+  if (asks && /(геймпасс|game-pass|id пасса|ссылк)/.test(ours) && /^\d{6,}$/.test(word)) {
+    return `Покупатель ответил на нашу просьбу: «${word}» — это ID геймпасса, а не код.`;
+  }
+  return null;
+}
+
 export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen: number; replied: number; escalated: number; dry: number }> {
   const out = { seen: 0, replied: 0, escalated: 0, dry: 0 };
   const mode = await supportChannelMode(db, "wb_chat");
@@ -313,7 +336,8 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     const image = imageId ? await downloadBuyerChatImage(imageId) : null;
     if (imageId && !image) console.warn(`[wb-chat-ai] картинка ${ref.code} не скачалась — отвечаем по тексту`);
     const ocrLine = image ? await screenshotFact(image.data, orders[0]?.amount, orders[0]?.robloxUsername) : null;
-    const fullContext = [context, ocrLine, leadLine].filter(Boolean).join("\n");
+    const hintLine = replyHint(history.map((t) => ({ ...t, text: t.text.replace(/^\[менеджер\] /, "") })), ref.code);
+    const fullContext = [context, ocrLine, leadLine, hintLine].filter(Boolean).join("\n");
     const raw = await decideSupport({ channel: "wb_chat", context: fullContext, turns: history, ...(image ? { image } : {}) });
     const mark = (type: string, payload: Record<string, unknown>) =>
       db.wbMarketplaceEvent.upsert({

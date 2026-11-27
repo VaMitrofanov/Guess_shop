@@ -146,3 +146,20 @@ describe("humanRepliedRecently — человек ведёт чат, ворке�
   });
   it("isAutoSellerText", () => { expect(isAutoSellerText("Ваш заказ выполнен: 500 R$")).toBe(true); expect(isAutoSellerText("без пароля не зайти")).toBe(false); });
 });
+
+import { replyHint } from "../wb-chat-ai";
+describe("replyHint (27.11.2026, TM6MZJ3)", () => {
+  const asked = { role: "assistant" as const, text: "[менеджер] Смену ника в заказе можем сделать мы. Пришлите, пожалуйста, ник Roblox" };
+  it("одно слово после просьбы прислать ник — это ник", () => {
+    expect(replyHint([asked, { role: "user", text: "ACMVPO" }], "TM6MZJ3")).toMatch(/НИК Roblox/);
+  });
+  it("код заказа — не ник", () => {
+    expect(replyHint([asked, { role: "user", text: "TM6MZJ3" }], "TM6MZJ3")).toBeNull();
+  });
+  it("фраза — без подсказки", () => {
+    expect(replyHint([asked, { role: "user", text: "а как его узнать?" }], "X")).toBeNull();
+  });
+  it("без просьбы — без подсказки", () => {
+    expect(replyHint([{ role: "assistant", text: "Заказ выполнен" }, { role: "user", text: "ACMVPO" }], "X")).toBeNull();
+  });
+});
