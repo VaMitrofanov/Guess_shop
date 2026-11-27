@@ -163,3 +163,18 @@ describe("replyHint (27.11.2026, TM6MZJ3)", () => {
     expect(replyHint([{ role: "assistant", text: "Заказ выполнен" }, { role: "user", text: "ACMVPO" }], "X")).toBeNull();
   });
 });
+
+import { nickFactLine, nickFromReply } from "../wb-chat-ai";
+describe("проверка ника из ответа (27.11.2026)", () => {
+  const asked = { role: "assistant" as const, text: "Пришлите, пожалуйста, ник Roblox" };
+  it("ник достаётся из ответа", () => {
+    expect(nickFromReply([asked, { role: "user", text: "ACMVPO" }], "TM6MZJ3")).toBe("ACMVPO");
+  });
+  it("нет аккаунта → проверить написание", () => {
+    expect(nickFactLine({ status: "user_not_found", nick: "x", expectedPrice: 1429 })).toMatch(/НЕТ/);
+  });
+  it("нет пасса → создать пасс нужной цены", () => {
+    expect(nickFactLine({ status: "no_gamepasses", nick: "Acmvpo", expectedPrice: 1429, userId: 1, games: { visibility: "hidden" as never, count: 0 } }))
+      .toMatch(/создать пасс ценой 1429/);
+  });
+});

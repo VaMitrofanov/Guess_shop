@@ -37,6 +37,8 @@ import { escapeHtml } from "./notify";
 import { notifyDbsAiEscalation, notifyDbsBuyerMessage } from "./wb-delivery-admin-notify";
 import { closeAiCards, manualMode, manualRow, sendAiEscalationCard } from "./wb-ai-cards";
 import { mskTime } from "./notify-format";
+import { searchGamepassesByNick, type GamepassSearchOutcome } from "./gamepass-search";
+import { passPriceFor } from "./wb-question-templates";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
@@ -271,12 +273,33 @@ export function replyHint(history: { role: "user" | "assistant"; text: string }[
   if (orderCode && word.toUpperCase() === orderCode.toUpperCase()) return null;
   const asks = /(пришлите|напишите|укажите|отправьте|скиньте)/.test(ours);
   if (asks && /ник/.test(ours) && !/^\d+$/.test(word)) {
-    return `Покупатель ответил на нашу просьбу прислать ник: «${word}» — это НИК Roblox, а не код. Не переспрашивай и не называй его кодом. Смену ника делает менеджер: escalate, черновик — «Спасибо, ник ${word} получили, меняем его в заказе и напишем здесь же».`;
+    return `Покупатель ответил на нашу просьбу прислать ник: «${word}» — это НИК Roblox, а не код. Не переспрашивай и не называй его кодом. Смену ника делает менеджер: escalate, в черновике — «ник получили, меняем в заказе» и следующий шаг по факту проверки ника ниже (если он есть).`;
   }
   if (asks && /(геймпасс|game-pass|id пасса|ссылк)/.test(ours) && /^\d{6,}$/.test(word)) {
     return `Покупатель ответил на нашу просьбу: «${word}» — это ID геймпасса, а не код.`;
   }
   return null;
+}
+
+/** Ник из ответа на нашу просьбу (та же логика, что в `replyHint`). */
+export function nickFromReply(history: { role: "user" | "assistant"; text: string }[], orderCode?: string | null): string | null {
+  const h = replyHint(history, orderCode);
+  return h?.startsWith("Покупатель ответил на нашу просьбу прислать ник") ? h.match(/«([^»]+)»/)?.[1] ?? null : null;
+}
+
+/**
+ * Факт проверки ника для черновика (27.11.2026): существует ли аккаунт, есть ли
+ * пасс нужной цены, видны ли игры — чтобы черновик сразу говорил следующий шаг.
+ */
+export function nickFactLine(o: GamepassSearchOutcome): string {
+  if (o.status === "user_not_found") return `Проверка ника: аккаунта «${o.nick}» в Roblox НЕТ. В черновике попроси проверить ник (точное написание, латиница).`;
+  const name = `аккаунт ${o.nick} (id ${o.userId}) существует`;
+  if (o.status === "ok" && o.matches.length) {
+    const p = o.matches[0];
+    return `Проверка ника: ${name}, есть пасс нужной цены ${o.expectedPrice} R$ (id ${p.gamepassId}). В черновике: ник поменяли, пасс видим, выкупим.`;
+  }
+  const hidden = o.games?.visibility === "hidden" || o.games?.count === 0;
+  return `Проверка ника: ${name}, но пасса за ${o.expectedPrice} R$ нет${hidden ? " (публичных плейсов не видно)" : ""}. В черновике: попроси создать пасс ценой ${o.expectedPrice} R$ в публичном плейсе и прислать ссылку на него.`;
 }
 
 export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen: number; replied: number; escalated: number; dry: number }> {
@@ -337,7 +360,14 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     if (imageId && !image) console.warn(`[wb-chat-ai] картинка ${ref.code} не скачалась — отвечаем по тексту`);
     const ocrLine = image ? await screenshotFact(image.data, orders[0]?.amount, orders[0]?.robloxUsername) : null;
     const hintLine = replyHint(history.map((t) => ({ ...t, text: t.text.replace(/^\[менеджер\] /, "") })), ref.code);
-    const fullContext = [context, ocrLine, leadLine, hintLine].filter(Boolean).join("\n");
+    const hintNick = hintLine ? nickFromReply(history.map((t) => ({ ...t, text: t.text.replace(/^\[менеджер\] /, "") })), ref.code) : null;
+    const nickLine = hintNick && orders[0]?.amount
+      ? await Promise.race([
+          searchGamepassesByNick(hintNick, passPriceFor(orders[0].amount)).then(nickFactLine),
+          new Promise<null>((r) => setTimeout(() => r(null), 25_000)),
+        ]).catch(() => null)
+      : null;
+    const fullContext = [context, ocrLine, leadLine, hintLine, nickLine].filter(Boolean).join("\n");
     const raw = await decideSupport({ channel: "wb_chat", context: fullContext, turns: history, ...(image ? { image } : {}) });
     const mark = (type: string, payload: Record<string, unknown>) =>
       db.wbMarketplaceEvent.upsert({
