@@ -15,3 +15,16 @@ describe("ответ в теме = уточнение к задаче", () => {
   it("по #N в начале", () => expect(ideaForReply(items, undefined, "#2 и вот ещё")?.n).toBe(2));
   it("иначе — новая запись", () => expect(ideaForReply(items, 999, "новая идея")).toBeNull());
 });
+
+describe("доска задач", () => {
+  const { boardText } = jest.requireActual("../ideas-worker") as typeof import("../ideas-worker");
+  it("разделы и «как сделано»", () => {
+    const t = boardText([
+      { ...item(1, 1), status: "done", title: "Цены", result: "сделано 20.11" },
+      { ...item(2, 2), status: "queued", title: "Курс", question: "откуда?" },
+    ]);
+    expect(t).toContain("✅ <b>Сделано</b> (1)");
+    expect(t).toContain("сделано 20.11");
+    expect(t).toContain("#2 Курс · ❓ ждёт ответа");
+  });
+});

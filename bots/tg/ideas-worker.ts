@@ -54,6 +54,11 @@ export interface Idea {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Tg = any;
 
+async function metaOf(): Promise<Record<string, unknown>> {
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: IDEAS_STREAM } }).catch(() => null);
+  return (row?.metadata ?? {}) as Record<string, unknown>;
+}
+
 async function loadItems(): Promise<Idea[]> {
   const row = await db.wbSyncCursor.findUnique({ where: { stream: IDEAS_STREAM } }).catch(() => null);
   const items = ((row?.metadata ?? {}) as { items?: Idea[] }).items;
@@ -71,7 +76,7 @@ async function updateItems(fn: (items: Idea[]) => void): Promise<Idea[]> {
   await db.wbSyncCursor.upsert({
     where: { stream: IDEAS_STREAM },
     create: { stream: IDEAS_STREAM, metadata: { items: kept } as never },
-    update: { metadata: { items: kept } as never },
+    update: { metadata: { ...(await metaOf()), items: kept } as never },
   });
   return kept;
 }
@@ -206,6 +211,48 @@ export async function runIdeasTick(telegram: Tg): Promise<void> {
     const ok = await replyInTopic(telegram, s.chatId, thread, item.messageId, html);
     if (ok) await updateItems((all) => { const x = all.find((i) => i.n === item.n); if (x) x.announced = item.status; });
   }
+
+  await syncBoard(telegram, s.chatId, thread, await loadItems()).catch((e) => console.warn("[ideas] доска:", e instanceof Error ? e.message : e));
+}
+
+/* ── 📋 Доска задач (27.11.2026) ────────────────────────────────────────────
+   Одно закреплённое сообщение в теме, бот переписывает его сам: что открыто,
+   что в работе, что сделано и как. Владелец: «чтобы понимание было». */
+export function boardText(items: Idea[]): string {
+  const line = (i: Idea) => `#${i.n} ${escapeHtml(i.title ?? i.text.slice(0, 60))}`;
+  const open = items.filter((i) => i.status === "new" || i.status === "queued");
+  const work = items.filter((i) => i.status === "in_progress");
+  const done = items.filter((i) => i.status === "done").slice(-15).reverse();
+  const no = items.filter((i) => i.status === "rejected").slice(-5).reverse();
+  const out = ["📋 <b>Доска задач</b> · обновляется сама"];
+  out.push("", `🛠 <b>В работе</b> (${work.length})`, ...(work.length ? work.map(line) : ["—"]));
+  out.push("", `📥 <b>В очереди</b> (${open.length})`, ...(open.length ? open.map((i) => `${line(i)}${i.question ? " · ❓ ждёт ответа" : ""}`) : ["—"]));
+  out.push("", `✅ <b>Сделано</b> (${items.filter((i) => i.status === "done").length})`,
+    ...(done.length ? done.map((i) => `${line(i)}${i.result ? `\n   <i>${escapeHtml(i.result.slice(0, 220))}</i>` : ""}`) : ["—"]));
+  if (no.length) out.push("", "🚫 <b>Не делаем</b>", ...no.map((i) => `${line(i)}${i.result ? ` — <i>${escapeHtml(i.result.slice(0, 120))}</i>` : ""}`));
+  return out.join("\n").slice(0, 4000);
+}
+
+async function syncBoard(telegram: Tg, chatId: number, thread: number, items: Idea[]): Promise<void> {
+  const row = await db.wbSyncCursor.findUnique({ where: { stream: IDEAS_STREAM } }).catch(() => null);
+  const meta = (row?.metadata ?? {}) as { boardMessageId?: number; boardText?: string };
+  const text = boardText(items);
+  if (meta.boardText === text && meta.boardMessageId) return;
+  let id = meta.boardMessageId;
+  if (id) {
+    const ok = await telegram.editMessageText(chatId, id, undefined, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true } })
+      .then(() => true).catch((e: unknown) => /not modified/i.test(String(e)));
+    if (!ok) id = undefined;
+  }
+  if (!id) {
+    const sent = await telegram.sendMessage(chatId, text, { parse_mode: "HTML", message_thread_id: thread, disable_notification: true, link_preview_options: { is_disabled: true } }).catch(() => null);
+    if (!sent) return;
+    id = sent.message_id;
+    await telegram.pinChatMessage(chatId, id, { disable_notification: true }).catch(() => undefined);
+  }
+  const fresh = await db.wbSyncCursor.findUnique({ where: { stream: IDEAS_STREAM } }).catch(() => null);
+  const m = (fresh?.metadata ?? {}) as Record<string, unknown>;
+  await db.wbSyncCursor.update({ where: { stream: IDEAS_STREAM }, data: { metadata: { ...m, boardMessageId: id, boardText: text } as never } }).catch(() => undefined);
 }
 
 export function startIdeasWorker(bot: Telegraf): void {
