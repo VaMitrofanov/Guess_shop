@@ -75,6 +75,7 @@ import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from 
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { clearGamepassFails, reportGamepassFail, type GamepassFailReason } from "../shared/gamepass-stuck-notice";
 import { heldOrderBuyerText, isOrderHeld } from "../shared/held-order-notice";
+import { PARKED_KEY_LINE, parkRobloxKey } from "../shared/parked-key";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 
 /** Узкие представления `db` для шага геймпасса — без `any`. */
@@ -4255,6 +4256,11 @@ async function handleVkApiKeyInput(
   // Ключ годный, не хватает ссылки на игру — держим его до следующего сообщения.
   if (verdict.needsGameLink && outcome.created.length === 0) heldGameKeys.hold(vkUserId, key);
   else heldGameKeys.drop(vkUserId);
+  // Годный ключ упёрся не в себя — сохраняем, воркер применит сам (`parked-key.ts`).
+  const parked = outcome.created.length === 0
+    ? await parkRobloxKey(db, { key, nick: pending.nick, error: outcome.error, vkId: vkUserId, wbCode: pending.wbCode })
+    : false;
+  if (parked) verdict.text = `${verdict.text}\n\n${PARKED_KEY_LINE}`;
   await showVkQuest(
     ctx,
     questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }),
@@ -4980,6 +4986,9 @@ async function handleVkDirectApiKey(ctx: MessageContext, vkUserId: number, raw: 
     const verdict = keyCreateVerdict(outcome.error);
     if (verdict.needsGameLink) heldGameKeys.hold(vkUserId, key);
     else heldGameKeys.drop(vkUserId);
+    if (await parkRobloxKey(db, { key, nick: st.robloxUsername, error: outcome.error, vkId: vkUserId })) {
+      verdict.text = `${verdict.text}\n\n${PARKED_KEY_LINE}`;
+    }
     await showVkQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: st.robloxUsername }), "VK/direct-key-fail");
     if (verdict.placeHelp) await sendPlaceHelpVk(ctx, vkUserId, verdict.placeHelp, { wbCode: null, denomination: null, nick: st.robloxUsername });
     return;

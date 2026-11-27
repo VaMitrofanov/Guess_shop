@@ -72,7 +72,7 @@ describe("шаги и кадры", () => {
 
   it("шаги называют Studio, New Experience и Publish to Roblox", () => {
     const text = placeStepsText();
-    for (const word of ["Roblox Studio", "New Experience", "Publish to Roblox", "только на компьютере", "ключ ещё раз"]) {
+    for (const word of ["Roblox Studio", "New Experience", "Publish to Roblox", "только на компьютере", "ключ у нас сохранён"]) {
       expect(text).toContain(word);
     }
   });

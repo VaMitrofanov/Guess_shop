@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { createGamePassViaBridge } from "@/lib/roblox-gamepass-create";
 import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { appendOrderAudit } from "@/lib/order-recovery";
+import { parkRobloxKey } from "../../bots/shared/parked-key";
 import { auditGamepassAutocreated, type OrderAuditClient } from "@/lib/order-audit";
 import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
 import { recordKeyOutcome } from "../../bots/shared/key-outcomes";
@@ -43,6 +44,8 @@ interface KeyCreateOutcome {
   created: CreatedPass[];
   /** Машинный код отказа: `bad_scope`, `not_authorized`, … Пусто — всё создано. */
   error?: string;
+  /** Ключ годный и отложен: применится сам, когда станет можно. */
+  parked?: boolean;
 }
 
 /** Отсечь мусор из цен: только целые в разумных пределах, не больше `MAX_TARGETS`. */
@@ -112,9 +115,15 @@ export async function createPassesWithKey(opts: {
     });
   }
 
+  // 🔑 Годный ключ упёрся не в себя (нет игры, сбой) — откладываем: воркер
+  // применит его сам, как только станет можно (`bots/shared/parked-key.ts`).
+  const parked = created.length === 0
+    ? await parkRobloxKey(prisma, { key: opts.key, nick: opts.nick, error: failure, userId: opts.userId ?? null, wbCode: opts.code || null })
+    : false;
+
   // 🔑 Учёт исходов ключа (15.11.2026): видно, почему ключ не сработал.
   await recordKeyOutcome(prisma, { via: opts.via === "admin-key" ? "admin" : "site", result: failure ?? "ok", nick: opts.nick });
-  return failure ? { created, error: failure } : { created };
+  return failure ? { created, error: failure, ...(parked ? { parked: true } : {}) } : { created };
 }
 
 /**

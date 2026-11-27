@@ -13,7 +13,7 @@
 
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
-import { ADMIN_IDS } from "../shared/admin";
+import { ADMIN_IDS, sendAdminOrderCard } from "../shared/admin";
 import { tgSend, tgDeliveryOutcome, vkSend, vkCanReceive, escapeHtml } from "../shared/notify";
 
 import { searchGamepassesByNick } from "../shared/gamepass-search";
@@ -22,6 +22,7 @@ import { DONOR_NET_CAPACITY } from "../shared/gamepass-plan";
 
 
 import { runWbTokenWatch } from "../shared/wb-token-watch";
+import { runParkedKeySweep } from "../shared/parked-key";
 import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
 import { orderPinMarkupTg, syncOrderPins } from "../shared/order-pin";
 import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
@@ -205,6 +206,27 @@ export function startAutoWorkers(bot: Telegraf): void {
   // deploy proves the worker alive within минуты, не через час.
   setTimeout(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] boot:", e)), 70_000);
   setInterval(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] tick:", e)), 60 * 60 * 1000);
+
+  // 🔑 Отложенные ключи (27.11.2026): годный ключ, упёршийся в «нет игры» или
+  // сбой, применяется сам, как только станет можно (`parked-key.ts`).
+  const parkedKeys = () => runParkedKeySweep(db, {
+    sendBuyer: async (user, text) => {
+      if (user.tgId) await tgSend(user.tgId, escapeHtml(text), { parse_mode: "HTML" });
+      else if (user.vkId) await vkSend(user.vkId, text);
+    },
+    alertAdmins: (html) => alertAdmins(html),
+    orderCard: async (order, opts) => {
+      await sendAdminOrderCard({
+        id: order.id, amount: order.amount, gamepassUrl: order.gamepassUrl,
+        platform: order.platform === "VK" ? "VK" : "TG", orderSource: order.orderSource,
+        wbCode: order.wbCode, userDisplay: "отложенный ключ", createdAt: order.createdAt,
+        creatorName: order.robloxUsername ?? undefined, viaKey: true, heldReason: opts.heldReason,
+      });
+    },
+  }).then((r) => { if (r.applied || r.stale || r.expired) console.log("[parked-key]", JSON.stringify(r)); })
+    .catch((e) => console.error("[parked-key] tick:", e));
+  setTimeout(parkedKeys, 180_000);
+  setInterval(parkedKeys, 60 * 60 * 1000);
 
   // Срок токена WB: раз в час, первый прогон через 2 минуты после старта
   // (01.11.2026 токен истёк молча — бот 7 часов не видел заказы DBS).

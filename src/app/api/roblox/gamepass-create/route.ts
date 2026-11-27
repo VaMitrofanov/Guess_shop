@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
   const outcome = await createPassesWithKey({ key, nick, code, userId: ownerForNewKey, targets, game });
 
   if (outcome.error) {
-    return NextResponse.json({ ok: false, error: outcome.error, created: outcome.created });
+    return NextResponse.json({ ok: false, error: outcome.error, created: outcome.created, ...(outcome.parked ? { parked: true } : {}) });
   }
   console.log(`[gamepass-create] создано пассов: ${outcome.created.length}`);
   return NextResponse.json({ ok: true, created: outcome.created });

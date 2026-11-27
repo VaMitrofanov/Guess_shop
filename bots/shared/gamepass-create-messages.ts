@@ -152,8 +152,9 @@ const OURS: KeyCreateVerdict = {
 };
 
 export function keyCreateVerdict(error?: string | null): KeyCreateVerdict {
-  if (!error) return OURS;
-  return VERDICTS[error] ?? OURS;
+  if (!error) return { ...OURS };
+  // Копия: ветки ключа дописывают в `text` строку про отложенный ключ.
+  return { ...(VERDICTS[error] ?? OURS) };
 }
 
 /**

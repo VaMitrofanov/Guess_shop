@@ -1,15 +1,12 @@
-import { HELD_KEY_TTL_MS, createHeldApiKeyStore } from "../held-api-key";
+import { createHeldApiKeyStore } from "../held-api-key";
 
-/** Ключ ждёт ссылку на игру 15 минут и только в памяти процесса. */
+/** С 27.11.2026 ключ в памяти бессрочный: живёт до привязки пасса или drop. */
 describe("held api key", () => {
-  it("отдаёт ключ, пока он жив, и забывает после срока", () => {
-    let now = 1_000;
-    const store = createHeldApiKeyStore(() => now);
+  it("отдаёт ключ без срока", () => {
+    const store = createHeldApiKeyStore();
     store.hold(7, "secret-key");
     expect(store.get(7)).toBe("secret-key");
     expect(store.get("7")).toBe("secret-key");
-    now += HELD_KEY_TTL_MS + 1;
-    expect(store.get(7)).toBeNull();
   });
 
   it("drop стирает ключ сразу", () => {

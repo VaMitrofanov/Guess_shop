@@ -87,6 +87,8 @@ export async function createPassesByKey(opts: {
    * ищется по нику — среди публичных и закрытых игр аккаунта.
    */
   game?: { universeId: string } | { placeId: string } | null;
+  /** Повтор отложенного ключа (`parked-key.ts`): ежечасный «игры всё ещё нет» не пишем в /key_stats. */
+  quiet?: boolean;
 }): Promise<AutocreateOutcome> {
   const created: AutocreatedPass[] = [];
   const targets = opts.targets
@@ -106,7 +108,7 @@ export async function createPassesByKey(opts: {
     if (!res.ok || !res.gamePassId) {
       const error = res.error ?? "roblox_error";
       console.warn(`[gamepass-autocreate] отказ: ${error} (создано ${created.length})`);
-      emitKeyOutcome({ result: error, nick: opts.nick });
+      if (!opts.quiet) emitKeyOutcome({ result: error, nick: opts.nick });
       return { created, error };
     }
     created.push({

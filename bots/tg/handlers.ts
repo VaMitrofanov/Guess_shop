@@ -80,6 +80,7 @@ import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from 
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { clearGamepassFails, reportGamepassFail, type GamepassFailReason } from "../shared/gamepass-stuck-notice";
 import { heldOrderBuyerText, isOrderHeld } from "../shared/held-order-notice";
+import { PARKED_KEY_LINE, parkRobloxKey } from "../shared/parked-key";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 import { escapeReviewReason, normalizeCustomReviewReason, REVIEW_REJECT_REASONS, reviewRejectReasonText } from "../shared/review-reject";
 
@@ -3884,6 +3885,11 @@ async function handleApiKeyInput(bot: Telegraf, ctx: any, raw: string): Promise<
   // Ключ годный, не хватает ссылки на игру — держим его до следующего сообщения.
   if (verdict.needsGameLink && outcome.created.length === 0) heldGameKeys.hold(ctx.from.id, key);
   else heldGameKeys.drop(ctx.from.id);
+  // Годный ключ упёрся не в себя — сохраняем, воркер применит сам (`parked-key.ts`).
+  const parked = outcome.created.length === 0
+    ? await parkRobloxKey(db, { key, nick: pending.nick, error: outcome.error, tgId: ctx.from.id, wbCode: pending.wbCode })
+    : false;
+  if (parked) verdict.text = `${verdict.text}\n\n${PARKED_KEY_LINE}`;
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: pending.wbCode, nick: pending.nick }), edit);
   if (verdict.placeHelp) await sendPlaceHelpTg(ctx, verdict.placeHelp, { wbCode: pending.wbCode, denomination: pending.denomination, nick: pending.nick });
 }
@@ -3959,6 +3965,9 @@ async function handleDirectApiKeyInput(bot: Telegraf, ctx: any, raw: string): Pr
   const verdict = keyCreateVerdict(outcome.error);
   if (verdict.needsGameLink) heldGameKeys.hold(ctx.from.id, key);
   else heldGameKeys.drop(ctx.from.id);
+  if (await parkRobloxKey(db, { key, nick: pending.nick, error: outcome.error, tgId: ctx.from.id })) {
+    verdict.text = `${verdict.text}\n\n${PARKED_KEY_LINE}`;
+  }
   await showQuest(ctx, questKeyFailScreen({ verdict, wbCode: "", nick: pending.nick }), edit);
   if (verdict.placeHelp) await sendPlaceHelpTg(ctx, verdict.placeHelp, { wbCode: null, denomination: null, nick: pending.nick });
 }

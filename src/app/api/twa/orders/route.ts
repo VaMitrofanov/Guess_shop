@@ -90,6 +90,7 @@ import { riskInfoForCodes, type OrderRisk } from "@/lib/order-risk";
 import { loadOrderContacts, type OrderContactSummary } from "@/lib/order-contact";
 import { countQualifiedInvites } from "@/lib/codes/referral";
 import { keyCreateVerdict } from "../../../../../bots/shared/gamepass-create-messages";
+import { parkRobloxKey } from "../../../../../bots/shared/parked-key";
 import { MAX_KEY_LEN, looksLikeApiKey } from "../../../../../bots/shared/gamepass-autocreate";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -2603,8 +2604,12 @@ export async function POST(req: NextRequest) {
     if (!verdict.ok) {
       const human = keyCreateVerdict(verdict.error);
       console.warn(`[admin-key] ключ не принят: ${verdict.error} (заказ ${order.wbCode})`);
+      // Годный ключ (нет игры, сбой Roblox) не теряем: воркер применит сам.
+      const parked = await parkRobloxKey(prisma, {
+        key, nick, error: verdict.error, userId: order.user?.id ?? order.userId ?? null, wbCode: order.wbCode,
+      });
       return NextResponse.json(
-        { error: `${human.title}. ${human.text}`, code: verdict.error ?? "roblox_error", needsGameLink: human.needsGameLink ?? false },
+        { error: `${human.title}. ${human.text}${parked ? " Ключ сохранён — пасс создастся сам, как только станет можно." : ""}`, code: verdict.error ?? "roblox_error", needsGameLink: human.needsGameLink ?? false, parked },
         { status: 409 },
       );
     }
