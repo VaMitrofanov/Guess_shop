@@ -18,6 +18,7 @@ import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import NickGamepasses from "../NickGamepasses";
 import { AskBuyerForm, AttachGamepassForm, KeyCreateForm } from "../GamepassTools";
 import { OrderComposition, OrderPlaceBlock } from "../OrderSettingsBlocks";
+import WbClaimPanel from "../WbClaimPanel";
 import { parseGamepassRef, parseGamepassRefs } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
@@ -3352,6 +3353,9 @@ function OrderCard({
           </div>
         )}
       </div>
+
+      {/* ↩ Заявка на возврат WB — решить прямо отсюда (27.11.2026). */}
+      <WbClaimPanel code={order.wbCode} token={token} flags={order.flags} onChanged={onMoved} />
 
       {/* ── Разделы полной шторки ─────────────────────────────────────────── */}
       <section data-form="gamepass" className="twa-os-sec">

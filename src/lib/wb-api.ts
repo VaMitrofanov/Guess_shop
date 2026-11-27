@@ -780,3 +780,77 @@ export async function getSupplies(): Promise<TwaSupply[] | null> {
     return cache.supplies?.data ?? null;
   }
 }
+
+// ── 💰 Баланс кабинета WB (27.11.2026) ──────────────────────────────────────
+/* `finance-api /api/v1/account/balance`: текущий баланс и сколько можно вывести.
+   Кэш 10 минут — главная TWA опрашивается раз в 30 секунд, а баланс за минуты
+   не меняется. Сбой отдаёт последнее известное значение (с его временем). */
+const BalanceSchema = z.object({
+  currency: z.string().optional(),
+  current: z.number(),
+  for_withdraw: z.number().optional().default(0),
+});
+export interface WbBalance { current: number; forWithdraw: number; currency: string; at: string }
+const BALANCE_TTL = 10 * 60_000;
+let balanceCache: { data: WbBalance; ts: number } | null = null;
+let balanceInflight: Promise<WbBalance | null> | null = null;
+
+export async function getWbBalance(): Promise<WbBalance | null> {
+  if (balanceCache && Date.now() - balanceCache.ts < BALANCE_TTL) return balanceCache.data;
+  balanceInflight ??= (async () => {
+    const res = await fetchWb("https://finance-api.wildberries.ru/api/v1/account/balance", BalanceSchema);
+    if (!res) return balanceCache?.data ?? null;
+    const data = { current: res.current, forWithdraw: res.for_withdraw, currency: res.currency ?? "RUB", at: new Date().toISOString() };
+    balanceCache = { data, ts: Date.now() };
+    return data;
+  })().finally(() => { balanceInflight = null; });
+  return balanceInflight;
+}
+
+// ── ↩ Заявки покупателей на возврат (27.11.2026) ─────────────────────────────
+/* `returns-api`: заявку находим по `srid` (= `rid` нашей строки DBS) в активных и
+   архиве. `actions` — что WB разрешает продавцу по ЭТОЙ заявке; кнопки строятся
+   только из них: approve… и autorefund… — вернуть деньги, reject… — отказать
+   (rejectcustom — с нашим комментарием, от 10 символов). */
+const ClaimSchema = z.object({
+  id: z.string(),
+  srid: z.string().optional().nullable(),
+  status: z.number().optional(),
+  status_ex: z.number().optional(),
+  dt: z.string().optional(),
+  user_comment: z.string().optional().nullable(),
+  actions: z.array(z.string()).optional().default([]),
+  price: z.number().optional(),
+}).passthrough();
+const ClaimsSchema = z.object({ claims: z.array(ClaimSchema).optional().default([]) }).passthrough();
+export type WbClaim = z.infer<typeof ClaimSchema>;
+
+export async function findWbClaimBySrid(srid: string): Promise<WbClaim | null> {
+  for (const archive of ["false", "true"]) {
+    const res = await fetchWb(`https://returns-api.wildberries.ru/api/v1/claims?is_archive=${archive}&limit=200`, ClaimsSchema);
+    const hit = res?.claims.find((c) => c.srid === srid);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Ответ на заявку. `ok:false` — текст ошибки WB (для тоста). */
+export async function answerWbClaim(id: string, action: string, comment?: string): Promise<{ ok: boolean; error?: string }> {
+  const token = getWbToken();
+  if (!token) return { ok: false, error: "токен WB не задан" };
+  try {
+    const res = await fetch("https://returns-api.wildberries.ru/api/v1/claim", {
+      method: "PATCH",
+      cache: "no-store",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify(comment ? { id, action, comment } : { id, action }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.ok) return { ok: true };
+    const body = await res.json().catch(() => null) as { detail?: string; title?: string } | null;
+    console.error(`[wb-api] claim ${res.status}: ${body?.detail ?? body?.title ?? ""}`.slice(0, 300));
+    return { ok: false, error: body?.detail ?? body?.title ?? `WB ответил ${res.status}` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "сеть" };
+  }
+}

@@ -29,6 +29,7 @@ import { NowBlock, OrderFeed } from "./order-signals";
 import { replyForOrder } from "@/lib/order-reply";
 import { canOrderAction, ORDER_ACTION_OFF_LABEL, ORDER_ACTIONS } from "@/lib/order-actions";
 import OrderPlaceBox from "./order-place";
+import WbClaimPanel from "@/app/twa/_components/WbClaimPanel";
 
 const TONE_CLASS: Record<BuyoutTone, string> = {
   green: styles.toneGreen, red: styles.toneRed, orange: styles.toneOrange, neutral: styles.toneNeutral, muted: styles.toneMuted,
@@ -335,6 +336,8 @@ export default function OrderDossier({
         {/* Сигналы — часть шапки (11.11.2026): заморозка, пометки и решения по
             ним одним блоком, у каждого своё действие справа. */}
         <NowBlock order={order} onUnhold={onHold} onAck={(flag) => onAckFlag?.(flag)} />
+        {/* ↩ Заявка на возврат WB — тот же блок, что в TWA (27.11.2026). */}
+        <WbClaimPanel code={order.wbCode} token="" flags={order.flags} onChanged={onChanged} />
         {/* ID пасса — главное в досье: на компьютере выкупают вставкой ID.
             Крупная плашка, клик (или C) копирует. В TWA на этом месте ник. */}
         {ids.length > 0 && (

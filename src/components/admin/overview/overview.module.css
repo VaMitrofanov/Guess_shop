@@ -564,3 +564,26 @@
 .prioIssue > button:disabled { opacity: .45; }
 .prioIssue > .prioGhost { background: rgba(255,255,255,.1); color: #fff; }
 .prioRow { flex-wrap: wrap; }
+
+/* 💰 Баланс WB и ↩ возвраты (27.11.2026) — фиолетовым, чтобы не спутать с зелёным героем робуксов. */
+.wbMoney { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.wbBalance { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; border-radius: 18px;
+  background: linear-gradient(160deg, rgba(167,139,250,.20), rgba(31,25,45,.9) 65%); border: 1px solid rgba(167,139,250,.28); }
+.wbBalanceHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: #d9ccff; }
+.wbBalanceHead > span { display: inline-flex; align-items: center; gap: 7px; }
+.wbBalanceNum { font-size: 40px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: #f7f5ff; }
+.wbBalanceNum small { font-size: 22px; color: #aaa4b8; font-weight: 600; }
+.wbMuted { font-size: 13px; color: #aaa4b8; font-weight: 400; }
+.wbMuted b { color: #f7f5ff; }
+.wbClaims { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; border-radius: 18px; background: rgba(255,69,58,.07); border: 1px solid rgba(255,105,97,.30); }
+.wbClaims .wbBalanceHead { color: #ff8a82; }
+.wbClaimRow { display: grid; grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1.4fr) 92px 64px; gap: 10px; align-items: center;
+  min-height: 40px; padding: 4px 8px; border-radius: 10px; color: #f7f5ff; text-decoration: none; font-size: 14px; }
+.wbClaimRow:hover { background: rgba(255,255,255,.05); }
+.wbClaimRow code { font-weight: 700; }
+.wbClaimRow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbClaimGo { color: #ff8a82; font-weight: 600; text-align: right; }
+@media (max-width: 640px) {
+  .wbClaimRow { grid-template-columns: 84px minmax(0, 1fr) 60px; }
+  .wbClaimRow > span:nth-of-type(2), .wbClaimRow > span:nth-of-type(3) { display: none; }
+}

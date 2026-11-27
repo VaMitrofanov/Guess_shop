@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
-import { getFeedbackSummary, getStats30d } from "@/lib/wb-api";
+import { getFeedbackSummary, getStats30d, getWbBalance } from "@/lib/wb-api";
+import { loadOpenClaims } from "@/lib/wb-claims-open";
 import { prisma } from "@/lib/prisma";
 import { getBrowserSession } from "@/lib/browser-purchase";
 import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, HELD_LIVE, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, SILENT_REMINDERS } from "@/lib/order-queue";
@@ -197,7 +198,7 @@ export async function GET(req: NextRequest) {
       displayName: twaUser.firstName || `TG ${twaUser.userId}`,
     }).catch(() => null);
 
-  const [statsRaw, core, feedbackRaw, donor, shiftData, vkHumanRaw] = await Promise.all([
+  const [statsRaw, core, feedbackRaw, donor, shiftData, vkHumanRaw, balanceRaw, openClaims] = await Promise.all([
     // WB API — внешний и медленный; главная его не ждёт дольше 400 мс (кэш
     // прогреется в фоне, данные придут со следующим опросом через 30 с).
     withTimeout(getStats30d().catch(() => null), 400),
@@ -217,7 +218,12 @@ export async function GET(req: NextRequest) {
     // «Ждут ответа в ВК»: обращения, на которые нужен человек, без ответа
     // менеджера. Ответ проверяется в ВК (кэш 2 мин) — главная не ждёт дольше 1,5 с.
     withTimeout(loadVkNeedsHuman().catch(() => null), 1_500),
+    // 💰 Баланс кабинета WB (27.11.2026): кэш 10 мин, главная ждёт не дольше 600 мс.
+    withTimeout(getWbBalance().catch(() => null), 600),
+    // ↩ Заявки на возврат, ждущие решения (27.11.2026).
+    loadOpenClaims(5).catch(() => ({ total: 0, rows: [] })),
   ]);
+  const wbBalance = balanceRaw === PENDING ? null : balanceRaw;
   const vkNeedsHuman = vkHumanRaw === PENDING ? null : vkHumanRaw;
   const { codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, dbs, firstInLine, codeOrders } = core;
 
@@ -332,6 +338,8 @@ export async function GET(req: NextRequest) {
     inbox,
     vkNeedsHuman,
     dbs,
+    wbBalance,
+    openClaims,
     // Пока WB догружается в фоне (холодный кэш), плашку «недоступен» не
     // показываем: данные придут со следующим опросом.
     apiAvailable: statsPending || !!stats,

@@ -7,6 +7,7 @@ import {
   ExternalLink,
   RefreshCw,
   Ticket,
+  Wallet,
   Zap,
 } from "lucide-react";
 import { C } from "../theme";
@@ -75,6 +76,10 @@ interface DashData {
   dbs: DbsSnapshot | null;
   apiAvailable: boolean;
   tokenPresent?: boolean;
+  /** 💰 Баланс кабинета WB (27.11.2026). `null` — WB не ответил. */
+  wbBalance?: { current: number; forWithdraw: number; currency: string; at: string } | null;
+  /** ↩ Заявки на возврат WB, ждущие решения (27.11.2026). */
+  openClaims?: { total: number; rows: { code: string; amount: number; status: string; reason: string | null; at: string }[] };
 }
 
 /** Как часто главная обновляется сама, пока экран на виду (решение О4). */
@@ -316,6 +321,32 @@ export default function Dashboard({
         </button>
       </div>
       <div className="twa-ori">
+        {/* 💰 Баланс кабинета WB — рубли, фиолетовым, с кошельком; ниже зелёным —
+            робуксы к выкупу. Две разные валюты рядом не должны путаться (владелец 27.11). */}
+        {data.wbBalance && (
+          <div className="twa-wb-balance" style={{
+            gridColumn: "span 2",
+            background: `linear-gradient(160deg, ${C.accent}38, rgba(41,34,57,0.85) 62%)`,
+            border: `1px solid ${C.accent}4d`, borderRadius: 20, padding: "14px 16px",
+            display: "flex", flexDirection: "column", gap: 8,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 15, fontWeight: 600, color: "#d9ccff" }}>
+                <Wallet size={17} aria-hidden="true" /> Кабинет WB
+              </span>
+              <span style={{ fontSize: 13, color: C.textSecondary }}>{fmtAge(data.wbBalance.at)} назад</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <strong style={{ fontSize: 32, fontWeight: 700, letterSpacing: -0.4, color: C.textPrimary }}>
+                {Math.round(data.wbBalance.current).toLocaleString("ru-RU")}
+              </strong>
+              <span style={{ fontSize: 20, fontWeight: 600, color: C.textSecondary }}>₽</span>
+            </div>
+            <span style={{ fontSize: 14, color: C.textSecondary }}>
+              к выводу <b style={{ color: C.textPrimary }}>{rub(Math.round(data.wbBalance.forWithdraw))}</b>
+            </span>
+          </div>
+        )}
         <div className="twa-ori-till">
           <button type="button" className="twa-ori-till-main twa-press-sm" onClick={() => openOrders("BUYOUT")}>
             <span className="twa-ori-l">К выкупу{buyout.orders > 0 && <> · старейший <b style={{ color: ageColor(buyout.oldestAt) }}>{fmtAge(buyout.oldestAt)}</b></>}</span>
@@ -340,6 +371,16 @@ export default function Dashboard({
             <span className="twa-ori-l">WB Доставка</span>
             <strong>{dbs.needsUs > 0 ? dbs.needsUs : dbs.unclosed}</strong>
             <span className="twa-ori-s">{dbs.needsUs > 0 ? "ждут нашего хода" : "ждут покупателя"}{dbs.overdue > 0 ? ` · ${dbs.overdue} просрочено` : dbsOldest ? ` · ${fmtAge(dbsOldest)}` : ""}</span>
+          </button>
+        )}
+        {(data.openClaims?.total ?? 0) > 0 && (
+          /* ↩ Возвраты WB ждут решения: отклонить и выкупить или вернуть —
+             из карточки заказа (27.11.2026). Тап открывает первый заказ. */
+          <button type="button" className="twa-ori-tile is-red twa-press-sm"
+            onClick={() => { haptic.select(); onOpenOrders?.(data.openClaims!.rows[0]?.code); }}>
+            <span className="twa-ori-l">Возвраты WB</span>
+            <strong>{data.openClaims!.total}</strong>
+            <span className="twa-ori-s">ждут решения · {data.openClaims!.rows[0]?.code}</span>
           </button>
         )}
         {errors.count > 0 && (

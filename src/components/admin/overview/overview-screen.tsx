@@ -19,6 +19,7 @@ import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
 import type { AdminOverview, OverviewFeedRow, OverviewQueueOrder } from "@/types/admin-overview";
 import FirstInLinePanel from "@/components/admin/first-in-line/first-in-line-panel";
 import styles from "./overview.module.css";
+import WbMoney from "./wb-money";
 import { cn } from "@/lib/utils";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +396,9 @@ export default function OverviewScreen({
         onChanged={() => void refresh(true)}
         onToast={showToast}
       />
+
+      {/* 💰 Баланс кабинета WB и ↩ возвраты — над робуксами (27.11.2026). */}
+      <WbMoney />
 
       {/* ── 1. Ответ: сколько робуксов тратим прямо сейчас ─────────────────── */}
       <section className={styles.hero} aria-label="Очередь выкупа">
