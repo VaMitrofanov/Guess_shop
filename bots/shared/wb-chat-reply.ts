@@ -89,6 +89,9 @@ export async function sendWbChatReply(db: Db, wbOrderId: string, rawText: string
       payload: { length: text.length },
     },
   }).catch(() => undefined);
+  // ✅ Ответ человека — у карточек воркера по заказу «Отправить» больше нет.
+  await import("./wb-ai-cards").then(({ closeAiCards, answeredLabel }) => closeAiCards(db, order.id, answeredLabel(actor, sentAt)))
+    .catch(() => undefined);
   return { sent: true };
 }
 

@@ -4,7 +4,9 @@ import { ADMIN_IDS } from "../shared/admin";
 import { escapeHtml } from "../shared/notify";
 import { recordOperatorExample } from "../shared/support-ai-learn";
 import { isAutoSellerText } from "../shared/wb-chat-ai";
-import { noteDbsAdminReply, WB_AI_SEND_CB } from "../shared/wb-delivery-admin-notify";
+import { noteDbsAdminReply } from "../shared/wb-delivery-admin-notify";
+import { ACCOUNT_HANDOFF_TEXT, refreshManualRow, setManualMode, WB_AI_ACCOUNT_CB, WB_AI_AUTO_CB, WB_AI_MANUAL_CB, WB_AI_NOOP_CB, WB_AI_SEND_CB } from "../shared/wb-ai-cards";
+import { setFlag } from "../shared/order-flags";
 import { parseWbReplyCallback, sendWbChatReply, wbOrderForMessage, wbReplyFailText, wbReplyTemplate } from "../shared/wb-chat-reply";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -43,6 +45,8 @@ export function registerWbReply(bot: Telegraf): void {
     const payload = (ev?.payload ?? {}) as { draft?: string | null; sentBy?: string };
     if (!ev || !payload.draft) return ctx.answerCbQuery("Ответа нет — напишите сами", { show_alert: true }).catch(() => undefined);
     if (payload.sentBy) return ctx.answerCbQuery(`Уже отправил ${payload.sentBy}`).catch(() => undefined);
+    const closed = (payload as { closed?: string }).closed;
+    if (closed) return ctx.answerCbQuery(`Устарело: ${closed}. Черновик не отправлен.`, { show_alert: true }).catch(() => undefined);
     const mp = await db.wbMarketplaceOrder.findUnique({ where: { id: ev.marketplaceOrderId! }, select: { wbOrderId: true } }).catch(() => null);
     if (!mp) return ctx.answerCbQuery("Заказ не найден").catch(() => undefined);
     /* Карточка устарела (27.11.2026, VWU5YU8): черновик 08:31 ушёл в 08:44, хотя
@@ -68,10 +72,54 @@ export function registerWbReply(bot: Telegraf): void {
       await ctx.answerCbQuery(`Не ушло: ${wbReplyFailText(result.reason)}`, { show_alert: true }).catch(() => undefined);
       return;
     }
-    await db.wbMarketplaceEvent.update({ where: { id: ev.id }, data: { payload: { ...payload, sentBy: actor, sentAt: new Date().toISOString() } } }).catch(() => undefined);
+    // Кнопки карточек уже переписал sendWbChatReply («✅ ответил …»).
+    const fresh = await db.wbMarketplaceEvent.findUnique({ where: { id: ev.id }, select: { payload: true } }).catch(() => null);
+    await db.wbMarketplaceEvent.update({ where: { id: ev.id }, data: { payload: { ...((fresh?.payload ?? payload) as object), sentBy: actor, sentAt: new Date().toISOString() } } }).catch(() => undefined);
     await ctx.answerCbQuery("Отправлено").catch(() => undefined);
-    await ctx.editMessageReplyMarkup(undefined).catch(() => undefined);
     await ctx.reply(`📤 ${escapeHtml(actor)} отправил ответ воркера в чат WB.`, {
+      parse_mode: "HTML", disable_notification: true,
+      reply_parameters: { message_id: (ctx.callbackQuery as { message?: { message_id: number } }).message?.message_id ?? 0, allow_sending_without_reply: true },
+    }).catch(() => undefined);
+  });
+
+  bot.action(WB_AI_NOOP_CB, (ctx) => ctx.answerCbQuery().catch(() => undefined));
+
+  /* ✋ Веду сам / 🤖 Вернуть воркеру — ручной режим заказа (сутки максимум). */
+  bot.action(new RegExp(`^(${WB_AI_MANUAL_CB}|${WB_AI_AUTO_CB})(.+)$`), async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return ctx.answerCbQuery("Только для админов").catch(() => undefined);
+    const [, kind, orderId] = ctx.match as RegExpMatchArray;
+    const on = kind === WB_AI_MANUAL_CB;
+    const actor = actorOf(ctx.from);
+    const ok = await db.wbMarketplaceOrder.findUnique({ where: { id: orderId }, select: { id: true } }).catch(() => null);
+    if (!ok) return ctx.answerCbQuery("Заказ не найден").catch(() => undefined);
+    await setManualMode(db as never, orderId, on, actor);
+    await ctx.answerCbQuery(on ? "Ведёте сами — воркер только предлагает (до суток)" : "Воркер снова отвечает сам").catch(() => undefined);
+    await refreshManualRow(db as never, orderId, on).catch(() => undefined);
+    await ctx.reply(on ? `✋ ${escapeHtml(actor)} ведёт чат сам — воркер молчит и только предлагает.` : `🤖 ${escapeHtml(actor)} вернул чат воркеру.`, {
+      parse_mode: "HTML", disable_notification: true,
+      reply_parameters: { message_id: (ctx.callbackQuery as { message?: { message_id: number } }).message?.message_id ?? 0, allow_sending_without_reply: true },
+    }).catch(() => undefined);
+  });
+
+  /* 🔐 Взять аккаунт на себя: просим логин и пароль, пометка «Делаем за клиента»,
+     ручной режим — пока разбираемся с доступом, воркер не вмешивается. */
+  bot.action(new RegExp(`^${WB_AI_ACCOUNT_CB}(.+)$`), async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) return ctx.answerCbQuery("Только для админов").catch(() => undefined);
+    const eventId = (ctx.match as RegExpMatchArray)[1];
+    const ev = await db.wbMarketplaceEvent.findUnique({ where: { idempotencyKey: `ai-chat:${eventId}` }, select: { marketplaceOrderId: true, payload: true } }).catch(() => null);
+    const mp = ev?.marketplaceOrderId
+      ? await db.wbMarketplaceOrder.findUnique({ where: { id: ev.marketplaceOrderId }, select: { id: true, wbOrderId: true } }).catch(() => null)
+      : null;
+    if (!mp) return ctx.answerCbQuery("Заказ не найден").catch(() => undefined);
+    const code = ((ev!.payload ?? {}) as { code?: string }).code;
+    const actor = actorOf(ctx.from);
+    const result = await sendWbChatReply(db as never, mp.wbOrderId, ACCOUNT_HANDOFF_TEXT, actor);
+    if (!result.sent) return ctx.answerCbQuery(`Не ушло: ${wbReplyFailText(result.reason)}`, { show_alert: true }).catch(() => undefined);
+    if (code) await setFlag(db as never, { wbCode: code, kind: "ACCOUNT_HANDOFF", detail: `взял ${actor}` }).catch(() => undefined);
+    await setManualMode(db as never, mp.id, true, actor).catch(() => undefined);
+    await refreshManualRow(db as never, mp.id, true).catch(() => undefined);
+    await ctx.answerCbQuery("Попросили логин и пароль, заказ помечен 🔐").catch(() => undefined);
+    await ctx.reply(`🔐 ${escapeHtml(actor)} взял аккаунт на себя: покупателю ушла просьба прислать логин и пароль, заказ помечен «Делаем за клиента», воркер молчит.`, {
       parse_mode: "HTML", disable_notification: true,
       reply_parameters: { message_id: (ctx.callbackQuery as { message?: { message_id: number } }).message?.message_id ?? 0, allow_sending_without_reply: true },
     }).catch(() => undefined);

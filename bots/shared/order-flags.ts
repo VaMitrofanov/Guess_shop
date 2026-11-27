@@ -26,7 +26,10 @@ export type OrderFlagKind = "CLAIM" | "STALE" | "PARTIAL_REFUND" | "CANCEL_ASK"
   | "REVIEW_DELETED"
   /** 15.11.2026: «под наблюдением» — ставит админ (`/watch`), события заказа
    *  идут в тему «Под наблюдением» беседы уведомлений (`bots/tg/watch-list.ts`). */
-  | "WATCH";
+  | "WATCH"
+  /** 27.11.2026: «🔐 Взять аккаунт на себя» — плейс/пасс делаем мы, по логину
+   *  и паролю покупателя (нет компьютера). Чтобы заказ не забыли. */
+  | "ACCOUNT_HANDOFF";
 
 export interface OrderFlag {
   kind: OrderFlagKind;
@@ -47,6 +50,7 @@ export const FLAG_META: Record<OrderFlagKind, { icon: string; label: string; ton
   CANCEL_ASK: { icon: "✋", label: "Просит отмену", tone: "orange" },
   REVIEW_DELETED: { icon: "🗑", label: "Был плохой отзыв, удалён", tone: "yellow" },
   WATCH: { icon: "👁", label: "Уебки", tone: "red" },
+  ACCOUNT_HANDOFF: { icon: "🔐", label: "Делаем за клиента", tone: "yellow" },
 };
 
 const KINDS = new Set<string>(Object.keys(FLAG_META));

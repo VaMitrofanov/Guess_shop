@@ -145,7 +145,8 @@ export function noteDbsAdminReply(wbOrderId: string, actor: string, what: string
 
 /** ИИ в чате WB передал вопрос человеку — с сутью и готовым черновиком. */
 /** Префикс кнопки «📤 Отправить» ответа ИИ в чат WB (27.11.2026); дальше — `wbEventId`. */
-export const WB_AI_SEND_CB = "wbais:";
+export { WB_AI_SEND_CB } from "./wb-ai-cards";
+import { WB_AI_SEND_CB } from "./wb-ai-cards";
 
 export function notifyDbsAiEscalation(ref: DbsRef, input: { text: string; summary: string; draft: string; category: string; sendKey?: string }, who: string[] = []) {
   broadcast({

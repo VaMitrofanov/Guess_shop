@@ -19,7 +19,7 @@ import { supportCardTarget, supportChannelMode } from "./support-ai";
 type Db = any;
 
 /** Карточка в тему журнала ИИ. `silent` — без звука (ответил сам). Сбой — не беда. */
-export async function aiLogCard(db: Db, html: string, opts: { silent?: boolean } = {}): Promise<void> {
+export async function aiLogCard(db: Db, html: string, opts: { silent?: boolean; keyboard?: Array<Array<{ text: string; callback_data: string }>> } = {}): Promise<void> {
   const target = await supportCardTarget(db).catch(() => ({ chatId: null, topics: {} as Record<string, number> }));
   const thread = target.chatId ? target.topics.test : undefined;
   const ids = target.chatId ? [target.chatId] : ADMIN_IDS;
@@ -28,6 +28,7 @@ export async function aiLogCard(db: Db, html: string, opts: { silent?: boolean }
     link_preview_options: { is_disabled: true },
     ...(thread ? { message_thread_id: thread } : {}),
     ...(opts.silent ? { disable_notification: true } : {}),
+    ...(opts.keyboard ? { reply_markup: { inline_keyboard: opts.keyboard } } : {}),
   })));
 }
 
