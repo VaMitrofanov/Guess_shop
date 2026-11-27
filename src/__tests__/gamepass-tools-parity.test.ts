@@ -74,9 +74,9 @@ describe("предусловия — те же, что на сервере", () 
     expect(gamepassToolsRefusal(order())).toBeNull();
   });
 
-  it("❄️ заморозка выключает все инструменты и говорит почему", () => {
+  it("❄️ заморозка оставляет только ключ и просмотр ника и говорит почему (8L3JCD5)", () => {
     const held = order({ heldAt: "2026-10-18T00:00:00Z" });
-    expect(gamepassToolsFor(held)).toHaveLength(0);
+    expect(gamepassToolsFor(held).map((t) => t.id).sort()).toEqual(["key", "nick"]);
     expect(gamepassToolsRefusal(held)).toContain("заморожен");
   });
 

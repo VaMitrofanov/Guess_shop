@@ -16,6 +16,26 @@ import { AdminOrder, SLICE_META, gamepassIdsOf, num } from "./types";
 import { loadRecentSearches, rememberRecentSearch } from "@/lib/recent-searches";
 import styles from "./orders.module.css";
 
+type CodeHit = {
+  code: string | null; denomination: number | null; codeStatus: string | null; reservedUntil: string | null;
+  nick: string | null; gamepassId: string | null; deliveryId: string | null; wbOrderId: string | null;
+  deliveryClosedAt: string | null; cancelledAt: string | null; hasOrder: boolean;
+};
+
+/** На каком шаге покупатель, у которого есть код, но нет заказа на выкуп. */
+function codeStepText(hit: CodeHit): string {
+  if (hit.cancelledAt) return "заказ WB отменён";
+  if (!hit.code) return hit.deliveryClosedAt ? "доставка закрыта, кода нет" : "ждём код получения от покупателя";
+  if (hit.codeStatus === "AVAILABLE") return "код выдан, инструкцию не открывал";
+  if (hit.codeStatus === "RESERVED") {
+    const until = hit.reservedUntil ? new Date(hit.reservedUntil) : null;
+    const open = until && until.getTime() > Date.now();
+    const step = hit.gamepassId ? "пасс выбран, заказ не оформлен" : hit.nick ? `ник ${hit.nick}, пасс не выбран` : "ник и пасс не ввёл";
+    return `${open ? "открыл инструкцию" : "открывал инструкцию"}: ${step}`;
+  }
+  return `код ${hit.codeStatus?.toLowerCase() ?? "?"}`;
+}
+
 type Command = "export" | "complete" | "hold" | "copy-id" | "split" | "edit" | "priority" | "help";
 
 interface Row {
@@ -37,6 +57,9 @@ export default function CommandPalette({
 }) {
   const [value, setValue] = useState("");
   const [found, setFound] = useState<AdminOrder[]>([]);
+  /* Код гейта / номер WB без заказа на выкуп (15.11.2026): заказа ещё нет, пока
+     покупатель не ввёл ник и пасс, — раньше палитра молчала «Ничего не нашлось». */
+  const [codeHits, setCodeHits] = useState<CodeHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,14 +71,19 @@ export default function CommandPalette({
 
   useEffect(() => {
     const term = value.trim();
-    if (term.length < 2) { setFound([]); return; }
+    if (term.length < 2) { setFound([]); setCodeHits([]); return; }
     let cancelled = false;
     setSearching(true);
     const timer = setTimeout(() => {
       void (async () => {
         try {
           const params = new URLSearchParams({ status: "ALL", q: term, limit: "8", page: "1", skipCounts: "1", lite: "1" });
-          const res = await fetch(`/api/admin/orders?${params}`, { cache: "no-store" });
+          const [res, codeRes] = await Promise.all([
+            fetch(`/api/admin/orders?${params}`, { cache: "no-store" }),
+            fetch(`/api/admin/code-lookup?q=${encodeURIComponent(term)}`, { cache: "no-store" }).catch(() => null),
+          ]);
+          const hits = codeRes?.ok ? ((await codeRes.json()).items ?? []) as CodeHit[] : [];
+          if (!cancelled) setCodeHits(hits.filter(hit => !hit.hasOrder));
           if (!res.ok) return;
           const data = await res.json();
           if (!cancelled) setFound(data.orders ?? []);
@@ -76,6 +104,20 @@ export default function CommandPalette({
         label: `${order.wbCode} · ${order.robloxUsername ?? order.probableNick ?? "без ника"}`,
         hint: `${num(grossOf(order.amount))} R$ · ${order.status} · ${fmtAge(order.createdAt)}`,
         run: () => { rememberRecentSearch("admin", value); onOpenOrder(order.id); },
+      });
+    }
+
+    for (const hit of codeHits) {
+      const amount = hit.denomination ? `${num(hit.denomination)} R$` : "";
+      const wb = hit.wbOrderId ? `WB № ${hit.wbOrderId}` : "";
+      list.push({
+        id: `code-${hit.code ?? hit.deliveryId}`,
+        label: `${hit.code ?? wb} · заказа на выкуп ещё нет`,
+        hint: [codeStepText(hit), amount, hit.code ? wb : ""].filter(Boolean).join(" · "),
+        run: () => {
+          rememberRecentSearch("admin", value);
+          if (hit.deliveryId) window.location.href = `/admin/wildberries/delivery?order=${encodeURIComponent(hit.deliveryId)}`;
+        },
       });
     }
 
@@ -113,8 +155,8 @@ export default function CommandPalette({
     const term = value.trim().toLowerCase();
     return term.length < 2
       ? list
-      : list.filter(row => row.id.startsWith("order-") || row.label.toLowerCase().includes(term));
-  }, [found, recent, cursorOrder, slice, value, onOpenOrder, onSlice, onCommand]);
+      : list.filter(row => row.id.startsWith("order-") || row.id.startsWith("code-") || row.label.toLowerCase().includes(term));
+  }, [found, codeHits, recent, cursorOrder, slice, value, onOpenOrder, onSlice, onCommand]);
 
   useEffect(() => { setActive(0); }, [rows.length]);
 
@@ -126,7 +168,7 @@ export default function CommandPalette({
   }, [rows, active, onClose]);
 
   // «Недавние» идут в первой группе: это тоже путь к заказу, а не команда.
-  const isOrderRow = (row: Row) => row.id.startsWith("order-") || row.id.startsWith("recent-");
+  const isOrderRow = (row: Row) => row.id.startsWith("order-") || row.id.startsWith("code-") || row.id.startsWith("recent-");
   const orderRows = rows.filter(isOrderRow);
   const commandRows = rows.filter(row => !isOrderRow(row));
   const recentOnly = orderRows.length > 0 && orderRows.every(row => row.id.startsWith("recent-"));

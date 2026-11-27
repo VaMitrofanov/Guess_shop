@@ -120,10 +120,13 @@ export function isUnpaidDirectOrder(order: GamepassToolOrder): boolean {
  * (прямо или следующим шагом), а это ровно то, что заморозка запрещает.
  */
 export function gamepassToolsFor(order: GamepassToolOrder): GamepassTool[] {
-  if (order.heldAt) return [];
   if (isUnpaidDirectOrder(order)) return [];
   const nick = (order.robloxUsername ?? order.probableNick ?? "").trim();
   return GAMEPASS_TOOLS.filter((tool) => {
+    // ❄️ Заморозка (27.11.2026, 8L3JCD5): только ключ и просмотр ника. Ключ
+    // создаёт пасс, но заказ остаётся замороженным; сервер не пускает ключ,
+    // если заморозила «автозащита».
+    if (order.heldAt && tool.id !== "key" && tool.id !== "nick") return false;
     switch (tool.id) {
       case "key":
       case "link":
@@ -150,7 +153,7 @@ export function hasGamepassTool(order: GamepassToolOrder, id: GamepassToolId): b
  * строки пустое меню выглядит как сломанное.
  */
 export function gamepassToolsRefusal(order: GamepassToolOrder): string | null {
-  if (order.heldAt) return "❄️ Заказ заморожен — сначала разморозь: выкупать его нельзя ни одним путём.";
+  if (order.heldAt) return "❄️ Заказ заморожен: пасс по ключу создать можно, но выкуп — только после разморозки.";
   if (isUnpaidDirectOrder(order)) return "💳 Прямой заказ не оплачен — сначала подтверди оплату.";
   if (!GAMEPASS_SPLITTABLE_STATUSES.includes(order.status)) {
     return `В статусе ${order.status} геймпасс не меняют: заказ уже закрыт.`;

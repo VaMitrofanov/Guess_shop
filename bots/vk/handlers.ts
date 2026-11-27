@@ -74,6 +74,7 @@ import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { clearGamepassFails, reportGamepassFail, type GamepassFailReason } from "../shared/gamepass-stuck-notice";
+import { heldOrderBuyerText, isOrderHeld } from "../shared/held-order-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 
 /** Узкие представления `db` для шага геймпасса — без `any`. */
@@ -1614,7 +1615,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       pausedState?.type === "AWAITING_ROBLOX_NICK" ||
       pausedState?.type === "AWAITING_DIRECT_NICK_INPUT" ||
       pausedState?.type === "AWAITING_NICK_EDIT";
+    // Ключ Roblox — тоже терминальный ввод: пауза менеджера не должна его
+    // глотать (8L3JCD5, 27.11.2026).
     const looksLikeFlowInput =
+      classifyBuyerInput(text).kind === "api_key" ||
       extractPassId(text) !== null ||
       (/^[A-Za-z0-9]{7}$/.test(text.trim()) && /[A-Za-z]/.test(text.trim())) ||
       (awaitsNick && ROBLOX_NICK_RE.test(text.trim().replace(/^@/, "")));
@@ -3286,9 +3290,20 @@ async function handleGamepassLink(
     price: validatedPrice,
   });
 
+  // Заказ заморожен (плохой отзыв, ручная заморозка): пасс принят, но обещать
+  // «выкупим, просто ждите» нельзя — выкуп ждёт проверки.
+  const heldNow = isOrderHeld(order) ? (order.heldReason ?? "заморожен") : null;
+  if (heldNow) {
+    await showResult({
+      message: heldOrderBuyerText(heldNow, wbCode),
+      keyboard: Keyboard.builder()
+        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
+        .inline(),
+    });
+  }
   const creatorLine = validatedCreator ? `\n👤 Создатель: ${validatedCreator}` : "";
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
-  await showResult({
+  if (!heldNow) await showResult({
     message:
       `🎉 Ваш геймпасс принят!` +
       creatorLine +
@@ -3361,6 +3376,7 @@ async function handleGamepassLink(
     viaWebOneTap,
     viaManualLink:       opts.viaManualLink === true,
     replacedGamepassUrl: replacedGamepassUrl ?? undefined,
+    heldReason:          heldNow,
     // Признак «пасс создан по ключу» берём из СОБЫТИЙ заказа, а не со слов
     // клиента: маркер 🔑 говорит, что цену и «в продаже» выставили мы.
     viaKey:              autoCreatedCount > 0,
@@ -4075,7 +4091,9 @@ async function handleVkStrayApiKey(ctx: MessageContext, vkUserId: number, raw: s
   const user = await strayKeyDb.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, robloxUsername: true } });
   const orders = user
     ? await strayKeyDb.wbOrder.findMany({
-        where: { userId: user.id, status: { in: STRAY_KEY_STATUSES }, heldAt: null },
+        // Замороженный заказ тоже ждёт пасс: заморозка запрещает выкуп, а не
+        // приём пасса (`held-order-notice.ts`, 8L3JCD5).
+        where: { userId: user.id, status: { in: STRAY_KEY_STATUSES } },
         orderBy: { createdAt: "desc" },
       })
     : [];

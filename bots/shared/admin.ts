@@ -844,6 +844,8 @@ interface OrderCardPayload {
   viaWebOneTap?:       boolean;
   /** true when the customer pasted the gamepass link/ID because the nick search found nothing. */
   viaManualLink?:      boolean;
+  /** Заказ заморожен: пасс принят, но в очередь выкупа он не встанет. */
+  heldReason?:         string | null;
   /** Old gamepassUrl when the user swapped the pass on an already-queued order (🔁 marker). */
   replacedGamepassUrl?: string;
   /** Пасс(ы) создал наш бот по Open Cloud-ключу покупателя — цену и «в продаже» выставили мы. */
@@ -987,7 +989,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<numbe
   const text = formatAdminNotice({
     marker: order.isAgeRestricted ? "urgent" : "action",
     zone: orderSource === "WB_DBS" ? "DBS" : orderSource === "DIRECT" ? "ПРЯМОЙ" : "WB",
-    title: order.replacedGamepassUrl ? "заменён геймпасс" : order.title ?? "ждёт выкупа",
+    title: order.heldReason ? "пасс на замороженном заказе" : order.replacedGamepassUrl ? "заменён геймпасс" : order.title ?? "ждёт выкупа",
     lines: [
       orderRef({
         wbOrderId: wbRef.wbOrderId,
@@ -996,6 +998,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<numbe
         buyerName: null,
       }),
       // Плашки-исключения идут ДО полей: они меняют то, как читать всё ниже.
+      order.heldReason ? `❄️ <b>ЗАМОРОЖЕН</b> — ${escapeHtml(order.heldReason)}` : null,
       replacedLine.trim() || null,
       viaKeyLine.trim() || null,
       viaChatLine.trim() || null,
@@ -1007,7 +1010,9 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<numbe
       whoLine,
       passLine,
     ],
-    next: order.isAgeRestricted
+    next: order.heldReason
+      ? "проверить причину заморозки; выкуп — только после разморозки"
+      : order.isAgeRestricted
       ? "игра 18+ — выкупать только вручную"
       : "скопировать ID → купить в аккаунте → «Выкуплено» в TWA",
   });

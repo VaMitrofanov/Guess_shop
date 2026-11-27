@@ -408,6 +408,9 @@ export function GamepassToolRows({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {order.heldAt && refusal ? (
+        <div style={{ fontSize: 14, color: C.textTertiary, padding: compact ? "2px 0" : "4px 0" }}>{refusal}</div>
+      ) : null}
       {rows.map((tool) => (
         <button
           key={tool.id}

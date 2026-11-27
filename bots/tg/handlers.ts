@@ -79,6 +79,7 @@ import { noteProbableNick } from "../shared/nick";
 import { placeGuideUrl, placeStepsText, PLACE_STEPS, STUDIO_DOWNLOAD_URL } from "../shared/no-place";
 import { placeHelpAdminText, recordPlaceHelp, shouldNotifyPlaceHelp, type PlaceHelpClient } from "../shared/no-place-notice";
 import { clearGamepassFails, reportGamepassFail, type GamepassFailReason } from "../shared/gamepass-stuck-notice";
+import { heldOrderBuyerText, isOrderHeld } from "../shared/held-order-notice";
 import { classifyBuyerInput, errText, recordBuyerDeadEnd, STRAY_KEY_STATUSES, type BuyerStepClient, type StrayKeyDb } from "../shared/buyer-step";
 import { escapeReviewReason, normalizeCustomReviewReason, REVIEW_REJECT_REASONS, reviewRejectReasonText } from "../shared/review-reject";
 
@@ -3670,7 +3671,9 @@ async function handleStrayApiKey(bot: Telegraf, ctx: Parameters<typeof handleApi
   const user = await strayKeyDb.user.findUnique({ where: { tgId: String(tgIdNum) }, select: { id: true, robloxUsername: true } });
   const orders = user
     ? await strayKeyDb.wbOrder.findMany({
-        where: { userId: user.id, status: { in: STRAY_KEY_STATUSES }, heldAt: null },
+        // Замороженный заказ тоже ждёт пасс: заморозка запрещает выкуп, а не
+        // приём пасса (`held-order-notice.ts`, 8L3JCD5).
+        where: { userId: user.id, status: { in: STRAY_KEY_STATUSES } },
         orderBy: { createdAt: "desc" },
       })
     : [];
@@ -4456,7 +4459,13 @@ async function processGamepassSubmission(
     const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     void reactTo(bot.telegram as never, ctx.chat?.id, clientMsgId, "🔥");
-    await showResult(
+    // Заказ заморожен: пасс принят, но «просто ждите выкуп» обещать нельзя.
+    const heldNow = isOrderHeld(order) ? (order.heldReason ?? "заморожен") : null;
+    if (heldNow) await showResult(escapeHtml(heldOrderBuyerText(heldNow, state.wbCode)), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]]),
+    });
+    else await showResult(
       `🎉 Ваш геймпасс принят!\n` +
       creatorLine +
       priceLine +
@@ -4640,6 +4649,7 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
       orderRef({ code: order.wbCode, denomination: order.amount }, [
         splitRows.length > 1 ? `${splitRows.length} пасса на ${passPrice} R$ суммарно` : `геймпасс ${passPrice} R$`,
       ]),
+      order.heldAt ? `❄️ <b>ЗАМОРОЖЕН</b> — ${escapeHtml(order.heldReason ?? "причина не указана")} · выкуп только после разморозки` : null,
       replacedLine.trim() || null,
       viaKeyLine.trim() || null,
       webOneTapLine.trim() || null,

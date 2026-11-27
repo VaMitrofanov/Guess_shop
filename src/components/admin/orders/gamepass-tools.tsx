@@ -55,6 +55,7 @@ export function GamepassToolRows({
 
   return (
     <div className={styles.gpTools}>
+      {order.heldAt && refusal ? <div className={styles.hint}>{refusal}</div> : null}
       {rows.map(tool => (
         <button
           key={tool.id}

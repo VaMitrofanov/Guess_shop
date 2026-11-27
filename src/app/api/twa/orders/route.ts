@@ -57,6 +57,7 @@ import {
   type FilterTab,
 } from "@/lib/order-queue";
 import {
+  PROBLEM_HOLD_ACTOR,
   assertOrderBuyable,
   heldRefusal,
   holdByCode,
@@ -77,7 +78,7 @@ import { createTargetsFor, singlePassFits, splitRequiredMessage } from "@/lib/ga
 import { rememberRobloxApiKey } from "@/lib/roblox-api-key-store";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { notifyAdminsKeyCreated, passNeedsHands } from "@/lib/gamepass-key-admin-notify";
-import { notifyBuyerStep, notifyGamepassCreatedForBuyer } from "@/lib/twa-notify";
+import { notifyBuyerStep, notifyGamepassCreatedForBuyer, notifyHeldOrderPassForBuyer } from "@/lib/twa-notify";
 import { BUYER_STEP_EVENT, buyerStepEventText, isBuyerStepKind } from "../../../../../bots/shared/buyer-step";
 import { addOrderContact, listOrderContacts, removeOrderContact } from "../../../../../bots/shared/order-contacts";
 import { PLACE_HELP_EVENT } from "../../../../../bots/shared/no-place";
@@ -2555,8 +2556,17 @@ export async function POST(req: NextRequest) {
     // Привязка ставит заказ в очередь выкупа — то же, что запрещают заморозка
     // и неоплаченный прямой заказ (дыра, закрытая у `attach-gamepass`).
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    // Заморозка запрещает ВЫКУП, а не создание пасса (8L3JCD5, 27.11.2026):
+    // ключ принимаем и на замороженном заказе, заказ остаётся замороженным —
+    // очереди выкупа фильтруют `heldAt` сами. Исключение — «автозащита»
+    // (деньги вернулись, отмена WB, код аннулирован): выкупа не будет никогда.
     const keyHeld = await assertOrderBuyable(prisma, orderId, { allowRejected: true });
-    if (keyHeld.held) return NextResponse.json({ error: keyHeld.message }, { status: 409 });
+    const keyHeldReason = keyHeld.held ? keyHeld.reason : null;
+    if (keyHeld.held) {
+      const holdRow = await prisma.wbOrder.findUnique({ where: { id: orderId }, select: { heldBy: true } });
+      if (!holdRow?.heldBy || holdRow.heldBy === PROBLEM_HOLD_ACTOR)
+        return NextResponse.json({ error: keyHeld.message }, { status: 409 });
+    }
 
     const KEYABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
     if (!KEYABLE.includes(order.status))
@@ -2712,10 +2722,11 @@ export async function POST(req: NextRequest) {
     /* Шаг 4 — формируем заказ. Один пасс — путём `attach-gamepass`, набор —
        строками `WbOrderGamepass`, как `set-gamepass-split`. */
     const headUrl = `https://www.roblox.com/game-pass/${outcome.created[0].gamePassId}`;
-    const noteLine = complete
+    const noteLine = (complete
       ? `[КЛЮЧ-АДМИН ${stamp}] ${actor.displayName}: создано и привязано ${checks.map((c) => `${c.gamepassId} (${c.price} R$)`).join(", ")}`
       : `[КЛЮЧ-АДМИН ${stamp}] ${actor.displayName}: создано ${outcome.created.length} из ${targets.length} ` +
-        `(${checks.map((c) => `${c.gamepassId} (${c.price} R$)`).join(", ")}) — набор НЕ полный, дособерите заказ`;
+        `(${checks.map((c) => `${c.gamepassId} (${c.price} R$)`).join(", ")}) — набор НЕ полный, дособерите заказ`)
+      + (keyHeldReason ? ` · заказ заморожен, выкуп после разморозки` : "");
     const needsHands = checks.some(passNeedsHands);
 
     const data: Record<string, unknown> = {
@@ -2758,7 +2769,9 @@ export async function POST(req: NextRequest) {
        ничего не присылал боту и делать ему больше нечего. Неполный набор
        покупателю не анонсируем — заказ ещё не готов. */
     const notified = complete
-      ? await notifyGamepassCreatedForBuyer(order.user, order.wbCode, { nick: confirmed, prices }).catch(() => null)
+      ? keyHeldReason
+        ? await notifyHeldOrderPassForBuyer(order.user, order.wbCode, keyHeldReason).catch(() => null)
+        : await notifyGamepassCreatedForBuyer(order.user, order.wbCode, { nick: confirmed, prices }).catch(() => null)
       : null;
 
     return NextResponse.json({
@@ -2767,7 +2780,8 @@ export async function POST(req: NextRequest) {
       nick: confirmed,
       created: checks,
       complete,
-      queued: complete,
+      queued: complete && !keyHeldReason,
+      held: keyHeldReason,
       needsHands,
       notified,
       adminCard,

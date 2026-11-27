@@ -10,6 +10,7 @@ import {
   type BuyerStepOrder,
 } from "../../bots/shared/buyer-step";
 import { notifyOrderWatchers, type WatcherEvent } from "../../bots/shared/order-contacts";
+import { heldOrderBuyerText } from "../../bots/shared/held-order-notice";
 import { TG_INVITE_LABEL, TG_INVITE_TEXT, prepareTgInvite } from "../../bots/shared/bot-bind";
 import { vkUploadMessagePhoto } from "../../bots/shared/vk-photo";
 import { effectExtra } from "../../bots/shared/tg-flair";
@@ -473,6 +474,19 @@ export async function notifyGamepassCreatedForBuyer(
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
   return tgThenVk(user, tgMsg, vkMsg);
+  return null;
+}
+
+/** Пасс создан по ключу, но заказ заморожен: принят, выкуп ждёт проверки. */
+export async function notifyHeldOrderPassForBuyer(
+  user: UserRef,
+  wbCode: string,
+  heldReason: string,
+): Promise<"tg" | "vk" | null> {
+  const text = heldOrderBuyerText(heldReason, wbCode);
+  const tgMsg = text.replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
+  if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
+  if (user.vkId) return (await vkPost(user.vkId, text)) ? "vk" : null;
   return null;
 }
 
