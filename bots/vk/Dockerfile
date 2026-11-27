@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# Без строки `# syntax=docker/dockerfile:1.7` (27.11.2026): с RF-хоста загрузка этого образа
+# с Docker Hub то и дело висла ровно 1030 с (сборки 1980, 1987, 2023 — +17 мин к деплою).
+# Встроенный разборщик BuildKit сам умеет RUN --mount=type=cache и COPY --chown.
 
 # ────────────────────────────────────────────────────────────────────────────
 # VK long-polling bot for RobloxBank.
