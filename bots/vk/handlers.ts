@@ -104,7 +104,11 @@ import { checkPendingScreenshot, pendingOkReplyText, isWrongPage, wrongPageReply
 import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, personalFaqAnswer, priceLabelSuffix, type FaqStage } from "../shared/smart-faq";
 import { robuxWaitText } from "../shared/robux-wait";
-import { rememberVkOutbox, tryVkAi, vkStateAllowsAi } from "./vk-ai";
+import { answerVkIntake, rememberVkOutbox, tryVkAi, vkStateAllowsAi } from "./vk-ai";
+import { SUPPORT_CONTEXT_LABELS } from "../shared/support-context-labels";
+
+/** Темы кнопки поддержки, где сначала отвечает ИИ (28.11.2026). Робуксы/Pending — свой путь со скрином. */
+const AI_FIRST_INTAKE = new Set(["general", "no_place", "code_not_found", "pass_format", "pass_not_found", "pass_private", "pass_inactive", "pass_price", "pass_deleted", "rejected", "resubmit"]);
 import { fetchSupportImage, isConversationalText, SCREENSHOT_OWN_FLOW_RE } from "../shared/support-ai";
 import { PASS_ID_IMAGE, PASS_ID_IMAGE_CAPTION, passIdHelpText } from "../shared/passid-help";
 import { robuxGotCardText } from "../shared/robux-got-card";
@@ -309,6 +313,20 @@ async function deliverSupportIntake(
   if (matched) {
     hint = { wbCode: matched.wbCode, denom: matched.amount };
     said = `${said}\n\n🔎 Заказ найден ${matchedByLabel(matched.by)}`;
+  }
+
+  // 🤖 Сначала ИИ (28.11.2026): отвечает сам или передаёт человеку с черновиком.
+  const ctxKey = intake?.contextKey ?? "general";
+  if (AI_FIRST_INTAKE.has(ctxKey) && clipProblemText(text)) {
+    const label = SUPPORT_CONTEXT_LABELS[ctxKey];
+    const aiText = label && ctxKey !== "general" ? `[нажал кнопку поддержки: ${label}] ${text}` : text;
+    const image = photoUrl ? await fetchSupportImage(photoUrl).catch(() => undefined) : undefined;
+    const handled = await answerVkIntake(vkUserId, aiText, {
+      reply: (message) => ctx.reply(message),
+      escalate: (problemText) => triggerSupport(ctx, vkUserId, ctxKey, { problemText }),
+      firstName: () => vkGetName(vkUserId),
+    }, image).catch((err) => { console.error("[VK] ИИ по кнопке поддержки:", err); return false; });
+    if (handled) return;
   }
 
   // Скрин Transactions после «в Pending меньше суммы» — сначала читаем сами

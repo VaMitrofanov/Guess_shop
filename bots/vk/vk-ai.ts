@@ -75,6 +75,19 @@ export async function tryVkAi(vkUserId: number, text: string, deps: VkAiDeps, im
   return (await answerVkAi(vkUserId, text, deps, mode, image)) === "handled";
 }
 
+/**
+ * Обращение через кнопку поддержки (28.11.2026, 4E7XZ7H): раньше описание сразу
+ * уходило менеджеру и бот вставал на паузу 24 ч — клиент молчал в ответ на
+ * «Ничего не получается». Теперь сначала отвечает ИИ (тема кнопки — в тексте);
+ * передать человеку он решает сам (`deps.escalate`). `false` — пусть идёт старый путь.
+ */
+export async function answerVkIntake(vkUserId: number, text: string, deps: VkAiDeps, image?: SupportImage): Promise<boolean> {
+  if ((await supportChannelMode(db, "vk_bot")) !== "on") return false;
+  if (!memory.has(key(vkUserId))) memory.seed(key(vkUserId), await recallTurns(db, "vk_bot", `vk:${vkUserId}`));
+  memory.push(key(vkUserId), "user", text);
+  return (await answerVkAi(vkUserId, text, deps, "on", image)) === "handled";
+}
+
 async function answerVkAi(vkUserId: number, text: string, deps: VkAiDeps, mode: "on" | "dry", image?: SupportImage): Promise<"handled" | "ignored" | "failed"> {
   const user = await db.user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true, name: true } }).catch(() => null);
   const name = user?.name ?? await deps.firstName().catch(() => null);
