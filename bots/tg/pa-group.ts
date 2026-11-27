@@ -26,6 +26,7 @@ import { flagsOf } from "../shared/order-flags";
 import { profileText, recentBadReviewsWithBuyers, whoIs } from "../shared/buyer-identity";
 import { PA_AI_MODEL, plain } from "../shared/pa-ai-support";
 import { card, loadSettings, saveSettings, type PaTopic } from "./pa-ai";
+import { saveIdea } from "./ideas-worker";
 import { ADMIN_NOTIFY_STREAM, ADMIN_TOPICS, ADMIN_TOPIC_KEYS, loadAdminRoute, resetAdminRouteCache, saveTopicLook } from "../shared/admin-route";
 import { pendingPaymentDetails, pendingRejectionReason, pendingReviewRejectReason } from "./session";
 
@@ -118,34 +119,7 @@ async function ensurePaTopics(telegram: Telegraf["telegram"]): Promise<void> {
   if (created) await saveSettings({ topics });
 }
 
-/* ── «Фичи и баги» (14.11.2026) ─────────────────────────────────────────────
-   Сообщения из темы копятся в базе (`WbSyncCursor` stream `admin-ideas`,
-   `metadata.items`, последние 500), бот ставит 👀. Сейчас их разбирает
-   владелец, дальше — ИИ-воркер. */
-const IDEAS_STREAM = "admin-ideas";
-const IDEAS_MAX = 500;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function saveIdea(ctx: any, msg: any): Promise<void> {
-  const text = String(msg.text ?? msg.caption ?? "").trim();
-  const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1].file_id : null;
-  if (!text && !photo) return;
-  const from = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name ?? String(ctx.from?.id ?? "?");
-  const row = await db.wbSyncCursor.findUnique({ where: { stream: IDEAS_STREAM } }).catch(() => null);
-  const meta = (row?.metadata ?? {}) as { items?: unknown[] };
-  const items = [...(Array.isArray(meta.items) ? meta.items : []), {
-    at: new Date().toISOString(), from, text: text.slice(0, 4000), photo, messageId: msg.message_id, status: "new",
-  }].slice(-IDEAS_MAX);
-  await db.wbSyncCursor.upsert({
-    where: { stream: IDEAS_STREAM },
-    create: { stream: IDEAS_STREAM, metadata: { items } as never },
-    update: { metadata: { items } as never },
-  });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (ctx.telegram as any).callApi("setMessageReaction", {
-    chat_id: ctx.chat.id, message_id: msg.message_id, reaction: [{ type: "emoji", emoji: "👀" }],
-  }).catch(() => undefined);
-}
+// «Фичи и баги» — запись и разбор в ./ideas-worker (27.11.2026).
 
 /**
  * Подсказки команд в беседе админов (14.11.2026) — только то, что там работает.
@@ -545,7 +519,7 @@ const TOPICS: Array<{ key: PaTopic; name: string; icon: string; color: number; h
   { key: "support", name: "Поддержка", icon: "❓", color: 0xff93b2, hello: "Сюда бот присылает обращения из @RobloxBank_PA, где нужен человек: карточка с сутью, заказом и черновиком ответа. «📤 Отправить черновик» — ответ уйдёт покупателю от имени поддержки." },
   { key: "test", name: "ИИ — журнал", icon: "🤖", color: 0xffd67e, hello: "Журнал ИИ-поддержки: каждый ответ, который ИИ отправил сам (без звука), и тестовые карточки режима dry. Передачи человеку — в своих темах, со звуком." },
   { key: "digest", name: "Сводки", icon: "📈", color: 0x6fb9f0, hello: "Каждое утро в 09:00 МСК — итоги вчера и что горит сейчас. По запросу — /digest." },
-  { key: "ideas", name: "Фичи и баги", icon: "💡", color: 0xffd67e, hello: "Пишите сюда фичи, баги и идеи — одним сообщением на штуку, можно со скриншотом. Бот ставит 👀 — значит записал в базу. Пока их разбирает владелец, дальше — ИИ-воркер." },
+  { key: "ideas", name: "Фичи и баги", icon: "💡", color: 0xffd67e, hello: "Пишите сюда фичи, баги и идеи — одним сообщением на штуку, можно со скриншотом. Бот ставит 👀 — записал, и через минуту отвечает карточкой задачи #N. Уточнение — ответом на своё сообщение или карточку." },
   { key: "updates", name: "Апдейты", icon: "🎉", color: 0x8eee98, hello: "Сюда бот присылает короткую выжимку по крупным апдейтам: новые функции и изменения в работе — без мелочей вроде «поменяли кнопку». Если у апдейта есть пост для клиентов, под ним кнопки «Опубликовать в канал и ВК» и «Не публиковать»." },
   { key: "assistant", name: "Ассистент", icon: "🤖", color: 0x8eee98, hello: "Спрашивайте здесь обычным текстом — отвечу по базе: «что с ZT8BW8D», «кто ждёт пасс больше 2 дней», «сколько выкупили вчера», «найди заказы Анны», «открытые риски». Я только смотрю — ничего не меняю. В других темах зовите через @RobloxBankBot." },
 ];

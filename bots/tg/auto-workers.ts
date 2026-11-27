@@ -11,6 +11,7 @@
  * браузерный сервис не работает, выкуп идёт вручную.
  */
 
+import { startIdeasWorker } from "./ideas-worker";
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { ADMIN_IDS, sendAdminOrderCard } from "../shared/admin";
@@ -284,6 +285,7 @@ export function startAutoWorkers(bot: Telegraf): void {
 
   // Утренняя сводка в беседу админов (09:00 МСК), Claude Haiku 5.5.
   startPaDigest(bot);
+  startIdeasWorker(bot);
   // «Молчат» — раз в неделю, без ИИ (13.11.2026).
   startSilentWeekly(bot);
 
