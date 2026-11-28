@@ -7,6 +7,7 @@ import {
   rbxrubyOverview,
   rbxrubyStates,
   rbxrubyTimeline,
+  saveRbxrubySettings,
   sendToRbxrubyNow,
   setRbxrubyExcluded,
   setRbxrubyMode,
@@ -42,6 +43,10 @@ export async function POST(req: NextRequest) {
       if (body.mode !== "on" && body.mode !== "dry" && body.mode !== "off") return NextResponse.json({ error: "bad mode" }, { status: 400 });
       await setRbxrubyMode(body.mode, by);
       return NextResponse.json({ ok: true, overview: await rbxrubyOverview() });
+    }
+    case "settings": {
+      const s = await saveRbxrubySettings((body as { settings?: Record<string, unknown> }).settings ?? {}, by);
+      return NextResponse.json({ ok: true, settings: s, overview: await rbxrubyOverview() });
     }
     case "send":
     case "cancel":

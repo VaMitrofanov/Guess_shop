@@ -63,6 +63,7 @@ type CursorMeta = {
   history?: StockPoint[];
   /** Последний пуш «появился продавец» — не чаще раза в час. */
   sellerAlert?: { at: string; maxInstant: number };
+  settings?: RbxrubySettings;
 };
 export type RbxrubySnapshot = {
   at: string;
@@ -102,9 +103,74 @@ function num(name: string, fallback: number): number {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
+
+/* ── Настройки из админки (28.11.2026): «что выкупать» прямо в плашке ────── */
+
+export const RBXRUBY_LANES = ["pinned", "rebuy", "direct", "rush", "asks", "queue"] as const;
+export type RbxrubyLane = (typeof RBXRUBY_LANES)[number];
+export const RBXRUBY_NOMINALS = [100, 200, 500, 800, 1000, 1500] as const;
+
+export type RbxrubySettings = {
+  /** Наш потолок курса, $ за 1000 R$: дороже продавцов не берём. */
+  maxRate: number;
+  /** Какие группы «Первым делом» выкупать; `queue` — остальная очередь. */
+  lanes: RbxrubyLane[];
+  /** Какие номиналы выкупать; пусто — все. */
+  nominals: number[];
+  perTick: number;
+  /** Сколько $ можно потратить за сутки (резервы отправленных + выкупленные). */
+  dailyUsd: number;
+  /** Не трогать заказы моложе N часов (0 — любые). */
+  minAgeHours: number;
+  by?: string;
+  at?: string;
+};
+
+export function defaultRbxrubySettings(): RbxrubySettings {
+  return {
+    maxRate: num("RBXRUBY_MAX_RATE", 3.8),
+    lanes: [...RBXRUBY_LANES],
+    nominals: [],
+    perTick: num("RBXRUBY_MAX_PER_TICK", 2),
+    dailyUsd: num("RBXRUBY_DAILY_USD", 50),
+    minAgeHours: 0,
+  };
+}
+
+/** Привести присланное из админки к допустимому. */
+export function normalizeRbxrubySettings(input: Partial<RbxrubySettings>, base = defaultRbxrubySettings()): RbxrubySettings {
+  const clamp = (v: unknown, lo: number, hi: number, d: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
+  };
+  return {
+    maxRate: Math.round(clamp(input.maxRate, 1, 6, base.maxRate) * 10) / 10,
+    lanes: Array.isArray(input.lanes) ? RBXRUBY_LANES.filter((l) => input.lanes!.includes(l)) : base.lanes,
+    nominals: Array.isArray(input.nominals) ? RBXRUBY_NOMINALS.filter((n) => input.nominals!.map(Number).includes(n)) : base.nominals,
+    perTick: Math.round(clamp(input.perTick, 1, 10, base.perTick)),
+    dailyUsd: Math.round(clamp(input.dailyUsd, 1, 1000, base.dailyUsd)),
+    minAgeHours: Math.round(clamp(input.minAgeHours, 0, 168, base.minAgeHours)),
+  };
+}
+
+/** Действующие настройки — читаются в начале тика и при каждом показе плашки. */
+let cfg: RbxrubySettings = defaultRbxrubySettings();
+export async function loadRbxrubySettings(): Promise<RbxrubySettings> {
+  const meta = await readMeta();
+  cfg = meta.settings ? { ...normalizeRbxrubySettings(meta.settings), by: meta.settings.by, at: meta.settings.at } : defaultRbxrubySettings();
+  return cfg;
+}
+export async function saveRbxrubySettings(input: Partial<RbxrubySettings>, by: string): Promise<RbxrubySettings> {
+  const current = await loadRbxrubySettings();
+  const next = { ...normalizeRbxrubySettings(input, current), by, at: new Date().toISOString() };
+  await writeMeta({ settings: next });
+  cfg = next;
+  return next;
+}
+
 /** Наш потолок курса, $ за 1000 R$. Дублирует коридор в кабинете — на случай, если там поднимут. */
-const maxRate = () => num("RBXRUBY_MAX_RATE", 3.8);
-const maxPerTick = () => num("RBXRUBY_MAX_PER_TICK", 2);
+const maxRate = () => cfg.maxRate;
+const maxPerTick = () => cfg.perTick;
 /** Потолок робуксов (цена пассов) за сутки — страховка от разгона. */
 const dailyRobuxCap = () => num("RBXRUBY_DAILY_ROBUX", 30_000);
 
@@ -154,14 +220,18 @@ async function loadCandidates(limit: number): Promise<Array<Candidate & { lane: 
       },
       orderBy: [{ priorityAt: { sort: "desc", nulls: "last" } }, { isDirectOrder: "desc" }, { createdAt: "asc" }],
       take: 300,
-      select: { id: true, wbCode: true, amount: true, gamepassId: true, status: true },
+      select: { id: true, wbCode: true, amount: true, gamepassId: true, status: true, createdAt: true },
     }),
     loadFirstInLine().catch(() => null),
   ]);
   const rank = new Map<string, { i: number; lane: string }>();
   first?.rows.forEach((r, i) => rank.set(r.id, { i, lane: r.reason }));
+  const ageCut = Date.now() - cfg.minAgeHours * 3600_000;
   return rows
-    .flatMap((r) => (r.gamepassId ? [{ ...r, gamepassId: r.gamepassId, status: String(r.status), lane: rank.get(r.id)?.lane ?? "queue", _i: rank.get(r.id)?.i ?? Number.MAX_SAFE_INTEGER }] : []))
+    .filter((r) => cfg.nominals.length === 0 || cfg.nominals.includes(r.amount))
+    .filter((r) => cfg.minAgeHours === 0 || r.createdAt.getTime() <= ageCut)
+    .filter((r) => (cfg.lanes as string[]).includes(rank.get(r.id)?.lane ?? "queue"))
+    .flatMap((r) => (r.gamepassId ? [{ id: r.id, wbCode: r.wbCode, amount: r.amount, gamepassId: r.gamepassId, status: String(r.status), lane: rank.get(r.id)?.lane ?? "queue", _i: rank.get(r.id)?.i ?? Number.MAX_SAFE_INTEGER }] : []))
     .map((r, idx) => ({ ...r, _idx: idx }))
     .sort((a, b) => a._i - b._i || a._idx - b._idx)
     .slice(0, limit)
@@ -233,6 +303,7 @@ export type TickReport = {
 
 export async function runRbxrubyTick(): Promise<TickReport> {
   const mode = await rbxrubyMode();
+  await loadRbxrubySettings().catch(() => {});
   const report: TickReport = { mode, submitted: [], wouldSubmit: [], skipped: [], synced: 0, completed: [], failed: [] };
   if (!rbxrubyKey()) return report;
   let lastStock: Stock = [];
@@ -259,6 +330,7 @@ export async function runRbxrubyTick(): Promise<TickReport> {
       const todays = await prisma.orderEvent.findMany({ where: { type: RBXRUBY_SUBMIT, createdAt: { gte: since } }, select: { payload: true } });
       let spentRobux = todays.reduce((sum, e) => sum + (Number((e.payload as { passPrice?: number })?.passPrice) || 0), 0);
       let money = balance;
+      let spentUsd = await spentUsd24h();
 
       for (const c of await loadCandidates(maxPerTick() * 5)) {
         if (report.submitted.length + report.wouldSubmit.length >= maxPerTick()) break;
@@ -268,7 +340,8 @@ export async function runRbxrubyTick(): Promise<TickReport> {
           if (prep.stop) break;
           continue;
         }
-        if (spentRobux + prep.pass.passPrice > dailyRobuxCap()) { report.skipped.push({ code: c.wbCode, reason: "дневной потолок" }); break; }
+        if (spentRobux + prep.pass.passPrice > dailyRobuxCap()) { report.skipped.push({ code: c.wbCode, reason: "дневной потолок R$" }); break; }
+        if (spentUsd + prep.reserve > cfg.dailyUsd) { report.skipped.push({ code: c.wbCode, reason: `лимит $${cfg.dailyUsd} в сутки` }); break; }
 
         if (mode === "dry") {
           report.wouldSubmit.push(`[${c.lane}] ${c.wbCode} ${prep.pass.passPrice}R$ ~$${prep.reserve} @${prep.pass.owner}/${prep.pass.placeId}`);
@@ -280,6 +353,7 @@ export async function runRbxrubyTick(): Promise<TickReport> {
         }
         money -= prep.reserve;
         spentRobux += prep.pass.passPrice;
+        spentUsd += prep.reserve;
       }
     }
   } catch (e) {
@@ -331,6 +405,24 @@ async function stockHistoryPatch(stock: Stock, now: string): Promise<Partial<Cur
 const num0 = (n: number) => n.toLocaleString("ru-RU");
 
 type Stock = Array<{ rate: number; totalRobuxAmount: number; maxInstantOrder: number; accountsCount?: number }>;
+
+/** Потрачено за сутки, $: выкупленные — по факту, отправленные без итога — по резерву. */
+async function spentUsd24h(): Promise<number> {
+  const since = new Date(Date.now() - 86400_000);
+  const ev = await prisma.orderEvent.findMany({
+    where: { type: { in: [RBXRUBY_SUBMIT, RBXRUBY_RESULT] }, createdAt: { gte: since } },
+    select: { type: true, payload: true },
+  });
+  const results = new Map(ev.filter((e) => e.type === RBXRUBY_RESULT).map((e) => [String((e.payload as { extId?: string }).extId), e.payload as { status?: string; price?: number }]));
+  let usd = 0;
+  for (const e of ev.filter((x) => x.type === RBXRUBY_SUBMIT)) {
+    const p = e.payload as { extId?: string; passPrice?: number };
+    const r = results.get(String(p.extId));
+    if (!r) usd += rbxrubyReserveUsd(Number(p.passPrice) || 0, maxRate());
+    else if (r.status === "Completed") usd += Number(r.price) || 0;
+  }
+  return Math.round(usd * 1000) / 1000;
+}
 const usableStock = (stock: Stock) => stock.filter((r) => r.rate <= maxRate() && r.totalRobuxAmount > 0);
 
 type Prepared =
@@ -627,6 +719,12 @@ export type RbxrubyOverview = {
   offers: Array<{ rate: number; robux: number; sellers: number | null; maxOne: number; usable: boolean }>;
   history: StockPoint[];
   minUsefulPass: number;
+  settings: RbxrubySettings;
+  nextTickAt: string | null;
+  feed: Array<{ at: string; orderId: string; code: string; amount: number; ok: boolean; usd: number; rate: number | null; seller: string | null; why: string | null }>;
+  active: Array<{ at: string; orderId: string; code: string; amount: number; pass: number }>;
+  today: { robux: number; usd: number; saved: number; savingsBase: number };
+  fit: { fit: number; total: number } | null;
 };
 
 export async function rbxrubyOverview(): Promise<RbxrubyOverview> {
@@ -647,6 +745,30 @@ export async function rbxrubyOverview(): Promise<RbxrubyOverview> {
   const dayDone = done.filter((e) => e.createdAt.getTime() >= since1);
   const weekUsd = sum(done, (p) => Number(p.price));
   const weekRobux = sum(done, (p) => Number(p.robuxAmount));
+  const settings = await loadRbxrubySettings();
+
+  // Лента: последние итоги + что сейчас у площадки (с кодом и номиналом заказа).
+  const recent = await prisma.orderEvent.findMany({
+    where: { type: { in: [RBXRUBY_SUBMIT, RBXRUBY_RESULT] }, createdAt: { gte: since7 } },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+    select: { type: true, payload: true, createdAt: true, order: { select: { id: true, wbCode: true, amount: true } } },
+  });
+  const resultByExt = new Map(recent.filter((e) => e.type === RBXRUBY_RESULT).map((e) => [String((e.payload as { extId?: string }).extId), e]));
+  const feed = recent
+    .filter((e) => e.type === RBXRUBY_RESULT)
+    .slice(0, 12)
+    .map((e) => {
+      const p = e.payload as { status?: string; price?: number; rate?: number; buyerRobloxUsername?: string; error?: { message?: string } | null };
+      return {
+        at: e.createdAt.toISOString(), orderId: e.order.id, code: e.order.wbCode, amount: e.order.amount,
+        ok: p.status === "Completed", usd: Number(p.price) || 0, rate: Number(p.rate) || null,
+        seller: p.buyerRobloxUsername ?? null, why: p.status === "Completed" ? null : p.error?.message ?? p.status ?? null,
+      };
+    });
+  const active = recent
+    .filter((e) => e.type === RBXRUBY_SUBMIT && !resultByExt.has(String((e.payload as { extId?: string }).extId)))
+    .map((e) => ({ at: e.createdAt.toISOString(), orderId: e.order.id, code: e.order.wbCode, amount: e.order.amount, pass: Number((e.payload as { passPrice?: number }).passPrice) || 0 }));
   return {
     configured: Boolean(rbxrubyKey()),
     mode,
@@ -679,7 +801,31 @@ export async function rbxrubyOverview(): Promise<RbxrubyOverview> {
       .map((r) => ({ rate: r.rate, robux: r.totalRobuxAmount, sellers: r.accountsCount ?? null, maxOne: r.maxInstantOrder, usable: r.rate <= maxRate() })),
     history: meta.history ?? [],
     minUsefulPass: MIN_USEFUL_PASS,
+    settings,
+    nextTickAt: snap?.at ? new Date(new Date(snap.at).getTime() + 60_000).toISOString() : null,
+    feed,
+    active,
+    today: {
+      robux: feed.filter((f) => new Date(f.at).getTime() >= since1).reduce((s, f) => s + f.amount, 0),
+      usd: Math.round(dayDone.reduce((s, e) => s + (Number((e.payload as { price?: number }).price) || 0), 0) * 100) / 100,
+      saved: Math.round(dayDone.reduce((s, e) => {
+        const p = e.payload as { price?: number; robuxAmount?: number };
+        return s + Math.max(0, ((Number(p.robuxAmount) || 0) / 1000) * SAVINGS_BASE - (Number(p.price) || 0));
+      }, 0) * 100) / 100,
+      savingsBase: SAVINGS_BASE,
+    },
+    fit: await countFitting().catch(() => null),
   };
+}
+
+/** С чем сравниваем экономию: курс, по которому брали бы без RBXRUBY-продавцов дешевле. */
+const SAVINGS_BASE = num("RBXRUBY_SAVINGS_BASE", 3.8);
+
+/** Сколько заказов «К выкупу» сейчас подходят под настройки (без проверки пасса). */
+async function countFitting(): Promise<{ fit: number; total: number }> {
+  const all = await prisma.wbOrder.count({ where: { isTest: false, status: "PENDING", heldAt: null, NOT: { isDirectOrder: true, paidAt: null } } });
+  const fit = (await loadCandidates(300)).length;
+  return { fit, total: all };
 }
 
 /** «Не отдавать в RBXRUBY» / «Снова можно». */
@@ -699,6 +845,7 @@ export async function setRbxrubyExcluded(orderId: string, excluded: boolean, by:
 export async function sendToRbxrubyNow(orderId: string, by: string): Promise<{ ok: boolean; message: string }> {
   if (!rbxrubyKey()) return { ok: false, message: "RBXRUBY не настроен" };
   if (process.env.RBXRUBY_MODE?.trim().toLowerCase() === "off") return { ok: false, message: "RBXRUBY выключен рубильником" };
+  await loadRbxrubySettings();
   const o = await prisma.wbOrder.findUnique({
     where: { id: orderId },
     select: { id: true, wbCode: true, amount: true, gamepassId: true, status: true, isDirectOrder: true, paidAt: true, heldAt: true, _count: { select: { splitGamepasses: true } } },

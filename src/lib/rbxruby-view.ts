@@ -39,7 +39,40 @@ export type RbxrubyOverviewView = {
   offers: Array<{ rate: number; robux: number; sellers: number | null; maxOne: number; usable: boolean }>;
   history: Array<{ at: string; usable: number; maxInstant: number }>;
   minUsefulPass: number;
+  settings: RbxrubySettingsView;
+  nextTickAt: string | null;
+  feed: Array<{ at: string; orderId: string; code: string; amount: number; ok: boolean; usd: number; rate: number | null; seller: string | null; why: string | null }>;
+  active: Array<{ at: string; orderId: string; code: string; amount: number; pass: number }>;
+  today: { robux: number; usd: number; saved: number; savingsBase: number };
+  fit: { fit: number; total: number } | null;
 };
+
+export type RbxrubyLaneView = "pinned" | "rebuy" | "direct" | "rush" | "asks" | "queue";
+export type RbxrubySettingsView = {
+  maxRate: number; lanes: RbxrubyLaneView[]; nominals: number[]; perTick: number; dailyUsd: number; minAgeHours: number; by?: string; at?: string;
+};
+export const LANE_LABEL: Record<RbxrubyLaneView, string> = {
+  pinned: "Поднятые", rebuy: "Не дошло", direct: "Прямые", rush: "Ебут мозги", asks: "Спрашивают", queue: "Остальные",
+};
+export const LANES: RbxrubyLaneView[] = ["pinned", "rebuy", "direct", "rush", "asks", "queue"];
+export const NOMINALS = [100, 200, 500, 800, 1000, 1500];
+export const RATE_PRESETS = [2.9, 3.2, 3.5, 3.8];
+
+/** Сколько R$ доступно по курсу ≤ rate (из предложений) — подсказка под курсом. */
+export function availableAt(offers: RbxrubyOverviewView["offers"], rate: number): { robux: number; maxOne: number } {
+  const rows = offers.filter((o) => o.rate <= rate + 1e-9);
+  return { robux: rows.reduce((s, o) => s + o.robux, 0), maxOne: Math.max(0, ...rows.map((o) => o.maxOne)) };
+}
+
+/** Секунд до следующего прохода. */
+export function secondsTo(iso: string | null, now = Date.now()): number | null {
+  if (!iso) return null;
+  return Math.max(0, Math.round((new Date(iso).getTime() - now) / 1000));
+}
+
+export function hhmm(iso: string): string {
+  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
 
 /** Точки графика стока: x 0..1 по времени суток, y 0..1 от максимума. */
 export function stockSpark(history: RbxrubyOverviewView["history"], w: number, h: number): string {
