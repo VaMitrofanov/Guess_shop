@@ -43,8 +43,6 @@ export function describePass(id: string, expected: number | null, f: PassFacts):
   if (expected && f.price !== null && f.price !== expected) problems.push(`цена ${f.price} R$ вместо нужных ${expected} R$`);
   if (f.managed) problems.push("включён Managed pricing — Roblox сам меняет цену");
   if (f.regional) problems.push("включены региональные цены (Regional pricing)");
-  if (f.privateGame) problems.push("игра закрыта/не опубликована");
-  if (f.ageRestricted) problems.push("игра 18+ — пасс в такой игре купить нельзя");
   return problems.length
     ? `ПРОВЕРКА ПАССА ${id} сейчас: ${problems.join("; ")}. Подскажи, что именно поправить.`
     : `ПРОВЕРКА ПАССА ${id} сейчас: всё в порядке (цена ${f.price ?? "?"} R$, в продаже) — выкуп за нами.`;
