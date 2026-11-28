@@ -19,6 +19,8 @@
    `PA_DESK=off` — выключить, `PA_DESK=dry` — только писать в лог, что сделал бы.
    ───────────────────────────────────────────────────────────────────────── */
 
+import { paExportPairs } from "../shared/support-ai-harvest";
+import { recordOperatorExamples } from "../shared/support-ai-learn";
 import { redactWbChatText } from "../shared/wb-delivery-crypto";
 import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
@@ -828,7 +830,9 @@ async function dropStaleQuickReplies(tg: TelegramClient, user: Api.UserFull): Pr
  * После выгрузки — итог недели ИИ в «📊 Сводки» (`aiWeeklyReport`).
  * Поменять `EXPORT_VERSION` — внеочередная выгрузка при следующем проходе.
  */
-const EXPORT_VERSION = "2026-11-26";
+const EXPORT_VERSION = "2026-11-28-learn";
+/** Новая версия = полная выгрузка с этой даты (28.11.2026: история PA — в обучение ИИ). */
+const EXPORT_FULL_SINCE = new Date("2026-01-01T00:00:00Z");
 const EXPORT_STREAM = "pa-export";
 /** Сжатая копия последней выгрузки (jsonl.gz в base64): `/tmp` не переживает деплой. */
 const EXPORT_FILE_STREAM = "pa-export-file";
@@ -847,7 +851,8 @@ export async function exportPaDialogs(): Promise<void> {
   // Упавшую посреди выгрузку (деплой пересоздал контейнер — 26.11.2026 так
   // пропала выгрузка за две недели) повторяем, но не чаще раза в 3 часа.
   if (meta.startedAt && Date.now() - new Date(meta.startedAt).getTime() < EXPORT_RETRY_MS) return;
-  const since = meta.until ? new Date(meta.until) : row?.lastSuccessAt ? new Date(row.lastSuccessAt) : EXPORT_FIRST_SINCE;
+  const full = !!row?.cursor && row.cursor !== "running" && row.cursor !== EXPORT_VERSION;
+  const since = full ? EXPORT_FULL_SINCE : meta.until ? new Date(meta.until) : row?.lastSuccessAt ? new Date(row.lastSuccessAt) : EXPORT_FIRST_SINCE;
   const until = new Date();
   // Курсор (cursor/lastSuccessAt/until) двигается только после успеха: до
   // 26.11 он ставился в начале, и прерванная выгрузка считалась сделанной на неделю.
@@ -918,6 +923,15 @@ export async function exportPaDialogs(): Promise<void> {
     data: { cursor: EXPORT_VERSION, lastSuccessAt: until, metadata: { since: since.toISOString(), until: until.toISOString(), chats: n, messages: msgsTotal, file, copy: EXPORT_FILE_STREAM } as never },
   });
   console.log(`[pa-export] готово: чатов ${n}, новых сообщений ${msgsTotal} (с ${since.toISOString().slice(0, 10)}) → ${file}`);
+  // 🧠 Ответы операторов из выгрузки — в примеры ИИ (28.11.2026).
+  try {
+    const pairs = paExportPairs(await fs.readFile(file, "utf8"));
+    const added = await recordOperatorExamples(db, pairs);
+    console.log(`[ai-learn] PA: пар ${pairs.length} (+${added})`);
+  } catch (e) {
+    console.warn("[ai-learn] PA:", e instanceof Error ? e.message : e);
+  }
+  if (full) return; // полная выгрузка истории — не недельный итог
   await aiWeeklyReport(db, { since, chats: n, messages: msgsTotal })
     .catch((e) => console.warn("[ai-weekly]", e instanceof Error ? e.message : e));
 }
