@@ -131,6 +131,8 @@ const anthropic = () => (client ??= new Anthropic({ apiKey: process.env.ANTHROPI
  */
 async function opusJson<T>(schema: z.ZodType<T>, system: string, user: string, maxTokens: number, label: string): Promise<T | null> {
   const t0 = Date.now();
+  // Обрезка .slice() режет эмодзи пополам — одиночный суррогат ломает JSON запроса (400).
+  user = user.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
   console.log(`[ai-teacher] ${label}: запрос (${Math.round(user.length / 1000)}k символов)`);
   const stream = anthropic().messages.stream({
     model: TEACHER_MODEL,
