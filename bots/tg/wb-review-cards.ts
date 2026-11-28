@@ -8,7 +8,7 @@
    На каждый новый неотвеченный отзыв 1–3★ в тему «Отзывы и вопросы» уходит
    одна карточка: чей это заказ (копируемый код, WB #, ШК, ник, TG/ВК), текст,
    готовый публичный ответ ИИ и оценка «можно ли пожаловаться». Кнопки:
-     🚩 Пожаловался — ответ уйдёт через 3 дня, если WB отзыв не снимет;
+     🚩 Пожаловался — через 3 дня напоминание с кнопкой (сам ответ НЕ уходит, 28.11);
      📝 Ответить сейчас — ответ уходит в WB сразу;
      🙈 Не отвечать.
    Сам ИИ на отзыв ничего не публикует, пока человек не нажал кнопку.
@@ -85,7 +85,7 @@ async function draftFor(f: WbFeedbackRaw, orderContext: string): Promise<{ reply
 function buttons(id: string) {
   return {
     inline_keyboard: [
-      [{ text: "🚩 Пожаловался — ответ через 3 дня", callback_data: `wbrv:later:${id}` }],
+      [{ text: "🚩 Пожаловался — напомнить через 3 дня", callback_data: `wbrv:later:${id}` }],
       [{ text: "📝 Ответить сейчас", callback_data: `wbrv:now:${id}` }, { text: "🙈 Не отвечать", callback_data: `wbrv:skip:${id}` }],
     ],
   };
@@ -139,18 +139,17 @@ export async function runWbReviewCards(bot: Telegraf, now = Date.now()): Promise
       continue;
     }
     if (fb.answer?.text) { it.status = "answered"; dirty = true; continue; }
-    if (await answerReview(id, it.draft, false)) {
-      it.status = "answered";
-      dirty = true;
-      await notify(bot, `📤 <b>Жалоба на отзыв ${it.stars}★ не сработала за 3 дня — ответ опубликован:</b>\n${escapeHtml(it.draft)}`);
-    }
+    // 28.11.2026 владелец: автоответы на отзывы выключены — только напоминание с кнопкой.
+    it.status = "new";
+    dirty = true;
+    await notify(bot, `⏰ <b>Жалоба на отзыв ${it.stars}★ не сработала за 3 дня</b> — отзыв на месте. Ответ сам не уйдёт:\n${escapeHtml(it.draft)}`, buttons(id));
   }
   if (dirty) await save(items);
 }
 
-async function notify(bot: Telegraf, html: string): Promise<void> {
+async function notify(bot: Telegraf, html: string, markup?: ReturnType<typeof buttons>): Promise<void> {
   for (const t of await adminTargets("reviews", { loud: false })) {
-    await bot.telegram.sendMessage(t.chatId, html, { parse_mode: "HTML", ...t.extra }).catch(() => undefined);
+    await bot.telegram.sendMessage(t.chatId, html, { parse_mode: "HTML", ...(markup ? { reply_markup: markup } : {}), ...t.extra }).catch(() => undefined);
   }
 }
 
@@ -171,7 +170,7 @@ export function registerWbReviewCards(bot: Telegraf): void {
     if (act === "later") {
       it.status = "complained";
       it.complainedAt = new Date().toISOString();
-      note = `🚩 ${who}: жалоба подана. Если через 3 дня отзыв останется — ответ уйдёт сам.`;
+      note = `🚩 ${who}: жалоба подана. Через 3 дня напомню, если отзыв останется.`;
     } else if (act === "skip") {
       it.status = "skipped";
       note = `🙈 ${who}: без ответа.`;
