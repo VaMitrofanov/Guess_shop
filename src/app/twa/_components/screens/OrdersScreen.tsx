@@ -3876,7 +3876,7 @@ function orderToTab(order: Order): FilterTab {
 function isWorkOrder(order: Order): boolean {
   const cutoff = Date.now() - 40 * 3600_000;
   if (order.status === "ERROR") return true;
-  if (["PENDING", "IN_PROGRESS"].includes(order.status) && !isUnpaidDirect(order) && order.orderSource !== "AVITO") return true;
+  if (["PENDING", "IN_PROGRESS"].includes(order.status) && !isUnpaidDirect(order)) return true;
   return order.status === "AWAITING_GAMEPASS" && new Date(order.createdAt).getTime() <= cutoff;
 }
 

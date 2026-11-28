@@ -75,7 +75,6 @@ export const SILENT_REMINDERS = 3;
 export const BUYOUT_QUEUE_SQL = `
   ${PAID_BUYOUT_SQL}
   AND ${NOT_HELD_SQL}
-  AND "orderSource" <> 'AVITO'
   AND (
     status IN ('PENDING','IN_PROGRESS')
     OR (status = 'ERROR' AND "buyoutErrorCode" IN ('${BUYOUT_ERROR_REGIONAL_PRICE}','${BUYOUT_ERROR_ROBLOX_PLUS_FLOW}'))
@@ -87,7 +86,7 @@ export const BUYOUT_QUEUE_SQL = `
  *
  * `SITE` и `DIRECT` — обе «прямые» (сайт создаёт заказ с `isDirectOrder = true`),
  * поэтому ось — `isDirectOrder`, а не перечисление источников: новый прямой
- * канал попадёт в свою полосу сам. `AVITO` в очередь выкупа не входит вовсе.
+ * канал попадёт в свою полосу сам. (Авито закрыт 28.11.2026 — исключений под него нет.)
  */
 export const BUYOUT_LANE_SQL = `
   CASE
@@ -109,7 +108,7 @@ export const BUYOUT_LANE_SQL = `
 export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
   WORK: `${NOT_HELD_SQL} AND (
     status = 'ERROR'
-    OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" <> 'AVITO')
+    OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL})
     OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
   )`,
   BUYOUT: BUYOUT_QUEUE_SQL,
@@ -131,7 +130,7 @@ export const TAB_SQL: Record<Exclude<FilterTab, "ALL">, string> = {
      и он ничего не выделял. Тишину покупателя показывает «Молчат». */
   ATTENTION: `${NOT_HELD_SQL} AND (
     status = 'ERROR'
-    OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" <> 'AVITO'
+    OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL}
         AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
     OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
   )`,
@@ -154,7 +153,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
         ...NOT_HELD,
         OR: [
           { status: "ERROR" },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" } },
+          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE },
           { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff } },
         ],
       };
@@ -164,7 +163,6 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
       return {
         ...PAID_BUYOUT_SCOPE,
         ...NOT_HELD,
-        orderSource: { not: "AVITO" },
         OR: [
           { status: { in: ["PENDING", "IN_PROGRESS"] } },
           { status: "ERROR", buyoutErrorCode: { in: [BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW] } },
@@ -205,7 +203,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
         ...NOT_HELD,
         OR: [
           { status: "ERROR" },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
+          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, pendingAt: { lte: buyoutOverdue } },
           { isDirectOrder: true, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
         ],
       };

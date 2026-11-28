@@ -33,11 +33,9 @@ export function isUnpaidDirect(order: Pick<BuyoutQueueOrder, "isDirectOrder" | "
 }
 
 /**
- * Заказ находится в общей очереди «К выкупу». Авито считается отдельной очередью
- * (у неё своя вкладка и свой источник), поэтому в общую не входит.
+ * Заказ находится в общей очереди «К выкупу». (Отдельной очереди Авито больше нет — 28.11.2026.)
  */
 export function belongsToBuyoutQueue(order: BuyoutQueueOrder): boolean {
-  if (order.orderSource === "AVITO") return false;
   if (isUnpaidDirect(order)) return false;
   return (BUYOUT_QUEUE_STATUSES as readonly string[]).includes(order.status);
 }

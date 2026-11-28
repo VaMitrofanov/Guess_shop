@@ -473,7 +473,49 @@ const PIN_ACTIVE_S = 24 * 3600;
 
 type PinState = Record<string, { id: number; text: string }>;
 
-async function syncOrderPins(
+/**
+ * Закреп слался по многу раз (28.11.2026, RUP3VQM: «Вы уже 3000000000 раз это
+ * отправили»). Три дыры:
+ *  1) состояние писалось в базу только в конце прохода — деплой посреди прохода
+ *     «забывал» отправленный закреп, и следующий проход слал его снова;
+ *  2) отправили, а закрепить не вышло — закреп не запоминался и уходил каждый проход;
+ *  3) мгновенный закреп (`pinPaOrdersNow`) и обычный проход читали состояние
+ *     одновременно и оба слали новый.
+ * Теперь: проходы идут строго по одному (`pinLock`), отправленный закреп
+ * записывается сразу, а перед отправкой смотрим последние сообщения чата —
+ * такой же текст уже есть, значит берём его, а не шлём ещё раз.
+ */
+let pinLock: Promise<void> = Promise.resolve();
+
+function syncOrderPins(
+  tg: TelegramClient,
+  dialogs: Dialog[],
+  ordersOf: (tgId: string) => PinOrder[],
+  mode: Mode,
+  result: PaDeskResult,
+): Promise<void> {
+  const run = pinLock.then(() => syncOrderPinsOnce(tg, dialogs, ordersOf, mode, result));
+  pinLock = run.catch(() => undefined);
+  return run;
+}
+
+async function savePins(pins: PinState): Promise<void> {
+  await db.wbSyncCursor.upsert({
+    where: { stream: PIN_STREAM },
+    create: { stream: PIN_STREAM, metadata: { pins } as never },
+    update: { metadata: { pins } as never },
+  });
+}
+
+/** Наш закреп с тем же началом уже есть среди последних сообщений — его id. */
+async function existingPinId(tg: TelegramClient, u: Api.User, text: string): Promise<number | null> {
+  const head = text.split("\n")[0].replace(/<[^>]+>/g, "").trim();
+  const msgs = await tg.getMessages(u, { limit: 15 }).catch(() => []);
+  const hit = msgs.find((m) => m.out && (m.message ?? "").startsWith(head.slice(0, 40)));
+  return hit ? hit.id : null;
+}
+
+async function syncOrderPinsOnce(
   tg: TelegramClient,
   dialogs: Dialog[],
   ordersOf: (tgId: string) => PinOrder[],
@@ -519,13 +561,24 @@ async function syncOrderPins(
     if (!fresh || !pinWorthCreating(orders, now) || result.pinsCreated >= PIN_CREATE_CAP) continue;
     result.pinsCreated++;
     if (mode === "dry") { console.log(`[pa-pin] (dry) новый закреп ${key}`); continue; }
+    // Закреп уже есть в чате (потерянное состояние) — правим его, а не шлём новый.
+    const found = await existingPinId(tg, u, text);
+    if (found) {
+      await tg.editMessage(u, { message: found, text, parseMode: "html" }).catch(() => undefined);
+      pins[key] = { id: found, text };
+      await savePins(pins);
+      result.pinsCreated--;
+      continue;
+    }
     try {
       const sent = await tg.sendMessage(u, { message: text, silent: true, parseMode: "html" });
-      // Общий закреп (не «только у себя»): клиент тоже видит его над чатом.
-      await tg.pinMessage(u, sent.id, { notify: false, pmOneSide: false });
-      if (have) await tg.unpinMessage(u, have.id).catch(() => undefined);
+      // Запоминаем СРАЗУ: что бы ни случилось дальше, второй раз этот текст не уйдёт.
       pins[key] = { id: sent.id, text };
-      changed = true;
+      await savePins(pins);
+      // Общий закреп (не «только у себя»): клиент тоже видит его над чатом.
+      await tg.pinMessage(u, sent.id, { notify: false, pmOneSide: false })
+        .catch((error) => console.warn(`[pa-pin] сообщение ушло, но не закрепилось: ${error instanceof Error ? error.message : error}`));
+      if (have) await tg.unpinMessage(u, have.id).catch(() => undefined);
       await sleep(2500);
     } catch (error) {
       console.warn(`[pa-pin] закреп не встал: ${error instanceof Error ? error.message : error}`);
@@ -534,11 +587,7 @@ async function syncOrderPins(
 
   if (result.pinsCreated || result.pinsUpdated) console.log(`[pa-pin] новых закрепов ${result.pinsCreated}, обновлено ${result.pinsUpdated}`);
   if (!changed) return;
-  await db.wbSyncCursor.upsert({
-    where: { stream: PIN_STREAM },
-    create: { stream: PIN_STREAM, metadata: { pins } as never },
-    update: { metadata: { pins } as never },
-  });
+  await savePins(pins);
 }
 
 /** Привести одну папку к составу `want`. `true` — что-то меняли (или хотели в dry). */

@@ -126,7 +126,6 @@ const SOURCE_OPTIONS = [
   ["WB", "Wildberries"],
   ["WB_DBS", "WB DBS"],
   ["DIRECT", "Прямой"],
-  ["AVITO", "Авито"],
   ["MANUAL", "Ручной"],
 ] as const;
 

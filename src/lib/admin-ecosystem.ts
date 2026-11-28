@@ -38,7 +38,7 @@ type AdminOrderRow = {
   attention: boolean;
 };
 
-type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "ERROR";
+type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "WB_DBS" | "DIRECT" | "ERROR";
 
 export type AdminOrdersPage = {
   orders: AdminOrderRow[];
@@ -155,8 +155,8 @@ export async function getAdminOrdersPage(input: {
   const limit = Math.min(100, Math.max(10, input.limit ?? 50));
   const clauses: Prisma.WbOrderWhereInput[] = [{ isTest: false }];
 
-  if (["SITE", "WB", "WB_DBS", "DIRECT", "AVITO"].includes(filter)) {
-    clauses.push({ orderSource: filter as "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" });
+  if (["SITE", "WB", "WB_DBS", "DIRECT"].includes(filter)) {
+    clauses.push({ orderSource: filter as "SITE" | "WB" | "WB_DBS" | "DIRECT" });
   } else if (filter === "ERROR") {
     clauses.push({
       OR: [
@@ -289,8 +289,7 @@ async function queryDashboardOperational() {
         COUNT(*) AS "totalOrders",
         COUNT(*) FILTER (WHERE "status"::text IN ('AWAITING_PAYMENT', 'PAYMENT_PENDING', 'AWAITING_GAMEPASS', 'PENDING', 'IN_PROGRESS')) AS "activeOrders",
         COUNT(*) FILTER (
-          WHERE "orderSource"::text <> 'AVITO'
-            AND NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
+          WHERE NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
             AND (
               "status"::text IN ('PENDING', 'IN_PROGRESS')
               OR ("status"::text = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE', 'ROBLOX_PLUS_FLOW'))

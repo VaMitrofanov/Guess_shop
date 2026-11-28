@@ -11,7 +11,7 @@ export default async function AdminEconomicsPage() {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <span className={styles.eyebrow}>Прямые заказы · сайт · Авито · ручные</span>
+          <span className={styles.eyebrow}>Прямые заказы · сайт · ручные</span>
           <h1>Экономика</h1>
           <p>
             Сколько получили, сколько робуксов на это ушло и во что обошлись бонусы.

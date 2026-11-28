@@ -24,10 +24,10 @@ describe("главная считает очередь тем же предик�
     expect(dashboard).not.toContain("status IN ('PENDING', 'IN_PROGRESS')");
   });
 
-  it("предикат очереди несёт заморозку, оплату и исключение Авито", () => {
+  it("предикат очереди несёт заморозку и оплату; исключения Авито нет (28.11.2026)", () => {
     expect(BUYOUT_QUEUE_SQL).toContain(`"heldAt" IS NULL`);
     expect(BUYOUT_QUEUE_SQL).toContain(`"paidAt" IS NULL`);
-    expect(BUYOUT_QUEUE_SQL).toContain(`"orderSource" <> 'AVITO'`);
+    expect(BUYOUT_QUEUE_SQL).not.toContain("AVITO");
     expect(BUYOUT_QUEUE_SQL).toContain("REGIONAL_PRICE");
   });
 

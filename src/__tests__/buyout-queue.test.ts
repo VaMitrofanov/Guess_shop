@@ -30,8 +30,8 @@ describe("Общая очередь выкупа", () => {
     expect(belongsToBuyoutQueue(unpaid)).toBe(false);
   });
 
-  test("Авито остаётся отдельной очередью", () => {
-    expect(belongsToBuyoutQueue(order({ orderSource: "AVITO" }))).toBe(false);
+  test("отдельной очереди Авито больше нет (28.11.2026)", () => {
+    expect(belongsToBuyoutQueue(order({ orderSource: "AVITO" }))).toBe(true);
   });
 
   test("статусы вне выкупа не считаются очередью", () => {
