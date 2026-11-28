@@ -12,6 +12,7 @@ import { SUPPORT_SETTINGS_STREAM, type SupportAiRequest, type SupportAiResult } 
 import { db } from "../shared/db";
 import { examplesBlock, loadExampleLibrary, pickExamples } from "../shared/support-ai-learn";
 import { SUPPORT_TOOLS, runSupportTool } from "./support-ai-tools";
+import { SUPPORT_WORKFLOW } from "../shared/support-workflow";
 import { recordUsage } from "./ai-usage";
 
 /** Похожие ответы операторов под этот вопрос (28.11.2026: вся библиотека, не «последние 8»). */
@@ -95,7 +96,8 @@ export async function decideSupportDirect(req: SupportAiRequest, opts: { rules?:
   const system: Anthropic.TextBlockParam[] = [
     // Кэш на час (27.11.2026): вызовы идут раз в 10–30 мин, 5-минутный кэш
     // почти всегда истекал и база писалась заново по 1,25× цены.
-    { type: "text", text: PA_AI_SYSTEM + TOOLS_NOTE, cache_control: { type: "ephemeral", ttl: "1h" } },
+    // База + воркфлоу + инструменты — одна неизменная часть, кэш на час.
+    { type: "text", text: `${PA_AI_SYSTEM}\n\n${SUPPORT_WORKFLOW}${TOOLS_NOTE}`, cache_control: { type: "ephemeral", ttl: "1h" } },
     { type: "text", text: CHANNEL_NOTES[req.channel] },
     ...(rules ? [{ type: "text" as const, text: rules }] : []),
     ...(examples ? [{ type: "text" as const, text: examples }] : []),
