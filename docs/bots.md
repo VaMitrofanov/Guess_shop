@@ -117,7 +117,7 @@ WB — в нить заказа DBS).
   (`pickExamples`, общие основы слов) + 2 свежих, отдельным блоком системы после правил.
 - *Инструменты воркера (28.11, `bots/tg/support-ai-tools.ts`):* модель ведёт заказ сама — `find_order` (код WB / CODE-…),
   `find_by_gamepass`, `check_gamepass`, `search_passes_by_nick`, `attach_gamepass` (через `attachGamepassFromSupport`:
-  Roblox, цена ±2, ник = владелец пасса, заморозка, занятость; карточка выкупа админам) и `propose_nick_change`
+  Roblox, цена ±2, ник = владелец пасса, заморозка, занятость; карточка выкупа админам) `propose_nick_change`, `order_progress` (этап без сроков), `guide_link` (личная инструкция; в чате WB — без ссылки), `mark_nag` (заметка 🤬 + тон в журнал)
   (карточка ✅/❌, `support-ai-nick.ts`, stream `nick-proposals`). Цикл до 5 кругов в `support-ai-direct.ts`; на отзывах
   инструментов нет. Haiku решил «звать человека» → второе мнение Sonnet с теми же инструментами. Расход по моделям —
   `ai-usage.ts` (stream `ai-usage`), строка «💵 ИИ за сутки» в утренней сводке и у учителя. Передача человеку в PA

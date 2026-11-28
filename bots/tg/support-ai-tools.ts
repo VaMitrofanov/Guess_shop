@@ -51,6 +51,21 @@ export const SUPPORT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: { code: { type: "string" }, gamepass: { type: "string" } }, required: ["code", "gamepass"] },
   },
   {
+    name: "order_progress",
+    description: "Где сейчас заказ и что его держит: этап, сколько ждёт, поднят ли вручную, прямой ли, проверка менеджера. Для ответа «когда придут робуксы»: место в очереди и сроки покупателю НЕ называй — говори этап и что делаем.",
+    input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"] },
+  },
+  {
+    name: "guide_link",
+    description: "Личная ссылка на инструкцию по заказу (с уже подставленным кодом). stage: passid — сразу шаг «прислать Pass ID», key — «Сделайте за меня» (ключ), sale — включить продажу. В чате WB саму ссылку не пиши — сошлись на сообщение со ссылкой выше; в TG/ВК — дай ссылку.",
+    input_schema: { type: "object", properties: { code: { type: "string" }, stage: { type: "string", enum: ["passid", "key", "sale"] } }, required: ["code"] },
+  },
+  {
+    name: "mark_nag",
+    description: "Отметить, что покупатель ебёт мозги: пишет одно и то же, давит, грозит, пишет в нескольких каналах. Заказ поднимется в «Ебут мозги» у админов (если ему больше суток). reason — коротко, почему.",
+    input_schema: { type: "object", properties: { code: { type: "string" }, reason: { type: "string" } }, required: ["code", "reason"] },
+  },
+  {
     name: "propose_nick_change",
     description: "Покупатель просит поменять ник Roblox в заказе. Сам ник не меняешь — создаёшь админу карточку с кнопкой. Покупателю скажи, что передал на смену.",
     input_schema: { type: "object", properties: { code: { type: "string" }, nick: { type: "string" }, why: { type: "string" } }, required: ["code", "nick"] },
@@ -140,6 +155,55 @@ export async function runSupportTool(name: string, input: Record<string, unknown
             : `❌ Пасс не поставлен: ${r.reason}. Это решает человек — эскалируй.`;
           default: return r.why === "roblox_down" ? "Roblox не ответил — попробуй позже." : r.why === "not_a_pass" ? "Roblox не знает такого пасса — проверь ссылку/ID." : r.why === "no_orders" ? "Заказ заморожен или уже не ждёт пасс — ничего не меняю, эскалируй." : "Не удалось однозначно — эскалируй.";
         }
+      }
+      case "order_progress": {
+        const c = normCode(String(input.code ?? ""));
+        if (!CODE_RE.test(c)) return "Нужен код заказа из 7 символов.";
+        const o = await db.wbOrder.findFirst({
+          where: { wbCode: { equals: c, mode: "insensitive" } },
+          select: { status: true, amount: true, createdAt: true, pendingAt: true, priorityAt: true, isDirectOrder: true, heldAt: true, completedAt: true, gamepassId: true, robloxUsername: true },
+        }).catch(() => null);
+        if (!o) return "Заказ не найден — find_order.";
+        const h = (d: Date | null) => (d ? `${Math.round((Date.now() - d.getTime()) / 3_600_000)} ч` : "—");
+        const stage = o.status === "AWAITING_GAMEPASS" ? "ждём геймпасс от покупателя — без него выкупа не будет"
+          : o.status === "PENDING" ? `пасс принят, в очереди на выкуп ${h(o.pendingAt)}`
+          : o.status === "COMPLETED" ? `выкуплен ${o.completedAt?.toISOString().slice(0, 16).replace("T", " ")} — робуксы в Pending у Roblox`
+          : o.status === "ERROR" ? "выкуп не прошёл — нужна правка пасса (смотри данные покупателя)" : o.status;
+        return [
+          `Заказ ${c}: ${o.amount} R$, ${stage}.`,
+          o.heldAt ? "Стоит на проверке у менеджера (причину покупателю не называть — «проверка, менеджер посмотрит»)." : "",
+          o.priorityAt ? "Поднят вручную — первым в очереди." : o.isDirectOrder ? "Прямой заказ — в приоритете." : "",
+          o.status === "PENDING" ? "Покупателю: заказ в очереди, выкупаем по порядку, напишем сразу после выкупа. Сроки и место в очереди не называй." : "",
+        ].filter(Boolean).join("\n");
+      }
+      case "guide_link": {
+        const c = normCode(String(input.code ?? ""));
+        const o = await db.wbOrder.findFirst({
+          where: { wbCode: { equals: c, mode: "insensitive" } },
+          select: { wbCode: true, amount: true, isDirectOrder: true, robloxUsername: true, probableNick: true },
+        }).catch(() => null);
+        if (!o) return "Заказ не найден.";
+        const { buyerGuideUrl } = await import("../shared/buyer-step");
+        const stage = ["passid", "key", "sale"].includes(String(input.stage)) ? (input.stage as "passid" | "key" | "sale") : undefined;
+        const url = buyerGuideUrl(o, stage);
+        return ctx.channel === "wb_chat"
+          ? "В чате WB ссылку не пиши — попроси открыть ссылку из сообщения «Спасибо, код доставки получен» выше в этом чате."
+          : `Личная инструкция: ${url}`;
+      }
+      case "mark_nag": {
+        if (ctx.exam) return "(экзамен) Отметка была бы поставлена.";
+        const c = normCode(String(input.code ?? ""));
+        const o = await db.wbOrder.findFirst({ where: { wbCode: { equals: c, mode: "insensitive" } }, select: { id: true, adminNote: true } }).catch(() => null);
+        if (!o) return "Заказ не найден.";
+        const reason = String(input.reason ?? "").replace(/\s+/g, " ").slice(0, 200);
+        const line = `🤬 воркер ${new Date().toISOString().slice(0, 16).replace("T", " ")}: ${reason}`;
+        const note = o.adminNote?.trim() ? `${o.adminNote.trim()}\n${line}` : line;
+        await db.wbOrder.update({ where: { id: o.id }, data: { adminNote: note.slice(-2000) } }).catch(() => undefined);
+        // Тон в журнал — по нему «Первым делом» собирает «Ебут мозги».
+        await db.aiSupportLog.create({
+          data: { channel: ctx.channel, action: "ignore", mode: "on", category: "complaint", peerKey: `nag:${c}`, orderCode: c, question: `[mark_nag] ${reason}`, tone: "nags" },
+        }).catch(() => undefined);
+        return "Отметил. Покупателю об этом не пиши.";
       }
       case "propose_nick_change": {
         if (ctx.exam) return "(экзамен) Карточка смены ника была бы создана.";
