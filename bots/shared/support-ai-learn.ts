@@ -28,7 +28,11 @@ const KEEP = 4000;
 export const PROMPT_EXAMPLES = 8;
 const PROMPT_RECENT = 2;
 
-export interface OperatorExample { channel: string; question: string; answer: string; by: string; at: string }
+export interface OperatorExample {
+  channel: string; question: string; answer: string; by: string; at: string;
+  /** Учитель (ночной разбор, `ai-teacher`) отметил как образцовый — выше в подборе. */
+  gold?: boolean;
+}
 
 /**
  * Ответ оператора, на котором можно учить ИИ (28.11.2026: в истории WB из
@@ -51,7 +55,7 @@ export function exampleWorthKeeping(question: string, answer: string, channel?: 
   return true;
 }
 
-const keyOf = (q: string) => q.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+export const keyOf = (q: string) => q.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
 
 /** Слить новые пары в библиотеку: дубли вопроса заменяются более свежим ответом. */
 export function mergeExamples(list: OperatorExample[], add: OperatorExample[]): OperatorExample[] {
@@ -69,28 +73,66 @@ export function mergeExamples(list: OperatorExample[], add: OperatorExample[]): 
   return out.slice(0, KEEP);
 }
 
-async function readAll(db: Db): Promise<OperatorExample[]> {
+interface LibMeta { items: OperatorExample[]; blocked: string[] }
+
+async function readMeta(db: Db): Promise<LibMeta> {
   const row = await db.wbSyncCursor.findUnique({ where: { stream: EXAMPLES_STREAM } });
-  return ((row?.metadata ?? {}) as { items?: OperatorExample[] }).items ?? [];
+  const m = (row?.metadata ?? {}) as Partial<LibMeta>;
+  return { items: m.items ?? [], blocked: m.blocked ?? [] };
+}
+
+async function writeMeta(db: Db, meta: LibMeta): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const metadata = { items: meta.items, blocked: meta.blocked.slice(-5000) } as any;
+  await db.wbSyncCursor.upsert({
+    where: { stream: EXAMPLES_STREAM },
+    create: { stream: EXAMPLES_STREAM, metadata },
+    update: { metadata },
+  });
+  libCache = null;
+}
+
+async function readAll(db: Db): Promise<OperatorExample[]> {
+  return (await readMeta(db)).items;
+}
+
+/**
+ * Решение учителя по библиотеке: устаревшие/плохие пары — вон и в чёрный
+ * список (сбор не вернёт их обратно), образцовые — с отметкой `gold`.
+ */
+export async function curateExamples(db: Db, verdict: { drop: string[]; gold: string[] }): Promise<{ dropped: number; gold: number }> {
+  const meta = await readMeta(db);
+  const drop = new Set(verdict.drop.map(keyOf));
+  const gold = new Set(verdict.gold.map(keyOf));
+  let dropped = 0;
+  let golded = 0;
+  const items = meta.items.filter((x) => {
+    if (drop.has(keyOf(x.question))) { dropped++; return false; }
+    return true;
+  }).map((x) => {
+    if (gold.has(keyOf(x.question)) && !x.gold) { golded++; return { ...x, gold: true }; }
+    return x;
+  });
+  await writeMeta(db, { items, blocked: [...meta.blocked, ...drop] });
+  return { dropped, gold: golded };
 }
 
 /** Несколько пар разом (история каналов). Возвращает, сколько новых добавилось. */
 export async function recordOperatorExamples(db: Db, add: Array<Omit<OperatorExample, "at"> & { at?: string }>): Promise<number> {
   if (!add.length) return 0;
   try {
-    const list = await readAll(db);
+    const meta = await readMeta(db);
+    const list = meta.items;
+    const blocked = new Set(meta.blocked);
     const now = new Date().toISOString();
-    const next = mergeExamples(list, add.map((x) => ({ ...x, at: x.at ?? now })));
+    const fresh = add.filter((x) => !blocked.has(keyOf(x.question))).map((x) => ({ ...x, at: x.at ?? now }));
+    if (!fresh.length) return 0;
+    // Образцовая отметка переживает обновление ответа на тот же вопрос.
+    const goldKeys = new Set(list.filter((x) => x.gold).map((x) => keyOf(x.question)));
+    const next = mergeExamples(list, fresh).map((x) => (goldKeys.has(keyOf(x.question)) && !x.gold ? { ...x, gold: true } : x));
     const before = new Set(list.map((x) => keyOf(x.question)));
     const added = next.filter((x) => !before.has(keyOf(x.question))).length;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const metadata = { items: next } as any;
-    await db.wbSyncCursor.upsert({
-      where: { stream: EXAMPLES_STREAM },
-      create: { stream: EXAMPLES_STREAM, metadata },
-      update: { metadata },
-    });
-    libCache = null;
+    await writeMeta(db, { items: next, blocked: meta.blocked });
     return added;
   } catch (e) {
     console.warn("[ai-learn] примеры не сохранились:", e instanceof Error ? e.message : e);
@@ -142,7 +184,7 @@ export function pickExamples(lib: OperatorExample[], query: string, channel?: st
         const s = stems(x.question);
         let common = 0;
         for (const w of q) if (s.has(w)) common++;
-        const score = common / Math.sqrt(Math.max(4, s.size)) + (channel && x.channel === channel ? 0.15 : 0) - i * 1e-5;
+        const score = common / Math.sqrt(Math.max(4, s.size)) + (channel && x.channel === channel ? 0.15 : 0) + (x.gold ? 0.2 : 0) - i * 1e-5;
         return { x, common, score };
       }).filter((r) => r.common >= 1).sort((a, b) => b.score - a.score)
     : [];

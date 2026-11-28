@@ -12,6 +12,7 @@
    Выключатель — `PA_BUSINESS_REPLY=off`.
    ───────────────────────────────────────────────────────────────────────── */
 
+import { registerAiTeacher } from "./ai-teacher";
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
@@ -90,6 +91,7 @@ export function paBusinessReplyEnabled(env: NodeJS.ProcessEnv = process.env): bo
 export function registerPaBusiness(bot: Telegraf): void {
   // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
   registerPaAiAdmin(bot);
+  registerAiTeacher(bot);
   registerAiJudge(bot);
   // 🔗 Контакты заказа (17.11.2026): «да / не мой / убрать» — и из чата
   // поддержки, и из бота, и у владельца. До защиты беседы админов.

@@ -26,13 +26,12 @@ async function ownerRules(): Promise<string> {
   const row = await db.wbSyncCursor.findUnique({ where: { stream: SUPPORT_SETTINGS_STREAM } }).catch(() => null);
   const rules = ((row?.metadata ?? {}) as { rules?: unknown }).rules;
   const list = Array.isArray(rules) ? rules.filter((r): r is string => typeof r === "string" && r.trim().length > 0) : [];
-  rulesCache = {
-    at: Date.now(),
-    text: [
-      list.length ? `ПРАВИЛА ВЛАДЕЛЬЦА МАГАЗИНА (важнее базы знаний выше; соблюдай всегда):\n${list.map((r, i) => `${i + 1}. ${r}`).join("\n")}` : "",
-    ].filter(Boolean).join("\n\n"),
-  };
+  rulesCache = { at: Date.now(), text: rulesText(list) };
   return rulesCache.text;
+}
+
+function rulesText(list: string[]): string {
+  return list.length ? `ПРАВИЛА ВЛАДЕЛЬЦА МАГАЗИНА (важнее базы знаний выше; соблюдай всегда):\n${list.map((r, i) => `${i + 1}. ${r}`).join("\n")}` : "";
 }
 
 const PaAiDecisionSchema = z.object({
@@ -76,17 +75,20 @@ export function buildSupportMessages(req: SupportAiRequest): Anthropic.MessagePa
   return messages;
 }
 
-export async function decideSupportDirect(req: SupportAiRequest): Promise<SupportAiResult> {
+export async function decideSupportDirect(req: SupportAiRequest, opts: { rules?: string[]; exam?: boolean } = {}): Promise<SupportAiResult> {
   if (!process.env.ANTHROPIC_API_KEY?.trim()) return null;
+  // Экзамен учителя (`ai-teacher`) не расходует суточный потолок каналов.
+  if (!opts.exam) {
   const day = new Date().toISOString().slice(0, 10);
   const c = calls.get(req.channel);
   const counter = c && c.day === day ? c : { day, n: 0 };
   if (counter.n >= DAILY_CAP) return null;
   counter.n++;
   calls.set(req.channel, counter);
+  }
   const messages = buildSupportMessages(req);
   if (!messages) return null;
-  const rules = await ownerRules();
+  const rules = opts.rules ? rulesText(opts.rules) : await ownerRules();
   const examples = await examplesFor(req);
   try {
     const res = await anthropic().messages.parse({

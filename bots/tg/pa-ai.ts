@@ -388,7 +388,7 @@ export function registerPaAiAdmin(bot: Telegraf): void {
       return;
     }
     const s = await loadSettings(true);
-    const rules = [...s.rules, rule.slice(0, 600)].slice(-40);
+    const rules = [...s.rules, rule.slice(0, 600)].slice(-60);
     await saveSettings({ rules });
     await ctx.reply(`✅ Правило №${rules.length} добавлено — ИИ учтёт его в течение минуты.\nВсе правила: /ai_rules`);
   });
