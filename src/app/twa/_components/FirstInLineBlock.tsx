@@ -18,7 +18,6 @@ import {
   firstMetaLine,
   firstNoteText,
   firstReadiness,
-  firstRushHeat,
   firstRushLine,
   firstVisibleGroups,
   FIRST_GROUPS,
@@ -213,6 +212,15 @@ export default function FirstInLineBlock({
     toast(next ? `✎ ${order.wbCode}: заметка сохранена` : `✎ ${order.wbCode}: заметка снята`, "success");
   }, [post, editNote]);
 
+  /* «Опустить»: заказ уходит из «Ебут мозги» в общую очередь, пока не напишет снова. */
+  const dismissNag = async (order: FirstInLineOrder) => {
+    haptic.select();
+    const result = await post({ action: "nag-dismiss", orderId: order.id });
+    if (!result.ok) { haptic.notify("error"); toast(`${order.wbCode}: ${result.error}`, "error"); return; }
+    setData(prev => (prev ? { ...prev, rows: prev.rows.filter(row => row.id !== order.id), total: Math.max(0, prev.total - 1) } : prev));
+    toast(`${order.wbCode}: опущен в общую очередь`, "success");
+  };
+
   if (!data) return null;
   const visible = rows.filter(row => !bought.has(row.id));
   if (visible.length === 0) return null;
@@ -312,9 +320,8 @@ export default function FirstInLineBlock({
                 {(ready || meta || order.rush) && (
                   <div className="twa-first-meta">
                     {order.rush && (
-                      <span className="twa-first-heat" style={{ color: C.purple }} title={firstRushLine(order.rush, now)}>
-                        <i aria-hidden>{"●".repeat(firstRushHeat(order.rush.count))}{"○".repeat(3 - firstRushHeat(order.rush.count))}</i>
-                        {firstRushLine(order.rush, now).replace(/^📣 /, "")}
+                      <span className="twa-first-heat" style={{ color: order.reason === "rush" ? C.purple : C.textSecondary }} title={firstRushLine(order.rush, now)}>
+                        {firstRushLine(order.rush, now)}
                       </span>
                     )}
                     {ready && <span style={{ color: TONE[ready.tone] }}>{ready.text}</span>}
@@ -364,6 +371,17 @@ export default function FirstInLineBlock({
                     >
                       <Copy size={13} />ID{order.gamepassIds.length > 1 ? ` · ${order.gamepassIds.length}` : ""}
                     </button>
+                    {(order.reason === "rush" || order.reason === "asks") && (
+                      <button
+                        type="button"
+                        className="twa-first-copy twa-press-sm"
+                        disabled={busy.has(order.id)}
+                        aria-label={`Опустить заказ ${order.wbCode} в общую очередь`}
+                        onClick={() => void dismissNag(order)}
+                      >
+                        Опустить
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="twa-first-tick twa-press-sm"

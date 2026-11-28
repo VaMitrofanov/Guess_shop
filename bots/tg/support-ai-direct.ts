@@ -7,7 +7,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { CHANNEL_NOTES, PA_AI_CATEGORIES, PA_AI_MODEL, PA_AI_STRONG_MODEL, PA_AI_SYSTEM, type SupportChannel } from "../shared/pa-ai-support";
+import { BUYER_TONES, CHANNEL_NOTES, PA_AI_CATEGORIES, PA_AI_MODEL, PA_AI_STRONG_MODEL, PA_AI_SYSTEM, type SupportChannel } from "../shared/pa-ai-support";
 import { SUPPORT_SETTINGS_STREAM, type SupportAiRequest, type SupportAiResult } from "../shared/support-ai";
 import { db } from "../shared/db";
 import { examplesBlock, loadExampleLibrary, pickExamples } from "../shared/support-ai-learn";
@@ -41,6 +41,7 @@ const PaAiDecisionSchema = z.object({
   reply: z.string(),
   summary: z.string(),
   draft: z.string(),
+  tone: z.enum(BUYER_TONES),
 });
 
 /** Потолок вызовов модели в сутки на канал — страховка счёта. */

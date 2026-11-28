@@ -15,6 +15,7 @@
 
 /* Модуль без зависимостей: его тянет и ВК-бот, в образе которого нет ни zod,
    ни SDK Anthropic. Схема ответа для модели — в `support-ai-direct.ts`. */
+import { NAG_TONES as BUYER_TONES, type NagTone as BuyerTone } from "./buyer-nag";
 import { passPriceFor } from "./wb-question-templates";
 import { buyoutDelayText } from "./robux-wait";
 
@@ -36,7 +37,12 @@ export interface PaAiDecision {
   summary: string;
   /** Черновик ответа покупателю, который админ может отправить кнопкой (для escalate). */
   draft: string;
+  /** Тон последних сообщений покупателя (28.11.2026) — основа очереди «Ебут мозги». */
+  tone?: BuyerTone;
 }
+
+/** Тон покупателя: спокойно / спрашивает / ноет / наезжает / угрожает. */
+export { NAG_TONES as BUYER_TONES, type NagTone as BuyerTone } from "./buyer-nag";
 
 /** Проверка решения, пришедшего из сети (мост), без zod. */
 export function asPaAiDecision(raw: unknown): PaAiDecision | null {
@@ -44,7 +50,8 @@ export function asPaAiDecision(raw: unknown): PaAiDecision | null {
   if (!r || (r.action !== "reply" && r.action !== "escalate" && r.action !== "ignore")) return null;
   if (!PA_AI_CATEGORIES.includes(r.category as PaAiDecision["category"])) return null;
   if (typeof r.reply !== "string" || typeof r.summary !== "string" || typeof r.draft !== "string") return null;
-  return { action: r.action, category: r.category as PaAiDecision["category"], reply: r.reply, summary: r.summary, draft: r.draft };
+  const tone = BUYER_TONES.includes(r.tone as BuyerTone) ? (r.tone as BuyerTone) : undefined;
+  return { action: r.action, category: r.category as PaAiDecision["category"], reply: r.reply, summary: r.summary, draft: r.draft, ...(tone ? { tone } : {}) };
 }
 
 export const CATEGORY_RU: Record<(typeof PA_AI_CATEGORIES)[number], string> = {
@@ -179,6 +186,7 @@ ROBLOX: ГДЕ ЧТО НАХОДИТСЯ И КУДА НАЖИМАТЬ
    • ты не уверен.
    Для escalate: reply="", summary — суть для админа в 1–2 строках (кто, какой заказ, что хочет), draft — готовый вежливый ответ покупателю, который админ отправит одной кнопкой (без обещаний денег и сроков, если их нет в данных).
 3) action="ignore" — «спасибо», «ок», стикеры, приветствие без вопроса, спам и чужие ссылки («лови подарок», боты-раздачи). reply/summary/draft пустые. Коммерческие предложения магазину (продвижение, реклама, сотрудничество) — escalate (category="other"), draft пустой: отвечает владелец.
+Поле tone — тон покупателя по его последним сообщениям (учитывай всю переписку выше), для очереди выкупа, покупателю не видно: "calm" — благодарит/присылает данные, вопросов нет; "asks" — спокойно спрашивает (статус, «когда?», как сделать), один-два раза; "nags" — ноет и торопит: повторяет одно и то же, «???», «ау», «ну когда уже», пишет снова и снова; "aggressive" — наезжает, обвиняет в обмане, требует вернуть деньги в резкой форме, грозит плохим отзывом; "threat" — угрожает судом, полицией, Роспотребнадзором, «уголовкой», удалением с площадки.
 
 ЗАПРЕЩЕНО
 • Обещать возврат денег, компенсацию, бонусы, конкретные даты и сроки — любые сроки выкупа и зачисления, кроме срока Pending выше.

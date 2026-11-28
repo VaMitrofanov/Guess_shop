@@ -91,7 +91,7 @@ async function answerTgAi(text: string, deps: TgAiDeps, mode: "on" | "dry", imag
   void aiLogRecord(db, {
     channel: "tg_bot", action: d.action, mode: mode as "on" | "dry", category: d.category,
     peerKey: `tg:${key}`, orderCode: customer.orders[0]?.wbCode ?? null,
-    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null, tone: raw.tone ?? null,
   });
 
   const order = customer.orders[0];

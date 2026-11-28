@@ -11,14 +11,15 @@ const row = (patch: Partial<FirstInLineOrder> = {}): FirstInLineOrder => ({
 });
 
 describe("«Первым делом»: группы", () => {
-  it("порядок групп фиксирован: не дошло → торопят → подняты → прямые; пустые не рисуются", () => {
-    expect(FIRST_GROUPS.map(g => g.id)).toEqual(["rebuy", "rush", "pinned", "direct"]);
+  it("порядок групп (28.11.2026): подняты → не дошло → прямые → ебут мозги → спрашивают; пустые не рисуются", () => {
+    expect(FIRST_GROUPS.map(g => g.id)).toEqual(["pinned", "rebuy", "direct", "rush", "asks"]);
     const groups = groupFirstInLine([row({ id: "d", reason: "direct" }), row({ id: "r" })]);
     expect(groups.map(g => g.group.id)).toEqual(["rebuy", "direct"]);
   });
 
   it("перевыкуп розовый, не оранжевый (оранжевый — Авито)", () => {
-    expect(FIRST_GROUPS[0].tone).toBe("pink");
+    expect(FIRST_GROUPS.find(g => g.id === "rebuy")?.tone).toBe("pink");
+    expect(FIRST_GROUPS.some(g => g.tone === "orange")).toBe(false);
   });
 });
 
@@ -82,8 +83,8 @@ describe("«Первым делом» v3 — фильтры и «Торопят�
   const rows = [r("a", "rebuy"), ...["b", "c", "d", "e", "f"].map((id) => r(id, "rush")), r("g", "pinned")];
   const totals = { rebuy: 1, rush: 7, pinned: 1, direct: 0 };
 
-  it("порядок групп: 🔁 → 📣 → ⚡ → 💳", () => {
-    expect(view.FIRST_GROUPS.map((g) => g.id)).toEqual(["rebuy", "rush", "pinned", "direct"]);
+  it("порядок групп: ⚡ → 🔁 → 💳 → 🤬 → 💬", () => {
+    expect(view.FIRST_GROUPS.map((g) => g.id)).toEqual(["pinned", "rebuy", "direct", "rush", "asks"]);
     expect(view.FIRST_GROUPS.find((g) => g.id === "rush")?.tone).toBe("purple");
   });
 
@@ -112,7 +113,9 @@ describe("«Первым делом» v3 — фильтры и «Торопят�
 
   it("строка накала: число, каналы, давность", () => {
     const line = view.firstRushLine({ count: 3, channels: ["TG", "WB"], lastAt: "2026-11-01T10:00:00Z", quote: null, via: "chat" }, Date.parse("2026-11-01T12:00:00Z"));
-    expect(line).toBe("📣 3× · TG, чат WB · 2 ч назад");
+    expect(line).toBe("3 раза · TG, чат WB · 2 ч назад");
+    const angry = view.firstRushLine({ count: 8, channels: ["WB"], lastAt: "2026-11-01T10:00:00Z", quote: null, via: "chat", tone: "aggressive" }, Date.parse("2026-11-01T12:00:00Z"));
+    expect(angry).toBe("наезжает · 8 раз · чат WB · 2 ч назад");
     expect(view.firstRushHeat(1)).toBe(1);
     expect(view.firstRushHeat(5)).toBe(3);
   });

@@ -9,6 +9,7 @@
 
 import type { Tone } from "@/lib/order-presentation";
 import type { FirstInLineOrder } from "@/types/first-in-line";
+import { nagLine } from "../../bots/shared/buyer-nag";
 
 /** Сколько секунд «Выкуплено» можно отменить, прежде чем клиенту уйдёт сообщение. */
 export const FIRST_UNDO_MS = 5_000;
@@ -24,12 +25,17 @@ interface FirstGroupMeta {
   tone: Tone;
 }
 
-/** Порядок групп = порядок срочности: тот же, что `FIRST_IN_LINE_ORDER_SQL`. */
+/**
+ * Порядок групп = порядок выкупа (28.11.2026, владелец): поднятые руками →
+ * не дошло → прямые → «Ебут мозги» (воркер, по тону и числу сообщений) →
+ * «Спрашивают». Молчащих в блоке нет: долгое ожидание само не поднимает.
+ */
 export const FIRST_GROUPS: readonly FirstGroupMeta[] = [
-  { id: "rebuy", icon: "🔁", title: "Не дошло", hint: "покупатель не получил", tone: "pink" },
-  { id: "rush", icon: "📣", title: "Торопят", hint: "писали в поддержку за 48 ч", tone: "purple" },
   { id: "pinned", icon: "⚡", title: "Подняты вручную", hint: "выкупать первым", tone: "yellow" },
+  { id: "rebuy", icon: "🔁", title: "Не дошло", hint: "покупатель не получил", tone: "pink" },
   { id: "direct", icon: "💳", title: "Прямые", hint: "оплачены напрямую", tone: "blue" },
+  { id: "rush", icon: "🤬", title: "Ебут мозги", hint: "ноют, наезжают, пишут без конца", tone: "purple" },
+  { id: "asks", icon: "💬", title: "Спрашивают", hint: "писали спокойно", tone: "muted" },
 ];
 
 /** Сколько строк группы видно в режиме «Все» — остальное за «Ещё N →». */
@@ -49,10 +55,10 @@ export function groupFirstInLine<T extends Pick<FirstInLineOrder, "reason">>(
 
 /** Сколько всего заказов в группе — из счётчиков сервера (строк может быть загружено меньше). */
 export function firstGroupTotal(
-  data: { rebuy?: number; rush?: number; pinned: number; direct: number },
+  data: { rebuy?: number; rush?: number; asks?: number; pinned: number; direct: number },
   id: FirstGroupId,
 ): number {
-  return id === "rebuy" ? data.rebuy ?? 0 : id === "rush" ? data.rush ?? 0 : id === "pinned" ? data.pinned : data.direct;
+  return id === "rebuy" ? data.rebuy ?? 0 : id === "rush" ? data.rush ?? 0 : id === "asks" ? data.asks ?? 0 : id === "pinned" ? data.pinned : data.direct;
 }
 
 /**
@@ -63,7 +69,7 @@ export function firstGroupTotal(
 export function firstVisibleGroups<T extends Pick<FirstInLineOrder, "reason">>(
   rows: T[],
   filter: FirstFilter,
-  totals: { rebuy?: number; rush?: number; pinned: number; direct: number },
+  totals: { rebuy?: number; rush?: number; asks?: number; pinned: number; direct: number },
 ): { group: FirstGroupMeta; rows: T[]; hidden: number }[] {
   return groupFirstInLine(rows)
     .filter(entry => filter === "all" || entry.group.id === filter)
@@ -80,7 +86,7 @@ const CHANNEL_LABEL: Record<string, string> = { TG: "TG", VK: "VK", WB: "чат 
 export function firstRushLine(rush: NonNullable<FirstInLineOrder["rush"]>, now = Date.now()): string {
   const mins = Math.max(0, Math.round((now - Date.parse(rush.lastAt)) / 60_000));
   const ago = mins < 60 ? `${mins} мин назад` : mins < 48 * 60 ? `${Math.round(mins / 60)} ч назад` : `${Math.round(mins / 1440)} дн назад`;
-  return [`📣 ${rush.count}×`, rush.channels.map(c => CHANNEL_LABEL[c] ?? c).join(", "), ago].join(" · ");
+  return [nagLine({ count: rush.count, tone: rush.tone }), rush.channels.map(c => CHANNEL_LABEL[c] ?? c).join(", "), ago].join(" · ");
 }
 
 /** Точки «накала»: 1 обращение — ●○○, 3 и больше — ●●●. */

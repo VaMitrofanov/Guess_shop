@@ -157,7 +157,11 @@ export async function runPaDeskSweep(mode: Mode = paDeskMode()): Promise<PaDeskR
   }
   await runPaResponseStats().catch((e) => console.warn("[pa-response]", e instanceof Error ? e.message : e));
   // Раз в неделю: новые диалоги для разбора ИИ (сама решает, пора ли; проверка — одно чтение строки).
-  await exportPaDialogs().catch((e) => console.warn("[pa-export]", e instanceof Error ? e.message : e));
+  // Фоном (28.11.2026): полная выгрузка истории идёт десятки минут и не должна держать проход.
+  if (!exportRunning) {
+    exportRunning = true;
+    void exportPaDialogs().catch((e) => console.warn("[pa-export]", e instanceof Error ? e.message : e)).finally(() => { exportRunning = false; });
+  }
   return result;
 }
 
@@ -831,6 +835,8 @@ async function dropStaleQuickReplies(tg: TelegramClient, user: Api.UserFull): Pr
  * Поменять `EXPORT_VERSION` — внеочередная выгрузка при следующем проходе.
  */
 const EXPORT_VERSION = "2026-11-28-learn";
+const PROCESS_STARTED_AT = Date.now();
+let exportRunning = false;
 /** Новая версия = полная выгрузка с этой даты (28.11.2026: история PA — в обучение ИИ). */
 const EXPORT_FULL_SINCE = new Date("2026-01-01T00:00:00Z");
 const EXPORT_STREAM = "pa-export";
@@ -848,9 +854,11 @@ export async function exportPaDialogs(): Promise<void> {
   const last = row?.lastSuccessAt ? new Date(row.lastSuccessAt).getTime() : 0;
   if (row?.cursor === EXPORT_VERSION && Date.now() - last < EXPORT_EVERY_MS) return;
   const meta = (row?.metadata ?? {}) as { until?: string; startedAt?: string };
-  // Упавшую посреди выгрузку (деплой пересоздал контейнер — 26.11.2026 так
-  // пропала выгрузка за две недели) повторяем, но не чаще раза в 3 часа.
-  if (meta.startedAt && Date.now() - new Date(meta.startedAt).getTime() < EXPORT_RETRY_MS) return;
+  // Упавшую посреди выгрузку (деплой пересоздал контейнер — 26.11 и 28.11.2026
+  // так пропадала выгрузка) повторяем сразу в новом процессе: идёт ли она
+  // сейчас, знает только этот процесс (`exportRunning`), метка в базе — нет.
+  // Повтор ошибки внутри одного процесса — не чаще раза в 3 часа.
+  if (meta.startedAt && new Date(meta.startedAt).getTime() > PROCESS_STARTED_AT && Date.now() - new Date(meta.startedAt).getTime() < EXPORT_RETRY_MS) return;
   const full = !!row?.cursor && row.cursor !== "running" && row.cursor !== EXPORT_VERSION;
   const since = full ? EXPORT_FULL_SINCE : meta.until ? new Date(meta.until) : row?.lastSuccessAt ? new Date(row.lastSuccessAt) : EXPORT_FIRST_SINCE;
   const until = new Date();

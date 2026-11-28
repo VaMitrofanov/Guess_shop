@@ -106,7 +106,7 @@ async function answerVkAi(vkUserId: number, text: string, deps: VkAiDeps, mode: 
   void aiLogRecord(db, {
     channel: "vk_bot", action: d.action, mode: mode as "on" | "dry", category: d.category,
     peerKey: `vk:${vkUserId}`, orderCode: orders[0]?.wbCode ?? null,
-    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null, tone: raw.tone ?? null,
   });
 
   const order = orders[0];

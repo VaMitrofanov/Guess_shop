@@ -280,7 +280,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
 const SLICES: { id: SliceKey; label: string; till: string; color: string }[] = [
   { id: "BUYOUT",        label: "Выкупить", till: "К выкупу",    color: C.green },
   { id: "ERROR",         label: "Починить", till: "Ошибки",      color: C.red },
-  { id: "AWAITING_LINK", label: "Дожать",   till: "Ждут ссылку", color: C.yellow },
+  { id: "AWAITING_LINK", label: "Помочь",   till: "Ждут пасс",   color: C.yellow },
   { id: "DONE",          label: "История",  till: "История",     color: C.accent },
 ];
 

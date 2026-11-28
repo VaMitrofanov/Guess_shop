@@ -1575,6 +1575,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, priority: on, wbCode: order.wbCode });
   }
 
+  /* «Опустить» из «Ебут мозги» / «Спрашивают» (28.11.2026): обращения до этой
+     отметки заказ наверх больше не поднимают; напишет снова — вернётся. */
+  if (action === "nag-dismiss") {
+    await prisma.wbOrder.update({ where: { id: orderId }, data: { nagDismissedAt: new Date() } });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, wbCode: order.wbCode });
+  }
+
   if (action === "set-error") {
     if (![...ERRORABLE_STATUSES, "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Cannot set error on this order" }, { status: 400 });

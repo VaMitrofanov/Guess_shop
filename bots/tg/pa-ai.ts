@@ -239,7 +239,7 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     // Пока чат у человека, ответ модели — лишь черновик: в статистике это передача, не «сам».
     channel: "tg_pa", action: handed && d.action === "reply" ? "escalate" : d.action, mode: mode as "on" | "dry", category: d.category,
     peerKey: `tg:${m.chatId}`, orderCode: orders[0]?.wbCode ?? null,
-    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+    question: text, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null, tone: raw.tone ?? null,
   });
   const order = orders[0];
   const orderLine = order ? `📦 ${order.wbCode} · ${order.amount} R$ · ${order.status}${order.heldAt ? ` · ${heldLabel(order.heldReason ?? null, 60)}` : ""}` : codeOrders.length ? "🎟 покупка кода Robux на сайте (заказов WB нет)" : "📦 заказов в базе нет";

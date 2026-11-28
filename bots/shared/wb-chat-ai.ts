@@ -405,7 +405,7 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
     void aiLogRecord(db, {
       channel: "wb_chat", action: d.action, mode: mode as "on" | "dry", category: d.category,
       peerKey: `wb:${ref.code}`, orderCode: ref.code,
-      question: asked, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null,
+      question: asked, answer: d.action === "reply" ? plain(d.reply) : d.draft || null, summary: d.summary || null, tone: raw.tone ?? null,
     });
 
     if (mode === "dry") {

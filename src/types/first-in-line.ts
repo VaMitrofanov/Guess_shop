@@ -38,7 +38,7 @@ export interface FirstInLineOrder {
    */
   note: string | null;
   /** Почему он здесь: перевыкуп, покупатель торопит, подняли руками или это прямой заказ. */
-  reason: "rebuy" | "rush" | "pinned" | "direct";
+  reason: "rebuy" | "rush" | "asks" | "pinned" | "direct";
   /**
    * 📣 Покупатель писал за последние 48 ч (поддержка TG/VK, кнопка «Статус»,
    * чат WB) — есть у каждой строки, по которой писали, даже если она в другой
@@ -53,6 +53,8 @@ export interface FirstInLineOrder {
     quote: string | null;
     /** Как обращался, если цитаты нет: кнопка «Статус» или поддержка без текста. */
     via: "status" | "support" | "chat";
+    /** Самый резкий тон по оценке ИИ (`buyer-nag`), 28.11.2026. */
+    tone?: string | null;
   } | null;
   /** 🔁 Что прислал покупатель — только у `reason: "rebuy"`. */
   rebuyReason?: string | null;
@@ -90,6 +92,8 @@ export interface FirstInLine {
   rebuy?: number;
   /** 📣 Сколько торопят (без перевыкупов — группы не пересекаются). */
   rush?: number;
+  /** «Спрашивают»: писали спокойно (28.11.2026). */
+  asks?: number;
   /** 🛑 Просьбы об отмене: заказы уже заморожены, выкупать нельзя. */
   stops?: FirstInLineStop[];
   stopTotal?: number;

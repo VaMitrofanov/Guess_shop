@@ -43,6 +43,8 @@ export interface AiLogEntry {
   question: string;
   answer?: string | null;
   summary?: string | null;
+  /** Тон покупателя (`BUYER_TONES`), 28.11.2026. */
+  tone?: string | null;
 }
 
 /**
@@ -80,6 +82,7 @@ export async function aiLogRecord(db: Db, e: AiLogEntry): Promise<void> {
         peerKey: e.peerKey.slice(0, 80), orderCode: e.orderCode?.slice(0, 40) ?? null,
         question: e.question.slice(0, 2000), answer: e.answer?.slice(0, 2000) ?? null,
         summary: e.summary?.slice(0, 1000) ?? null,
+        tone: e.tone ?? null,
       },
     });
   } catch (err) {

@@ -534,6 +534,8 @@ model WbOrder {
   /// Хранится момент нажатия, а не флаг: у нескольких поднятых наверху окажется
   /// поднятый последним. Сортировать ТОЛЬКО как `desc, nulls: "last"`.
   priorityAt             DateTime?
+  /// «Опустить» в «Ебут мозги» (28.11.2026): обращения до этой отметки заказ наверх не поднимают.
+  nagDismissedAt DateTime?
   priorityBy             String?
   /// 🔁 Перевыкуп: заказ был в «Готово», но покупатель робуксы не получил
   /// (выкупа не было, ошибка аккаунта, пасс не тот). Кнопка «Не дошло — выкупить
@@ -1734,8 +1736,11 @@ model AiSupportLog {
   question  String
   answer    String?
   summary   String?
+  /// calm | asks | nags | aggressive | threat — тон покупателя (28.11.2026)
+  tone      String?
   createdAt DateTime @default(now())
 
   @@index([createdAt])
   @@index([channel, createdAt])
+  @@index([orderCode, createdAt])
 }

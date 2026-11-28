@@ -8,6 +8,7 @@ import {
   BUYER_RUSH_WINDOW_HOURS, contactQuote, loadBuyerContacts, recentContactExistsSql, summarizeRush, type BuyerRush,
 } from "../../bots/shared/buyer-contact";
 import { problemHoldReason } from "../../bots/shared/order-hold";
+import { compareNag, nagLevel, worstTone } from "../../bots/shared/buyer-nag";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    «Первым делом» — короткий список заказов, которые выкупаются вне общей
@@ -59,8 +60,11 @@ function humanNote(note: string | null): string | null {
   return human.length > 0 ? human.join(" · ") : null;
 }
 
-/** Порядок групп: 🔁 → 📣 → ⚡ → 💳. */
-const GROUP_RANK: Record<FirstInLineOrder["reason"], number> = { rebuy: 0, rush: 1, pinned: 2, direct: 3 };
+/**
+ * Порядок групп (28.11.2026, владелец): поднятые руками → не дошло → прямые →
+ * «Ебут мозги» (воркер) → «Спрашивают». Молчащих здесь нет вовсе.
+ */
+const GROUP_RANK: Record<FirstInLineOrder["reason"], number> = { pinned: 0, rebuy: 1, direct: 2, rush: 3, asks: 4 };
 
 /** Цитата из причины заморозки «Покупатель просит отмену…: «текст»». */
 function stopQuote(reason: string | null): string | null {
@@ -93,6 +97,7 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
       rebuyAt: Date | null;
       rebuyReason: string | null;
       adminNote: string | null;
+      nagDismissedAt: Date | null;
     }>>(`
       SELECT "id", "wbCode", "robloxUsername", "amount",
              ${BUYOUT_LANE_SQL} AS "lane",
@@ -105,7 +110,8 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
              "priorityBy",
              "rebuyAt",
              "rebuyReason",
-             "adminNote"
+             "adminNote",
+             "nagDismissedAt"
         FROM "WbOrder"
        WHERE ${scope}
        ORDER BY ${FIRST_IN_LINE_ORDER_SQL}
@@ -136,15 +142,42 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
 
   const rush = summarizeRush(contacts);
 
+  // Тон от ИИ по каждому заказу за то же окно (28.11.2026): самый резкий.
+  const codes = rows.filter((row) => rush.has(row.id)).map((row) => row.wbCode);
+  const toneRows = codes.length
+    ? await prisma.aiSupportLog.findMany({
+        where: { orderCode: { in: codes }, tone: { not: null }, createdAt: { gte: new Date(Date.now() - BUYER_RUSH_WINDOW_HOURS * 3_600_000) } },
+        select: { orderCode: true, tone: true, createdAt: true },
+      }).catch(() => [] as Array<{ orderCode: string | null; tone: string | null; createdAt: Date }>)
+    : [];
+  const tonesByCode = new Map<string, Array<{ tone: string | null; at: Date }>>();
+  for (const t of toneRows) {
+    if (!t.orderCode) continue;
+    const list = tonesByCode.get(t.orderCode) ?? [];
+    list.push({ tone: t.tone, at: t.createdAt });
+    tonesByCode.set(t.orderCode, list);
+  }
+  /** Тон и уровень заказа; «Опустить» гасит всё, что было до отметки. */
+  const nagOf = (row: (typeof rows)[number]) => {
+    const r = rush.get(row.id);
+    if (!r) return null;
+    if (row.nagDismissedAt && r.lastAt.getTime() <= row.nagDismissedAt.getTime()) return null;
+    const after = row.nagDismissedAt?.getTime() ?? 0;
+    const tone = worstTone((tonesByCode.get(row.wbCode) ?? []).filter((t) => t.at.getTime() > after).map((t) => t.tone));
+    return { count: r.count, tone, level: nagLevel({ count: r.count, tone }) };
+  };
+  const nags = new Map(rows.map((row) => [row.id, nagOf(row)] as const));
+
   // Группа каждой строки. Писали, но не «торопят» (спасибо, прислал ник) и
   // других причин нет — строке здесь не место.
   const placed = rows
     .map((row) => {
-      const reason: FirstInLineOrder["reason"] | null = row.rebuyAt
-        ? "rebuy"
-        : rush.has(row.id) ? "rush"
-        : row.priorityAt ? "pinned"
+      const nag = nags.get(row.id);
+      const reason: FirstInLineOrder["reason"] | null = row.priorityAt
+        ? "pinned"
+        : row.rebuyAt ? "rebuy"
         : row.isDirectOrder ? "direct"
+        : nag ? (nag.level === "brain" ? "rush" : "asks")
         : null;
       return reason ? { row, reason } : null;
     })
@@ -156,15 +189,18 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
   indexed.sort((a, b) => {
     const g = GROUP_RANK[a.reason] - GROUP_RANK[b.reason];
     if (g !== 0) return g;
-    if (a.reason === "rush") {
-      const heat = (rush.get(b.row.id)?.count ?? 0) - (rush.get(a.row.id)?.count ?? 0);
-      if (heat !== 0) return heat;
-      return a.row.since.getTime() - b.row.since.getTime();
+    if (a.reason === "rush" || a.reason === "asks") {
+      const na = nags.get(a.row.id);
+      const nb = nags.get(b.row.id);
+      return compareNag(
+        { count: na?.count ?? 0, tone: na?.tone, since: a.row.since.getTime() },
+        { count: nb?.count ?? 0, tone: nb?.tone, since: b.row.since.getTime() },
+      );
     }
     return a.index - b.index;
   });
 
-  const counts = { rebuy: 0, rush: 0, pinned: 0, direct: 0 };
+  const counts = { rebuy: 0, rush: 0, asks: 0, pinned: 0, direct: 0 };
   let gross = 0;
   const shown: typeof indexed = [];
   for (const entry of indexed) {
@@ -173,7 +209,7 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
     gross += Math.ceil(entry.row.amount / 0.7);
     if (counts[entry.reason] <= FIRST_IN_LINE_GROUP_CAP) shown.push(entry);
   }
-  const total = counts.rebuy + counts.rush + counts.pinned + counts.direct;
+  const total = counts.rebuy + counts.rush + counts.asks + counts.pinned + counts.direct;
   // Части разбитых заказов — отдельным запросом и только НЕвыкупленные: в буфер
   // донору должно попасть то, что ещё покупать, а не история заказа.
   const parts = shown.length > 0
@@ -212,7 +248,7 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
       note: humanNote(row.adminNote),
       // 🔁 → 📣 → ⚡ → полоса: поднятый руками прямой — всё-таки поднятый.
       reason,
-      rush: rushView(rush.get(row.id)),
+      rush: rushView(rush.get(row.id), nags.get(row.id)?.tone ?? null),
       rebuyReason: row.rebuyAt ? row.rebuyReason : null,
       rebuyWas: row.rebuyAt ? rebuyWasFromNote(row.adminNote) : null,
       priorityBy: row.priorityAt ? row.priorityBy : null,
@@ -223,6 +259,7 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
     direct: counts.direct,
     rebuy: counts.rebuy,
     rush: counts.rush,
+    asks: counts.asks,
     stops: stops.map((stop) => ({
       id: stop.id,
       wbCode: stop.wbCode,
@@ -237,7 +274,7 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
   };
 }
 
-function rushView(r: BuyerRush | undefined): FirstInLineOrder["rush"] {
+function rushView(r: BuyerRush | undefined, tone: string | null): FirstInLineOrder["rush"] {
   if (!r) return null;
-  return { count: r.count, channels: r.channels, lastAt: r.lastAt.toISOString(), quote: contactQuote(r.lastText), via: r.lastVia };
+  return { count: r.count, channels: r.channels, lastAt: r.lastAt.toISOString(), quote: contactQuote(r.lastText), via: r.lastVia, tone };
 }

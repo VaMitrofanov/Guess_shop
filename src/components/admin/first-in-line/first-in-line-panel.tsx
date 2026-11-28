@@ -14,7 +14,6 @@ import {
   firstMetaLine,
   firstNoteText,
   firstReadiness,
-  firstRushHeat,
   firstRushLine,
   firstVisibleGroups,
   FIRST_GROUPS,
@@ -43,10 +42,10 @@ const TONE_CLASS: Record<Tone, string> = {
   blue: styles.toneBlue, ice: styles.toneIce, accent: styles.toneAccent, muted: styles.toneMuted, pink: styles.tonePink, purple: styles.tonePurple,
 };
 const STRIPE_CLASS: Record<FirstInLineOrder["reason"], string> = {
-  rebuy: styles.rowRebuy, rush: styles.rowRush, pinned: styles.rowPinned, direct: styles.rowDirect,
+  rebuy: styles.rowRebuy, rush: styles.rowRush, asks: styles.rowDirect, pinned: styles.rowPinned, direct: styles.rowDirect,
 };
 const CNT_CLASS: Record<FirstGroupId, string> = {
-  rebuy: styles.cntRebuy, rush: styles.cntRush, pinned: styles.cntPinned, direct: styles.cntDirect,
+  rebuy: styles.cntRebuy, rush: styles.cntRush, asks: styles.cntDirect, pinned: styles.cntPinned, direct: styles.cntDirect,
 };
 const GROUP_CLASS: Partial<Record<FirstGroupId, string>> = { rebuy: styles.groupRebuy, rush: styles.groupRush };
 
@@ -274,9 +273,8 @@ export default function FirstInLinePanel({
                 </div>
                 <div className={styles.facts}>
                   {order.rush && (
-                    <span className={cn(styles.heat, styles.tonePurple)} title={firstRushLine(order.rush, now)}>
-                      <i aria-hidden="true">{"●".repeat(firstRushHeat(order.rush.count))}{"○".repeat(3 - firstRushHeat(order.rush.count))}</i>
-                      {firstRushLine(order.rush, now).replace(/^📣 /, "")}
+                    <span className={cn(styles.heat, order.reason === "rush" ? styles.tonePurple : styles.toneMuted)} title={firstRushLine(order.rush, now)}>
+                      {firstRushLine(order.rush, now)}
                     </span>
                   )}
                   {ready && <span className={TONE_CLASS[ready.tone]}>{ready.text}</span>}

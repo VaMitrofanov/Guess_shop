@@ -3135,6 +3135,19 @@ export function registerText(bot: Telegraf): void {
             );
             return;
           }
+          // 28.11.2026 (A8UDQUX): заказ в очереди на выкуп (PENDING) не ловила ни
+          // одна ветка выше — любой текст падал в «нет активных заявок», хотя
+          // заказ закреплён в чате. Есть живой заказ — отвечаем его статусом.
+          const liveUser = isAdmin ? null : await db.user.findUnique({ where: { tgId }, select: { id: true } }).catch(() => null);
+          const liveOrder = liveUser
+            ? await db.wbOrder.findFirst({ where: { userId: liveUser.id, status: { in: ACTIVE_STATUSES } }, select: { wbCode: true, status: true } }).catch(() => null)
+            : null;
+          if (liveOrder) {
+            if (text.trim().length >= 4 && await aiTakes(`заказ ${liveOrder.wbCode} есть, статус ${liveOrder.status} — ответь по нему`)) return;
+            const { text: statusText, keyboard } = await buildStatusMessage(tgId);
+            await ctx.reply(statusText, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+            return;
+          }
           if (await aiTakes("активного заказа нет: ждём код с карты WB или прямой заказ")) return;
           await ctx.reply(
             "У вас сейчас нет активных заявок.\n\n" +
