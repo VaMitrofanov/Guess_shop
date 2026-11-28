@@ -291,6 +291,17 @@ export function nickFromReply(history: { role: "user" | "assistant"; text: strin
  * Факт проверки ника для черновика (27.11.2026): существует ли аккаунт, есть ли
  * пасс нужной цены, видны ли игры — чтобы черновик сразу говорил следующий шаг.
  */
+/**
+ * 28.11.2026 (WN4CK2V, 4 передачи за вечер): заказ WB есть, код выдан, но
+ * покупатель ещё не открыл его по ссылке — заказа робуксов в базе пока нет,
+ * и ИИ отвечал «не нашли ваш заказ» и сдавался. Это не «нет заказа», а
+ * «не начал оформление»: ведём по ссылке из этого же чата.
+ */
+export function notStartedFact(code: string | null | undefined, ordersFound: number): string | null {
+  if (!code || ordersFound > 0) return null;
+  return `ЗАКАЗ WB ЕСТЬ: это чат заказа с кодом ${code}. Код покупателю уже выдан (сообщение «Спасибо, код доставки получен» выше в этом чате, там ссылка с уже подставленным кодом), но оформление он ещё не начал — поэтому заказа робуксов в данных пока нет. НЕ пиши «не нашли заказ» и не передавай человеку только из-за этого. Отвечай сам: попроси открыть ссылку из того сообщения выше в этом чате — там по шагам указать ник Roblox и создать геймпасс. Саму ссылку и названия сайтов не пиши. Если пишет, что не получается — спроси, на каком шаге и что видит на экране (можно скриншот). Просьба вернуть деньги — как обычно, через Wildberries.`;
+}
+
 export function nickFactLine(o: GamepassSearchOutcome): string {
   if (o.status === "user_not_found") return `Проверка ника: аккаунта «${o.nick}» в Roblox НЕТ. В черновике попроси проверить ник (точное написание, латиница).`;
   const name = `аккаунт ${o.nick} (id ${o.userId}) существует`;
@@ -367,7 +378,8 @@ export async function runWbChatAiSweep(db: Db, now = Date.now()): Promise<{ seen
           new Promise<null>((r) => setTimeout(() => r(null), 25_000)),
         ]).catch(() => null)
       : null;
-    const fullContext = [context, ocrLine, leadLine, hintLine, nickLine].filter(Boolean).join("\n");
+    const notStartedLine = notStartedFact(ref.code, orders.length);
+    const fullContext = [context, notStartedLine, ocrLine, leadLine, hintLine, nickLine].filter(Boolean).join("\n");
     const raw = await decideSupport({ channel: "wb_chat", context: fullContext, turns: history, ...(image ? { image } : {}) });
     const mark = (type: string, payload: Record<string, unknown>) =>
       db.wbMarketplaceEvent.upsert({

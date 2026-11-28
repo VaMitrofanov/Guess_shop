@@ -105,6 +105,7 @@ import { PENDING_PAGE_BUTTON, PENDING_PAGE_URL } from "../shared/pending-info";
 import { GP_HIDDEN_ITEM, STAGE_KEYS, faqContextLines, faqStage, personalFaqAnswer, priceLabelSuffix, type FaqStage } from "../shared/smart-faq";
 import { robuxWaitText } from "../shared/robux-wait";
 import { answerVkIntake, rememberVkOutbox, tryVkAi, vkStateAllowsAi } from "./vk-ai";
+import { learnFromVkManager } from "./vk-ai-learn";
 import { SUPPORT_CONTEXT_LABELS } from "../shared/support-context-labels";
 
 /** Темы кнопки поддержки, где сначала отвечает ИИ (28.11.2026). Робуксы/Pending — свой путь со скрином. */
@@ -1093,6 +1094,8 @@ export async function handleOutboxMessage(ctx: MessageContext): Promise<void> {
   if (await isHumanOutbox(ctx, peer)) {
     // Живой менеджер пишет клиенту → бот замолкает (ставим/продлеваем паузу).
     await pauseSupport(peer, "пишет менеджер");
+    // 🧠 Ответ менеджера — пример для ИИ (28.11.2026).
+    if (_vkApi) void learnFromVkManager(_vkApi, peer);
   }
 }
 

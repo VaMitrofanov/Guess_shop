@@ -10,13 +10,19 @@ import { z } from "zod";
 import { CHANNEL_NOTES, PA_AI_CATEGORIES, PA_AI_MODEL, PA_AI_STRONG_MODEL, PA_AI_SYSTEM, type SupportChannel } from "../shared/pa-ai-support";
 import { SUPPORT_SETTINGS_STREAM, type SupportAiRequest, type SupportAiResult } from "../shared/support-ai";
 import { db } from "../shared/db";
-import { examplesBlock, loadOperatorExamples } from "../shared/support-ai-learn";
+import { examplesBlock, loadExampleLibrary, pickExamples } from "../shared/support-ai-learn";
 
-/** Правила владельца (`/ai_rule`) из строки настроек + примеры операторов; кэш минута. */
+/** Похожие ответы операторов под этот вопрос (28.11.2026: вся библиотека, не «последние 8»). */
+async function examplesFor(req: SupportAiRequest): Promise<string> {
+  const users = req.turns.filter((t) => t.role === "user").slice(-3).map((t) => t.text).join("\n");
+  const lib = await loadExampleLibrary(db).catch(() => []);
+  return examplesBlock(pickExamples(lib, users, req.channel === "wb_review" ? "wb_chat" : req.channel));
+}
+
+/** Правила владельца (`/ai_rule`) из строки настроек; кэш минута. */
 let rulesCache = { at: 0, text: "" };
 async function ownerRules(): Promise<string> {
   if (Date.now() - rulesCache.at < 60_000) return rulesCache.text;
-  const examples = examplesBlock(await loadOperatorExamples(db).catch(() => []));
   const row = await db.wbSyncCursor.findUnique({ where: { stream: SUPPORT_SETTINGS_STREAM } }).catch(() => null);
   const rules = ((row?.metadata ?? {}) as { rules?: unknown }).rules;
   const list = Array.isArray(rules) ? rules.filter((r): r is string => typeof r === "string" && r.trim().length > 0) : [];
@@ -24,7 +30,6 @@ async function ownerRules(): Promise<string> {
     at: Date.now(),
     text: [
       list.length ? `ПРАВИЛА ВЛАДЕЛЬЦА МАГАЗИНА (важнее базы знаний выше; соблюдай всегда):\n${list.map((r, i) => `${i + 1}. ${r}`).join("\n")}` : "",
-      examples,
     ].filter(Boolean).join("\n\n"),
   };
   return rulesCache.text;
@@ -81,6 +86,7 @@ export async function decideSupportDirect(req: SupportAiRequest): Promise<Suppor
   const messages = buildSupportMessages(req);
   if (!messages) return null;
   const rules = await ownerRules();
+  const examples = await examplesFor(req);
   try {
     const res = await anthropic().messages.parse({
       // Ответ на отзыв видят все будущие покупатели — Sonnet (27.11.2026); чаты — Haiku.
@@ -93,6 +99,7 @@ export async function decideSupportDirect(req: SupportAiRequest): Promise<Suppor
         { type: "text", text: PA_AI_SYSTEM, cache_control: { type: "ephemeral", ttl: "1h" } },
         { type: "text", text: CHANNEL_NOTES[req.channel] },
         ...(rules ? [{ type: "text" as const, text: rules }] : []),
+        ...(examples ? [{ type: "text" as const, text: examples }] : []),
       ],
       messages,
       output_config: { effort: "low", format: zodOutputFormat(PaAiDecisionSchema) },

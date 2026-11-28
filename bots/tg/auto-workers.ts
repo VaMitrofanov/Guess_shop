@@ -29,6 +29,7 @@ import { orderPinMarkupTg, syncOrderPins } from "../shared/order-pin";
 import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
 import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
 import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
+import { runSupportHarvest } from "../shared/support-ai-harvest";
 import { adminTargets, type AdminTopic } from "../shared/admin-route";
 import { flushPaOutbox, paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
 import { applyPaQuickPlan, dumpPaQuickReplies, syncPaQuickReplies } from "./pa-quick-replies";
@@ -266,6 +267,15 @@ export function startAutoWorkers(bot: Telegraf): void {
   };
   setTimeout(questions, 300_000);
   setInterval(questions, 10 * 60 * 1000);
+
+  // 🌾 ИИ учится на ВСЕХ ответах операторов (28.11.2026): чаты WB (вся история
+  // при первом запуске, дальше свежие) + выгрузка @RobloxBank_PA. ВК — в ВК-боте.
+  const harvest = () =>
+    runSupportHarvest(db)
+      .then((r) => { if (r) console.log(`[ai-learn] ${r}`); })
+      .catch((e) => console.error("[ai-learn] сбор:", e instanceof Error ? e.message : e));
+  setTimeout(harvest, 360_000);
+  setInterval(harvest, 30 * 60 * 1000);
 
   // ИИ в чатах заказов WB (13.11.2026). Режим — `/support_mode wb on|dry|off`,
   // по умолчанию off: проход сразу выходит.

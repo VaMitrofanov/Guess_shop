@@ -27,6 +27,7 @@
 import "dotenv/config";
 import { VK } from "vk-io";
 import { handleMessage, handleOutboxMessage, handleVkGroupJoin, initVkHandlers } from "./handlers";
+import { backfillVkExamples } from "./vk-ai-learn";
 import { notifyBotError } from "../shared/admin";
 import { startBridgeServer } from "../shared/bridge";
 import { startIndependentPaymentWorkerWatchdog } from "../shared/payment-worker-watchdog";
@@ -185,6 +186,8 @@ vk.updates
   .startPolling()
   .then(() => {
     console.log(`[VK] Bot started ✅ (group ${groupId})`);
+    // 🧠 История ответов менеджеров → примеры для ИИ (однократно, в фоне; 28.11.2026).
+    setTimeout(() => { void backfillVkExamples(vk.api); }, 120_000);
   })
   .catch((err: Error) => {
     console.error("[VK] Failed to start:", err);

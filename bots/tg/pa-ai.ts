@@ -71,8 +71,9 @@ export function rememberTurn(chatId: number, role: Turn["role"], text: string) {
 
 /** Оператор написал в чат — передача закрыта, бот снова может отвечать позже. */
 export function operatorReplied(chatId: number, text?: string) {
-  /* 🧠 ИИ передал разговор, оператор ответил сам — учимся на этой паре (27.11.2026). */
-  if (handedOff.has(chatId) && text?.trim()) {
+  /* 🧠 Оператор ответил покупателю — учимся на этой паре (27.11, с 28.11 на всех). */
+  // 28.11.2026: учимся на КАЖДОМ ответе оператора, не только после передачи от ИИ.
+  if (text?.trim()) {
     const turns = history.get(chatId) ?? [];
     const q: string[] = [];
     for (let i = turns.length - 1; i >= 0 && turns[i].role === "user"; i--) q.unshift(turns[i].text);
