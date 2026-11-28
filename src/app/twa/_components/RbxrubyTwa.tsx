@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { C } from "./theme";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
-import { RBXRUBY_MODE_LABEL, fmtUsd, nextLine, type RbxrubyOverviewView, type RbxrubyOrderView } from "@/lib/rbxruby-view";
+import { RBXRUBY_MODE_LABEL, fmtUsd, nextLine, stockSpark, type RbxrubyOverviewView, type RbxrubyOrderView } from "@/lib/rbxruby-view";
 
 /* 🤖 RBXRUBY в TWA (28.11.2026): карточка на главной/«Выкупы» и блок в карточке заказа. */
 
@@ -31,6 +31,7 @@ const btn = (primary: boolean, danger = false): React.CSSProperties => ({
 export function RbxrubyCard({ token }: { token: string }) {
   const [data, setData] = useState<RbxrubyOverviewView | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const load = useCallback(() => {
     fetch(API, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null)).then((d) => d && setData(d)).catch(() => {});
@@ -79,9 +80,36 @@ export function RbxrubyCard({ token }: { token: string }) {
           {data.mode !== "off" && <button type="button" style={btn(false, data.mode === "on")} disabled={busy} onClick={() => setMode("off")}>Пауза</button>}
         </div>
       )}
-      <div style={{ fontSize: 14, color: C.textTertiary }}>
-        {data.stockLines.map((l) => `${l.rate} — ${num(l.robux)}`).join(" · ")}
-      </div>
+      <button type="button" onClick={() => { haptic.select(); setOpen((v) => !v); }}
+        style={{ font: "inherit", fontSize: 15, fontWeight: 600, minHeight: 44, borderRadius: 12, border: 0, background: "rgba(255,255,255,0.06)", color: C.accent, textAlign: "left", padding: "0 12px" }}>
+        {open ? "Скрыть предложения" : `Предложения · один продавец до ${num(data.maxInstant)} R$`}
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "56px 1fr 1fr 1fr", gap: "6px 8px", fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
+            <span style={{ color: C.textTertiary }}>Курс</span><span style={{ color: C.textTertiary }}>Всего</span>
+            <span style={{ color: C.textTertiary }}>Продавцов</span><span style={{ color: C.textTertiary }}>У одного</span>
+            {data.offers.map((o) => {
+              const color = o.usable && o.maxOne >= data.minUsefulPass ? C.green : o.usable ? C.textPrimary : C.textTertiary;
+              return [
+                <span key={`r${o.rate}`} style={{ color, fontWeight: 600 }}>{o.rate}</span>,
+                <span key={`t${o.rate}`} style={{ color }}>{num(o.robux)}</span>,
+                <span key={`s${o.rate}`} style={{ color }}>{o.sellers ?? "—"}</span>,
+                <span key={`m${o.rate}`} style={{ color }}>{num(o.maxOne)}</span>,
+              ];
+            })}
+          </div>
+          <div style={{ fontSize: 14, color: C.textSecondary }}>Сток ≤ {data.maxRate} за сутки</div>
+          {data.history.length > 1 ? (
+            <svg viewBox="0 0 320 70" width="100%" height="70" role="img" aria-label="График стока RBXRUBY за сутки">
+              <path d={stockSpark(data.history, 320, 66)} fill="none" stroke={C.accent} strokeWidth="2" transform="translate(0,2)" />
+            </svg>
+          ) : <div style={{ fontSize: 14, color: C.textTertiary }}>История копится — точка раз в 10 минут.</div>}
+          <div style={{ fontSize: 14, color: C.textTertiary }}>
+            крупнейший продавец за сутки {num(Math.max(0, ...data.history.map((p) => p.maxInstant)))} R$ · зелёным — берёт пасс от {data.minUsefulPass} R$
+          </div>
+        </div>
+      )}
     </section>
   );
 }

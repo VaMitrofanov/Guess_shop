@@ -55,11 +55,18 @@ const STREAM = "rbxruby";
 export type RbxrubyMode = "off" | "dry" | "on";
 const asMode = (v: unknown): RbxrubyMode | null => (v === "on" || v === "dry" || v === "off" ? v : null);
 
-type CursorMeta = { mode?: RbxrubyMode; modeBy?: string; modeAt?: string; snapshot?: RbxrubySnapshot };
+type StockPoint = { at: string; usable: number; maxInstant: number };
+type CursorMeta = {
+  mode?: RbxrubyMode; modeBy?: string; modeAt?: string; snapshot?: RbxrubySnapshot;
+  /** Сток ≤ потолка курса раз в 10 минут за сутки — для графика. */
+  history?: StockPoint[];
+  /** Последний пуш «появился продавец» — не чаще раза в час. */
+  sellerAlert?: { at: string; maxInstant: number };
+};
 export type RbxrubySnapshot = {
   at: string;
   balance: number | null;
-  stock: Array<{ rate: number; totalRobuxAmount: number; maxInstantOrder: number }>;
+  stock: Array<{ rate: number; totalRobuxAmount: number; maxInstantOrder: number; accountsCount?: number }>;
   report?: Omit<TickReport, "mode">;
 };
 
@@ -222,7 +229,7 @@ export async function runRbxrubyTick(): Promise<TickReport> {
   try {
     const [balance, stock] = await Promise.all([rbxrubyBalance(), rbxrubyDetailedStock()]);
     report.balance = balance;
-    lastStock = stock.map((r) => ({ rate: r.rate, totalRobuxAmount: r.totalRobuxAmount, maxInstantOrder: r.maxInstantOrder }));
+    lastStock = stock.map((r) => ({ rate: r.rate, totalRobuxAmount: r.totalRobuxAmount, maxInstantOrder: r.maxInstantOrder, accountsCount: r.accountsCount }));
     const usable = usableStock(lastStock);
     report.bestRate = usable.length ? Math.min(...usable.map((r) => r.rate)) : null;
     if (mode !== "off" && usable.length) {
@@ -258,11 +265,50 @@ export async function runRbxrubyTick(): Promise<TickReport> {
   }
   const { mode: _m, ...rest } = report;
   void _m;
-  await writeMeta({ snapshot: { at: new Date().toISOString(), balance: report.balance ?? null, stock: lastStock, report: rest } }).catch(() => {});
+  const now = new Date().toISOString();
+  const extra = report.balance != null ? await stockHistoryPatch(lastStock, now).catch(() => ({})) : {};
+  await writeMeta({ snapshot: { at: now, balance: report.balance ?? null, stock: lastStock, report: rest }, ...extra }).catch(() => {});
   return report;
 }
 
-type Stock = Array<{ rate: number; totalRobuxAmount: number; maxInstantOrder: number }>;
+/** Самый дешёвый пасс заказа — 715 R$ (номинал 500): меньше этого продавец нам бесполезен. */
+const MIN_USEFUL_PASS = 715;
+
+/**
+ * История стока (точка раз в 10 мин, сутки) и пуш «появился продавец», когда
+ * один продавец ≤ потолка снова тянет пасс на 715+ (не чаще раза в час).
+ */
+async function stockHistoryPatch(stock: Stock, now: string): Promise<Partial<CursorMeta>> {
+  const meta = await readMeta();
+  const usable = usableStock(stock);
+  const point: StockPoint = { at: now, usable: usable.reduce((s, r) => s + r.totalRobuxAmount, 0), maxInstant: Math.max(0, ...usable.map((r) => r.maxInstantOrder)) };
+  const cutoff = Date.now() - 86400_000;
+  const history = (meta.history ?? []).filter((p) => new Date(p.at).getTime() >= cutoff);
+  const last = history[history.length - 1];
+  if (!last || Date.now() - new Date(last.at).getTime() >= 10 * 60_000) history.push(point);
+  else if (point.maxInstant > last.maxInstant) history[history.length - 1] = point; // пик внутри окна не теряем
+
+  const patch: Partial<CursorMeta> = { history };
+  const prevMax = meta.snapshot ? Math.max(0, ...usableStock(meta.snapshot.stock).map((r) => r.maxInstantOrder)) : 0;
+  const lastAlert = meta.sellerAlert ? new Date(meta.sellerAlert.at).getTime() : 0;
+  if (point.maxInstant >= MIN_USEFUL_PASS && prevMax < MIN_USEFUL_PASS && Date.now() - lastAlert > 3600_000) {
+    const best = usable.filter((r) => r.maxInstantOrder >= MIN_USEFUL_PASS).sort((a, b) => a.rate - b.rate)[0];
+    const mode = await rbxrubyMode();
+    await alert("buyout", formatAdminNotice({
+      marker: "action", zone: "ВЫКУП", title: "RBXRUBY: появился продавец",
+      lines: [
+        `Один продавец до <b>${num0(point.maxInstant)} R$</b>${best ? ` по курсу <b>${best.rate}</b>` : ""} · всего ≤${maxRate()}: ${num0(point.usable)} R$`,
+        mode === "on" ? "Автовыкуп включён — заказы уйдут сами." : `Автовыкуп: ${mode === "dry" ? "тест" : "пауза"} — включите в плашке RBXRUBY.`,
+      ],
+      next: null,
+    })).catch(() => {});
+    patch.sellerAlert = { at: now, maxInstant: point.maxInstant };
+  }
+  return patch;
+}
+const num0 = (n: number) => n.toLocaleString("ru-RU");
+
+type Stock = Array<{ rate: number; totalRobuxAmount: number; maxInstantOrder: number; accountsCount?: number }>;
 const usableStock = (stock: Stock) => stock.filter((r) => r.rate <= maxRate() && r.totalRobuxAmount > 0);
 
 type Prepared =
@@ -555,6 +601,10 @@ export type RbxrubyOverview = {
   week: { completed: number; usd: number; robux: number; avgRate: number | null };
   next: string[];
   lastError: string | null;
+  /** Предложения площадки по курсам (то, что видит наш ключ — до макс. курса мерчанта). */
+  offers: Array<{ rate: number; robux: number; sellers: number | null; maxOne: number; usable: boolean }>;
+  history: StockPoint[];
+  minUsefulPass: number;
 };
 
 export async function rbxrubyOverview(): Promise<RbxrubyOverview> {
@@ -601,6 +651,12 @@ export async function rbxrubyOverview(): Promise<RbxrubyOverview> {
     },
     next: (snap?.report?.wouldSubmit ?? []).slice(0, 3),
     lastError: snap?.report?.error ?? null,
+    offers: [...(snap?.stock ?? [])]
+      .filter((r) => r.totalRobuxAmount > 0)
+      .sort((a, b) => a.rate - b.rate)
+      .map((r) => ({ rate: r.rate, robux: r.totalRobuxAmount, sellers: r.accountsCount ?? null, maxOne: r.maxInstantOrder, usable: r.rate <= maxRate() })),
+    history: meta.history ?? [],
+    minUsefulPass: MIN_USEFUL_PASS,
   };
 }
 

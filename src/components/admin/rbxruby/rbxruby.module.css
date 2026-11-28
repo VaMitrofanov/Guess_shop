@@ -36,6 +36,17 @@
 .hint { color: #8e8e97; font-size: 12px; overflow-wrap: anywhere; }
 .err { grid-column: 1 / -1; color: #ff8f85; font-size: 12.5px; }
 
+.offers { grid-column: 1 / -1; border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 10px; }
+.offers summary { cursor: pointer; color: #c4d0ff; font-weight: 600; }
+.offersBody { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; margin-top: 10px; }
+@media (max-width: 900px) { .offersBody { grid-template-columns: 1fr; } }
+.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.table th, .table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.table th { color: #8e8e97; font-weight: 500; font-size: 12px; }
+.fit td { color: #40d47e; font-weight: 600; }
+.dim td { color: #6c707a; }
+.chart { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
 .box {
   display: flex; flex-direction: column; gap: 10px;
   padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, .03);

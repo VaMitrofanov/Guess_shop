@@ -36,7 +36,21 @@ export type RbxrubyOverviewView = {
   week: { completed: number; usd: number; robux: number; avgRate: number | null };
   next: string[];
   lastError: string | null;
+  offers: Array<{ rate: number; robux: number; sellers: number | null; maxOne: number; usable: boolean }>;
+  history: Array<{ at: string; usable: number; maxInstant: number }>;
+  minUsefulPass: number;
 };
+
+/** Точки графика стока: x 0..1 по времени суток, y 0..1 от максимума. */
+export function stockSpark(history: RbxrubyOverviewView["history"], w: number, h: number): string {
+  if (history.length < 2) return "";
+  const t0 = new Date(history[0].at).getTime();
+  const t1 = new Date(history[history.length - 1].at).getTime() || t0 + 1;
+  const max = Math.max(1, ...history.map((p) => p.usable));
+  return history
+    .map((p, i) => `${i ? "L" : "M"}${(((new Date(p.at).getTime() - t0) / Math.max(1, t1 - t0)) * w).toFixed(1)},${(h - (p.usable / max) * h).toFixed(1)}`)
+    .join(" ");
+}
 
 export type RbxrubyOrderView = {
   state: { state: string; label: string; why?: string } | null;

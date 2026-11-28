@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { RBXRUBY_MODE_LABEL, fmtUsd, nextLine, type RbxrubyOverviewView, type RbxrubyOrderView } from "@/lib/rbxruby-view";
+import { RBXRUBY_MODE_LABEL, fmtUsd, nextLine, stockSpark, type RbxrubyOverviewView, type RbxrubyOrderView } from "@/lib/rbxruby-view";
 import styles from "./rbxruby.module.css";
 
 const num = (n: number) => n.toLocaleString("ru-RU");
@@ -90,6 +90,42 @@ export default function RbxrubyPanel({ onToast, onChanged }: { onToast: (text: s
         </span>
       </div>
       {data.lastError && <div className={styles.err}>Последняя ошибка: {data.lastError}</div>}
+      <details className={styles.offers}>
+        <summary>
+          Предложения · {data.offers.length} курсов · один продавец до {num(data.maxInstant)} R$
+          {data.snapshotAt ? ` · ${new Date(data.snapshotAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : ""}
+        </summary>
+        <div className={styles.offersBody}>
+          <table className={styles.table}>
+            <thead><tr><th>Курс $/1k</th><th>Всего R$</th><th>Продавцов</th><th>Максимум у одного</th><th /></tr></thead>
+            <tbody>
+              {data.offers.map((o) => {
+                const fits = o.usable && o.maxOne >= data.minUsefulPass;
+                return (
+                  <tr key={o.rate} className={fits ? styles.fit : !o.usable ? styles.dim : undefined}>
+                    <td>{o.rate}</td>
+                    <td>{num(o.robux)}</td>
+                    <td>{o.sellers ?? "—"}</td>
+                    <td>{num(o.maxOne)}</td>
+                    <td>{fits ? (o.maxOne >= 1429 ? "берёт 1429" : "берёт 715") : o.usable ? "мелочь" : `выше ${data.maxRate}`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className={styles.chart}>
+            <div className={styles.label}>Сток ≤ {data.maxRate} за сутки (R$)</div>
+            {data.history.length > 1 ? (
+              <svg viewBox="0 0 320 80" width="100%" height="80" role="img" aria-label="График стока RBXRUBY за сутки">
+                <path d={stockSpark(data.history, 320, 76)} fill="none" stroke="#7d9cff" strokeWidth="2" transform="translate(0,2)" />
+              </svg>
+            ) : <div className={styles.hint}>История копится — точка раз в 10 минут.</div>}
+            <div className={styles.hint}>
+              пик {num(Math.max(0, ...data.history.map((p) => p.usable)))} R$ · крупнейший продавец за сутки {num(Math.max(0, ...data.history.map((p) => p.maxInstant)))} R$
+            </div>
+          </div>
+        </div>
+      </details>
     </section>
   );
 }
