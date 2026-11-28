@@ -172,8 +172,9 @@ export async function runEval(): Promise<string> {
 }
 
 export function registerAiJudge(bot: Telegraf): void {
-  setTimeout(() => { void dailyTick(bot); }, 120_000);
-  setInterval(() => { void dailyTick(bot); }, 30 * 60_000);
+  // Ночной разбор с 28.11.2026 делает учитель (`ai-teacher.ts`: Opus, сверка с
+  // операторами, экзамен, чистка шпаргалки). Здесь остаются /ai_judge и /ai_eval.
+  void dailyTick;
 
   bot.command("ai_judge", async (ctx) => {
     if (!isAdmin(ctx.from?.id)) return;
