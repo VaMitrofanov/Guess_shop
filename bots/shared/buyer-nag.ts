@@ -39,6 +39,14 @@ export const TONE_RU: Record<NagTone, string> = {
 /** Сколько обращений за 48 ч само по себе = «ебёт мозги», даже вежливо. */
 export const NAG_COUNT = 4;
 
+/** Заказ моложе суток в «Ебут мозги»/«Спрашивают» не попадает вовсе:
+ *  «кто ебёт мозги с заказом меньше суток — идёт на хуй, минимум сутки».
+ *  Поднятые вручную, «Не дошло» и прямые правило не трогает. */
+export const NAG_MIN_AGE_HOURS = 24;
+export function nagOldEnough(createdAt: Date | number, now = Date.now()): boolean {
+  return now - new Date(createdAt).getTime() >= NAG_MIN_AGE_HOURS * 3_600_000;
+}
+
 export type NagLevel = "brain" | "asks";
 
 export function nagLevel(input: { count: number; tone: string | null | undefined }): NagLevel {

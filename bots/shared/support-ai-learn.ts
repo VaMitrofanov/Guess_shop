@@ -23,7 +23,7 @@
 type Db = any;
 
 export const EXAMPLES_STREAM = "ai-examples";
-const KEEP = 1500;
+const KEEP = 4000;
 /** Сколько пар идёт в промпт: похожих + свежих. */
 export const PROMPT_EXAMPLES = 8;
 const PROMPT_RECENT = 2;

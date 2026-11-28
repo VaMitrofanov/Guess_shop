@@ -1,4 +1,4 @@
-import { compareNag, nagLevel, nagLine, worstTone } from "../buyer-nag";
+import { compareNag, nagLevel, nagLine, nagOldEnough, worstTone } from "../buyer-nag";
 
 describe("Ебут мозги / Спрашивают (28.11.2026)", () => {
   it("тон решает: ноет и резче — ебёт мозги; спокойный вопрос — спрашивает", () => {
@@ -23,5 +23,13 @@ describe("Ебут мозги / Спрашивают (28.11.2026)", () => {
     expect(nagLine({ count: 8, tone: "aggressive" })).toBe("наезжает · 8 раз");
     expect(nagLine({ count: 3, tone: "asks" })).toBe("3 раза");
     expect(nagLine({ count: 1, tone: null })).toBe("1 раз");
+  });
+});
+
+describe("nagOldEnough", () => {
+  it("заказ моложе суток не поднимается", () => {
+    const now = Date.parse("2026-11-28T12:00:00Z");
+    expect(nagOldEnough(now - 23 * 3_600_000, now)).toBe(false);
+    expect(nagOldEnough(now - 24 * 3_600_000, now)).toBe(true);
   });
 });

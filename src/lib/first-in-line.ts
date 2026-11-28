@@ -8,7 +8,7 @@ import {
   BUYER_RUSH_WINDOW_HOURS, contactQuote, loadBuyerContacts, recentContactExistsSql, summarizeRush, type BuyerRush,
 } from "../../bots/shared/buyer-contact";
 import { problemHoldReason } from "../../bots/shared/order-hold";
-import { compareNag, nagLevel, worstTone } from "../../bots/shared/buyer-nag";
+import { compareNag, nagLevel, nagOldEnough, worstTone } from "../../bots/shared/buyer-nag";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    «Первым делом» — короткий список заказов, которые выкупаются вне общей
@@ -161,6 +161,8 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
   const nagOf = (row: (typeof rows)[number]) => {
     const r = rush.get(row.id);
     if (!r) return null;
+    // Заказу меньше суток — сколько бы ни писал, не поднимаем (владелец, 28.11).
+    if (!nagOldEnough(row.createdAt)) return null;
     if (row.nagDismissedAt && r.lastAt.getTime() <= row.nagDismissedAt.getTime()) return null;
     const after = row.nagDismissedAt?.getTime() ?? 0;
     const tone = worstTone((tonesByCode.get(row.wbCode) ?? []).filter((t) => t.at.getTime() > after).map((t) => t.tone));
