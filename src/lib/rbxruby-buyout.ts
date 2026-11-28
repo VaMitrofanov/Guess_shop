@@ -3,7 +3,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { assertOrderBuyable } from "@/lib/order-hold";
 import { loadFirstInLine } from "@/lib/first-in-line";
-import { bridgeConfigured, bridgeGamepassById } from "@/lib/roblox-bridge";
+import { bridgeConfigured, bridgeGamepassById, bridgeSearchGamepasses } from "@/lib/roblox-bridge";
+import { getGamepassDetails, getRobloxUserById, getUniverseGamepasses, getUserGames } from "@/lib/roblox";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { recordOrderStatusChange } from "@/lib/order-status-event";
 import { notifyOrderCompleted } from "@/lib/twa-notify";
@@ -172,18 +173,39 @@ type PassCheck =
   | { ok: false; reason: string };
 
 /** Пасс живой, на продаже, цена = номиналу, и площадка видит его у владельца. */
+/** Плейс, на котором висит пасс: мостом по нику, затем по публичным играм владельца. */
+async function findPassPlace(owner: string, gamepassId: string): Promise<number | null> {
+  const viaNick = await bridgeSearchGamepasses(owner).catch(() => null);
+  const hit = viaNick?.gamepasses.find((p) => String(p.gamepassId) === gamepassId && p.placeId);
+  if (hit) return hit.placeId;
+  const games = await getUserGames(owner).catch(() => []);
+  for (const g of games.slice(0, 10)) {
+    const passes = await getUniverseGamepasses(g.universeId).catch(() => []);
+    if (passes.some((p: { id: number | string }) => String(p.id) === gamepassId) && g.rootPlaceId) return Number(g.rootPlaceId);
+  }
+  return null;
+}
+
 async function checkPass(c: Candidate): Promise<PassCheck> {
   if (!bridgeConfigured()) return { ok: false, reason: "мост Roblox не настроен" };
   const gp = await bridgeGamepassById(c.gamepassId);
   const details = gp?.details;
-  const placeId = gp?.pass?.placeId;
+  let placeId = gp?.pass?.placeId || null;
   if (!details) return { ok: false, reason: "Roblox не отдал пасс" };
   if (details.isActive === false) return { ok: false, reason: "пасс не на продаже" };
   const need = expectedPassPrice(c.amount);
   if (Number(details.price) !== need) return { ok: false, reason: `цена пасса ${details.price} R$, нужна ${need}` };
-  const owner = details.creatorName ?? gp?.pass?.sellerName;
+  // Ник: мост → product-info → профиль по id владельца.
+  let owner = details.creatorName ?? gp?.pass?.sellerName ?? null;
+  if (!owner) owner = (await getGamepassDetails(c.gamepassId).catch(() => null))?.creatorName ?? null;
+  if (!owner && details.creatorId) {
+    const u = await getRobloxUserById(String(details.creatorId)).catch(() => null);
+    owner = u?.name ?? null;
+  }
   if (!owner) return { ok: false, reason: "не знаем ник владельца" };
-  if (!placeId) return { ok: false, reason: "не знаем плейс пасса" };
+  // Плейс: мост по id пасса → поиск пассов по нику (мост) → публичные игры владельца.
+  if (!placeId) placeId = await findPassPlace(owner, c.gamepassId);
+  if (!placeId) return { ok: false, reason: "не нашли плейс пасса (игра скрыта?)" };
   try {
     const list = await rbxrubyListPasses(owner, placeId);
     const hit = list.passes.find((p) => String(p.passId) === c.gamepassId);
