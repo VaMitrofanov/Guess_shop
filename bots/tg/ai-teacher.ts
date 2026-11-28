@@ -125,6 +125,34 @@ export function matchCases(
 let client: Anthropic | null = null;
 const anthropic = () => (client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), maxRetries: 1, timeout: 300_000 }));
 
+/**
+ * Вызов Opus потоком (28.11.2026: обычный запрос на большой разбор висел без
+ * ответа и без ошибки). Жёсткий таймаут 8 мин, JSON сверяем схемой сами.
+ */
+async function opusJson<T>(schema: z.ZodType<T>, system: string, user: string, maxTokens: number, label: string): Promise<T | null> {
+  const t0 = Date.now();
+  console.log(`[ai-teacher] ${label}: запрос (${Math.round(user.length / 1000)}k символов)`);
+  const stream = anthropic().messages.stream({
+    model: TEACHER_MODEL,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }],
+    output_config: { effort: "medium", format: zodOutputFormat(schema) },
+  });
+  const timer = setTimeout(() => stream.abort(), 8 * 60_000);
+  try {
+    const msg = await stream.finalMessage();
+    recordUsage(TEACHER_MODEL, msg.usage.input_tokens, msg.usage.output_tokens, msg.usage.cache_read_input_tokens ?? 0, msg.usage.cache_creation_input_tokens ?? 0);
+    console.log(`[ai-teacher] ${label}: ответ за ${Math.round((Date.now() - t0) / 1000)} с, ${msg.usage.output_tokens} ток., stop=${msg.stop_reason}`);
+    const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+    const parsed = schema.safeParse(JSON.parse(text));
+    if (!parsed.success) { console.warn(`[ai-teacher] ${label}: JSON не по схеме`); return null; }
+    return parsed.data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const VERDICTS = ["good", "close", "wrong_fact", "wrong_tone", "should_reply", "should_escalate", "operator_bad"] as const;
 
 const ReviewSchema = z.object({
@@ -164,15 +192,7 @@ async function review(rules: string[], cases: TeachCase[], lib: OperatorExample[
     `#${i} [${c.channel}] Покупатель: «${c.question}»\n  Воркер (${c.aiAction === "reply" ? "ответил сам" : "позвал человека"}): «${c.aiAnswer}»\n  Оператор: «${c.operator}»`,
   ).join("\n\n");
   const libText = lib.map((x, i) => `${i}. [${x.channel}] В: «${x.question.replace(/\s+/g, " ").slice(0, 300)}» → О: «${x.answer.replace(/\s+/g, " ").slice(0, 400)}»`).join("\n");
-  const res = await anthropic().messages.parse({
-    model: TEACHER_MODEL,
-    max_tokens: 16000,
-    system: TEACHER_SYSTEM,
-    messages: [{ role: "user", content: `СВОД ПРАВИЛ:\n${rulesBlock(rules)}\n\nСЛУЧАИ (${cases.length}):\n${caseText || "(нет)"}\n\nБИБЛИОТЕКА (${lib.length}):\n${libText || "(нет)"}` }],
-    output_config: { format: zodOutputFormat(ReviewSchema) },
-  });
-  recordUsage(TEACHER_MODEL, res.usage.input_tokens, res.usage.output_tokens, res.usage.cache_read_input_tokens ?? 0, res.usage.cache_creation_input_tokens ?? 0);
-  return res.parsed_output;
+  return opusJson(ReviewSchema, TEACHER_SYSTEM, `СВОД ПРАВИЛ:\n${rulesBlock(rules)}\n\nСЛУЧАИ (${cases.length}):\n${caseText || "(нет)"}\n\nБИБЛИОТЕКА (${lib.length}):\n${libText || "(нет)"}`, 32000, "разбор");
 }
 
 const JudgeSchema = z.object({ scores: z.array(z.object({ i: z.number().int(), a: z.number().int(), b: z.number().int() })) });
@@ -193,15 +213,8 @@ async function exam(cases: TeachCase[], oldRules: string[], newRules: string[]):
     const [a, b] = await Promise.all([run(c, oldRules), run(c, newRules)]);
     rows.push(`#${i} Покупатель: «${c.question}»\n  Оператор: «${c.operator}»\n  A: ${a}\n  B: ${b}`);
   }
-  const res = await anthropic().messages.parse({
-    model: TEACHER_MODEL,
-    max_tokens: 4000,
-    system: "Оцени ответы A и B ИИ-поддержки против ответа живого оператора: 2 — по сути так же (или лучше), 1 — частично, 0 — неверно/вредно. Звать человека там, где оператор просто ответил, — 1; отвечать самому там, где нужны данные заказа, — 0. Верни баллы для каждого #.",
-    messages: [{ role: "user", content: rows.join("\n\n") }],
-    output_config: { format: zodOutputFormat(JudgeSchema) },
-  });
-  recordUsage(TEACHER_MODEL, res.usage.input_tokens, res.usage.output_tokens, res.usage.cache_read_input_tokens ?? 0, res.usage.cache_creation_input_tokens ?? 0);
-  const s = res.parsed_output?.scores ?? [];
+  const judged = await opusJson(JudgeSchema, "Оцени ответы A и B ИИ-поддержки против ответа живого оператора: 2 — по сути так же (или лучше), 1 — частично, 0 — неверно/вредно. Звать человека там, где оператор просто ответил, — 1; отвечать самому там, где нужны данные заказа, — 0. Верни баллы для каждого #.", rows.join("\n\n"), 8000, "экзамен");
+  const s = judged?.scores ?? [];
   if (!s.length) return null;
   return { before: s.reduce((n, x) => n + x.a, 0), after: s.reduce((n, x) => n + x.b, 0), max: s.length * 2 };
 }
@@ -234,6 +247,7 @@ export async function runTeacher(bot: Telegraf, opts: { force?: boolean } = {}):
   if (!opts.force && meta.day === today) return null;
   meta.day = today;
   await writeMeta(meta);
+  console.log("[ai-teacher] старт разбора");
 
   const since = new Date(Date.now() - 24 * 3_600_000);
   const logs = await db.aiSupportLog.findMany({
@@ -252,8 +266,13 @@ export async function runTeacher(bot: Telegraf, opts: { force?: boolean } = {}):
 
   const settings = await loadSettings(true);
   const rules = settings.rules;
-  const r = await review(rules, cases, sample);
-  if (!r) return "учитель не ответил";
+  const r = await review(rules, cases, sample).catch((e) => { console.error("[ai-teacher] разбор упал:", e instanceof Error ? e.message : e); return null; });
+  if (!r) {
+    // Не вышло — попробуем снова через полчаса, а не завтра.
+    meta.day = undefined;
+    await writeMeta(meta);
+    return "учитель не ответил — повтор через 30 мин";
+  }
 
   // Чистка шпаргалки — сразу: это не правила, а отбор примеров.
   const cur = await curateExamples(db, {
