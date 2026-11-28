@@ -35,6 +35,7 @@ import { flushPaOutbox, paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-de
 import { applyPaQuickPlan, dumpPaQuickReplies, syncPaQuickReplies } from "./pa-quick-replies";
 import { runWbChatAiSweep } from "../shared/wb-chat-ai";
 import { startPaDigest, startSilentWeekly } from "./pa-group";
+import { rbxrubyTick } from "../shared/codes-bot-api";
 
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -292,6 +293,26 @@ export function startAutoWorkers(bot: Telegraf): void {
   };
   setTimeout(chatAi, 150_000);
   setInterval(chatAi, 60 * 1000);
+
+  // 🤖 Автовыкуп через RBXRUBY (28.11.2026): вся логика на Web, тут только тик.
+  // Режим RBXRUBY_MODE=off|dry|on задаётся у Web; off — Web отвечает сразу.
+  let rbxrubyRunning = false;
+  let rbxrubyLast = "";
+  const rbxruby = () => {
+    if (rbxrubyRunning) return;
+    rbxrubyRunning = true;
+    rbxrubyTick()
+      .then((r) => {
+        if (!r || r.mode === "off") return;
+        const line = JSON.stringify(r);
+        if (line !== rbxrubyLast) console.log(`[rbxruby] ${line}`);
+        rbxrubyLast = line;
+      })
+      .catch((e) => console.error("[rbxruby] tick:", e instanceof Error ? e.message : e))
+      .finally(() => { rbxrubyRunning = false; });
+  };
+  setTimeout(rbxruby, 200_000);
+  setInterval(rbxruby, 60 * 1000);
 
   // Утренняя сводка в беседу админов (09:00 МСК), Claude Haiku 5.5.
   startPaDigest(bot);

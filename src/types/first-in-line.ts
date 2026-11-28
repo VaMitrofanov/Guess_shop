@@ -63,6 +63,8 @@ export interface FirstInLineOrder {
   /** ⚡ Кто поднял и когда — только у поднятых. */
   priorityBy?: string | null;
   priorityAt?: string | null;
+  /** 🤖 RBXRUBY: метка строки (28.11.2026). */
+  rbxruby?: { state: "excluded" | "open" | "done" | "failed" | "skipped" | "next"; label: string; why?: string } | null;
 }
 
 /** 🛑 Заказ заморожен, потому что покупатель просит отмену — полоса над группами. */

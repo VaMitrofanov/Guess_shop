@@ -1,0 +1,48 @@
+/* 🤖 RBXRUBY на сайте (28.11.2026): плашка над «Первым делом» и блок в досье. */
+
+.panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(125, 156, 255, .28);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(125, 156, 255, .08), rgba(125, 156, 255, .02));
+  font-size: 13.5px;
+}
+@media (max-width: 1100px) {
+  .panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.head { display: flex; flex-direction: column; gap: 6px; }
+.title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+.mode { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+.modeOn { background: rgba(64, 212, 126, .16); color: #40d47e; }
+.modeDry { background: rgba(255, 214, 10, .14); color: #ffd60a; }
+.modeOff { background: rgba(255, 255, 255, .08); color: #a3a7b1; }
+.sub { color: #8e8e97; font-size: 12.5px; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.btn {
+  font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .15); background: transparent; color: inherit;
+}
+.btn:disabled { opacity: .5; cursor: default; }
+.primary { border: 0; background: #2f6bff; color: #fff; font-weight: 600; }
+.danger { border-color: rgba(255, 107, 96, .45); color: #ff8f85; }
+
+.stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.label { color: #8e8e97; font-size: 12px; }
+.value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hint { color: #8e8e97; font-size: 12px; overflow-wrap: anywhere; }
+.err { grid-column: 1 / -1; color: #ff8f85; font-size: 12.5px; }
+
+.box {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .08); font-size: 13px;
+}
+.boxHead { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.tl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 10px; }
+.tlAt { color: #8e8e97; font-variant-numeric: tabular-nums; }
+.ok { color: #40d47e; }
+.bad { color: #ff8f85; }

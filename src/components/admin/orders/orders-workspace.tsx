@@ -24,6 +24,7 @@ import { orderStateWord } from "@/lib/order-feed";
    ───────────────────────────────────────────────────────────────────────── */
 
 import FirstInLinePanel from "@/components/admin/first-in-line/first-in-line-panel";
+import RbxrubyPanel from "@/components/admin/rbxruby/rbxruby-panel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -958,7 +959,11 @@ export default function OrdersWorkspace({
           возвращённый на перевыкуп заказ обязан быть виден и здесь, а не только
           местом в ленте. При поиске и сужении его нет: там ищут конкретное. */}
       {slice === "BUYOUT" && !query.trim() && narrowChips.length === 0 && (
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+          <RbxrubyPanel
+            onToast={(text, error) => showToast({ text, error })}
+            onChanged={() => { void load(1, false); void refreshCounts(); }}
+          />
           <FirstInLinePanel
             refreshSignal={firstSignal}
             onOpenOrder={order => {

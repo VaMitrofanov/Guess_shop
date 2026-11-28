@@ -8,6 +8,7 @@ import { haptic } from "./haptics";
 import { toast } from "./Toast";
 import { copyText } from "./clipboard";
 import ConfirmBuyoutSheet from "./ConfirmBuyoutSheet";
+import { rbxrubyBadge } from "@/lib/rbxruby-view";
 import type { Tone } from "@/lib/order-presentation";
 import type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
 import {
@@ -317,7 +318,7 @@ export default function FirstInLineBlock({
                   <b className="twa-first-sum">{robux(order.gross)}</b>
                   <span className="twa-first-age" style={{ color: ageColor(basis) }}>{fmtAge(basis)}</span>
                 </button>
-                {(ready || meta || order.rush) && (
+                {(ready || meta || order.rush || order.rbxruby) && (
                   <div className="twa-first-meta">
                     {order.rush && (
                       <span className="twa-first-heat" style={{ color: order.reason === "rush" ? C.purple : C.textSecondary }} title={firstRushLine(order.rush, now)}>
@@ -325,6 +326,7 @@ export default function FirstInLineBlock({
                       </span>
                     )}
                     {ready && <span style={{ color: TONE[ready.tone] }}>{ready.text}</span>}
+                    {(() => { const b = rbxrubyBadge(order.rbxruby); return b ? <span style={{ color: TONE[b.tone], fontWeight: 600 }}>{b.text}</span> : null; })()}
                     {meta && <span>{meta}</span>}
                   </div>
                 )}

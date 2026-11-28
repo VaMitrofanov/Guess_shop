@@ -8,6 +8,7 @@ import {
   BUYER_RUSH_WINDOW_HOURS, contactQuote, loadBuyerContacts, recentContactExistsSql, summarizeRush, type BuyerRush,
 } from "../../bots/shared/buyer-contact";
 import { problemHoldReason } from "../../bots/shared/order-hold";
+import { rbxrubyStates } from "@/lib/rbxruby-buyout";
 import { compareNag, nagLevel, nagOldEnough, worstTone } from "../../bots/shared/buyer-nag";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -230,8 +231,11 @@ export async function loadFirstInLine(): Promise<FirstInLine> {
     else partsByOrder.set(part.orderId, [part.gamepassId]);
   }
 
+  const rbx = await rbxrubyStates(shown.map((entry) => entry.row.id)).catch(() => ({} as Awaited<ReturnType<typeof rbxrubyStates>>));
+
   return {
     rows: shown.map(({ row, reason }) => ({
+      rbxruby: rbx[row.id] ? { state: rbx[row.id].state, label: rbx[row.id].label, why: "why" in rbx[row.id] ? (rbx[row.id] as { why?: string }).why : undefined } : null,
       id: row.id,
       wbCode: row.wbCode,
       robloxUsername: row.robloxUsername,

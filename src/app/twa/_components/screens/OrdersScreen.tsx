@@ -23,6 +23,7 @@ import { parseGamepassRef, parseGamepassRefs } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { gamepassToolsFor, type GamepassToolId } from "@/lib/gamepass-tools";
 import FirstInLineBlock from "../FirstInLineBlock";
+import { RbxrubyCard, RbxrubyOrderSection } from "../RbxrubyTwa";
 import {
   canRebuy,
   orderBadge as sharedOrderBadge,
@@ -3327,6 +3328,11 @@ function OrderCard({
           />
         )}
 
+        {/* 🤖 RBXRUBY: хроника и ручные кнопки (28.11.2026). */}
+        {order.status !== "REJECTED" && order.status !== "AWAITING_GAMEPASS" && (
+          <RbxrubyOrderSection token={token} orderId={order.id} onChanged={onMoved} />
+        )}
+
         {/* 3. Лента заказа (11.11.2026): заметки, заморозки, заявки и правки
             одной хроникой. Сырой текст заметки — по «Править текстом». */}
         {/* 🕓 Хронология (16.11.2026): путь покупателя и лента заказа одной
@@ -4939,7 +4945,8 @@ export default function OrdersScreen({
             возвращённый на перевыкуп, обязан быть виден и здесь, а не только
             местом в ленте. Перечитывается, когда в ленте меняется статус или ⚡. */}
         {filter === "BUYOUT" && !query && (
-          <div style={{ padding: "10px 16px 0" }}>
+          <div style={{ padding: "10px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+            <RbxrubyCard token={token} />
             <FirstInLineBlock
               token={token}
               refreshSignal={firstSignal}

@@ -161,3 +161,9 @@ export function revealFailText(status: string): string {
     default: return "Не получилось открыть код — попробуйте через минуту. Он есть и в кабинете на сайте.";
   }
 }
+
+/** Тик автовыкупа RBXRUBY (28.11.2026). Режим живёт на Web (`RBXRUBY_MODE`), при off Web сразу отвечает. */
+export async function rbxrubyTick(): Promise<Record<string, unknown> | null> {
+  const { status, data } = await signedPost<Record<string, unknown>>("/api/internal/rbxruby/tick", {}, 110_000);
+  return status === 200 ? data : null;
+}

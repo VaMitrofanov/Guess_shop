@@ -20,6 +20,7 @@ import { contactEventText } from "../../../../bots/shared/order-contacts";
 import { OrderContactsBlock, type OrderContactRow } from "./order-contacts-block";
 import { buyerJourney, type JourneyEventRow, type JourneyNext } from "@/lib/buyer-journey";
 import { BuyerJourneyPanel, JourneySteps } from "./buyer-journey-panel";
+import { RbxrubyOrderBox } from "@/components/admin/rbxruby/rbxruby-panel";
 import { hasGamepassTool, type GamepassToolId } from "@/lib/gamepass-tools";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
@@ -463,6 +464,11 @@ export default function OrderDossier({
             onNext={runJourneyNext}
             onOther={hasGamepassTool(order, "ask") ? () => openAsk(undefined) : undefined}
           />
+        )}
+
+        {/* 🤖 RBXRUBY: хроника и ручные кнопки (28.11.2026). */}
+        {["PENDING", "IN_PROGRESS", "ERROR", "COMPLETED"].includes(order.status) && (
+          <RbxrubyOrderBox key={order.id} orderId={order.id} onToast={onToast} onChanged={onChanged} />
         )}
       </div>
 

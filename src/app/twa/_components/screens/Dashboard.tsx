@@ -18,6 +18,7 @@ import type { PendingCodeOrders } from "@/lib/code-orders-pending";
 import type { FirstInLine } from "@/types/first-in-line";
 import type { VkNeedsHuman } from "@/types/vk-needs-human";
 import FirstInLineBlock from "../FirstInLineBlock";
+import { RbxrubyCard } from "../RbxrubyTwa";
 import BuyoutFocus from "../BuyoutFocus";
 import type { OverviewDiff, OverviewFeedRow } from "@/types/admin-overview";
 import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
@@ -304,6 +305,7 @@ export default function Dashboard({
       </section>
 
       {/* ── 2. ⚡ Первым делом — наше избранное ──────────────────────────── */}
+      <RbxrubyCard token={token} />
       <FirstInLineBlock
         token={token}
         initial={firstNoDirect}

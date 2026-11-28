@@ -18,6 +18,7 @@ import {
 import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
 import type { AdminOverview, OverviewFeedRow, OverviewQueueOrder } from "@/types/admin-overview";
 import FirstInLinePanel from "@/components/admin/first-in-line/first-in-line-panel";
+import RbxrubyPanel from "@/components/admin/rbxruby/rbxruby-panel";
 import styles from "./overview.module.css";
 import WbMoney from "./wb-money";
 import { cn } from "@/lib/utils";
@@ -390,6 +391,7 @@ export default function OverviewScreen({
       {/* ── 1.5. ⚡ Первым делом ────────────────────────────────────────────
           Перевыкупы, поднятые руками и прямые — группами. Тот же компонент
           стоит над лентой «Выкупить»; пусто — блока нет вовсе. */}
+      <RbxrubyPanel onToast={showToast} onChanged={() => void refresh(true)} />
       <FirstInLinePanel
         initial={firstNoDirect}
         queueHref="/admin/orders?slice=BUYOUT"

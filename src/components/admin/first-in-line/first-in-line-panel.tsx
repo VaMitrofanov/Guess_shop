@@ -22,6 +22,7 @@ import {
   type FirstLive,
 } from "@/lib/first-in-line-view";
 import { cn } from "@/lib/utils";
+import { rbxrubyBadge } from "@/lib/rbxruby-view";
 import styles from "./first-in-line.module.css";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +279,7 @@ export default function FirstInLinePanel({
                     </span>
                   )}
                   {ready && <span className={TONE_CLASS[ready.tone]}>{ready.text}</span>}
+                  {(() => { const b = rbxrubyBadge(order.rbxruby); return b ? <span className={TONE_CLASS[b.tone]} title={b.title}>{b.text}</span> : null; })()}
                   {meta && <span>{meta}</span>}
                 </div>
                 {deadline ? (

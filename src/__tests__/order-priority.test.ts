@@ -119,9 +119,9 @@ describe("«Первым делом» на обеих главных", () => {
     // Одна копия на платформу: TWA — FirstInLineBlock, сайт — FirstInLinePanel.
     // Копия внутри экрана уже раз разошлась бы со второй.
     expect(read("src/app/twa/_components/screens/Dashboard.tsx")).toContain("<FirstInLineBlock");
-    expect(read("src/app/twa/_components/screens/OrdersScreen.tsx")).toMatch(/filter === "BUYOUT" && !query && \(\s*<div[^>]*>\s*<FirstInLineBlock/);
+    expect(read("src/app/twa/_components/screens/OrdersScreen.tsx")).toMatch(/filter === "BUYOUT" && !query && \(\s*<div[^>]*>\s*(?:<RbxrubyCard[^>]*\/>\s*)?<FirstInLineBlock/);
     expect(read("src/components/admin/overview/overview-screen.tsx")).toContain("<FirstInLinePanel");
-    expect(read("src/components/admin/orders/orders-workspace.tsx")).toMatch(/slice === "BUYOUT"[^\n]*\n[\s\S]{0,120}<FirstInLinePanel/);
+    expect(read("src/components/admin/orders/orders-workspace.tsx")).toMatch(/slice === "BUYOUT"[^\n]*\n[\s\S]{0,400}<FirstInLinePanel/);
     // Пустой блок не рисуется, группы и копирование — из общего правила.
     for (const file of ["src/app/twa/_components/FirstInLineBlock.tsx", "src/components/admin/first-in-line/first-in-line-panel.tsx"]) {
       const src = read(file);
