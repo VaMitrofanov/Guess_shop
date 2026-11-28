@@ -1,0 +1,386 @@
+/**
+ * Фоновые задачи TG-бота (единственный всегда работающий процесс с доступом к
+ * базе и алертам админам):
+ *
+ *  • GP-watcher (+3): для AWAITING_GAMEPASS с вероятным ником ищет в Roblox
+ *    выставленный пасс по нужной цене и просит покупателя подтвердить —
+ *    подтверждение (handlers.ts) переводит заказ в PENDING, дальше менеджер.
+ *  • Срок токена WB и обращения покупателей — см. расписание внизу.
+ *
+ * Автовыкуп и автослив донора удалены 11.11.2026: донора как модели нет,
+ * браузерный сервис не работает, выкуп идёт вручную.
+ */
+
+import { startIdeasWorker } from "./ideas-worker";
+import type { Telegraf } from "telegraf";
+import { db } from "../shared/db";
+import { ADMIN_IDS, sendAdminOrderCard } from "../shared/admin";
+import { tgSend, tgDeliveryOutcome, vkSend, vkCanReceive, escapeHtml } from "../shared/notify";
+
+import { searchGamepassesByNick } from "../shared/gamepass-search";
+import { DONOR_NET_CAPACITY } from "../shared/gamepass-plan";
+
+
+
+import { runWbTokenWatch } from "../shared/wb-token-watch";
+import { runParkedKeySweep } from "../shared/parked-key";
+import { runBuyerContactSweep } from "../shared/buyer-contact-sweep";
+import { orderPinMarkupTg, syncOrderPins } from "../shared/order-pin";
+import { reconcileNoticeLine, runWbSalesReconcile } from "../shared/wb-sales-reconcile";
+import { notifyWbReconcile } from "../shared/wb-delivery-admin-notify";
+import { questionsAutoreplyEnabled, runWbQuestionsSweep } from "../shared/wb-questions-sweep";
+import { runSupportHarvest } from "../shared/support-ai-harvest";
+import { adminTargets, type AdminTopic } from "../shared/admin-route";
+import { flushPaOutbox, paDeskClient, paDeskMode, runPaDeskSweep } from "./pa-desk-worker";
+import { applyPaQuickPlan, dumpPaQuickReplies, syncPaQuickReplies } from "./pa-quick-replies";
+import { runWbChatAiSweep } from "../shared/wb-chat-ai";
+import { startPaDigest, startSilentWeekly } from "./pa-group";
+import { rbxrubyTick } from "../shared/codes-bot-api";
+
+
+const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const jitter = (min: number, max: number) => min + Math.floor(Math.random() * (max - min));
+
+async function alertAdmins(html: string, topic: AdminTopic = "action"): Promise<void> {
+  const targets = await adminTargets(topic, { loud: topic === "action" });
+  await Promise.allSettled(targets.map((t) => tgSend(t.chatId, html, { parse_mode: "HTML", ...t.extra })));
+}
+
+
+// ── One-shot adminNote annotation (best-effort, dedup by marker) ─────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// +1 Auto-buyout
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// +5.G.3 Auto-drain — слив остатка донора в приёмник, когда баланс упал ниже
+// минимальной цены выкупа (143 R$ грязными = 100 R$ чистыми). Kill-switch OFF.
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// +3 GP-watcher
+// ─────────────────────────────────────────────────────────────────────────────
+
+const gpWatchTickRunning = { v: false };
+
+export async function runGpWatchTick(bot: Telegraf): Promise<void> {
+  if (gpWatchTickRunning.v) return;
+  gpWatchTickRunning.v = true;
+  try {
+    const settings = await db.globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
+    if (!settings?.gpWatchEnabled) return;
+    const mode: string = settings.gpWatchNotify ?? "both";
+    const pingCustomer = mode !== "admin";
+    const alertAdmin   = mode !== "customer";
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const candidates = await db.wbOrder.findMany({
+      where: {
+        status: "AWAITING_GAMEPASS",
+        isTest: false,
+        robloxUsername: null,            // user hasn't confirmed a different nick
+        probableNick: { not: null },
+        createdAt: { gte: thirtyDaysAgo },
+        // Заказ больше донора одним пассом не закрыть (2000 → пасс за 2858, а
+        // аккаунт выкупа держит 2143). До 18.11.2026 воркер искал ОДИН пасс на
+        // всю сумму и звал покупателя подтвердить его (DNJZUB5, 2857 R$) —
+        // такие заказы идут только набором частей, их GP-watch не трогает.
+        amount: { lte: DONOR_NET_CAPACITY },
+      },
+      orderBy: { probableNickAt: "desc" },
+      take: 60, // fetched wide; per-order throttle trims to ~20 actual Roblox checks
+      include: { user: { select: { tgId: true, vkId: true } } },
+    });
+
+    const now = Date.now();
+    let checked = 0;
+    for (const order of candidates) {
+      if (checked >= 20) break;
+      // Throttle: fresh orders (<3d) every tick; older ones every 2h.
+      const ageMs = now - new Date(order.createdAt).getTime();
+      const minGap = ageMs < 3 * 24 * 60 * 60 * 1000 ? 0 : 2 * 60 * 60 * 1000;
+      const lastCheck = order.gpWatchLastCheckAt ? new Date(order.gpWatchLastCheckAt).getTime() : 0;
+      if (now - lastCheck < minGap) continue;
+      checked++;
+
+      await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchLastCheckAt: new Date() } });
+
+      const want = expectedPrice(order.amount);
+      let outcome;
+      try { outcome = await searchGamepassesByNick(order.probableNick!, want); }
+      catch { continue; }
+      if (outcome.status !== "ok" || outcome.matches.length === 0) continue;
+
+      const pass = outcome.matches[0];
+      if (String(pass.gamepassId) === order.gpWatchNotifiedPassId) continue; // already pinged for this pass
+
+      // Claim the dedup slot before sending (no double-ping if we crash mid-send),
+      // but ROLL BACK on a confirmed delivery failure so the next tick retries.
+      await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: String(pass.gamepassId) } });
+
+      // Исход пинга: доставлен / клиенту писать нельзя вообще / временный сбой.
+      // Временный сбой — единственный повод повторить на следующем тике, и
+      // только он молчит перед админами: алерт уходит один раз, когда исход
+      // известен. Раньше любой отказ сбрасывал дедуп, и тот же пасс каждый час
+      // рождал тот же алерт (FLBDVYK: покупатель заблокировал бота, 11.10.2026).
+      let delivered: "tg" | "vk" | "skip" | "unreachable" | null = pingCustomer ? null : "skip";
+      if (pingCustomer) {
+        const tgMsg =
+          `🎉 <b>Похоже, ваш геймпасс готов!</b>\n\n` +
+          `Ник: <b>${escapeHtml(order.probableNick!)}</b>\n` +
+          `Геймпасс: <b>${escapeHtml(pass.name)}</b> · <b>${pass.robux} R$</b>\n\n` +
+          `Это ваш геймпасс? Подтвердите — и мы сразу заберём его в выкуп 💛`;
+        const kb = {
+          inline_keyboard: [[
+            { text: "✅ Да, это мой", callback_data: `gpw_ok:${order.id}` },
+            { text: "❌ Не мой ник", callback_data: `gpw_no:${order.id}` },
+          ]],
+        };
+
+        if (order.user?.tgId) {
+          const res = await tgSend(order.user.tgId, tgMsg, { parse_mode: "HTML", reply_markup: kb });
+          const outcome = tgDeliveryOutcome(res);
+          delivered = outcome === "delivered" ? "tg" : outcome === "permanent" ? "unreachable" : null;
+        } else if (order.user?.vkId) {
+          const vkKb = JSON.stringify({
+            inline: true,
+            buttons: [[
+              { action: { type: "text", label: "✅ Да, это мой", payload: JSON.stringify({ command: "gpw_ok", orderId: order.id }) }, color: "positive" },
+              { action: { type: "text", label: "❌ Не мой ник", payload: JSON.stringify({ command: "gpw_no", orderId: order.id }) }, color: "negative" },
+            ]],
+          });
+          const ok = await vkSend(order.user.vkId,
+            `🎉 Похоже, ваш геймпасс готов!\n\nНик: ${order.probableNick}\nГеймпасс: ${pass.name} · ${pass.robux} R$\n\n` +
+            `Это ваш геймпасс? Подтвердите — заберём его в выкуп 💛`,
+            { keyboard: vkKb });
+          // VK 901 («нет разрешения на сообщения») не лечится повтором —
+          // спрашиваем VK прямо, а не гадаем по коду ошибки.
+          if (ok) delivered = "vk";
+          else if ((await vkCanReceive(order.user.vkId)) === false) delivered = "unreachable";
+        } else {
+          delivered = "unreachable";
+        }
+
+        if (delivered === null) {
+          // Временный сбой — освобождаем дедуп, следующий тик попробует снова.
+          // Админов не будим: они узнают исход, когда он станет известен.
+          await db.wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: null } });
+          continue;
+        }
+      }
+
+      if (alertAdmin) {
+        const pingLine =
+          delivered === "skip"        ? "клиенту НЕ отправлял (режим admin) — оповести из карточки TWA" :
+          delivered === "unreachable" ? "📵 клиенту написать нельзя (заблокировал бота / закрыл сообщения) — подтвердите пасс сами или напишите в чат WB" :
+                                        `клиент оповещён (${String(delivered).toUpperCase()}), ждём ✅/❌`;
+        await alertAdmins(
+          `👁 <b>GP-watch: нашёл геймпасс по вероятному нику</b>\n` +
+          `Заказ <code>${order.wbCode}</code> · ник <b>${escapeHtml(order.probableNick!)}</b>\n` +
+          `«${escapeHtml(pass.name)}» · <b>${pass.robux} R$</b> (ожидалось ${want})\n` +
+          `${pingLine}\n` +
+          `📊 TWA: поиск <code>${order.wbCode}</code>`,
+          delivered === "skip" || delivered === "unreachable" ? "action" : "feed",
+        );
+      }
+      await sleep(jitter(1500, 4000));
+    }
+  } catch (err: any) {
+    console.error("[gp-watch] tick error:", err?.message ?? err);
+  } finally {
+    gpWatchTickRunning.v = false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduling
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function startAutoWorkers(bot: Telegraf): void {
+  // GP-watcher: hourly cadence (owner 2026-07-04: «каждые 15 мин — часто,
+  // я бы сделал каждый час хотя бы»). Boot tick stays at +70s so a fresh
+  // deploy proves the worker alive within минуты, не через час.
+  setTimeout(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] boot:", e)), 70_000);
+  setInterval(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] tick:", e)), 60 * 60 * 1000);
+
+  // 🔑 Отложенные ключи (27.11.2026): годный ключ, упёршийся в «нет игры» или
+  // сбой, применяется сам, как только станет можно (`parked-key.ts`).
+  const parkedKeys = () => runParkedKeySweep(db, {
+    sendBuyer: async (user, text) => {
+      if (user.tgId) await tgSend(user.tgId, escapeHtml(text), { parse_mode: "HTML" });
+      else if (user.vkId) await vkSend(user.vkId, text);
+    },
+    alertAdmins: (html) => alertAdmins(html),
+    orderCard: async (order, opts) => {
+      await sendAdminOrderCard({
+        id: order.id, amount: order.amount, gamepassUrl: order.gamepassUrl,
+        platform: order.platform === "VK" ? "VK" : "TG", orderSource: order.orderSource,
+        wbCode: order.wbCode, userDisplay: "отложенный ключ", createdAt: order.createdAt,
+        creatorName: order.robloxUsername ?? undefined, viaKey: true, heldReason: opts.heldReason,
+      });
+    },
+  }).then((r) => { if (r.applied || r.stale || r.expired) console.log("[parked-key]", JSON.stringify(r)); })
+    .catch((e) => console.error("[parked-key] tick:", e));
+  setTimeout(parkedKeys, 180_000);
+  setInterval(parkedKeys, 60 * 60 * 1000);
+
+  // Срок токена WB: раз в час, первый прогон через 2 минуты после старта
+  // (01.11.2026 токен истёк молча — бот 7 часов не видел заказы DBS).
+  setTimeout(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] boot:", e)), 120_000);
+  setInterval(() => runWbTokenWatch(alertAdmins).catch((e) => console.error("[wb-token] tick:", e)), 60 * 60 * 1000);
+
+  // Обращения покупателей: отметки BUYER_CANCEL/BUYER_HELP (с 03.11 без заморозки и пуша).
+  const buyerSweep = () => runBuyerContactSweep(db)
+    .then((r) => { if (r.cancel || r.help) console.log(`[buyer-contacts] отмена ${r.cancel}, нужен человек ${r.help}`); })
+    .catch((e) => console.error("[buyer-contacts] tick:", e));
+  setTimeout(buyerSweep, 150_000);
+  setInterval(buyerSweep, 3 * 60 * 1000);
+
+  // Сверка денег WB с выдачей (12.11.2026): продажи/возвраты статистики против
+  // наших заказов. Сама ходит в WB раз в 3 часа; тик чаще — чтобы рестарт не
+  // откладывал проход. Находки — в «Риски» и одним пушем.
+  const reconcile = () => runWbSalesReconcile(db)
+    .then((r) => {
+      if (r.skipped) return;
+      console.log(`[wb-reconcile] продаж ${r.sales}, новых расхождений ${r.fresh.length}, открыто ${JSON.stringify(r.open)}`);
+      notifyWbReconcile(r.fresh.map((f) => reconcileNoticeLine(f, escapeHtml)), r.fresh.length);
+    })
+    .catch((e) => console.error("[wb-reconcile] tick:", e instanceof Error ? e.message : e));
+  setTimeout(reconcile, 240_000);
+  setInterval(reconcile, 15 * 60 * 1000);
+
+  // Вопросы к карточкам WB (12.11.2026): типовые — ответ шаблоном, код в вопросе —
+  // отклонить, жалоба — шаблон + «Риски» + пуш. Выключатель WB_QUESTIONS_AUTOREPLY=off.
+  const questions = () => {
+    if (!questionsAutoreplyEnabled()) return;
+    runWbQuestionsSweep(db)
+      .then((r) => {
+        if (r.seen) console.log(`[wb-questions] вопросов ${r.seen}: ответ ${r.answered}, скрыто ${r.rejected}, жалоб ${r.complaints}, без шаблона ${r.unknown}, не ушло ${r.failed}`);
+      })
+      .catch((e) => console.error("[wb-questions] tick:", e instanceof Error ? e.message : e));
+  };
+  setTimeout(questions, 300_000);
+  setInterval(questions, 10 * 60 * 1000);
+
+  // 🌾 ИИ учится на ВСЕХ ответах операторов (28.11.2026): чаты WB (вся история
+  // при первом запуске, дальше свежие) + выгрузка @RobloxBank_PA. ВК — в ВК-боте.
+  const harvest = () =>
+    runSupportHarvest(db)
+      .then((r) => { if (r) console.log(`[ai-learn] ${r}`); })
+      .catch((e) => console.error("[ai-learn] сбор:", e instanceof Error ? e.message : e));
+  setTimeout(harvest, 360_000);
+  setInterval(harvest, 30 * 60 * 1000);
+
+  // ИИ в чатах заказов WB (13.11.2026). Режим — `/support_mode wb on|dry|off`,
+  // по умолчанию off: проход сразу выходит.
+  let chatAiRunning = false;
+  const chatAi = () => {
+    if (chatAiRunning) return;
+    chatAiRunning = true;
+    runWbChatAiSweep(db)
+      .then((r) => {
+        if (r.seen) console.log(`[wb-chat-ai] чатов ${r.seen}: ответил ${r.replied}, передал ${r.escalated}, тест ${r.dry}`);
+      })
+      .catch((e) => console.error("[wb-chat-ai] tick:", e instanceof Error ? e.message : e))
+      .finally(() => { chatAiRunning = false; });
+  };
+  setTimeout(chatAi, 150_000);
+  setInterval(chatAi, 60 * 1000);
+
+  // 🤖 Автовыкуп через RBXRUBY (28.11.2026): вся логика на Web, тут только тик.
+  // Режим RBXRUBY_MODE=off|dry|on задаётся у Web; off — Web отвечает сразу.
+  let rbxrubyRunning = false;
+  let rbxrubyLast = "";
+  const rbxruby = () => {
+    if (rbxrubyRunning) return;
+    rbxrubyRunning = true;
+    rbxrubyTick()
+      .then((r) => {
+        if (!r || r.mode === "off") return;
+        const line = JSON.stringify(r);
+        if (line !== rbxrubyLast) console.log(`[rbxruby] ${line}`);
+        rbxrubyLast = line;
+      })
+      .catch((e) => console.error("[rbxruby] tick:", e instanceof Error ? e.message : e))
+      .finally(() => { rbxrubyRunning = false; });
+  };
+  setTimeout(rbxruby, 200_000);
+  setInterval(rbxruby, 60 * 1000);
+
+  // Утренняя сводка в беседу админов (09:00 МСК), Claude Haiku 5.5.
+  startPaDigest(bot);
+  startIdeasWorker(bot);
+  // «Молчат» — раз в неделю, без ИИ (13.11.2026).
+  startSilentWeekly(bot);
+
+  // Разметка чатов поддержки @RobloxBank_PA (12.11.2026): метки в именах контактов
+  // и папки по заказам. Никому не пишет. Env: PA_API_ID/PA_API_HASH/PA_SESSION, PA_DESK=off|dry.
+  const mode = paDeskMode();
+  if (mode !== "off") {
+    let running = false;
+    let tick = 0;
+    // Всё через одно подключение аккаунта и строго по очереди: параллельные
+    // запросы от пользовательского аккаунта — лишний риск флуд-лимита.
+    const desk = async () => {
+      if (running) return;
+      running = true;
+      const n = tick++;
+      try {
+        await flushPaOutbox().catch((e) => console.warn("[pa-outbox]", e instanceof Error ? e.message : e));
+        const r = await runPaDeskSweep(mode);
+        if (r && (r.renamed || r.foldersUpdated || r.archived)) {
+          console.log(`[pa-desk] чатов ${r.chats}, с заказами ${r.linked}, меток ${r.renamed}, папок обновлено ${r.foldersUpdated}, без ответа ${r.waiting}, в архив ${r.archived} ${JSON.stringify(r.folders)}`);
+        }
+        // 13.11.2026: быстрые ответы — при старте и раз в 6 ч (профиль и время
+        // ответа воркер ведёт сам внутри runPaDeskSweep).
+        if (n % 72 === 0) {
+          const q = await syncPaQuickReplies(await paDeskClient(), mode === "dry");
+          if (q.created || q.updated) console.log(`[pa-quick] создано ${q.created}, обновлено ${q.updated}, без изменений ${q.same}`);
+        }
+        // Ревизия ярлыков оператора (15.11.2026): выгрузка при старте и раз в 6 ч,
+        // план правок из базы — проверяется каждый проход (одно чтение БД).
+        if (mode === "on") {
+          const client = await paDeskClient();
+          if (n % 72 === 0) await dumpPaQuickReplies(client);
+          await applyPaQuickPlan(client);
+        }
+      } catch (e) {
+        console.error("[pa-desk] tick:", e instanceof Error ? e.message : e);
+      } finally {
+        running = false;
+      }
+    };
+    setTimeout(desk, 120_000);
+    setInterval(desk, 5 * 60 * 1000);
+  }
+
+  // Живой закреп заказа: «ждём пасс → в очереди → выкуплен» правится на месте.
+  // Сообщение удалено / бот заблокирован — стадию двигаем, чтобы не биться вечно.
+  const pinSweep = () => syncOrderPins(db, "TG", async (pin, text) => {
+    try {
+      await bot.telegram.editMessageText(pin.chatId, pin.messageId, undefined, text, { parse_mode: "HTML", reply_markup: orderPinMarkupTg(pin.next, pin.code) as never });
+      return {};
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      if (/message is not modified/i.test(msg)) return {};
+      if (/message to edit not found|chat not found|bot was blocked|user is deactivated|MESSAGE_ID_INVALID/i.test(msg)) {
+        console.warn(`[order-pin] TG ${pin.code}: закреп недоступен (${msg.slice(0, 80)})`);
+        return {};
+      }
+      throw err;
+    }
+  })
+    .then((n) => { if (n) console.log(`[order-pin] TG обновлено закрепов: ${n}`); })
+    .catch((e) => console.error("[order-pin] TG tick:", e));
+  setTimeout(pinSweep, 90_000);
+  setInterval(pinSweep, 2 * 60 * 1000);
+
+  console.log("[gp-watch] worker started ✅ (kill-switch in GlobalSettings.gpWatchEnabled)");
+}

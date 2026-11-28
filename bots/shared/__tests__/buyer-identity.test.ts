@@ -1,0 +1,64 @@
+/** Кто этот покупатель WB у нас (12.11.2026). */
+import { contactOf, extractRobloxRefs, identityLines, identityShortLine, type BuyerIdentity, type BuyerMatch } from "../buyer-identity";
+
+const m = (over: Partial<BuyerMatch> = {}): BuyerMatch => ({
+  userId: "u1", name: "Анна", tgUsername: "anna", tgId: "1", vkId: null, orders: 3, bought: 2, lastCode: "ZT8BW8D",
+  level: "exact", why: "этот заказ активирован", ...over,
+});
+const id = (over: Partial<BuyerIdentity> = {}): BuyerIdentity => ({ matches: [], namesakes: 0, buyerName: "Анна", ...over });
+
+describe("extractRobloxRefs", () => {
+  it("ник и Pass ID из сообщений чата WB", () => {
+    const r = extractRobloxRefs(["мой ник nikita228", "вот пасс https://www.roblox.com/game-pass/1907029789/vip"]);
+    expect(r.nicks).toContain("nikita228");
+    expect(r.passIds).toEqual(["1907029789"]);
+  });
+
+  it("обычные слова и служебные — не ники", () => {
+    const r = extractRobloxRefs(["Здравствуйте, где мой заказ? roblox pass ok"]);
+    expect(r.nicks).toEqual([]);
+  });
+});
+
+describe("identityLines", () => {
+  it("точное совпадение — «наш клиент» с контактом", () => {
+    const [line] = identityLines(id({ matches: [m()] }));
+    expect(line).toContain("👤 Наш клиент: Анна · @anna (TG)");
+    expect(line).toContain("этот заказ активирован");
+  });
+
+  it("догадка по имени — «вероятно»", () => {
+    expect(identityLines(id({ matches: [m({ level: "likely", why: "то же имя на WB" })] }))[0]).toContain("Вероятно наш клиент");
+  });
+
+  it("тёзки — без строки (16.11), догадку за факт не выдаём", () => {
+    const lines = identityLines(id({ namesakes: 4, matches: [m({ level: "namesake" })] }));
+    expect(lines).toEqual([]);
+  });
+
+  it("никого — новый покупатель", () => {
+    expect(identityLines(id())).toEqual(["🆕 Новый покупатель — у нас его ещё нет"]);
+  });
+
+  it("контакты TG и VK", () => {
+    expect(contactOf({ tgUsername: null, tgId: "5", vkId: "77" })).toBe("TG id 5 · vk.com/id77");
+  });
+});
+
+describe("identityShortLine — строка «кто» в «покупатель пишет» (17.11)", () => {
+  it("наш клиент: имя · канал · какой по счёту заказ", () => {
+    expect(identityShortLine(id({ matches: [m({ hasCurrent: true })] }))).toBe("👤 Анна · @anna · 3-й заказ · выкуплено 2");
+    expect(identityShortLine(id({ matches: [m({ tgId: null, tgUsername: null, vkId: "865", orders: 1, bought: 0, hasCurrent: true })] })))
+      .toBe("👤 Анна · ВК · первый заказ");
+  });
+
+  it("заказ ещё не активирован им — считается следующим", () => {
+    expect(identityShortLine(id({ matches: [m({ orders: 1, bought: 1, hasCurrent: false, level: "likely" })] })))
+      .toBe("👤 вероятно Анна · @anna · 2-й заказ · выкуплено 1");
+  });
+
+  it("никого — новый, с именем с WB; тёзки — только имя", () => {
+    expect(identityShortLine(id())).toBe("🆕 Анна · новый покупатель");
+    expect(identityShortLine(id({ namesakes: 3 }))).toBe("👤 Анна");
+  });
+});

@@ -2,7 +2,7 @@ const WB_SESSION_KEY = "rb_wb_session";
 const WB_SESSION_ID_KEY = "rb_wb_session_id";
 const WB_SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-export interface WBSession {
+interface WBSession {
   denomination: number;
   code: string;
   ts: number;

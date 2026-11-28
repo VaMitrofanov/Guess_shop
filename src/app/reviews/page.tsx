@@ -1,81 +1,43 @@
+import Link from "next/link";
+import { ArrowRight, MessageCircleMore, Star } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
-import { prisma } from "@/lib/prisma";
 import ReviewsClient from "@/components/reviews-client";
-import Link from "next/link";
+import { prisma } from "@/lib/prisma";
+import styles from "../public-sections.module.css";
+import type { Metadata } from "next";
 
-// Public reviews list lives in DB. Force dynamic so `next build` doesn't try
-// to prerender it (Coolify build container may have no DB access).
+export const metadata: Metadata = {
+  title: "Отзывы клиентов — RobloxBank",
+  description: "Опубликованные отзывы клиентов RobloxBank с отметкой подтверждённой покупки.",
+  alternates: { canonical: "/reviews" },
+};
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-function StarRow({ count = 5 }: { count?: number }) {
-  return (
-    <div className="flex gap-1">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <svg key={i} className={`w-4 h-4 ${i < count ? "text-[#00b06f]" : "text-zinc-700"}`} viewBox="0 0 24 24" fill="currentColor">
-          <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
-        </svg>
-      ))}
-    </div>
-  );
-}
+const VK_COMMUNITY = "https://vk.ru/bankroblox";
 
 export default async function ReviewsPage() {
   let reviews: Awaited<ReturnType<typeof prisma.review.findMany>> = [];
-  try {
-    reviews = await prisma.review.findMany({ orderBy: { createdAt: "desc" } });
-  } catch (err) {
-    console.error("[reviews] failed to load reviews from DB:", err);
-    reviews = [];
-  }
+  try { reviews = await prisma.review.findMany({ orderBy: { createdAt: "desc" } }); }
+  catch (error) { console.error("[reviews] failed to load reviews from DB:", error); }
+  const count = reviews.length;
+  const average = count ? reviews.reduce((sum, review) => sum + (review.rating ?? 0), 0) / count : 0;
 
   return (
-    <main className="min-h-screen">
+    <main className={styles.page}>
       <Navbar />
+      <div className={styles.shell}>
+        <header className={styles.hero}>
+          <div className={styles.heroCopy}><span className={styles.kicker}>Отзывы клиентов</span><h1>Люди открыли сейф.<br /><span>Вот что они говорят.</span></h1><p>Публикуем отзывы покупателей из наших каналов. Подтверждённая отметка означает, что покупка действительно была.</p></div>
+          {count > 0 ? <div className={styles.rating}><div className={styles.stars}>{Array.from({ length: 5 }).map((_, index) => <Star key={index} size={18} fill="currentColor" opacity={index < Math.round(average) ? 1 : .22} />)}</div><strong>{average.toFixed(1)}</strong><span>{count} {count === 1 ? "отзыв" : count < 5 ? "отзыва" : "отзывов"}</span></div> : <div className={styles.seal}>R$</div>}
+        </header>
 
-      <section className="container mx-auto px-4 pt-16 pb-24 max-w-5xl">
+        <div className={styles.sectionTop}><h2>Без рекламного шума</h2><p>Короткие реальные истории — о скорости, понятной инструкции и результате.</p></div>
+        {count > 0 ? <ReviewsClient initialReviews={JSON.parse(JSON.stringify(reviews))} /> : <div className={styles.empty}><MessageCircleMore size={42} /><h2>Отзывы скоро появятся здесь</h2><p>Пока их можно посмотреть в сообществе VK — там же легко оставить свой.</p><Link href={VK_COMMUNITY} target="_blank" rel="noopener noreferrer" className={styles.button}>Открыть отзывы в VK <ArrowRight size={19} /></Link></div>}
 
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-14">
-          <div className="space-y-4">
-            <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">REVIEWS</div>
-            <h1 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
-              Что говорят<br />
-              <span className="gold-text">покупатели</span>
-            </h1>
-            <p className="text-zinc-400 font-medium max-w-md">
-              Более 5 000 выполненных заказов. Реальные отзывы реальных покупателей.
-            </p>
-          </div>
-
-          {/* Rating card */}
-          <div className="pixel-card border-2 border-[#1e2a45] p-6 space-y-3 min-w-[200px]">
-            <StarRow count={5} />
-            <div className="font-pixel text-2xl text-[#00b06f]">4.9</div>
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Средний рейтинг</p>
-            <div className="accent-line" />
-            <p className="font-pixel text-[8px] text-zinc-600">{reviews.length}+ отзывов</p>
-          </div>
-        </div>
-
-        <div className="accent-line mb-10" />
-
-        {/* Reviews grid */}
-        <ReviewsClient initialReviews={JSON.parse(JSON.stringify(reviews))} />
-
-        {/* CTA */}
-        <div className="mt-16 pixel-card border-2 border-[#1e2a45] p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">YOUR TURN</div>
-            <h2 className="text-xl font-black uppercase">Оставь свой отзыв</h2>
-            <p className="text-zinc-500 text-sm font-medium">Отзывы проходят модерацию перед публикацией</p>
-          </div>
-          <button className="h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex-shrink-0">
-            Написать отзыв →
-          </button>
-        </div>
-      </section>
+        <section className={styles.cta}><div className={styles.ctaText}><h2>Есть опыт с RobloxBank?</h2><p>Расскажи честно — отзыв пройдёт модерацию и поможет другим.</p></div><Link href={VK_COMMUNITY} target="_blank" rel="noopener noreferrer" className={styles.button}>Написать отзыв <ArrowRight size={19} /></Link></section>
+      </div>
       <Footer />
     </main>
   );
