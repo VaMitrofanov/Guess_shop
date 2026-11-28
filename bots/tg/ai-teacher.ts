@@ -31,6 +31,7 @@ import { curateExamples, keyOf, loadExampleLibrary, stems, type OperatorExample 
 import type { SupportChannel } from "../shared/pa-ai-support";
 import { card, loadSettings, saveSettings } from "./pa-ai";
 import { decideSupportDirect } from "./support-ai-direct";
+import { recordUsage, usageLine } from "./ai-usage";
 
 export const TEACHER_MODEL = "claude-opus-5-5";
 const STREAM = "ai-teacher";
@@ -170,6 +171,7 @@ async function review(rules: string[], cases: TeachCase[], lib: OperatorExample[
     messages: [{ role: "user", content: `СВОД ПРАВИЛ:\n${rulesBlock(rules)}\n\nСЛУЧАИ (${cases.length}):\n${caseText || "(нет)"}\n\nБИБЛИОТЕКА (${lib.length}):\n${libText || "(нет)"}` }],
     output_config: { format: zodOutputFormat(ReviewSchema) },
   });
+  recordUsage(TEACHER_MODEL, res.usage.input_tokens, res.usage.output_tokens, res.usage.cache_read_input_tokens ?? 0, res.usage.cache_creation_input_tokens ?? 0);
   return res.parsed_output;
 }
 
@@ -198,6 +200,7 @@ async function exam(cases: TeachCase[], oldRules: string[], newRules: string[]):
     messages: [{ role: "user", content: rows.join("\n\n") }],
     output_config: { format: zodOutputFormat(JudgeSchema) },
   });
+  recordUsage(TEACHER_MODEL, res.usage.input_tokens, res.usage.output_tokens, res.usage.cache_read_input_tokens ?? 0, res.usage.cache_creation_input_tokens ?? 0);
   const s = res.parsed_output?.scores ?? [];
   if (!s.length) return null;
   return { before: s.reduce((n, x) => n + x.a, 0), after: s.reduce((n, x) => n + x.b, 0), max: s.length * 2 };
@@ -258,7 +261,7 @@ export async function runTeacher(bot: Telegraf, opts: { force?: boolean } = {}):
     gold: r.gold.map((i) => sample[i]?.question).filter((q): q is string => !!q),
   });
 
-  const verdict = new Map(r.cases.map((c) => [c.i, c.verdict]));
+  const verdict = new Map<number, string>(r.cases.map((c: { i: number; verdict: string }) => [c.i, c.verdict]));
   const good = cases.filter((_, i) => ["good", "close"].includes(verdict.get(i) ?? "")).length;
   const graded = cases.filter((_, i) => verdict.has(i) && verdict.get(i) !== "operator_bad").length;
   meta.history = [...meta.history.filter((h) => h.day !== today), { day: today, cases: graded, good }].slice(-60);
@@ -300,6 +303,7 @@ export async function runTeacher(bot: Telegraf, opts: { force?: boolean } = {}):
     misses ? `Промахи: ${escapeHtml(misses)}.` : "",
     `Шпаргалка: убрал ${cur.dropped} устаревших/плохих, отметил ${cur.gold} образцовых (всего ${lib.length - cur.dropped}).`,
     examLine ? escapeHtml(examLine) : "",
+    escapeHtml(await usageLine(mskDay(Date.now() - 86_400_000)).catch(() => "")),
     proposals.length ? "\nПредложения к правилам ниже — без ✅ ничего не меняется." : "\nНовых правил не предлагаю.",
   ].filter(Boolean).join("\n");
   await card(bot, head, undefined, "digest", true);

@@ -13,6 +13,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { registerAiTeacher } from "./ai-teacher";
+import { registerNickProposals } from "./support-ai-nick";
 import type { Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { isRepeatEtaQuestion } from "../shared/robux-eta";
@@ -92,6 +93,7 @@ export function registerPaBusiness(bot: Telegraf): void {
   // Команды беседы админов и кнопки карточек ИИ-поддержки — раньше общих обработчиков.
   registerPaAiAdmin(bot);
   registerAiTeacher(bot);
+  registerNickProposals(bot);
   registerAiJudge(bot);
   // 🔗 Контакты заказа (17.11.2026): «да / не мой / убрать» — и из чата
   // поддержки, и из бота, и у владельца. До защиты беседы админов.

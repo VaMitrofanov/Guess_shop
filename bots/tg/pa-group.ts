@@ -479,7 +479,11 @@ export function startPaDigest(bot: Telegraf) {
     const resp = await loadPaResponseStats().catch(() => null);
     const respBlock = resp?.day === yKey ? `\n\n${escape(formatResponseStats(resp, "@RobloxBank_PA"))}` : "";
     // ИИ-поддержка по площадкам за вчера — готовым блоком, не через модель (26.11.2026).
-    const aiBlock = await aiStatsBlock(mskDayStart(-1), mskDayStart(0), "ИИ-поддержка вчера").catch(() => "");
+    const aiStats = await aiStatsBlock(mskDayStart(-1), mskDayStart(0), "ИИ-поддержка вчера").catch(() => "");
+    // 💵 Сколько ИИ стоил вчера (28.11.2026).
+    const { usageLine } = await import("./ai-usage");
+    const cost = await usageLine(yKey).catch(() => "");
+    const aiBlock = [aiStats, cost ? escape(cost) : ""].filter(Boolean).join("\n");
     await card(bot, `☀️ <b>Сводка за ${new Date(mskDayStart(-1).getTime() + MSK).toISOString().slice(5, 10).split("-").reverse().join(".")}</b>\n\n${escape(text)}${respBlock}${aiBlock ? `\n\n${aiBlock}` : ""}`, undefined, "digest");
   };
   setTimeout(() => void tick().catch((e) => console.error("[pa-group] сводка:", e)), 180_000);

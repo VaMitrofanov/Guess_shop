@@ -205,6 +205,15 @@ export async function handleWithAi(bot: Telegraf, m: PaIncoming): Promise<boolea
     if (past.length) history.set(m.chatId, past.slice(-HISTORY));
   }
   rememberTurn(m.chatId, "user", text);
+  // Передача человеку переживает рестарт (28.11.2026): иначе после каждого
+  // деплоя тот же покупатель снова получал карточку «🆘 Нужен человек».
+  if (!handedOff.has(m.chatId)) {
+    const last = await db.aiSupportLog.findFirst({
+      where: { channel: "tg_pa", peerKey: `tg:${m.chatId}`, createdAt: { gte: new Date(Date.now() - 2 * 3600_000) } },
+      orderBy: { createdAt: "desc" }, select: { action: true, createdAt: true },
+    }).catch(() => null);
+    if (last?.action === "escalate") handedOff.set(m.chatId, { at: last.createdAt.getTime(), draftId: null });
+  }
 
   // Уже передали человеку — покупателю бот не пишет, а админам — «➕ дописал»
   // со свежим черновиком: модель видит всю переписку, включая новое сообщение.
